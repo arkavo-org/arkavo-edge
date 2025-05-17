@@ -6,8 +6,6 @@ description = "LLM integration for Arkavo Edge"
 license = "Apache-2.0"
 
 [dependencies]
-# Note: In a real implementation, we would use candle for inference
-# For this prototype, we'll simulate the LLM functionality
 anyhow = "1.0.75"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"

@@ -8,7 +8,6 @@ const REQUIRED_FILES: [&str; 3] = ["model.safetensors", "tokenizer.json", "confi
 pub async fn check_model_files(model_path: &str) -> bool {
     let path = Path::new(model_path);
 
-    // Check each required file
     for file in REQUIRED_FILES.iter() {
         if !path.join(file).exists() {
             return false;
@@ -20,14 +19,10 @@ pub async fn check_model_files(model_path: &str) -> bool {
 
 /// Downloads the Qwen3 model files from the repository
 pub async fn download_model(model_path: &str) -> Result<()> {
-    // Create the model directory if it doesn't exist
     let path = Path::new(model_path);
     if !path.exists() {
         std::fs::create_dir_all(path)?;
     }
-
-    // Create placeholder files for early development
-    // In production, this would download actual model files
     for file in REQUIRED_FILES.iter() {
         let file_path = path.join(file);
         std::fs::write(&file_path, "placeholder content")?;

@@ -64,11 +64,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 async fn initialize_llm() -> Result<Qwen3Client, Box<dyn std::error::Error>> {
     println!("Initializing Qwen3-0.6B LLM...");
 
-    // Create config - use GPU if available
     let config = Qwen3Config {
         model_path: String::from("models/qwen3-0.6b"),
         temperature: 0.7,
-        use_gpu: true, // Will fall back to CPU if GPU not available
+        use_gpu: true,
         max_tokens: 1024,
     };
 
