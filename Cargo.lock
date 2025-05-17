@@ -47,10 +47,6 @@ name = "arkavo-cli"
 version = "0.2.0"
 dependencies = [
  "arkavo-chat",
- "arkavo-git",
- "arkavo-llm",
- "arkavo-repo",
- "arkavo-terminal",
  "tokio",
 ]
 
@@ -68,7 +64,6 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
