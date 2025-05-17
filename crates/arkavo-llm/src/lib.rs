@@ -106,14 +106,16 @@ impl Qwen3Client {
 
     /// Checks if the model is properly downloaded
     pub async fn check_model_available(&self) -> bool {
-        utils::check_model_files(&self.config.model_path).await
-    }
-
-    /// Downloads the model if not available
-    pub async fn download_model_if_needed(&self) -> Result<()> {
-        if !self.check_model_available().await {
-            utils::download_model(&self.config.model_path).await?;
+        // With embedded model, we always have it available
+        #[cfg(feature = "embedded_model")]
+        {
+            true
         }
-        Ok(())
+        
+        // Otherwise check if files exist
+        #[cfg(not(feature = "embedded_model"))]
+        {
+            utils::check_model_files(&self.config.model_path).await
+        }
     }
 }
