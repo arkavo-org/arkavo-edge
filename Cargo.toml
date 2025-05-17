@@ -9,6 +9,7 @@ members = [
     "crates/arkavo-encryption",
     "crates/arkavo-vault",
     "crates/arkavo-test",
+    "crates/arkavo-llm",
 ]
 resolver = "2"
 

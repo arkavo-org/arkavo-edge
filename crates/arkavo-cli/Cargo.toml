@@ -10,4 +10,5 @@ description = "CLI Core for the Arkavo agentic CLI tool - command parser and mul
 arkavo-terminal = { path = "../arkavo-terminal" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
-anyhow = "1.0"
+arkavo-llm = { path = "../arkavo-llm" }
+tokio = { version = "1.32.0", features = ["full"] }
