@@ -15,15 +15,15 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "help" => {
             print_usage();
             Ok(())
-        },
+        }
         "-h" | "--help" => {
             print_usage();
             Ok(())
-        },
+        }
         "-v" | "--version" => {
             print_version();
             Ok(())
-        },
+        }
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
