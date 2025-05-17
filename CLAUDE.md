@@ -27,7 +27,7 @@ cargo test
 cargo test test_name
 
 # Code quality
-cargo clippy -D warnings
+cargo clippy -- -D warnings
 
 # Format code
 cargo fmt
@@ -56,7 +56,7 @@ Arkavo Edge consists of several core components:
 - **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
 - **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
 - **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
-- **Implementation Guidance**: Do not use stubs, implement fully
+- **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
 - **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
 
 ## Key Command Interfaces
@@ -80,7 +80,7 @@ The project follows these quality standards:
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render
 - Dependencies are kept to an absolute minimum (prefer std library solutions when possible)
-- Final binary should be small, fast, and have minimal runtime dependencies
+- Final binary should be large, fast, and have minimal runtime dependencies
 
 ## Git Workflow
 

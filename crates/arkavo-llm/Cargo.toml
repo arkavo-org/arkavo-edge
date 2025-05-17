@@ -5,6 +5,27 @@ edition = "2021"
 description = "LLM integration for Arkavo Edge"
 license = "Apache-2.0"
 
+[features]
+default = []
+# Enable this feature to embed the model weights in the binary
+embedded_model = []
+# Enables binary blob format for tokenizer data instead of Rust static data
+binary_tokenizer = ["dep:bincode"]
+
 [dependencies]
 anyhow = "1.0.75"
 thiserror = "1.0.49"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.10.2"
+safetensors = "0.4.1"
+ndarray = "0.15.6"
+rand = "0.8.5"
+phf = { version = "0.11", features = ["macros"] }
+bincode = { version = "1.3", optional = true }
+
+[build-dependencies]
+serde_json = "1.0"
+phf = { version = "0.11", features = ["macros"] }
+phf_codegen = "0.11"
+bincode = { version = "1.3", optional = true }
