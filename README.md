@@ -4,6 +4,10 @@ A developer-centric agentic CLI tool for AI-agent development and framework main
 
 ## Features
 
+- Local LLM inference with Qwen3-0.6B (privacy-first, no API required)
+
+### Planned
+
 - Conversational agent with repository context
 - Change planning and execution with automatic commit generation
 - Test integration with the agent feedback loop
