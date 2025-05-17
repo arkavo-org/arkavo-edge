@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Arkavo Edge is an open-source agentic CLI tool that aims to provide developer-centric capabilities for AI-agent development and framework maintenance. It focuses on secure, cost-efficient runtime for multi-file code transformations.
 
+**IMPORTANT**: This is a real production implementation, not a prototype. The codebase is intended for production release and should be maintained with appropriate quality standards.
+
 ## Build and Development Commands
 
 ```bash
@@ -53,6 +55,7 @@ Arkavo Edge consists of several core components:
 - **File size limit**: All source files should be kept under 400 lines of code to promote readability and maintainability.
 - **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
 - **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
+- **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
 
 ## Key Command Interfaces
 

@@ -34,6 +34,96 @@ arkavo test
 arkavo vault
 ```
 
+## LLM Integration
+
+Arkavo Edge uses the Qwen3-0.6B model for local LLM inference, ensuring privacy with no external API dependencies.
+
+### Downloading and Setting Up Qwen3-0.6B
+
+#### Hugging Face Authentication
+
+To download the model from Hugging Face:
+
+1. Visit [Hugging Face Token Settings](https://huggingface.co/settings/tokens)
+2. Create a token with "Read" permission
+3. Enter the token in the CLI `huggingface-cli`
+
+#### Download the Model
+
+Download the model directly to Arkavo's model directory:
+
+```bash
+# Create Arkavo model directory
+mkdir -p ~/.arkavo/models/qwen3-0.6b
+
+# Download the model directly to the target location
+huggingface-cli download Qwen/Qwen3-0.6B --local-dir ~/.arkavo/models/qwen3-0.6b
+```
+
+This single command downloads all required model files directly where Arkavo expects them. The download takes approximately 1-2 minutes depending on your connection speed.
+
+> **Alternative method:** If you prefer to download to Hugging Face's default cache location first, run `huggingface-cli download Qwen/Qwen3-0.6B` without the `--local-dir` option, then create a symbolic link from the cache location to Arkavo's model directory.
+
+#### Using the Model
+
+```bash
+# Start interactive chat
+arkavo chat
+
+# Process a single prompt
+arkavo chat --prompt "Hello Cyberspace"
+```
+
+### Embedding the Model in the Binary
+
+For completely offline distribution, Arkavo Edge supports embedding the model directly into the binary. This is particularly useful for deployments where downloading the model is not possible or desirable.
+
+#### How to Embed the Model
+
+1. Download the model files as described above
+
+2. Copy the model files to the embedding location:
+   ```bash
+   # Create the models directory in the arkavo-llm crate
+   mkdir -p crates/arkavo-llm/models/
+   
+   # Copy the model files
+   cp ~/.arkavo/models/qwen3-0.6b/model.safetensors crates/arkavo-llm/models/
+   cp ~/.arkavo/models/qwen3-0.6b/tokenizer.json crates/arkavo-llm/models/
+   cp ~/.arkavo/models/qwen3-0.6b/config.json crates/arkavo-llm/models/
+   ```
+
+3. Build with the embedded model feature (enabled by default):
+   ```bash
+   # Build with the model embedded in the binary
+   cargo build --release
+   ```
+
+4. The resulting binary will contain the model files and will not require any additional downloads
+
+#### Key Benefits
+
+- **100% Offline Operation**: No internet connection required after deployment
+- **Self-contained Binary**: Single-file distribution simplifies deployment
+- **Secure Runtime**: No downloads or external dependencies
+- **Portability**: Works across all supported platforms
+
+#### Size Considerations
+
+- The final binary will be significantly larger (1.5-2GB)
+- Building may take longer due to embedding the large model files
+- Runtime memory usage remains the same as with external model files
+
+### Technical Implementation
+
+Arkavo uses the Candle framework (by Hugging Face) for efficient Rust-based ML inference. Key integration points:
+
+- **CPU and GPU Support**: Both CPU and GPU inference are supported, with automatic fallback to CPU if GPU is unavailable
+- **Quantization**: The model uses efficient quantization techniques for optimal performance even on modest hardware
+- **Memory Efficiency**: Designed to work within reasonable memory constraints while maintaining quality outputs
+- **Privacy**: All processing occurs locally on your device with no data sent to external services
+- **Secure Cleanup**: Temporary files are securely deleted after use in high-security environments
+
 ## Development
 
 ```bash
