@@ -56,6 +56,8 @@ Arkavo Edge consists of several core components:
 - **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
 - **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
 - **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
+- **Implementation Guidance**: Do not use stubs, implement fully
+- **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
 
 ## Key Command Interfaces
 
@@ -71,9 +73,9 @@ The project will support the following main commands:
 
 The project follows these quality standards:
 
-- No warnings with `cargo clippy -D warnings`
+- No warnings with `cargo clippy -- -D warnings`
 - Test coverage target of ≥85%
-- Binary size ≤1 GB 
+- Binary size ≤4 GB 
 - All files under 400 LoC 
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render

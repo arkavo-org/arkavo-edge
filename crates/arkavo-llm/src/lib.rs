@@ -19,15 +19,12 @@ pub enum LlmError {
 
     #[error("Inference error: {0}")]
     InferenceError(String),
-
-    #[error("Failed to download model: {0}")]
-    DownloadError(String),
 }
 
 /// Configuration for Qwen3 model
 #[derive(Debug, Clone)]
 pub struct Qwen3Config {
-    /// Path to the model files
+    /// Path to the model files (virtual path for embedded model)
     pub model_path: String,
 
     /// Temperature for text generation (0.0-1.0)
@@ -43,7 +40,7 @@ pub struct Qwen3Config {
 impl Default for Qwen3Config {
     fn default() -> Self {
         Self {
-            model_path: String::from("models/qwen3-0.6b"),
+            model_path: String::from("memory://qwen3-0.6b"),
             temperature: 0.7,
             use_gpu: false,
             max_tokens: 1024,
@@ -70,11 +67,9 @@ impl Qwen3Client {
 
     /// Initializes the model and tokenizer
     pub async fn init(&mut self) -> Result<()> {
-        // Initialize tokenizer
-        self.tokenizer = Some(tokenizer::Qwen3Tokenizer::new(&self.config.model_path)?);
-
-        // Initialize model
-        self.model = Some(model::Qwen3Model::new(&self.config)?);
+        // Initialize tokenizer with embedded model data
+        self.tokenizer = Some(tokenizer::Qwen3Tokenizer::new_from_embedded()?);
+        self.model = Some(model::Qwen3Model::new_from_embedded(&self.config)?);
 
         Ok(())
     }
@@ -99,23 +94,16 @@ impl Qwen3Client {
         let output_tokens = model.generate(&input_tokens, self.config.max_tokens)?;
 
         // Decode response
-        let response = tokenizer.decode(&output_tokens)?;
+        let raw_response = tokenizer.decode(&output_tokens)?;
+        
+        // Process and clean the response
+        let clean_response = utils::extract_response(&raw_response);
 
-        Ok(response)
+        Ok(clean_response)
     }
 
-    /// Checks if the model is properly downloaded
-    pub async fn check_model_available(&self) -> bool {
-        // With embedded model, we always have it available
-        #[cfg(feature = "embedded_model")]
-        {
-            true
-        }
-        
-        // Otherwise check if files exist
-        #[cfg(not(feature = "embedded_model"))]
-        {
-            utils::check_model_files(&self.config.model_path).await
-        }
+    /// Checks if the model is properly initialized
+    pub async fn is_initialized(&self) -> bool {
+        self.model.is_some() && self.tokenizer.is_some()
     }
 }

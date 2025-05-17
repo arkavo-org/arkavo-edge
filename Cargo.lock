@@ -31,9 +31,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-chat"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arkavo-llm",
+ "arkavo-terminal",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-cli"
 version = "0.2.0"
 dependencies = [
+ "arkavo-chat",
  "arkavo-git",
  "arkavo-llm",
  "arkavo-repo",

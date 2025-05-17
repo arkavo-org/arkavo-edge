@@ -10,7 +10,4 @@ anyhow = "1.0.75"
 thiserror = "1.0.49"
 tracing = "0.1.37"
 
-[features]
-# Enable this feature to embed the model in the binary
-embedded_model = []
-default = ["embedded_model"]
+# No features section needed - embedded model is now the only implementation

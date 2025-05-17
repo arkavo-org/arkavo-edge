@@ -11,4 +11,5 @@ arkavo-terminal = { path = "../arkavo-terminal" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-chat = { path = "../arkavo-chat" }
 tokio = { version = "1.32.0", features = ["full"] }
