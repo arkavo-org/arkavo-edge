@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-terminal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Terminal UI for the Arkavo agentic CLI tool - GPU-accelerated terminal integration"
+
+[dependencies]

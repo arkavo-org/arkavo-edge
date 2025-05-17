@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-test"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Test harness for the Arkavo agentic CLI tool - local test runner adapter for various languages"
+
+[dependencies]

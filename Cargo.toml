@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/arkavo",
+    "crates/arkavo-cli",
+    "crates/arkavo-terminal",
+    "crates/arkavo-repo",
+    "crates/arkavo-git",
+    "crates/arkavo-protocol",
+    "crates/arkavo-encryption",
+    "crates/arkavo-vault",
+    "crates/arkavo-test",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Arkavo Edge Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/arkavo/arkavo-edge"
+description = "Developer-centric agentic CLI tool for AI-agent development and framework maintenance"

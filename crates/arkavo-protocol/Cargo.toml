@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Protocol adapters for the Arkavo agentic CLI tool - MCP & A2A client implementations"
+
+[dependencies]

@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-git"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Git integration for the Arkavo agentic CLI tool - handles auto-commit, branch management, and unified-diff previews"
+
+[dependencies]

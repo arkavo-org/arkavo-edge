@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-encryption"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Encryption for the Arkavo agentic CLI tool - OpenTDF wrapping with local KMS support"
+
+[dependencies]

@@ -1,0 +1,13 @@
+[package]
+name = "arkavo-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "CLI Core for the Arkavo agentic CLI tool - command parser and multi-step agent loop"
+
+[dependencies]
+arkavo-terminal = { path = "../arkavo-terminal" }
+arkavo-repo = { path = "../arkavo-repo" }
+arkavo-git = { path = "../arkavo-git" }
+anyhow = "1.0"

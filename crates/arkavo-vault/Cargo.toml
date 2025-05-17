@@ -1,0 +1,9 @@
+[package]
+name = "arkavo-vault"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Edge Vault CE for the Arkavo agentic CLI tool - Web UI, CRUD APIs, and SQLite driver"
+
+[dependencies]
