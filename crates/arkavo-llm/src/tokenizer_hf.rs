@@ -19,6 +19,17 @@ impl HfTokenizer {
         Ok(Self { tokenizer })
     }
     
+    /// Create a new HuggingFace tokenizer directly from bytes
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let json_str = std::str::from_utf8(bytes)
+            .map_err(|e| anyhow!("Failed to decode tokenizer bytes: {}", e))?;
+            
+        let tokenizer = Tokenizer::from_str(json_str)
+            .map_err(|e| anyhow!("Failed to load tokenizer from bytes: {}", e))?;
+            
+        Ok(Self { tokenizer })
+    }
+    
     /// Encode text into token IDs
     pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
         let encoding = self.tokenizer.encode(text, true)
@@ -29,12 +40,6 @@ impl HfTokenizer {
     
     /// Decode token IDs back into text
     pub fn decode(&self, tokens: &[u32]) -> Result<String> {
-        // Print the first few tokens for debugging
-        if !tokens.is_empty() {
-            let preview = tokens.iter().take(10).collect::<Vec<_>>();
-            eprintln!("DEBUG: First 10 tokens to decode: {:?}", preview);
-        }
-        
         // For direct token checks
         let contains_im_start = tokens.contains(&151644); // <|im_start|>
         let contains_im_end = tokens.contains(&151645);   // <|im_end|>
@@ -42,10 +47,6 @@ impl HfTokenizer {
         // tokenizers takes &[u32] directly, no need to convert to Vec
         let mut text = self.tokenizer.decode(tokens, false) // Set skip_special_tokens to false
             .map_err(|e| anyhow!("Failed to decode tokens: {}", e))?;
-        
-        // Collect first 100 Unicode characters - always safe
-        let preview: String = text.chars().take(100).collect();
-        eprintln!("DEBUG: Raw decoded text (first 100 chars): {}", preview);
         
         // The HuggingFace tokenizer might still strip some special tokens or modify them
         // Let's restore common ChatML tokens if they appear in the original token IDs
@@ -64,10 +65,6 @@ impl HfTokenizer {
             // Add im_end tag at the end if it was in the original tokens
             text.push_str("<|im_end|>");
         }
-        
-        // Log the final output - collect first 100 Unicode characters (always safe)
-        let post_preview: String = text.chars().take(100).collect();
-        eprintln!("DEBUG: Post-processed decoded text (first 100 chars): {}", post_preview);
         
         Ok(text)
     }

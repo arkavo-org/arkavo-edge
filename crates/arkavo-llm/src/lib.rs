@@ -96,29 +96,33 @@ impl Qwen3Client {
         }
         
         // Initialize HuggingFace tokenizer
-        // Use absolute path for more reliable loading
-        let tokenizer_path = std::path::Path::new("/Users/paul/Projects/arkavo/arkavo-edge/crates/arkavo-llm/models/tokenizer.json");
+        // Try possible locations for the tokenizer, from most specific to most general
+        let possible_paths = [
+            // Current directory
+            "tokenizer.json",
+            // Models subdirectory 
+            "models/tokenizer.json",
+            // Crate-specific path
+            "crates/arkavo-llm/models/tokenizer.json",
+        ];
         
-        if !tokenizer_path.exists() {
-            eprintln!("WARN: Tokenizer file not found at '{}'", tokenizer_path.display());
-            eprintln!("WARN: Looking for tokenizer.json in local directory");
-            
-            // Try with relative path
-            match tokenizer_hf::HfTokenizer::new("./crates/arkavo-llm/models/tokenizer.json") {
-                Ok(tokenizer) => {
-                    self.hf_tokenizer = Some(tokenizer);
-                    eprintln!("INFO: Using HuggingFace tokenizer from relative path");
-                }
-                Err(err) => {
-                    return Err(anyhow::anyhow!("Failed to load HuggingFace tokenizer: {}", err));
-                }
+        // Try each path until we find one that works
+        let mut tokenizer_loaded = false;
+        for path in possible_paths.iter() {
+            if let Ok(tokenizer) = tokenizer_hf::HfTokenizer::new(path) {
+                self.hf_tokenizer = Some(tokenizer);
+                eprintln!("INFO: Using HuggingFace tokenizer from path: {}", path);
+                tokenizer_loaded = true;
+                break;
             }
-        } else {
-            // Use absolute path if it exists
-            match tokenizer_hf::HfTokenizer::new(tokenizer_path) {
+        }
+        
+        // If nothing worked, try loading from the embedded data
+        if !tokenizer_loaded {
+            match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
                 Ok(tokenizer) => {
                     self.hf_tokenizer = Some(tokenizer);
-                    eprintln!("INFO: Using HuggingFace tokenizer from absolute path");
+                    eprintln!("INFO: Using embedded HuggingFace tokenizer");
                 }
                 Err(err) => {
                     return Err(anyhow::anyhow!("Failed to load HuggingFace tokenizer: {}", err));
