@@ -56,6 +56,12 @@ mkdir -p crates/arkavo-llm/models
 ```
 
 Download the model directly to the target location
+
+```bash
+huggingface-cli download Mattimax/DATA-AI_Chat_4_0.6B --local-dir crates/arkavo-llm/models
+```
+
+garbage output:
 ```bash
 huggingface-cli download suayptalha/Qwen3-0.6B-Code-Expert --local-dir crates/arkavo-llm/models
 ```
