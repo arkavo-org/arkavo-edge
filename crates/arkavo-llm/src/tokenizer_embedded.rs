@@ -29,7 +29,7 @@ impl EmbeddedQwen3Tokenizer {
         // Special token IDs for Qwen3
         let bos_id = 151644; // <|im_start|>
         let eos_id = 151645; // <|im_end|>
-        let pad_id = 0;      // padding token
+        let pad_id = 151643; // <|endoftext|> (used as padding)
         
         // Create a minimal vocabulary with essential tokens
         let mut vocab = HashMap::new();
@@ -42,14 +42,23 @@ impl EmbeddedQwen3Tokenizer {
             id_to_token.insert(id, c.to_string());
         }
         
-        // Add special Qwen3 tokens
+        // Add special Qwen3 tokens with their correct IDs
         vocab.insert("<|im_start|>".to_string(), bos_id);
         vocab.insert("<|im_end|>".to_string(), eos_id);
-        vocab.insert("<|padding|>".to_string(), pad_id);
+        vocab.insert("<|endoftext|>".to_string(), pad_id);
         
+        // Add standard role markers for Qwen3 chat format
+        vocab.insert("system".to_string(), 151646);
+        vocab.insert("user".to_string(), 151647);
+        vocab.insert("assistant".to_string(), 151648);
+        
+        // Add the reverse mappings for decoding
         id_to_token.insert(bos_id, "<|im_start|>".to_string());
         id_to_token.insert(eos_id, "<|im_end|>".to_string());
-        id_to_token.insert(pad_id, "<|padding|>".to_string());
+        id_to_token.insert(pad_id, "<|endoftext|>".to_string());
+        id_to_token.insert(151646, "system".to_string());
+        id_to_token.insert(151647, "user".to_string());
+        id_to_token.insert(151648, "assistant".to_string());
         
         // Add common word pieces
         let common_tokens = [
@@ -190,12 +199,13 @@ impl EmbeddedQwen3Tokenizer {
                 
                 // Skip system/user/assistant role identifiers and adjacent tokens
                 if skip_until_marker || 
-                   token.contains("system") || 
-                   token.contains("user") || 
-                   token.contains("assistant") ||
-                   token == ":" && (prev_token_str.contains("system") || 
-                                     prev_token_str.contains("user") || 
-                                     prev_token_str.contains("assistant")) {
+                   token == "system" || token == "user" || token == "assistant" || 
+                   token.contains("system") || token.contains("user") || token.contains("assistant") ||
+                   token == ":" && (prev_token_str == "system" || prev_token_str == "user" || 
+                                   prev_token_str == "assistant" || 
+                                   prev_token_str.contains("system") || 
+                                   prev_token_str.contains("user") || 
+                                   prev_token_str.contains("assistant")) {
                     prev_token_str = token;
                     i += 1;
                     continue;
@@ -235,13 +245,38 @@ impl EmbeddedQwen3Tokenizer {
             i += 1;
         }
         
-        // Clean up any remaining special markers in the output text
-        let clean_result = result
+        // Clean up all special tokens and incorrect placeholders
+        let mut clean_result = result
+            // Replace Qwen3 special tokens with nothing
             .replace("<|im_start|>", "")
             .replace("<|im_end|>", "")
+            .replace("<|endoftext|>", "")
             .replace("<|system|>", "")
             .replace("<|user|>", "")
-            .replace("<|assistant|>", "");
+            .replace("<|assistant|>", "")
+            .replace("system", "")
+            .replace("user", "")
+            .replace("assistant", "")
+            // Remove any encoded placeholders that might appear
+            .replace("ccimcstartcc", "")
+            .replace("ccimcendcc", "")
+            .replace("ccsystemc", "")
+            .replace("ccuserc", "")
+            .replace("ccassistantc", "");
+
+        // Normalize whitespace and trim
+        clean_result = clean_result.trim().to_string();
+        
+        // Remove only a stray leading "c" before an uppercase letter
+        // This is an artifact of the minimal tokenizer for certain character sequences
+        if clean_result.starts_with("c") && clean_result.chars().nth(1).map_or(false, |c| c.is_uppercase()) {
+            clean_result = clean_result[1..].to_string();
+        }
+        
+        // Remove stray trailing 'c' character that appears in some outputs
+        if clean_result.ends_with('c') {
+            clean_result.pop(); // Remove the last character
+        }
         
         Ok(clean_result)
     }

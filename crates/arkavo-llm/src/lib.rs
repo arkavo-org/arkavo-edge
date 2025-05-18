@@ -1,13 +1,15 @@
-mod model;
-mod tokenizer;
-mod tokenizer_static;
-mod tokenizer_embedded;
+// Model implementation - we now only use the Candle model
+mod candle_model;
+
+// Tokenizer implementations
+mod tokenizer_embedded; // Legacy embedded tokenizer (will be deprecated)
+mod tokenizer_hf;       // HuggingFace tokenizer (preferred)
 mod utils;
 
-pub use model::*;
-pub use tokenizer::*;
-pub use tokenizer_static::*;
-pub use tokenizer_embedded::*;
+// Re-export everything
+pub use candle_model::*;
+pub use tokenizer_embedded::*; // Keep for backward compatibility
+pub use tokenizer_hf::*;
 pub use utils::*;
 
 use anyhow::Result;
@@ -55,27 +57,18 @@ impl Default for Qwen3Config {
 /// Main interface for interacting with Qwen3 model
 pub struct Qwen3Client {
     config: Qwen3Config,
-    model: Option<model::Qwen3Model>,
     
-    // Different tokenizer implementations
-    #[allow(dead_code)]
-    tokenizer: Option<tokenizer::Qwen3Tokenizer>,
-    #[allow(dead_code)]
-    static_tokenizer: Option<tokenizer_static::StaticQwen3Tokenizer>,
+    // Candle model implementation - we only use this now
+    model: Option<CandleQwen3Model>,
+    
+    // HuggingFace tokenizer (preferred)
+    hf_tokenizer: Option<tokenizer_hf::HfTokenizer>,
+    
+    // Legacy embedded tokenizer (kept for backward compatibility)
     embedded_tokenizer: Option<tokenizer_embedded::EmbeddedQwen3Tokenizer>,
     
-    // Which tokenizer to use (embedded is most reliable)
-    tokenizer_type: TokenizerType,
-}
-
-/// Available tokenizer implementations
-enum TokenizerType {
-    /// Dynamic tokenizer that parses tokenizer.json at runtime
-    Dynamic,
-    /// Static tokenizer that was processed at build time
-    Static,
-    /// Embedded tokenizer with hardcoded common tokens
-    Embedded,
+    // Whether to use the HF tokenizer (recommended)
+    use_hf_tokenizer: bool,
 }
 
 impl Qwen3Client {
@@ -84,50 +77,83 @@ impl Qwen3Client {
         Self {
             config,
             model: None,
-            tokenizer: None,
-            static_tokenizer: None,
+            hf_tokenizer: None,
             embedded_tokenizer: None,
-            tokenizer_type: TokenizerType::Embedded, // Use embedded by default - most reliable
+            use_hf_tokenizer: true, // Default to using HuggingFace tokenizer
+        }
+    }
+    
+    /// Creates a new Qwen3Client using HuggingFace tokenizer explicitly
+    pub fn new_with_hf_tokenizer(config: Qwen3Config) -> Self {
+        Self {
+            config,
+            model: None,
+            hf_tokenizer: None,
+            embedded_tokenizer: None,
+            use_hf_tokenizer: true, // Force HuggingFace tokenizer
         }
     }
 
     /// Initializes the model and tokenizer
     pub async fn init(&mut self) -> Result<()> {
-        // Initialize model (using regular new method, which works with or without the embedded_model feature)
-        self.model = Some(model::Qwen3Model::new(&self.config)?);
+        // Initialize the Candle model
+        #[cfg(feature = "embedded_model")]
+        {
+            self.model = Some(candle_model::CandleQwen3Model::new_from_embedded(&self.config)?);
+        }
         
-        // Always initialize the embedded tokenizer first (most reliable)
+        #[cfg(not(feature = "embedded_model"))]
+        {
+            self.model = Some(candle_model::CandleQwen3Model::new(&self.config)?);
+        }
+        
+        // Try to initialize HuggingFace tokenizer - always try first regardless of use_hf_tokenizer setting
+        // Use absolute path for more reliable loading
+        let tokenizer_path = std::path::Path::new("/Users/paul/Projects/arkavo/arkavo-edge/crates/arkavo-llm/models/tokenizer.json");
+        let mut hf_tokenizer_loaded = false;
+        
+        if !tokenizer_path.exists() {
+            eprintln!("WARN: Tokenizer file not found at '{}'", tokenizer_path.display());
+            eprintln!("WARN: Looking for tokenizer.json in local directory");
+            
+            // Try with relative path
+            match tokenizer_hf::HfTokenizer::new("./crates/arkavo-llm/models/tokenizer.json") {
+                Ok(tokenizer) => {
+                    self.hf_tokenizer = Some(tokenizer);
+                    eprintln!("INFO: Using HuggingFace tokenizer from relative path");
+                    hf_tokenizer_loaded = true;
+                }
+                Err(err) => {
+                    eprintln!("WARN: Failed to initialize HuggingFace tokenizer from relative path: {}", err);
+                }
+            }
+        } else {
+            // Use absolute path if it exists
+            match tokenizer_hf::HfTokenizer::new(tokenizer_path) {
+                Ok(tokenizer) => {
+                    self.hf_tokenizer = Some(tokenizer);
+                    eprintln!("INFO: Using HuggingFace tokenizer from absolute path");
+                    hf_tokenizer_loaded = true;
+                }
+                Err(err) => {
+                    eprintln!("WARN: Failed to initialize HuggingFace tokenizer from absolute path: {}", err);
+                }
+            }
+        }
+        
+        // If HF tokenizer couldn't be loaded but was specifically requested, return error
+        if !hf_tokenizer_loaded && self.use_hf_tokenizer {
+            return Err(anyhow::anyhow!("Failed to load HuggingFace tokenizer as explicitly requested"));
+        }
+        
+        // Update use_hf_tokenizer flag based on successful load
+        self.use_hf_tokenizer = hf_tokenizer_loaded;
+        
+        // Always initialize embedded tokenizer as fallback
         self.embedded_tokenizer = Some(tokenizer_embedded::EmbeddedQwen3Tokenizer::new()?);
         
-        // Try other tokenizers as fallbacks based on preference
-        match self.tokenizer_type {
-            TokenizerType::Static => {
-                match tokenizer_static::StaticQwen3Tokenizer::new() {
-                    Ok(static_tokenizer) => {
-                        self.static_tokenizer = Some(static_tokenizer);
-                        self.tokenizer_type = TokenizerType::Static;
-                    },
-                    Err(_) => {
-                        // Fall back to embedded
-                        self.tokenizer_type = TokenizerType::Embedded;
-                    }
-                }
-            },
-            TokenizerType::Dynamic => {
-                match tokenizer::Qwen3Tokenizer::new_from_embedded() {
-                    Ok(dynamic_tokenizer) => {
-                        self.tokenizer = Some(dynamic_tokenizer);
-                        self.tokenizer_type = TokenizerType::Dynamic;
-                    },
-                    Err(_) => {
-                        // Fall back to embedded
-                        self.tokenizer_type = TokenizerType::Embedded;
-                    }
-                }
-            },
-            TokenizerType::Embedded => {
-                // Already initialized
-            }
+        if !self.use_hf_tokenizer {
+            eprintln!("INFO: Using embedded tokenizer");
         }
 
         Ok(())
@@ -137,98 +163,106 @@ impl Qwen3Client {
     pub async fn generate(&self, prompt: &str) -> Result<String> {
         eprintln!("DEBUG: Starting inference process...");
         
-        // Validate model is initialized
-        let model = self
-            .model
+        // DEBUG: Print the exact prompt we're using
+        eprintln!("DEBUG: ===== PROMPT =====");
+        eprintln!("{}", prompt);
+        eprintln!("DEBUG: =================");
+        
+        // Tokenize the prompt using the selected tokenizer
+        let input_tokens = if self.use_hf_tokenizer {
+            let tokenizer = self.hf_tokenizer
+                .as_ref()
+                .ok_or_else(|| LlmError::InferenceError("HuggingFace tokenizer not initialized".to_string()))?;
+                
+            tokenizer.encode(prompt)?
+        } else {
+            let tokenizer = self.embedded_tokenizer
+                .as_ref()
+                .ok_or_else(|| LlmError::InferenceError("Embedded tokenizer not initialized".to_string()))?;
+                
+            tokenizer.encode(prompt)?
+        };
+        
+        eprintln!("DEBUG: First 30 token IDs: {:?}", &input_tokens.iter().take(30).collect::<Vec<_>>());
+        
+        // Perform a round-trip test to verify tokenizer
+        let test_text = "Hello world";
+        let test_tokens = if self.use_hf_tokenizer {
+            self.hf_tokenizer.as_ref().unwrap().encode(test_text)?
+        } else {
+            self.embedded_tokenizer.as_ref().unwrap().encode(test_text)?
+        };
+        let decoded_test = if self.use_hf_tokenizer {
+            self.hf_tokenizer.as_ref().unwrap().decode(&test_tokens)?
+        } else {
+            self.embedded_tokenizer.as_ref().unwrap().decode(&test_tokens)?
+        };
+        eprintln!("DEBUG: Tokenizer round-trip test: '{}' -> {} tokens -> '{}'", 
+                 test_text, test_tokens.len(), decoded_test);
+
+        // Generate response using Candle model
+        eprintln!("DEBUG: Tokenization completed, starting model.generate()");
+        
+        let model = self.model
             .as_ref()
             .ok_or_else(|| LlmError::InferenceError("Model not initialized".to_string()))?;
             
-        eprintln!("DEBUG: Model validated");
-
-        // Tokenize the prompt using the appropriate tokenizer
-        let input_tokens = match self.tokenizer_type {
-            TokenizerType::Static => {
-                if let Some(tokenizer) = &self.static_tokenizer {
-                    tokenizer.encode(prompt)?
-                } else {
-                    // Fall back to embedded
-                    self.embedded_tokenizer
-                        .as_ref()
-                        .ok_or_else(|| LlmError::InferenceError("No tokenizer available".to_string()))?
-                        .encode(prompt)?
-                }
-            },
-            TokenizerType::Dynamic => {
-                if let Some(tokenizer) = &self.tokenizer {
-                    tokenizer.encode(prompt)?
-                } else {
-                    // Fall back to embedded
-                    self.embedded_tokenizer
-                        .as_ref()
-                        .ok_or_else(|| LlmError::InferenceError("No tokenizer available".to_string()))?
-                        .encode(prompt)?
-                }
-            },
-            TokenizerType::Embedded => {
-                self.embedded_tokenizer
-                    .as_ref()
-                    .ok_or_else(|| LlmError::InferenceError("Embedded tokenizer not initialized".to_string()))?
-                    .encode(prompt)?
-            }
-        };
-
-        // Generate response
-        eprintln!("DEBUG: Tokenization completed, starting model.generate()");
         let output_tokens = model.generate(&input_tokens, self.config.max_tokens)?;
+        
         eprintln!("DEBUG: Model.generate() completed successfully");
+        eprintln!("DEBUG: Output tokens count: {}", output_tokens.len());
+        eprintln!("DEBUG: First 20 output tokens: {:?}", &output_tokens.iter().take(20).collect::<Vec<_>>());
+        eprintln!("DEBUG: Last 20 output tokens: {:?}", 
+                 &output_tokens.iter().rev().take(20).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>());
 
-        // Decode response using the appropriate tokenizer
-        let raw_response = match self.tokenizer_type {
-            TokenizerType::Static => {
-                if let Some(tokenizer) = &self.static_tokenizer {
-                    tokenizer.decode(&output_tokens)?
-                } else {
-                    // Fall back to embedded
-                    self.embedded_tokenizer
-                        .as_ref()
-                        .ok_or_else(|| LlmError::InferenceError("No tokenizer available".to_string()))?
-                        .decode(&output_tokens)?
-                }
-            },
-            TokenizerType::Dynamic => {
-                if let Some(tokenizer) = &self.tokenizer {
-                    tokenizer.decode(&output_tokens)?
-                } else {
-                    // Fall back to embedded
-                    self.embedded_tokenizer
-                        .as_ref()
-                        .ok_or_else(|| LlmError::InferenceError("No tokenizer available".to_string()))?
-                        .decode(&output_tokens)?
-                }
-            },
-            TokenizerType::Embedded => {
-                self.embedded_tokenizer
-                    .as_ref()
-                    .ok_or_else(|| LlmError::InferenceError("Embedded tokenizer not initialized".to_string()))?
-                    .decode(&output_tokens)?
-            }
+        // Decode response using the selected tokenizer
+        let raw_response = if self.use_hf_tokenizer {
+            let tokenizer = self.hf_tokenizer
+                .as_ref()
+                .ok_or_else(|| LlmError::InferenceError("HuggingFace tokenizer not initialized".to_string()))?;
+                
+            tokenizer.decode(&output_tokens)?
+        } else {
+            let tokenizer = self.embedded_tokenizer
+                .as_ref()
+                .ok_or_else(|| LlmError::InferenceError("Embedded tokenizer not initialized".to_string()))?;
+                
+            tokenizer.decode(&output_tokens)?
         };
         
-        // Print raw response for debugging
-        eprintln!("DEBUG: Raw response from tokenizer: {:?}", raw_response);
+        // Collect first 100 Unicode characters (always safe)
+        let preview: String = raw_response.chars().take(100).collect();
+        eprintln!("DEBUG: First 100 chars of raw decoded output: {}{}", 
+                 preview,
+                 if raw_response.chars().count() > 100 { "..." } else { "" });
         
         // Process and clean the response
         let clean_response = utils::extract_response(&raw_response);
         
-        // Print cleaned response for debugging
-        eprintln!("DEBUG: Cleaned response: {:?}", clean_response);
+        // Final sanity check - if output contains a lot of non-English characters, it's likely garbage
+        let non_ascii_ratio = clean_response.chars()
+            .filter(|c| !c.is_ascii() && !c.is_whitespace())
+            .count() as f32 / clean_response.chars().count() as f32;
+            
+        if non_ascii_ratio > 0.3 {  // If more than 30% non-ASCII characters
+            eprintln!("ERROR: Output contains too many non-ASCII characters ({}%). Model output appears corrupted.", 
+                     non_ascii_ratio * 100.0);
+            return Err(anyhow::anyhow!("Model output appears corrupted (contains {}% non-ASCII characters). This suggests a mismatch between the model and tokenizer.", 
+                                     (non_ascii_ratio * 100.0) as i32));
+        }
 
         Ok(clean_response)
     }
 
     /// Checks if the model is properly initialized
     pub async fn is_initialized(&self) -> bool {
-        self.model.is_some() && self.embedded_tokenizer.is_some()
+        let tokenizer_initialized = if self.use_hf_tokenizer {
+            self.hf_tokenizer.is_some()
+        } else {
+            self.embedded_tokenizer.is_some()
+        };
+        
+        self.model.is_some() && tokenizer_initialized
     }
     
     /// Checks if the model is using GPU acceleration
@@ -236,6 +270,28 @@ impl Qwen3Client {
         match &self.model {
             Some(model) => model.is_using_gpu(),
             None => false
+        }
+    }
+    
+    /// Returns the model implementation being used
+    pub fn get_model_impl_name(&self) -> &'static str {
+        "Candle (Accelerated)"
+    }
+    
+    /// Returns the hardware acceleration being used
+    pub fn get_acceleration_name(&self) -> &'static str {
+        match &self.model {
+            Some(model) => model.get_acceleration_name(),
+            None => "CPU"
+        }
+    }
+    
+    /// Returns the tokenizer implementation being used
+    pub fn get_tokenizer_impl_name(&self) -> &'static str {
+        if self.use_hf_tokenizer {
+            "HuggingFace Tokenizers"
+        } else {
+            "Embedded (Legacy)"
         }
     }
 }

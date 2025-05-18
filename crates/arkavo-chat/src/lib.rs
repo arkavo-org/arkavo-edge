@@ -98,5 +98,29 @@ pub fn format_message(message: &ChatMessage) -> String {
 
 /// Format a list of messages for the model
 pub fn format_messages(messages: &[ChatMessage]) -> String {
-    messages.iter().map(format_message).collect()
+    let mut formatted = String::new();
+
+    // 1. Add system message (from input, or default for Qwen3)
+    let system_msg = messages.iter().find(|msg| msg.role == ChatRole::System);
+    if let Some(system) = system_msg {
+        formatted.push_str(&format!("<|im_start|>system\n{}<|im_end|>\n", system.content));
+    } else {
+        // Use Qwen's canonical default
+        formatted.push_str("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n");
+    }
+
+    // 2. Add user and assistant messages in order (skip system)
+    for msg in messages.iter().filter(|m| m.role != ChatRole::System) {
+        let role = match msg.role {
+            ChatRole::User => "user",
+            ChatRole::Assistant => "assistant",
+            ChatRole::System => continue, // Defensive
+        };
+        formatted.push_str(&format!("<|im_start|>{}\n{}<|im_end|>\n", role, msg.content));
+    }
+
+    // 3. End with assistant marker (for generation)
+    formatted.push_str("<|im_start|>assistant");
+
+    formatted
 }

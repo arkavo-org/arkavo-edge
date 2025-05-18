@@ -61,6 +61,7 @@ Arkavo Edge consists of several core components:
 - **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
 - **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
 - **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
+- **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
 
 ## Key Command Interfaces
 

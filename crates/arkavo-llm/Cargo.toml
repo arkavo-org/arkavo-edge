@@ -11,6 +11,10 @@ default = ["embedded_model"]
 embedded_model = []
 # Enables binary blob format for tokenizer data instead of Rust static data
 binary_tokenizer = ["dep:bincode"]
+# Use Candle backend for accelerated inference
+candle_backend = []
+# Use ndarray backend (legacy implementation)
+ndarray_backend = []
 
 [dependencies]
 anyhow = "1.0.75"
@@ -19,12 +23,24 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.10.2"
 safetensors = "0.4.1"
-ndarray = "0.15.6"
+
+# HuggingFace tokenizers library
+tokenizers = "0.21.1"
+
+# Candle dependencies for accelerated LLM inference
+candle-core = { version = "0.9.1", features = ["accelerate", "metal"] }
+candle-nn = "0.9.1"
+candle-transformers = "0.9.1"
+
+# Original ndarray-based implementation
+ndarray = { version = "0.15.6", features = ["serde"] }
 ndarray-rand = "0.14.0"
+
 rand = "0.8.5"
 rand_distr = "0.4.3"
 phf = { version = "0.11", features = ["macros"] }
 bincode = { version = "1.3", optional = true }
+futures = { version = "0.3" }
 
 [build-dependencies]
 serde_json = "1.0"

@@ -28,37 +28,142 @@ const RESPONSE_SUFFIXES: [&str; 5] = [
     "\n\nUser:",
 ];
 
-/// Formats a prompt for Qwen3 model with proper chat markers according to the model's chat template
-pub fn format_prompt(user_message: &str) -> String {
-    // This follows the Qwen3 chat template format
-    let system_message = "You are a helpful AI assistant designed to provide precise, accurate information and assist with coding and technical tasks. For simple questions like math problems, respond with just the answer. For more complex questions, provide clear explanations.";
-    
-    format!(
-        "<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n",
-        system_message = system_message,
-        user_message = user_message
-    )
-}
-
 /// Extracts the assistant's response from the generated text
 pub fn extract_response(generated_text: &str) -> String {
-    // The proper approach for extracting assistant responses is to:
-    // 1. Use the tokenizer to decode the full sequence
-    // 2. Identify the last assistant message in the conversation
-    // 3. Extract just the content of that message
+    // For Qwen3 response extraction, following Hugging Face's implementation
     
-    // Find assistant responses in the text
-    let parts = extract_conversation_parts(generated_text);
+    // Print first bit of raw output for debugging (truncated)
+    // Collect first 100 Unicode characters (always safe)
+    let preview: String = generated_text.chars().take(100).collect();
+    eprintln!("DEBUG: Raw output from model [first 100 chars]: {}{}", 
+              preview,
+              if generated_text.chars().count() > 100 { "..." } else { "" }
+    );
     
-    // Return the assistant's response if found
-    if let Some(assistant_response) = parts.assistant_response {
-        // Return a clean response
-        return assistant_response;
+    // Check for Qwen3 special tokens
+    let contains_im_start_assistant = generated_text.contains("<|im_start|>assistant");
+    let contains_im_end = generated_text.contains("<|im_end|>");
+    let contains_assistant_marker = generated_text.contains("assistant");
+    
+    // Print token detection info for debugging
+    eprintln!("DEBUG: Found <|im_start|>assistant: {}", contains_im_start_assistant);
+    eprintln!("DEBUG: Found <|im_end|>: {}", contains_im_end);
+    eprintln!("DEBUG: Found 'assistant': {}", contains_assistant_marker);
+    
+    // First, check for thinking mode (not currently used but prepared for future)
+    if generated_text.contains("<think>") && generated_text.contains("</think>") {
+        if let Some(think_end) = generated_text.rfind("</think>") {
+            // Extract post-thinking content (after the last </think> tag)
+            let remaining = &generated_text[think_end + "</think>".len()..];
+            if !remaining.trim().is_empty() {
+                eprintln!("DEBUG: Extracting from thinking block");
+                return remaining.trim().to_string();
+            }
+        }
+    }
+
+    // Prefer extracting from last assistant block
+    if let Some(start_idx) = generated_text.rfind("<|im_start|>assistant") {
+        let content_start = start_idx + "<|im_start|>assistant".len();
+        let content_start = if content_start < generated_text.len() && 
+                            generated_text[content_start..].starts_with('\n') {
+            content_start + 1 // Skip the newline
+        } else {
+            content_start
+        };
+        if let Some(end_idx) = generated_text[content_start..].find("<|im_end|>") {
+            let assistant_text = &generated_text[content_start..content_start+end_idx];
+            let clean_text = clean_message(assistant_text);
+            
+            // Remove repeating words that might happen during generation
+            let clean_text = dedup_repeating_words(&clean_text);
+            
+            eprintln!("DEBUG: Extracted from <|im_start|>assistant block");
+            return clean_text.trim().to_string();
+        } else {
+            // No end tag found, just take the rest after assistant tag
+            let assistant_text = &generated_text[content_start..];
+            let clean_text = clean_message(assistant_text);
+            let clean_text = dedup_repeating_words(&clean_text);
+            
+            eprintln!("DEBUG: Extracted from <|im_start|>assistant block (no end tag)");
+            return clean_text.trim().to_string();
+        }
     }
     
-    // If we can't extract an assistant response, apply fallback cleanup
-    // This handles cases where the model output might have special token artifacts
-    fallback_response_extraction(generated_text)
+    // Fallback: get text after last <|im_end|> (the user's block)
+    if let Some(pos) = generated_text.rfind("<|im_end|>") {
+        let after = &generated_text[pos + "<|im_end|>".len()..];
+        if let Some(asst_pos) = after.find("<|im_start|>assistant") {
+            let asst_content = &after[asst_pos + "<|im_start|>assistant".len()..];
+            let clean_text = clean_message(asst_content);
+            eprintln!("DEBUG: Extracted from after <|im_end|> + <|im_start|>assistant");
+            return dedup_repeating_words(&clean_text).trim().to_string();
+        }
+        
+        // If there's no assistant marker after the last im_end, just take everything
+        if !after.trim().is_empty() {
+            let clean_text = clean_message(after);
+            eprintln!("DEBUG: Extracted everything after the last <|im_end|>");
+            return dedup_repeating_words(&clean_text).trim().to_string();
+        }
+    }
+    
+    // Check for simple colon-based format
+    if let Some(asst_pos) = generated_text.find("Assistant:") {
+        let content_start = asst_pos + "Assistant:".len();
+        let clean_text = clean_message(&generated_text[content_start..]);
+        eprintln!("DEBUG: Extracted from 'Assistant:' marker");
+        return dedup_repeating_words(&clean_text).trim().to_string();
+    }
+    
+    if let Some(asst_pos) = generated_text.find("assistant:") {
+        let content_start = asst_pos + "assistant:".len();
+        let clean_text = clean_message(&generated_text[content_start..]);
+        eprintln!("DEBUG: Extracted from 'assistant:' marker");
+        return dedup_repeating_words(&clean_text).trim().to_string();
+    }
+    
+    // Last resort: use our structured extraction
+    let parts = extract_conversation_parts(generated_text);
+    if let Some(assistant_response) = parts.assistant_response {
+        eprintln!("DEBUG: Extracted using conversation parts structural analysis");
+        return dedup_repeating_words(&assistant_response).trim().to_string();
+    }
+    
+    // Final fallback: clean up all protocol tokens
+    let cleaned = clean_message(generated_text);
+    let result = dedup_repeating_words(&cleaned).trim().to_string();
+    eprintln!("DEBUG: Used final fallback - general cleanup");
+    result
+}
+
+/// Remove repetitive words that might be generated by the model
+fn dedup_repeating_words(text: &str) -> String {
+    let mut deduped = String::new();
+    let mut last_word = "";
+    let mut repeat_count = 0;
+    
+    // Split by whitespace and process each word
+    for word in text.split_whitespace() {
+        if word == last_word {
+            repeat_count += 1;
+            // Only allow up to 2 repetitions of the same word
+            if repeat_count > 2 {
+                continue;
+            }
+        } else {
+            repeat_count = 0;
+        }
+        
+        if !deduped.is_empty() {
+            deduped.push(' ');
+        }
+        deduped.push_str(word);
+        last_word = word;
+    }
+    
+    deduped
 }
 
 /// Breaks down a conversation into system, user, and assistant parts
@@ -85,6 +190,12 @@ fn extract_conversation_parts(text: &str) -> ConversationParts {
     if let Some(start) = text.find("<|im_start|>system") {
         if let Some(end) = text[start..].find("<|im_end|>") {
             let content_start = start + "<|im_start|>system".len();
+            // Skip newline if present
+            let content_start = if content_start < text.len() && text[content_start..].starts_with('\n') {
+                content_start + 1
+            } else {
+                content_start
+            };
             let content = text[content_start..start+end].trim();
             parts.system_message = Some(content.to_string());
         }
@@ -94,6 +205,12 @@ fn extract_conversation_parts(text: &str) -> ConversationParts {
     if let Some(start) = text.find("<|im_start|>user") {
         if let Some(end) = text[start..].find("<|im_end|>") {
             let content_start = start + "<|im_start|>user".len();
+            // Skip newline if present
+            let content_start = if content_start < text.len() && text[content_start..].starts_with('\n') {
+                content_start + 1
+            } else {
+                content_start
+            };
             let content = text[content_start..start+end].trim();
             parts.user_message = Some(content.to_string());
         }
@@ -103,6 +220,12 @@ fn extract_conversation_parts(text: &str) -> ConversationParts {
     if let Some(start) = text.find("<|im_start|>assistant") {
         if let Some(end) = text[start..].find("<|im_end|>") {
             let content_start = start + "<|im_start|>assistant".len();
+            // Skip newline if present
+            let content_start = if content_start < text.len() && text[content_start..].starts_with('\n') {
+                content_start + 1
+            } else {
+                content_start
+            };
             let content = text[content_start..start+end].trim();
             parts.assistant_response = Some(content.to_string());
         }
@@ -185,111 +308,84 @@ fn extract_conversation_parts(text: &str) -> ConversationParts {
     parts
 }
 
-/// Cleans a message by removing protocol markers
+/// Cleans a message by removing protocol markers and special tokens
 fn clean_message(text: &str) -> String {
-    text.replace("ccimcstartcc", "")
-        .replace("ccimcendcc", "")
-        .replace("ccsystemc", "")
-        .replace("ccuserc", "")
-        .replace("ccassistantc", "")
-        .replace("<|im_start|>", "")
-        .replace("<|im_end|>", "")
-        .replace("<|system|>", "")
-        .replace("<|user|>", "")
-        .replace("<|assistant|>", "")
-        .replace("system:", "")
-        .replace("user:", "")
-        .replace("assistant:", "")
-        .replace("Pb", "")
+    // List of all markers to remove for clean output
+    let markers = [
+        // ChatML markers for Qwen3
+        "<|im_start|>", "<|im_end|>", 
+        "<|endoftext|>",
+        
+        // Role markers
+        "<|system|>", "<|user|>", "<|assistant|>",
+        "system:", "user:", "assistant:",
+        
+        // Thinking markers
+        "<think>", "</think>",
+        
+        // Encoded markers that might appear in tokenizer output
+        "ccimcstartcc", "ccimcendcc", 
+        "ccsystemc", "ccuserc", "ccassistantc",
+        
+        // Misc artifacts
+        "Pb", "systemYouare",
+        
+        // Tool markers
+        "<tool_call>", "</tool_call>",
+        "<tool_response>", "</tool_response>"
+    ];
+    
+    // Remove all markers
+    let mut clean = text.to_string();
+    for marker in markers {
+        clean = clean.replace(marker, "");
+    }
+    
+    // Remove any non-content lines and empty lines
+    clean.lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
         .trim()
         .to_string()
 }
 
-/// Fallback extraction for when structured parsing fails
-fn fallback_response_extraction(text: &str) -> String {
-    // Clean all protocol markers
-    let clean_text = clean_message(text);
+/// Debugging helper to parse a formatted prompt string to see how it's structured
+pub fn debug_parse_prompt(prompt: &str) -> String {
+    let mut result = String::new();
     
-    // If the text has "Hello Cyberspace" or similar, extract everything after it
-    if let Some(pos) = clean_text.find("Cyberspace") {
-        let after_query = clean_text[pos + "Cyberspace".len()..].trim();
-        if !after_query.is_empty() {
-            return after_query.to_string();
-        }
-    }
-    
-    // Replace token IDs like "1001" with actual words
-    let text_with_words = replace_token_placeholders(&clean_text);
-    
-    // Return either the processed text or a default response if nothing meaningful found
-    if text_with_words.trim().len() > 5 {
-        text_with_words
-    } else {
-        "Hello! I'm here to assist with your questions about cyberspace and technology.".to_string()
-    }
-}
-
-/// Replace numeric token IDs with actual words
-fn replace_token_placeholders(text: &str) -> String {
-    let mut result = text.to_string();
-    
-    // Replace common programming term token IDs
-    let replacements = [
-        ("1001", "return"),
-        ("1002", "const"),
-        ("1003", "let"),
-        ("1004", "var"),
-        ("1005", "if"),
-        ("1006", "else"),
-        ("1007", "for"),
-        ("1008", "while"),
-        ("1009", "class"),
-        ("1010", "int"),
-        ("1011", "string"),
-        ("1012", "boolean"),
-        ("1013", "true"),
-        ("1014", "false"),
-        ("1015", "null"),
-        ("1016", "undefined"),
-        ("1017", "import"),
-        ("1018", "export"),
-        ("1019", "from"),
-        ("1020", "public"),
+    // Look for all ChatML markers and print their positions
+    let markers = [
+        "<|im_start|>system", 
+        "<|im_end|>", 
+        "<|im_start|>user", 
+        "<|im_start|>assistant",
+        "<|endoftext|>"
     ];
     
-    // Apply replacements
-    for (token_id, word) in &replacements {
-        result = result.replace(token_id, word);
+    for marker in &markers {
+        if let Some(pos) = prompt.find(marker) {
+            result.push_str(&format!("Found '{}' at position {}\n", marker, pos));
+        } else {
+            result.push_str(&format!("Marker '{}' not found\n", marker));
+        }
     }
     
-    // Add spaces between words if needed
-    if !result.contains(' ') {
-        let mut readable = String::with_capacity(result.len() * 2);
-        let mut prev_was_upper = false;
-        let mut prev_was_lower = false;
-        
-        for (i, c) in result.chars().enumerate() {
-            let is_upper = c.is_uppercase();
-            let is_lower = c.is_lowercase();
-            
-            // Add space before uppercase letters that follow lowercase (camelCase -> camel Case)
-            if i > 0 && is_upper && prev_was_lower {
-                readable.push(' ');
-            }
-            
-            // Add space after punctuation
-            if i > 0 && ".,;:!?".contains(c) {
-                readable.push(c);
-                readable.push(' ');
-                continue;
-            }
-            
-            readable.push(c);
-            prev_was_upper = is_upper;
-            prev_was_lower = is_lower;
+    // Also try to extract parts by role and print their content
+    if let Some(start) = prompt.find("<|im_start|>system") {
+        if let Some(end_offset) = prompt[start..].find("<|im_end|>") {
+            let content_start = start + "<|im_start|>system".len();
+            let system_msg = &prompt[content_start..start+end_offset];
+            result.push_str(&format!("\nSystem message:\n{}\n", system_msg.trim()));
         }
-        
-        result = readable;
+    }
+    
+    if let Some(start) = prompt.find("<|im_start|>user") {
+        if let Some(end_offset) = prompt[start..].find("<|im_end|>") {
+            let content_start = start + "<|im_start|>user".len();
+            let user_msg = &prompt[content_start..start+end_offset];
+            result.push_str(&format!("\nUser message:\n{}\n", user_msg.trim()));
+        }
     }
     
     result

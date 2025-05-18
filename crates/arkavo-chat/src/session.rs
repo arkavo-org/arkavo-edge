@@ -44,11 +44,9 @@ impl ChatSession {
         let mut client = Qwen3Client::new(llm_config);
         client.init().await?;
         
-        // Set up system message
+        // Set up system message - keep it simple for Qwen3
         self.history.push(ChatMessage::system(
-            "You are a helpful assistant that provides direct and concise answers to questions. \
-             For simple questions, respond with just the answer without explanations unless asked for more details. \
-             You're designed to assist with coding, documentation, and technical questions."
+            "assist"
         ));
 
         self.llm_client = Some(client);
@@ -81,7 +79,16 @@ impl ChatSession {
         // Generate response
         let formatted_prompt = format_messages(&self.history);
         let client = self.llm_client.as_ref().unwrap();
-        let response = client.generate(&formatted_prompt).await?;
+        
+        // Debug: Show the exact prompt being sent to model
+        println!("\nDEBUG: Sending prompt to model:\n{}", &formatted_prompt);
+        
+        // Add timeout to ensure the generate call doesn't hang
+        use std::time::Duration;
+        let response = match tokio::time::timeout(Duration::from_secs(30), client.generate(&formatted_prompt)).await {
+            Ok(result) => result?,
+            Err(_) => return Err(anyhow::anyhow!("Model inference timed out after 30 seconds"))
+        };
         
         // Add the response to history
         self.history.push(ChatMessage::assistant(&response));
@@ -96,10 +103,18 @@ impl ChatSession {
             self.init().await?;
         }
         
+        let client = self.llm_client.as_ref().unwrap();
+        
         println!("\n🤖 Qwen3-0.6B is ready (local privacy-first LLM)");
         println!("🔐 All processing happens on your device - no data is sent to external services");
-        println!("🚀 GPU acceleration is {}abled (Metal on Apple Silicon)", 
-                 if self.llm_client.as_ref().unwrap().is_using_gpu() { "en" } else { "dis" });
+        println!("🚀 Using {} implementation", client.get_model_impl_name());
+        
+        if client.is_using_gpu() {
+            println!("🔋 Hardware acceleration is enabled ({})", client.get_acceleration_name());
+        } else {
+            println!("🔋 Hardware acceleration is disabled (using CPU)");
+        }
+        
         println!("💬 Type 'exit' or 'quit' to end the session");
         println!("❓ Try asking 'What can you help me with?' to learn more\n");
 
@@ -133,7 +148,7 @@ impl ChatSession {
                     let thinking_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
                     let mut i = 0;
                     while !thinking_stop_clone.load(Ordering::Relaxed) {
-                        print!("\r🧠 {}", thinking_chars[i]);
+                        print!("\rThinking {}", thinking_chars[i]);
                         io::stdout().flush().unwrap();
                         i = (i + 1) % thinking_chars.len();
                         thread::sleep(Duration::from_millis(100));
@@ -147,20 +162,12 @@ impl ChatSession {
             let formatted_prompt = format_messages(&self.history);
             let client = self.llm_client.as_ref().unwrap();
             
-            eprintln!("DEBUG: Calling LLM generate");
-            
             // Add timeout to detect hangs
             // Use our own Duration to avoid confusion
             use std::time::Duration as StdDuration;
             let result = match tokio::time::timeout(StdDuration::from_secs(30), client.generate(&formatted_prompt)).await {
-                Ok(generate_result) => {
-                    eprintln!("DEBUG: LLM generate returned");
-                    generate_result
-                },
-                Err(_) => {
-                    eprintln!("DEBUG: LLM generate timed out after 30 seconds");
-                    Err(anyhow::anyhow!("Model inference timed out after 30 seconds"))
-                }
+                Ok(generate_result) => generate_result,
+                Err(_) => Err(anyhow::anyhow!("Model inference timed out after 30 seconds"))
             };
             
             // Stop thinking animation
@@ -195,8 +202,17 @@ impl ChatSession {
                     println!("🤖 {}", response);
                 }
                 Err(e) => {
-                    println!("❌ Error generating response: {}", e);
-                    println!("Please try a different query or check if the model files are correctly installed.");
+                    println!("❌ Error: {}", e);
+                    println!("Note: The first run might be slow as the model initializes. Please try a simple query.");
+                    
+                    // Print model status information
+                    if let Some(model) = self.llm_client.as_ref() {
+                        if model.is_using_gpu() {
+                            println!("GPU acceleration: Enabled ({})", model.get_acceleration_name());
+                        } else {
+                            println!("GPU acceleration: Disabled (running on CPU)");
+                        }
+                    }
                 }
             }
             
