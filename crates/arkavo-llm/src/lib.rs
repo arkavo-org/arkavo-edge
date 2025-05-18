@@ -1,5 +1,6 @@
 // Model implementation - we now only use the Candle model
 mod candle_model;
+mod candle;
 
 // Tokenizer implementations
 mod tokenizer_hf;       // HuggingFace tokenizer
@@ -136,8 +137,6 @@ impl Qwen3Client {
             .count() as f32 / clean_response.chars().count() as f32;
             
         if non_ascii_ratio > 0.3 {  // If more than 30% non-ASCII characters
-            eprintln!("ERROR: Output contains too many non-ASCII characters ({}%). Model output appears corrupted.", 
-                     non_ascii_ratio * 100.0);
             return Err(anyhow::anyhow!("Model output appears corrupted (contains {}% non-ASCII characters). This suggests a mismatch between the model and tokenizer.", 
                                      (non_ascii_ratio * 100.0) as i32));
         }
