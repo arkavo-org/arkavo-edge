@@ -9,25 +9,6 @@ pub static EMBEDDED_TOKENIZER_JSON: &[u8] = include_bytes!("../models/tokenizer.
 /// Embed the model configuration directly in the binary
 pub static EMBEDDED_CONFIG_JSON: &[u8] = include_bytes!("../models/config.json");
 
-/// Common prefixes that indicate an assistant response
-const ASSISTANT_PREFIXES: [&str; 6] = [
-    "<|im_start|>assistant\n",
-    "<|im_start|>assistant",
-    "<|assistant|>",
-    "assistant:",
-    "Assistant:",
-    "ASSISTANT:",
-];
-
-/// Common suffixes that indicate the end of a response
-const RESPONSE_SUFFIXES: [&str; 5] = [
-    "<|im_end|>",
-    "</s>",
-    "<|endoftext|>",
-    "\n\nHuman:",
-    "\n\nUser:",
-];
-
 /// Extracts the assistant's response from the generated text
 pub fn extract_response(generated_text: &str) -> String {
     // For Qwen3 response extraction, following Hugging Face's implementation

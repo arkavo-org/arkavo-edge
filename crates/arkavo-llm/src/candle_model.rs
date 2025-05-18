@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use candle_core::{Tensor, Device, DType, Module};
-use candle_nn::{self as nn, ops, activation};
+use candle_nn::{ops, activation};
 use safetensors::SafeTensors;
 use safetensors::tensor::TensorView;
 use std::collections::HashMap;
@@ -226,9 +226,6 @@ impl KVCache {
 
 /// Qwen3 model implementation using Candle backend for accelerated inference
 pub struct CandleQwen3Model {
-    /// Whether to use GPU for inference
-    use_gpu: bool,
-    
     /// Whether the model has been loaded
     is_loaded: bool,
     
@@ -352,7 +349,6 @@ impl CandleQwen3Model {
         }
         
         Ok(Self {
-            use_gpu: config.use_gpu,
             is_loaded: true,
             hidden_dim,
             num_layers,
@@ -946,11 +942,11 @@ impl CandleQwen3Model {
             // Extract feed-forward weights using direct Qwen3 key patterns
             // Qwen3 MLP has up_proj, down_proj, and gate_proj weights
             let up_proj_key = format!("model.layers.{}.mlp.up_proj.weight", i);
-            let up_proj_bias_key = format!("model.layers.{}.mlp.up_proj.bias", i);
+            let _up_proj_bias_key = format!("model.layers.{}.mlp.up_proj.bias", i);
             let down_proj_key = format!("model.layers.{}.mlp.down_proj.weight", i);
-            let down_proj_bias_key = format!("model.layers.{}.mlp.down_proj.bias", i);
+            let _down_proj_bias_key = format!("model.layers.{}.mlp.down_proj.bias", i);
             let gate_proj_key = format!("model.layers.{}.mlp.gate_proj.weight", i);
-            let gate_proj_bias_key = format!("model.layers.{}.mlp.gate_proj.bias", i);
+            let _gate_proj_bias_key = format!("model.layers.{}.mlp.gate_proj.bias", i);
             
             // For Qwen3, we primarily need the up_proj (for intermediate weight)
             // and down_proj (for output weight)
@@ -984,7 +980,7 @@ impl CandleQwen3Model {
             };
             
             // Get the feed-forward intermediate dimension
-            let ff_dim = ff_inter_weight.dim(1)?;
+            let _ff_dim = ff_inter_weight.dim(1)?;
             
             // Direct access to MLPs bias tensors using the correct keys
             let up_proj_bias_key = format!("model.layers.{}.mlp.up_proj.bias", i);
@@ -1138,7 +1134,6 @@ impl CandleQwen3Model {
         eprintln!("DEBUG: Model successfully loaded");
         
         Ok(Self {
-            use_gpu: config.use_gpu,
             is_loaded: true,
             hidden_dim,
             num_layers,
@@ -1325,7 +1320,7 @@ impl CandleQwen3Model {
         // Generate new tokens auto-regressively
         while tokens_generated < max_tokens {
             // Start timing token generation
-            let token_start = Instant::now();
+            let _token_start = Instant::now();
             
             // Sample next token based on logits and temperature
             let next_token = self.sample_next_token(&logits)?;
@@ -1603,7 +1598,7 @@ impl CandleQwen3Model {
         let mut hidden_states = Vec::with_capacity(seq_len as usize);
         
         for pos in 0..seq_len as usize {
-            let token_start_time = Instant::now();
+            let _token_start_time = Instant::now();
             
             // Get token at position
             let token_id = tokens.get(pos as usize)?.to_scalar::<u32>()?;
@@ -1669,7 +1664,7 @@ impl CandleQwen3Model {
     /// Forward pass with cached key-values (for efficient generation)
     fn forward_pass_with_cache(&self, token: &Tensor, kv_cache: &mut KVCache, position: usize) -> Result<Tensor> {
         // Start timing the operation
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         
         // Get token ID
         let token_id = token.get(0)?.to_scalar::<u32>()?;
