@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-env-changed=OUT_DIR");
     
     // Print a message for debugging
-    println!("cargo:warning=Starting tokenizer build script...");
+    println!("cargo:info=Starting tokenizer build script...");
 
     // Get output directory from Cargo
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read tokenizer.json
     let models_dir = Path::new("models");
     let tokenizer_path = models_dir.join("tokenizer.json");
-    println!("cargo:warning=Reading tokenizer.json from {:?}...", tokenizer_path);
+    println!("cargo:info=Reading tokenizer.json from {:?}...", tokenizer_path);
     
     // Use BufWriter for better performance with large files
     let file = File::create(&dest_path)?;
@@ -38,13 +38,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Handle missing tokenizer file with appropriate fallback
     if !tokenizer_path.exists() {
-        println!("cargo:warning=No tokenizer file found at {:?}, using defaults", tokenizer_path);
+        println!("cargo:info=No tokenizer file found at {:?}, using defaults", tokenizer_path);
         generate_default_tokenizer(&mut writer)?;
         return Ok(());
     }
     
     // Stream read and parse the JSON to handle large files
-    println!("cargo:warning=Parsing tokenizer.json...");
+    println!("cargo:info=Parsing tokenizer.json...");
     let tokenizer_json = fs::read_to_string(&tokenizer_path)
         .map_err(|e| format!("Failed to read tokenizer.json: {}", e))?;
         
@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Log completion time for debugging
     let elapsed = start_time.elapsed();
-    println!("cargo:warning=Tokenizer build script completed in {:.2?}", elapsed);
+    println!("cargo:info=Tokenizer build script completed in {:.2?}", elapsed);
 
     Ok(())
 }
@@ -87,7 +87,7 @@ fn validate_tokenizer(tokenizer: &serde_json::Value) -> Result<(), Box<dyn std::
     
     // Check for merges (warn but don't fail if missing)
     if !tokenizer["model"]["merges"].is_array() {
-        println!("cargo:warning=Tokenizer JSON missing 'merges' array in model, no BPE merges will be available");
+        println!("cargo:info=Tokenizer JSON missing 'merges' array in model, no BPE merges will be available");
     }
     
     Ok(())
@@ -124,7 +124,7 @@ fn extract_special_tokens(
     tokenizer: &serde_json::Value,
     writer: &mut BufWriter<File>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:warning=Extracting special tokens...");
+    println!("cargo:info=Extracting special tokens...");
     writeln!(writer, "// Special token IDs")?;
     
     // BOS token
@@ -179,7 +179,7 @@ fn extract_vocabulary(
     tokenizer: &serde_json::Value,
     writer: &mut BufWriter<File>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:warning=Building vocabulary map...");
+    println!("cargo:info=Building vocabulary map...");
     
     // Try to get the vocab object, first under "vocab" then under "tokens"
     let vocab_obj = if tokenizer["model"]["vocab"].is_object() {
@@ -202,7 +202,7 @@ fn extract_vocabulary(
                 
                 // Print progress for large vocabularies
                 if count % 25000 == 0 {
-                    println!("cargo:warning=Processing vocabulary: {} entries so far", count);
+                    println!("cargo:info=Processing vocabulary: {} entries so far", count);
                 }
                 
                 // Escape any special characters in tokens
@@ -211,14 +211,14 @@ fn extract_vocabulary(
             }
         }
         
-        println!("cargo:warning=Vocabulary processed: {} total entries", count);
+        println!("cargo:info=Vocabulary processed: {} total entries", count);
         
         write!(writer, "{}", map.build())?;
         writeln!(writer, ";")?;
         writeln!(writer)?;
     } else {
         // Fallback for no vocabulary
-        println!("cargo:warning=No vocabulary found in tokenizer, using minimal default");
+        println!("cargo:info=No vocabulary found in tokenizer, using minimal default");
         writeln!(writer, "static VOCAB: phf::Map<&'static str, u32> = phf::phf_map!{{")?;
         writeln!(writer, "    \"<pad>\" => 0,")?;
         writeln!(writer, "    \"<s>\" => 1,")?;
@@ -241,7 +241,7 @@ fn extract_merges(
     tokenizer: &serde_json::Value,
     writer: &mut BufWriter<File>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:warning=Processing BPE merges...");
+    println!("cargo:info=Processing BPE merges...");
     
     if let Some(merges_arr) = tokenizer["model"]["merges"].as_array() {
         writeln!(writer, "// BPE merges ordered by priority (complete set for accurate tokenization)")?;
@@ -251,12 +251,12 @@ fn extract_merges(
         let mut skipped_count = 0;
         
         // Process all merges - print progress
-        println!("cargo:warning=Processing all {} BPE merges", merges_arr.len());
+        println!("cargo:info=Processing all {} BPE merges", merges_arr.len());
         
         for (rank, merge_value) in merges_arr.iter().enumerate() {
             // Print progress for large merge sets
             if merge_count > 0 && merge_count % 50000 == 0 {
-                println!("cargo:warning=Processed {} merges so far", merge_count);
+                println!("cargo:info=Processed {} merges so far", merge_count);
             }
             
             let (first, second) = if let Some(merge_str) = merge_value.as_str() {
@@ -297,10 +297,10 @@ fn extract_merges(
         writeln!(writer, "];")?;
         
         if skipped_count > 0 {
-            println!("cargo:warning=Skipped {} invalid merges", skipped_count);
+            println!("cargo:info=Skipped {} invalid merges", skipped_count);
         }
     } else {
-        println!("cargo:warning=No merges found in tokenizer");
+        println!("cargo:info=No merges found in tokenizer");
         writeln!(writer, "pub static MERGES: &[(&str, &str, usize)] = &[];")?;
     }
     
