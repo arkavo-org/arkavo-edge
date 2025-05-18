@@ -131,13 +131,6 @@ impl Qwen3Client {
 
     /// Generates text completion for the given prompt
     pub async fn generate(&self, prompt: &str) -> Result<String> {
-        eprintln!("DEBUG: Starting inference process...");
-        
-        // DEBUG: Print the exact prompt we're using
-        eprintln!("DEBUG: ===== PROMPT =====");
-        eprintln!("{}", prompt);
-        eprintln!("DEBUG: =================");
-        
         // Tokenize the prompt using HuggingFace tokenizer
         let tokenizer = self.hf_tokenizer
             .as_ref()
@@ -145,39 +138,15 @@ impl Qwen3Client {
             
         let input_tokens = tokenizer.encode(prompt)?;
         
-        eprintln!("DEBUG: First 30 token IDs: {:?}", &input_tokens.iter().take(30).collect::<Vec<_>>());
-        
-        // Perform a round-trip test to verify tokenizer
-        let test_text = "Hello world";
-        let test_tokens = tokenizer.encode(test_text)?;
-        let decoded_test = tokenizer.decode(&test_tokens)?;
-        
-        eprintln!("DEBUG: Tokenizer round-trip test: '{}' -> {} tokens -> '{}'", 
-                 test_text, test_tokens.len(), decoded_test);
-
         // Generate response using Candle model
-        eprintln!("DEBUG: Tokenization completed, starting model.generate()");
-        
         let model = self.model
             .as_ref()
             .ok_or_else(|| LlmError::InferenceError("Model not initialized".to_string()))?;
             
         let output_tokens = model.generate(&input_tokens, self.config.max_tokens)?;
         
-        eprintln!("DEBUG: Model.generate() completed successfully");
-        eprintln!("DEBUG: Output tokens count: {}", output_tokens.len());
-        eprintln!("DEBUG: First 20 output tokens: {:?}", &output_tokens.iter().take(20).collect::<Vec<_>>());
-        eprintln!("DEBUG: Last 20 output tokens: {:?}", 
-                 &output_tokens.iter().rev().take(20).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>());
-
         // Decode response using HuggingFace tokenizer
         let raw_response = tokenizer.decode(&output_tokens)?;
-        
-        // Collect first 100 Unicode characters (always safe)
-        let preview: String = raw_response.chars().take(100).collect();
-        eprintln!("DEBUG: First 100 chars of raw decoded output: {}{}", 
-                 preview,
-                 if raw_response.chars().count() > 100 { "..." } else { "" });
         
         // Process and clean the response
         let clean_response = utils::extract_response(&raw_response);

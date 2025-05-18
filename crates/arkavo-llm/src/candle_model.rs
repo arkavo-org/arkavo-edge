@@ -1,3 +1,5 @@
+#![allow(clippy::useless_format)]
+
 use anyhow::{Result, anyhow};
 use candle_core::{Tensor, Device, DType, Module};
 use candle_nn::{ops, activation};
@@ -9,6 +11,8 @@ use std::time::Instant;
 use crate::Qwen3Config;
 
 // Helper function to get tensor shape as a string for debugging
+// Marked with allow dead_code to avoid clippy warning
+#[allow(dead_code)]
 fn tensor_view_shape(tensor: &TensorView) -> Result<String> {
     let shape = tensor.shape();
     let shape_str = shape.iter().map(|&d| d.to_string()).collect::<Vec<_>>().join("×");
@@ -46,6 +50,7 @@ struct TransformerLayer {
 }
 
 impl TransformerLayer {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         query_weight: Tensor,
         key_weight: Tensor,
@@ -264,19 +269,14 @@ impl CandleQwen3Model {
         let device = if config.use_gpu {
             if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
                 // Use Metal on Apple Silicon
-                eprintln!("DEBUG: Using Metal backend on Apple Silicon");
                 Device::new_metal(0)?
             } else {
                 // Fallback to CPU
-                eprintln!("DEBUG: GPU requested but not available, using CPU");
                 Device::Cpu
             }
         } else {
-            eprintln!("DEBUG: Using CPU backend as requested");
             Device::Cpu
         };
-
-        eprintln!("DEBUG: Selected device: {:?}", device);
         
         // Read model dimensions from the embedded config.json
         use crate::utils::EMBEDDED_CONFIG_JSON;
@@ -301,7 +301,8 @@ impl CandleQwen3Model {
             .as_u64()
             .unwrap_or(16) as usize;
             
-        let num_kv_heads = config_json["num_key_value_heads"]
+        // Prefix with underscore to avoid clippy unused variable warning
+        let _num_kv_heads = config_json["num_key_value_heads"]
             .as_u64()
             .unwrap_or(num_heads as u64) as usize;
             
@@ -311,8 +312,6 @@ impl CandleQwen3Model {
             
         let head_dim = hidden_dim / num_heads;
         
-        eprintln!("Model architecture from config: hidden_dim={}, num_layers={}, num_heads={}, num_kv_heads={}, vocab_size={}", 
-                 hidden_dim, num_layers, num_heads, num_kv_heads, vocab_size);
         
         // Initialize default transformer matrices (zeros tensors for placeholders)
         let embedding = Tensor::zeros((vocab_size, hidden_dim), DType::F32, &device)?;
@@ -372,53 +371,31 @@ impl CandleQwen3Model {
         use crate::utils::EMBEDDED_MODEL_SAFETENSORS;
         use crate::utils::EMBEDDED_CONFIG_JSON;
         
-        eprintln!("DEBUG: Loading model from embedded data");
-        
         // Determine which device to use - this is where real hardware acceleration happens
         let device = if config.use_gpu {
             if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
                 // Use Metal on Apple Silicon
-                eprintln!("DEBUG: Using Metal backend on Apple Silicon");
                 match Device::new_metal(0) {
-                    Ok(dev) => {
-                        eprintln!("DEBUG: Metal device initialized successfully");
-                        dev
-                    },
-                    Err(e) => {
-                        eprintln!("DEBUG: Failed to initialize Metal device: {}, falling back to CPU", e);
-                        Device::Cpu
-                    }
+                    Ok(dev) => dev,
+                    Err(_) => Device::Cpu
                 }
             } else {
                 // Fallback to CPU
-                eprintln!("DEBUG: GPU requested but not available, using CPU");
                 Device::Cpu
             }
         } else {
-            eprintln!("DEBUG: Using CPU backend as requested");
             Device::Cpu
         };
-
-        eprintln!("DEBUG: Selected device: {:?}", device);
         
         // Parse config file to get model architecture parameters
         let config_str = std::str::from_utf8(EMBEDDED_CONFIG_JSON)
             .map_err(|e| anyhow!("Failed to decode config JSON: {}", e))?;
-            
-        eprintln!("DEBUG: Config JSON size: {} bytes", config_str.len());
-        eprintln!("DEBUG: Config JSON content: {}", if config_str.len() > 200 {
-            format!("{} [truncated]...", &config_str[..200])
-        } else {
-            config_str.to_string()
-        });
         
         let config_json: serde_json::Value = serde_json::from_str(config_str)
             .map_err(|e| anyhow!("Failed to parse config JSON: {}", e))?;
         
         // Check if we have empty embedded model data and need to fall back to default parameters
         let mut use_fallback = EMBEDDED_MODEL_SAFETENSORS.len() < 1000;
-        eprintln!("DEBUG: Safetensors size: {} bytes, {}", EMBEDDED_MODEL_SAFETENSORS.len(), 
-                 if use_fallback { "using fallback model" } else { "attempting to load" });
         
         // Extract model architecture parameters with many possible key names
         let hidden_dim = if use_fallback {
@@ -468,11 +445,7 @@ impl CandleQwen3Model {
             
         let head_dim = hidden_dim / num_heads;
         
-        eprintln!("DEBUG: Model architecture: hidden_dim={}, num_layers={}, num_heads={}, vocab_size={}", 
-                 hidden_dim, num_layers, num_heads, vocab_size);
-        
         // Load model weights from safetensors format
-        eprintln!("DEBUG: Deserializing model weights from safetensors format");
         let tensors = SafeTensors::deserialize(EMBEDDED_MODEL_SAFETENSORS)
             .map_err(|e| anyhow!("Failed to deserialize model: {}", e))?;
             
@@ -497,22 +470,12 @@ impl CandleQwen3Model {
                     // Insert into map (keep on CPU for now)
                     tensor_map.insert(tensor_name.to_string(), tensor);
                     tensor_count += 1;
-                    
-                    if tensor_count % 10 == 0 {
-                        eprintln!("DEBUG: Loaded {} tensors so far", tensor_count);
-                    }
                 },
                 
                 safetensors::Dtype::BF16 => {
                     // Get data and shape for BF16 tensor
                     let shape = safetensor.shape().to_vec();
                     let data = safetensor.data();
-                    
-                    // For BF16 tensors, we'll use from_raw_buffer but be careful with the data
-                    // Convert BF16 to F32 by expanding each value
-                    if tensor_count % 10 == 0 {
-                        eprintln!("DEBUG: Converting BF16 tensor to F32 for '{}'", tensor_name);
-                    }
                     
                     // Create BF16 tensor using from_raw_buffer
                     let tensor = Tensor::from_raw_buffer(
@@ -528,38 +491,21 @@ impl CandleQwen3Model {
                     // Insert into map
                     tensor_map.insert(tensor_name.to_string(), tensor);
                     tensor_count += 1;
-                    
-                    if tensor_count % 10 == 0 {
-                        eprintln!("DEBUG: Loaded {} tensors so far (BF16 converted to F32)", tensor_count);
-                    }
                 },
                 
-                other_dtype => {
-                    // Log unsupported dtypes but don't fail
-                    eprintln!("DEBUG: Skipping tensor '{}' with unsupported dtype {:?}", 
-                             tensor_name, other_dtype);
+                _other_dtype => {
+                    // Skip unsupported dtypes
                 }
             }
         }
         
-        eprintln!("DEBUG: Loaded {} tensors in total", tensor_count);
-        
         // After loading all tensors, check if we need to fallback due to no tensors found
         if tensor_count == 0 {
-            eprintln!("DEBUG: No tensors loaded from the safetensors file, falling back to stub model");
             use_fallback = true;
         }
         
         // Get tensor keys for later use
         let tensor_keys: Vec<_> = tensor_map.keys().map(|s| s.as_str()).collect();
-        
-        // Print some tensor keys to debug
-        let sample_keys = if !tensor_keys.is_empty() {
-            tensor_keys.iter().take(10).map(|&s| s.to_string()).collect::<Vec<_>>().join(", ")
-        } else {
-            "[No keys found]".to_string()
-        };
-        eprintln!("DEBUG: Sample tensor keys: {}", sample_keys);
         
         // Handle different naming conventions in safetensors model files
         // For Qwen3 models, try both naming conventions
@@ -568,30 +514,13 @@ impl CandleQwen3Model {
         let is_hf_format = tensor_keys.iter()
             .any(|&k| k.starts_with("transformer.") || k.starts_with("model."));
             
-        let is_qwen_format = tensor_keys.iter()
+        // Prefix with underscore to avoid clippy unused variable warning
+        let _is_qwen_format = tensor_keys.iter()
             .any(|&k| k.starts_with("layers.") || k.contains("rotary_emb"));
             
         // Check for modern HF Qwen3 format
         let is_hf_qwen3_format = tensor_keys.iter()
             .any(|&k| k.contains("model.layers."));
-            
-        // Print example keys to help debug
-        if !tensor_keys.is_empty() {
-            eprintln!("DEBUG: First 5 tensor keys: {}", 
-                     tensor_keys.iter().take(5).map(|&k| k.to_string()).collect::<Vec<_>>().join(", "));
-        }
-        
-        // Print all MLP bias keys and their shapes for layer 0 to debug the structure
-        eprintln!("DEBUG: Inspecting MLP bias keys and shapes for layer 0:");
-        for name in tensor_map.keys() {
-            if name.contains("model.layers.0.mlp") && name.contains("bias") {
-                let shape_str = tensor_view_shape(&tensors.tensor(name)?)?;
-                eprintln!("DEBUG: MLP Bias: {} with shape {}", name, shape_str);
-            }
-        }
-            
-        eprintln!("DEBUG: Model format detection: HF format: {}, Qwen format: {}, HF Qwen3: {}", 
-                 is_hf_format, is_qwen_format, is_hf_qwen3_format);
         
         // Get the appropriate key prefixes based on format
         let (emb_key, pos_emb_key, layer_prefix_format, ln_f_prefix) = 
@@ -610,11 +539,9 @@ impl CandleQwen3Model {
             };
         
         // Extract embeddings (and move to target device)
-        eprintln!("DEBUG: Extracting embedding weights");
         let embedding = match tensor_map.get(emb_key) {
             Some(emb) => emb.to_device(&device)?,
             None => {
-                eprintln!("DEBUG: Embedding key '{}' not found, searching for alternatives", emb_key);
                 // Try alternative keys
                 let alt_keys = ["transformer.word_embeddings.weight", "token_emb.weight", 
                                "word_embeddings.weight", "model.embed_tokens.weight",
@@ -624,7 +551,6 @@ impl CandleQwen3Model {
                 let mut found_emb = None;
                 for key in alt_keys.iter() {
                     if let Some(emb) = tensor_map.get(*key) {
-                        eprintln!("DEBUG: Found embedding with key '{}'", key);
                         found_emb = Some(emb.to_device(&device)?);
                         break;
                     }
@@ -632,7 +558,6 @@ impl CandleQwen3Model {
                 
                 if tensor_count == 0 || use_fallback {
                     // No tensors loaded, create a default tensor
-                    eprintln!("DEBUG: No embedding weights found, creating random initialization");
                     Tensor::randn(0.0, 0.01, (vocab_size, hidden_dim), &device)?
                 } else {
                     found_emb.ok_or_else(|| anyhow!("Missing embedding weights"))?
@@ -640,18 +565,15 @@ impl CandleQwen3Model {
             }
         };
         
-        eprintln!("DEBUG: Extracting position embedding weights");
         let position_embedding = match tensor_map.get(pos_emb_key) {
             Some(pos_emb) => pos_emb.to_device(&device)?,
             None => {
-                eprintln!("DEBUG: Position embedding key '{}' not found, initializing with zeros", pos_emb_key);
                 // Some models don't use positional embeddings, fall back to zeros
                 Tensor::zeros((2048, hidden_dim), DType::F32, &device)?
             }
         };
             
         // Extract final layer norm weights using direct Qwen3 key pattern
-        eprintln!("DEBUG: Extracting final layer norm weights");
         
         // For Qwen3, this is typically "model.norm.weight"
         let qwen3_norm_key = "model.norm.weight";
@@ -660,7 +582,6 @@ impl CandleQwen3Model {
         // Try the specific Qwen3 key first
         let final_norm_weight = match tensor_map.get(qwen3_norm_key) {
             Some(weight) => {
-                eprintln!("DEBUG: Found final layer norm weight using Qwen3 key");
                 weight.to_device(&device)?
             },
             None => {
@@ -669,7 +590,6 @@ impl CandleQwen3Model {
                 match tensor_map.get(&ln_f_weight_key) {
                     Some(weight) => weight.to_device(&device)?,
                     None => {
-                        eprintln!("DEBUG: Final layer norm weight not found, ERROR - Cannot continue without weights");
                         return Err(anyhow!("Missing critical weight: model.norm.weight"));
                     }
                 }
@@ -678,7 +598,6 @@ impl CandleQwen3Model {
             
         let final_norm_bias = match tensor_map.get(qwen3_norm_bias_key) {
             Some(bias) => {
-                eprintln!("DEBUG: Found final layer norm bias using Qwen3 key");
                 Some(bias.to_device(&device)?)
             },
             None => {
@@ -687,7 +606,6 @@ impl CandleQwen3Model {
                 match tensor_map.get(&ln_f_bias_key) {
                     Some(bias) => Some(bias.to_device(&device)?),
                     None => {
-                        eprintln!("DEBUG: Final layer norm bias not found, initializing with zeros");
                         Some(Tensor::zeros(hidden_dim, DType::F32, &device)?)
                     }
                 }
@@ -695,14 +613,11 @@ impl CandleQwen3Model {
         };
             
         // Extract LM head weights (usually tied to embedding weights in Qwen3)
-        eprintln!("DEBUG: Extracting LM head weights");
-        
         // For Qwen3, this is typically tied with the token embeddings or specifically named
         let qwen3_lm_head_key = "lm_head.weight";
         
         let lm_head = match tensor_map.get(qwen3_lm_head_key) {
             Some(lm) => {
-                eprintln!("DEBUG: Found LM head weight using Qwen3 key");
                 lm.to_device(&device)?
             },
             None => {
@@ -712,7 +627,6 @@ impl CandleQwen3Model {
                 
                 for key in alt_keys.iter() {
                     if let Some(lm) = tensor_map.get(*key) {
-                        eprintln!("DEBUG: Found LM head with alternative key '{}'", key);
                         found_lm = Some(lm.to_device(&device)?);
                         break;
                     }
@@ -722,7 +636,6 @@ impl CandleQwen3Model {
                     Some(lm) => lm,
                     None => {
                         // In Qwen3, weights are typically tied with the token embeddings
-                        eprintln!("DEBUG: LM head weight not found, using tied weights with embeddings");
                         embedding.clone() // Tied weights
                     }
                 }
@@ -730,11 +643,8 @@ impl CandleQwen3Model {
         };
             
         // Load transformer layers
-        eprintln!("DEBUG: Extracting transformer layers");
         let mut layers = Vec::new();
         for i in 0..num_layers {
-            eprintln!("DEBUG: Loading layer {}/{}", i+1, num_layers);
-            
             // Determine layer format and key patterns
             let (attn_key_format, attn_out_format, ffn_key_format, ln_key_format) = 
                 if is_hf_qwen3_format {
@@ -747,29 +657,11 @@ impl CandleQwen3Model {
                     // Legacy format
                     ("attention.{}.{}", "attention.output.{}", "feed_forward.{}.{}", "input_layernorm.{}")
                 };
-                
-            // Print the first few layer weight keys so we can see the pattern
-            if i == 0 {
-                // Construct example key patterns for debugging
-                let q_proj = format!("{}", format!("{}", layer_prefix_format)
-                    .replace("{}", "0")
-                    .replace("{}", "self_attn.q_proj.weight"));
-                    
-                let up_proj = format!("{}", format!("{}", layer_prefix_format)
-                    .replace("{}", "0")
-                    .replace("{}", "mlp.up_proj.weight"));
-                    
-                let input_ln = format!("{}", format!("{}", layer_prefix_format)
-                    .replace("{}", "0")
-                    .replace("{}", "input_layernorm.weight"));
-                    
-                eprintln!("DEBUG: Looking for pattern like: {}, {}, {}", q_proj, up_proj, input_ln);
-            }
             
-            // Extract attention weights
-            let query_weight_key = format!("{}", format!("{}",
-                layer_prefix_format).replace("{}", &i.to_string()).replace("{}", 
-                &format!("{}", attn_key_format).replace("{}", "weight")));
+            // Extract attention weights - avoid useless format calls
+            let query_weight_key = layer_prefix_format.to_string()
+                .replace("{}", &i.to_string())
+                .replace("{}", &attn_key_format.to_string().replace("{}", "weight"));
             
             let key_weight_key = format!("{}", format!("{}",
                 layer_prefix_format).replace("{}", &i.to_string()).replace("{}",
@@ -1110,28 +1002,14 @@ impl CandleQwen3Model {
         }
         
         if use_fallback {
-            eprintln!("\n\n⚠️  WARNING: Using a placeholder model since embedded model data is missing or invalid");
-            eprintln!("⚠️  This model will not produce meaningful outputs");
-            
             if EMBEDDED_MODEL_SAFETENSORS.len() > 1_000_000 {
                 // Model file exists but couldn't be parsed
-                eprintln!("⚠️  The embedded model IS available ({}MB) but couldn't be loaded correctly.", 
-                         EMBEDDED_MODEL_SAFETENSORS.len() / 1024 / 1024);
-                eprintln!("⚠️  This might be due to memory constraints or the safetensors format being invalid.");
-                eprintln!("⚠️  If using Metal acceleration, try without GPU by setting use_gpu: false\n\n");
+                return Err(anyhow!("Model file exists but couldn't be loaded correctly. Try without GPU acceleration."));
             } else {
                 // Model file is missing
-                eprintln!("⚠️  You need to download the Qwen3-0.6B model file from Hugging Face");
-                eprintln!("⚠️  Visit: https://huggingface.co/Qwen/Qwen3-0.6B");
-                eprintln!("⚠️  Download model.safetensors and place it in models/model.safetensors\n\n");
+                return Err(anyhow!("Model file is missing. You need to download the Qwen3-0.6B model file from Hugging Face."));
             }
-            
-            // CRITICAL: Return an error instead of using random weights
-            // This is essential because random weights will generate garbage output
-            return Err(anyhow!("Model is in fallback mode with placeholder weights. Cannot proceed with inference."));
         }
-        
-        eprintln!("DEBUG: Model successfully loaded");
         
         Ok(Self {
             is_loaded: true,
@@ -1153,11 +1031,7 @@ impl CandleQwen3Model {
     
     /// Check if the model is using GPU acceleration
     pub fn is_using_gpu(&self) -> bool {
-        match self.device {
-            Device::Cuda(_) => true,
-            Device::Metal(_) => true,
-            _ => false,
-        }
+        matches!(self.device, Device::Cuda(_) | Device::Metal(_))
     }
     
     /// Returns the name of the hardware acceleration being used
@@ -1218,7 +1092,7 @@ impl CandleQwen3Model {
         // The API requires a tensor for beta, we need to handle the None case
         let normalized = match bias {
             Some(b) => {
-                match ops::layer_norm(&input, &weight, b, eps) {
+                match ops::layer_norm(&input, weight, b, eps) {
                     Ok(result) => result,
                     Err(e) => {
                         // If we get a Metal error, fall back to CPU
@@ -1244,7 +1118,7 @@ impl CandleQwen3Model {
                 // Create a zeros tensor of the same shape as weight for the bias
                 let zeros = Tensor::zeros(weight.shape(), weight.dtype(), &self.device)?;
                 
-                match ops::layer_norm(&input, &weight, &zeros, eps) {
+                match ops::layer_norm(&input, weight, &zeros, eps) {
                     Ok(result) => result,
                     Err(e) => {
                         // If we get a Metal error, fall back to CPU
@@ -1273,8 +1147,6 @@ impl CandleQwen3Model {
     
     /// Generates token IDs from the input token IDs
     pub fn generate(&self, input_tokens: &[u32], max_tokens: usize) -> Result<Vec<u32>> {
-        eprintln!("Starting generation with {} input tokens", input_tokens.len());
-        
         if !self.is_loaded {
             return Err(anyhow::anyhow!("Model not loaded"));
         }
@@ -1307,21 +1179,13 @@ impl CandleQwen3Model {
             &self.device,
         )?;
         
-        // Run forward pass on all input tokens to build the initial KV cache
-        eprintln!("Building KV cache...");
-        
         // Convert input tokens to tensor
         let input_tensor = Tensor::new(input_tokens, &self.device)?;
         
         // Get logits for the last token
         let mut logits = self.forward_pass(&input_tensor, &mut kv_cache)?;
-        
-        eprintln!("Starting token generation...");
         // Generate new tokens auto-regressively
         while tokens_generated < max_tokens {
-            // Start timing token generation
-            let _token_start = Instant::now();
-            
             // Sample next token based on logits and temperature
             let next_token = self.sample_next_token(&logits)?;
             
@@ -1343,8 +1207,6 @@ impl CandleQwen3Model {
             let current_position = input_tokens.len() + tokens_generated;
             logits = self.forward_pass_with_cache(&next_token_tensor, &mut kv_cache, current_position)?;
         }
-        
-        eprintln!("Generation complete: {} tokens generated", tokens_generated);
         
         Ok(output)
     }
@@ -1583,25 +1445,14 @@ impl CandleQwen3Model {
     
     /// Perform the forward pass through the transformer
     fn forward_pass(&self, tokens: &Tensor, kv_cache: &mut KVCache) -> Result<Tensor> {
-        // Start timing the forward pass
-        let start_time = Instant::now();
         let seq_len = tokens.dim(0)?;
-        eprintln!("DEBUG: Processing {} tokens through full forward pass", seq_len);
-        
-        // Get whether we're using GPU
-        let using_gpu = self.is_using_gpu();
-        if using_gpu {
-            eprintln!("DEBUG: Using GPU acceleration");
-        }
         
         // Embedding lookup - we need to process tokens one by one to build the KV cache
-        let mut hidden_states = Vec::with_capacity(seq_len as usize);
+        let mut hidden_states = Vec::with_capacity(seq_len);
         
-        for pos in 0..seq_len as usize {
-            let _token_start_time = Instant::now();
-            
+        for pos in 0..seq_len {
             // Get token at position
-            let token_id = tokens.get(pos as usize)?.to_scalar::<u32>()?;
+            let token_id = tokens.get(pos)?.to_scalar::<u32>()?;
             
             if token_id as usize >= self.vocab_size {
                 return Err(anyhow!("Token ID {} out of vocabulary range", token_id));
@@ -1655,8 +1506,6 @@ impl CandleQwen3Model {
         // Project to logits using LM head
         // This is using hardware-accelerated matrix multiplication
         let logits = last_hidden.matmul(&self.lm_head.transpose(0, 1)?)?;
-        
-        eprintln!("DEBUG: Forward pass complete, generated logits for {} tokens in {:.2?}", seq_len, start_time.elapsed());
         
         Ok(logits)
     }

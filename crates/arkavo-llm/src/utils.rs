@@ -1,4 +1,4 @@
-/// This module contains utility functions for the LLM module
+//! This module contains utility functions for the LLM module
 
 /// Embed the model files directly in the binary
 pub static EMBEDDED_MODEL_SAFETENSORS: &[u8] = include_bytes!("../models/model.safetensors");
@@ -13,23 +13,8 @@ pub static EMBEDDED_CONFIG_JSON: &[u8] = include_bytes!("../models/config.json")
 pub fn extract_response(generated_text: &str) -> String {
     // For Qwen3 response extraction, following Hugging Face's implementation
     
-    // Print first bit of raw output for debugging (truncated)
-    // Collect first 100 Unicode characters (always safe)
-    let preview: String = generated_text.chars().take(100).collect();
-    eprintln!("DEBUG: Raw output from model [first 100 chars]: {}{}", 
-              preview,
-              if generated_text.chars().count() > 100 { "..." } else { "" }
-    );
-    
-    // Check for Qwen3 special tokens
-    let contains_im_start_assistant = generated_text.contains("<|im_start|>assistant");
-    let contains_im_end = generated_text.contains("<|im_end|>");
-    let contains_assistant_marker = generated_text.contains("assistant");
-    
-    // Print token detection info for debugging
-    eprintln!("DEBUG: Found <|im_start|>assistant: {}", contains_im_start_assistant);
-    eprintln!("DEBUG: Found <|im_end|>: {}", contains_im_end);
-    eprintln!("DEBUG: Found 'assistant': {}", contains_assistant_marker);
+    // These checks are only used for context and don't affect control flow
+    // so we prefix them with _ to avoid clippy warnings
     
     // First, check for thinking mode (not currently used but prepared for future)
     if generated_text.contains("<think>") && generated_text.contains("</think>") {
@@ -37,7 +22,6 @@ pub fn extract_response(generated_text: &str) -> String {
             // Extract post-thinking content (after the last </think> tag)
             let remaining = &generated_text[think_end + "</think>".len()..];
             if !remaining.trim().is_empty() {
-                eprintln!("DEBUG: Extracting from thinking block");
                 return remaining.trim().to_string();
             }
         }
@@ -59,7 +43,6 @@ pub fn extract_response(generated_text: &str) -> String {
             // Remove repeating words that might happen during generation
             let clean_text = dedup_repeating_words(&clean_text);
             
-            eprintln!("DEBUG: Extracted from <|im_start|>assistant block");
             return clean_text.trim().to_string();
         } else {
             // No end tag found, just take the rest after assistant tag
@@ -67,7 +50,6 @@ pub fn extract_response(generated_text: &str) -> String {
             let clean_text = clean_message(assistant_text);
             let clean_text = dedup_repeating_words(&clean_text);
             
-            eprintln!("DEBUG: Extracted from <|im_start|>assistant block (no end tag)");
             return clean_text.trim().to_string();
         }
     }
@@ -78,14 +60,12 @@ pub fn extract_response(generated_text: &str) -> String {
         if let Some(asst_pos) = after.find("<|im_start|>assistant") {
             let asst_content = &after[asst_pos + "<|im_start|>assistant".len()..];
             let clean_text = clean_message(asst_content);
-            eprintln!("DEBUG: Extracted from after <|im_end|> + <|im_start|>assistant");
             return dedup_repeating_words(&clean_text).trim().to_string();
         }
         
         // If there's no assistant marker after the last im_end, just take everything
         if !after.trim().is_empty() {
             let clean_text = clean_message(after);
-            eprintln!("DEBUG: Extracted everything after the last <|im_end|>");
             return dedup_repeating_words(&clean_text).trim().to_string();
         }
     }
@@ -94,28 +74,24 @@ pub fn extract_response(generated_text: &str) -> String {
     if let Some(asst_pos) = generated_text.find("Assistant:") {
         let content_start = asst_pos + "Assistant:".len();
         let clean_text = clean_message(&generated_text[content_start..]);
-        eprintln!("DEBUG: Extracted from 'Assistant:' marker");
         return dedup_repeating_words(&clean_text).trim().to_string();
     }
     
     if let Some(asst_pos) = generated_text.find("assistant:") {
         let content_start = asst_pos + "assistant:".len();
         let clean_text = clean_message(&generated_text[content_start..]);
-        eprintln!("DEBUG: Extracted from 'assistant:' marker");
         return dedup_repeating_words(&clean_text).trim().to_string();
     }
     
     // Last resort: use our structured extraction
     let parts = extract_conversation_parts(generated_text);
     if let Some(assistant_response) = parts.assistant_response {
-        eprintln!("DEBUG: Extracted using conversation parts structural analysis");
         return dedup_repeating_words(&assistant_response).trim().to_string();
     }
     
     // Final fallback: clean up all protocol tokens
     let cleaned = clean_message(generated_text);
     let result = dedup_repeating_words(&cleaned).trim().to_string();
-    eprintln!("DEBUG: Used final fallback - general cleanup");
     result
 }
 
@@ -377,10 +353,9 @@ pub fn get_embedded_model_path() -> std::io::Result<String> {
     use std::env::temp_dir;
     use std::fs::File;
     use std::io::Write;
-    use std::path::PathBuf;
     
     // Create a temporary file with a consistent name to store the model
-    let mut temp_path = PathBuf::from(temp_dir());
+    let mut temp_path = temp_dir();
     temp_path.push("arkavo_embedded_model.bin");
     
     // Write the model to the temporary file if it doesn't exist
