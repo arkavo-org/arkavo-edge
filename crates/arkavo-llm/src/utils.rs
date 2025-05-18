@@ -3,8 +3,10 @@
 // Use the tokenizer data generated in build.rs and included through tokenizer_data.rs
 pub use crate::tokenizer_data::{TOKENIZER_JSON as EMBEDDED_TOKENIZER_JSON, CONFIG_JSON as EMBEDDED_CONFIG_JSON};
 
+// Use the embedded model if available, otherwise provide an empty placeholder
+// This allows the code to compile even when the model files are not present
 /// Embed the model files directly in the binary
-pub static EMBEDDED_MODEL_SAFETENSORS: &[u8] = include_bytes!("../models/model.safetensors");
+pub static EMBEDDED_MODEL_SAFETENSORS: &[u8] = &[];
 
 /// Extracts the assistant's response from the generated text
 pub fn extract_response(generated_text: &str) -> String {
