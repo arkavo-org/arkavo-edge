@@ -229,7 +229,7 @@ impl Qwen3Tokenizer {
         // Apply BPE merges according to the rank order
         while chars.len() > 1 {
             let mut best_merge: Option<(usize, usize)> = None;
-            let mut best_rank = std::usize::MAX;
+            let mut best_rank = usize::MAX;
             
             // Find the best merge
             for i in 0..chars.len() - 1 {

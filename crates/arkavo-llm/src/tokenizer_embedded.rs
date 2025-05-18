@@ -153,26 +153,97 @@ impl EmbeddedQwen3Tokenizer {
     
     /// Decodes the given token IDs into text
     pub fn decode(&self, tokens: &[u32]) -> Result<String> {
-        // Filter out special tokens
-        let filtered_tokens: Vec<_> = tokens.iter()
-            .filter(|&&token| token != self.bos_id && token != self.eos_id && token != self.pad_id)
-            .collect();
+        // Pre-allocate result string with a reasonable capacity
+        let mut result = String::with_capacity(tokens.len() * 5);
         
-        // Convert token IDs to strings
-        let mut result = String::new();
-        for &token_id in filtered_tokens {
+        // Keep track of the previous token for context
+        let mut prev_token_str = "";
+        
+        // Process tokens to handle special sequences
+        let mut skip_until_marker = false;
+        let mut i = 0;
+        
+        while i < tokens.len() {
+            let token_id = tokens[i];
+            
+            // Skip special tokens completely
+            if token_id == self.bos_id || token_id == self.eos_id || token_id == self.pad_id {
+                i += 1;
+                continue;
+            }
+            
+            // Lookup the token string
             if let Some(token) = self.id_to_token.get(&token_id) {
-                // Handle special whitespace tokens for proper decoding
-                if token.starts_with('Ġ') {
+                // Check for markers that indicate message boundaries
+                if token.contains("<|im_start|>") || token.contains("start") {
+                    skip_until_marker = true;
+                    i += 1;
+                    continue;
+                }
+                
+                // Check for end markers
+                if token.contains("<|im_end|>") || token.contains("end") {
+                    skip_until_marker = false;
+                    i += 1;
+                    continue;
+                }
+                
+                // Skip system/user/assistant role identifiers and adjacent tokens
+                if skip_until_marker || 
+                   token.contains("system") || 
+                   token.contains("user") || 
+                   token.contains("assistant") ||
+                   token == ":" && (prev_token_str.contains("system") || 
+                                     prev_token_str.contains("user") || 
+                                     prev_token_str.contains("assistant")) {
+                    prev_token_str = token;
+                    i += 1;
+                    continue;
+                }
+                
+                // Normal token processing - handle multi-byte characters safely
+                if let Some('Ġ') = token.chars().next() {
+                    // This token represents a word with leading space
                     result.push(' ');
-                    result.push_str(&token[1..]);
+                    // Skip the 'Ġ' character and append the rest
+                    let remaining: String = token.chars().skip(1).collect();
+                    result.push_str(&remaining);
+                } else if token.starts_with("<") && token.ends_with(">") {
+                    // Special token, handle based on type
+                    match token.as_str() {
+                        "<|endoftext|>" | "<|eos|>" => {
+                            // End of sequence tokens - usually not displayed
+                            continue;
+                        },
+                        "<|pad|>" => {
+                            // Padding token - not displayed
+                            continue;
+                        },
+                        _ => {
+                            // Other special tokens (like <s> or </s>) - generally not displayed
+                            continue;
+                        }
+                    }
                 } else {
+                    // Regular token - just append
                     result.push_str(token);
                 }
+                
+                prev_token_str = token;
             }
+            
+            i += 1;
         }
         
-        Ok(result)
+        // Clean up any remaining special markers in the output text
+        let clean_result = result
+            .replace("<|im_start|>", "")
+            .replace("<|im_end|>", "")
+            .replace("<|system|>", "")
+            .replace("<|user|>", "")
+            .replace("<|assistant|>", "");
+        
+        Ok(clean_result)
     }
     
     /// Applies byte-pair encoding to a token
@@ -183,7 +254,7 @@ impl EmbeddedQwen3Tokenizer {
         // Apply BPE merges according to the rank order
         while chars.len() > 1 {
             let mut best_merge: Option<(usize, usize)> = None;
-            let mut best_rank = std::usize::MAX;
+            let mut best_rank = usize::MAX;
             
             // Find the best merge
             for i in 0..chars.len() - 1 {

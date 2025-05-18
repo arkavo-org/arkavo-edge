@@ -35,7 +35,7 @@ impl ChatSession {
 
         let llm_config = Qwen3Config {
             temperature: 0.7,
-            use_gpu: true,
+            use_gpu: true, // Try to use GPU acceleration (Metal on macOS ARM) for better performance
             max_tokens: 1024,
             ..Qwen3Config::default()
         };
@@ -98,6 +98,8 @@ impl ChatSession {
         
         println!("\n🤖 Qwen3-0.6B is ready (local privacy-first LLM)");
         println!("🔐 All processing happens on your device - no data is sent to external services");
+        println!("🚀 GPU acceleration is {}abled (Metal on Apple Silicon)", 
+                 if self.llm_client.as_ref().unwrap().is_using_gpu() { "en" } else { "dis" });
         println!("💬 Type 'exit' or 'quit' to end the session");
         println!("❓ Try asking 'What can you help me with?' to learn more\n");
 
@@ -144,7 +146,22 @@ impl ChatSession {
             // Process with LLM
             let formatted_prompt = format_messages(&self.history);
             let client = self.llm_client.as_ref().unwrap();
-            let result = client.generate(&formatted_prompt).await;
+            
+            eprintln!("DEBUG: Calling LLM generate");
+            
+            // Add timeout to detect hangs
+            // Use our own Duration to avoid confusion
+            use std::time::Duration as StdDuration;
+            let result = match tokio::time::timeout(StdDuration::from_secs(30), client.generate(&formatted_prompt)).await {
+                Ok(generate_result) => {
+                    eprintln!("DEBUG: LLM generate returned");
+                    generate_result
+                },
+                Err(_) => {
+                    eprintln!("DEBUG: LLM generate timed out after 30 seconds");
+                    Err(anyhow::anyhow!("Model inference timed out after 30 seconds"))
+                }
+            };
             
             // Stop thinking animation
             if let Some(thinking_thread) = thinking_thread {

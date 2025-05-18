@@ -5,10 +5,8 @@ use std::path::Path;
 use std::time::Instant;
 use phf_codegen::Map as PhfMap;
 
-// Maximum number of merges to include to avoid huge binary size
-const MAX_MERGES: usize = 5000;
-// Maximum vocab size to prevent excessive compile times
-const MAX_VOCAB_SIZE: usize = 50000;
+// Load all merges and vocabulary entries for correct operation
+// Previous limits removed to ensure full tokenizer functionality
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Instrumentation to detect any potential infinite loops
@@ -98,7 +96,7 @@ fn validate_tokenizer(tokenizer: &serde_json::Value) -> Result<(), Box<dyn std::
 /// Generates a default minimal tokenizer when no file is available
 fn generate_default_tokenizer(writer: &mut BufWriter<File>) -> Result<(), Box<dyn std::error::Error>> {
     writeln!(writer, "// Default tokenizer values (no tokenizer.json found)")?;
-    writeln!(writer, "pub static MERGES: &[(&'static str, &'static str, usize)] = &[];")?;
+    writeln!(writer, "pub static MERGES: &[(&str, &str, usize)] = &[];")?;
     writeln!(writer, "pub const BOS_TOKEN_ID: u32 = 1;")?;
     writeln!(writer, "pub const EOS_TOKEN_ID: u32 = 2;")?;
     writeln!(writer, "pub const PAD_TOKEN_ID: u32 = 0;")?;
@@ -197,14 +195,14 @@ fn extract_vocabulary(
         let mut map = PhfMap::new();
         let mut count = 0;
         
-        // Process the vocabulary
+        // Process the complete vocabulary - load all entries for correct tokenization
         for (token, id_value) in vocab_obj {
             if let Some(id) = id_value.as_u64() {
-                // Skip extremely large vocabularies to prevent build timeouts
                 count += 1;
-                if count > MAX_VOCAB_SIZE {
-                    println!("cargo:warning=Vocabulary too large, limiting to {} entries", MAX_VOCAB_SIZE);
-                    break;
+                
+                // Print progress for large vocabularies
+                if count % 25000 == 0 {
+                    println!("cargo:warning=Processing vocabulary: {} entries so far", count);
                 }
                 
                 // Escape any special characters in tokens
@@ -212,6 +210,8 @@ fn extract_vocabulary(
                 map.entry(escaped_token, &format!("{}", id));
             }
         }
+        
+        println!("cargo:warning=Vocabulary processed: {} total entries", count);
         
         write!(writer, "{}", map.build())?;
         writeln!(writer, ";")?;
@@ -244,16 +244,19 @@ fn extract_merges(
     println!("cargo:warning=Processing BPE merges...");
     
     if let Some(merges_arr) = tokenizer["model"]["merges"].as_array() {
-        writeln!(writer, "// BPE merges ordered by priority (limited to {} most important)", MAX_MERGES)?;
-        writeln!(writer, "pub static MERGES: &[(&'static str, &'static str, usize)] = &[")?;
+        writeln!(writer, "// BPE merges ordered by priority (complete set for accurate tokenization)")?;
+        writeln!(writer, "pub static MERGES: &[(&str, &str, usize)] = &[")?;
         
         let mut merge_count = 0;
         let mut skipped_count = 0;
         
+        // Process all merges - print progress
+        println!("cargo:warning=Processing all {} BPE merges", merges_arr.len());
+        
         for (rank, merge_value) in merges_arr.iter().enumerate() {
-            if merge_count >= MAX_MERGES {
-                println!("cargo:warning=Limiting merges to {} entries (skipped {})", MAX_MERGES, merges_arr.len() - MAX_MERGES);
-                break;
+            // Print progress for large merge sets
+            if merge_count > 0 && merge_count % 50000 == 0 {
+                println!("cargo:warning=Processed {} merges so far", merge_count);
             }
             
             let (first, second) = if let Some(merge_str) = merge_value.as_str() {
@@ -298,7 +301,7 @@ fn extract_merges(
         }
     } else {
         println!("cargo:warning=No merges found in tokenizer");
-        writeln!(writer, "pub static MERGES: &[(&'static str, &'static str, usize)] = &[];")?;
+        writeln!(writer, "pub static MERGES: &[(&str, &str, usize)] = &[];")?;
     }
     
     Ok(())

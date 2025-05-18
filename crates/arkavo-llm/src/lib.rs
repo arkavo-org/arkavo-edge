@@ -135,11 +135,15 @@ impl Qwen3Client {
 
     /// Generates text completion for the given prompt
     pub async fn generate(&self, prompt: &str) -> Result<String> {
+        eprintln!("DEBUG: Starting inference process...");
+        
         // Validate model is initialized
         let model = self
             .model
             .as_ref()
             .ok_or_else(|| LlmError::InferenceError("Model not initialized".to_string()))?;
+            
+        eprintln!("DEBUG: Model validated");
 
         // Tokenize the prompt using the appropriate tokenizer
         let input_tokens = match self.tokenizer_type {
@@ -174,7 +178,9 @@ impl Qwen3Client {
         };
 
         // Generate response
+        eprintln!("DEBUG: Tokenization completed, starting model.generate()");
         let output_tokens = model.generate(&input_tokens, self.config.max_tokens)?;
+        eprintln!("DEBUG: Model.generate() completed successfully");
 
         // Decode response using the appropriate tokenizer
         let raw_response = match self.tokenizer_type {
@@ -208,8 +214,14 @@ impl Qwen3Client {
             }
         };
         
+        // Print raw response for debugging
+        eprintln!("DEBUG: Raw response from tokenizer: {:?}", raw_response);
+        
         // Process and clean the response
         let clean_response = utils::extract_response(&raw_response);
+        
+        // Print cleaned response for debugging
+        eprintln!("DEBUG: Cleaned response: {:?}", clean_response);
 
         Ok(clean_response)
     }
@@ -217,5 +229,13 @@ impl Qwen3Client {
     /// Checks if the model is properly initialized
     pub async fn is_initialized(&self) -> bool {
         self.model.is_some() && self.embedded_tokenizer.is_some()
+    }
+    
+    /// Checks if the model is using GPU acceleration
+    pub fn is_using_gpu(&self) -> bool {
+        match &self.model {
+            Some(model) => model.is_using_gpu(),
+            None => false
+        }
     }
 }

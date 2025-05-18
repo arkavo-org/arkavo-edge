@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Arkavo Edge is an open-source agentic CLI tool that aims to provide developer-centric capabilities for AI-agent development and framework maintenance. It focuses on secure, cost-efficient runtime for multi-file code transformations.
 
-**IMPORTANT**: This is a real production implementation, not a prototype. The codebase is intended for production release and should be maintained with appropriate quality standards.
+**IMPORTANT**: This is a real production implementation, not a prototype, no placeholder, no demo. The codebase is intended for production release and should be maintained with appropriate quality standards.
 
 ## Build and Development Commands
 
@@ -19,6 +19,9 @@ cargo build --release
 
 # Run the project
 cargo run
+
+# Run chat with prompt
+cargo run -- chat --prompt "Hi"
 
 # Run tests
 cargo test
