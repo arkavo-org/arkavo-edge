@@ -95,38 +95,13 @@ impl Qwen3Client {
             self.model = Some(candle_model::CandleQwen3Model::new(&self.config)?);
         }
         
-        // Initialize HuggingFace tokenizer
-        // Try possible locations for the tokenizer, from most specific to most general
-        let possible_paths = [
-            // Current directory
-            "tokenizer.json",
-            // Models subdirectory 
-            "models/tokenizer.json",
-            // Crate-specific path
-            "crates/arkavo-llm/models/tokenizer.json",
-        ];
-        
-        // Try each path until we find one that works
-        let mut tokenizer_loaded = false;
-        for path in possible_paths.iter() {
-            if let Ok(tokenizer) = tokenizer_hf::HfTokenizer::new(path) {
+        // Always use the embedded tokenizer for both production and development
+        match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
+            Ok(tokenizer) => {
                 self.hf_tokenizer = Some(tokenizer);
-                eprintln!("INFO: Using HuggingFace tokenizer from path: {}", path);
-                tokenizer_loaded = true;
-                break;
             }
-        }
-        
-        // If nothing worked, try loading from the embedded data
-        if !tokenizer_loaded {
-            match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
-                Ok(tokenizer) => {
-                    self.hf_tokenizer = Some(tokenizer);
-                    eprintln!("INFO: Using embedded HuggingFace tokenizer");
-                }
-                Err(err) => {
-                    return Err(anyhow::anyhow!("Failed to load HuggingFace tokenizer: {}", err));
-                }
+            Err(err) => {
+                return Err(anyhow::anyhow!("Failed to load embedded HuggingFace tokenizer: {}", err));
             }
         }
 
