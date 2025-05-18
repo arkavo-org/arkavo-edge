@@ -126,8 +126,7 @@ impl KVCache {
         // Check if position is within bounds
         let cache_seq_len = k_cache.shape().dims()[2];
         if position >= cache_seq_len {
-            eprintln!("WARNING: Attempted to update KV cache at position {} but cache size is {}. Skipping update.",
-                     position, cache_seq_len);
+            // Position exceeds cache size, just skip the update silently
             return Ok(());
         }
         
@@ -215,12 +214,6 @@ impl KVCache {
         
         // Ensure we don't try to narrow beyond the available cache size
         let actual_pos = std::cmp::min(position + 1, seq_len);
-        
-        // Log this to help with debugging
-        if position + 1 > seq_len {
-            eprintln!("WARNING: Requested position {} exceeds cache size {}. Using maximum available.", 
-                     position + 1, seq_len);
-        }
         
         let k_cache_slice = k_cache.narrow(2, 0, actual_pos)?;
         let v_cache_slice = v_cache.narrow(2, 0, actual_pos)?;
