@@ -21,10 +21,8 @@ impl HfTokenizer {
     
     /// Create a new HuggingFace tokenizer directly from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let json_str = std::str::from_utf8(bytes)
-            .map_err(|e| anyhow!("Failed to decode tokenizer bytes: {}", e))?;
-            
-        let tokenizer = Tokenizer::from_str(json_str)
+        // Use the Tokenizer's from_bytes instead of trying to parse string
+        let tokenizer = Tokenizer::from_bytes(bytes)
             .map_err(|e| anyhow!("Failed to load tokenizer from bytes: {}", e))?;
             
         Ok(Self { tokenizer })
