@@ -4,6 +4,7 @@ mod candle;
 
 // Tokenizer implementations
 mod tokenizer_hf;       // HuggingFace tokenizer
+mod tokenizer_data;     // Generated tokenizer data
 mod utils;
 
 // Re-export everything

@@ -1,13 +1,10 @@
 //! This module contains utility functions for the LLM module
 
+// Use the tokenizer data generated in build.rs and included through tokenizer_data.rs
+pub use crate::tokenizer_data::{TOKENIZER_JSON as EMBEDDED_TOKENIZER_JSON, CONFIG_JSON as EMBEDDED_CONFIG_JSON};
+
 /// Embed the model files directly in the binary
 pub static EMBEDDED_MODEL_SAFETENSORS: &[u8] = include_bytes!("../models/model.safetensors");
-
-/// Embed the tokenizer data directly in the binary
-pub static EMBEDDED_TOKENIZER_JSON: &[u8] = include_bytes!("../models/tokenizer.json");
-
-/// Embed the model configuration directly in the binary
-pub static EMBEDDED_CONFIG_JSON: &[u8] = include_bytes!("../models/config.json");
 
 /// Extracts the assistant's response from the generated text
 pub fn extract_response(generated_text: &str) -> String {
