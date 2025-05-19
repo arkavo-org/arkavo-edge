@@ -214,9 +214,9 @@ impl CandleQwen3Model {
         
         // Always use embedded GGUF model - it's directly included in the binary
         // via include_bytes! in embedded_model.rs
-        return Self::load_from_embedded_gguf(
+        Self::load_from_embedded_gguf(
             hidden_dim, num_layers, num_heads, head_dim, vocab_size,
-            config.temperature, &device);
+            config.temperature, &device)
     }
 
     // Helper method to load from embedded GGUF bytes

@@ -34,9 +34,9 @@ impl ChatSession {
         println!("Initializing Qwen3-0.6B LLM...");
 
         let llm_config = Qwen3Config {
-            temperature: 0.7,
-            use_gpu: true, // Try to use GPU acceleration (Metal on macOS ARM) for better performance
-            max_tokens: 1024,
+            temperature: 0.5,  // Lower temperature for more deterministic results
+            use_gpu: true,     // Try to use GPU acceleration (Metal on macOS ARM) for better performance
+            max_tokens: 1024,  // Maximum tokens to generate
             ..Qwen3Config::default()
         };
 

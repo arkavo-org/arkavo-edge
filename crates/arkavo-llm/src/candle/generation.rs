@@ -101,10 +101,13 @@ impl CandleQwen3Model {
             }
             
             // Additionally check for any tokens with special meaning
-            // 151643 = Assistant (end of role marker)
-            // 151644 = Human (end of role marker)
-            // 151645 = End (EOS marker in Qwen 3)
-            if next_token >= 151643 && next_token <= 151650 {
+            // 151643 = <|endoftext|> token
+            // 151644 = <|im_start|> token
+            // 151645 = <|im_end|> token (EOS marker in Qwen 3)
+            if next_token == 151645 { // <|im_end|> is the primary stop token
+                println!("Hit <|im_end|> token (ID 151645), stopping generation");
+                break;
+            } else if (151643..=151650).contains(&next_token) {
                 println!("Hit special token with ID {}, treating as EOS", next_token);
                 break;
             }

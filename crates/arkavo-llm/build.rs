@@ -64,9 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Extract and write merges
     extract_merges(&tokenizer, &mut writer)?;
     
-    // Generate tokenizer_data_generated.rs with embedded tokenizer content in the src directory
-    // This allows conditional inclusion without OUT_DIR dependency
-    let tokenizer_data_path = Path::new("src").join("tokenizer_data_generated.rs");
+    // Generate tokenizer_data_generated.rs in the OUT_DIR (proper Rust practice)
+    let tokenizer_data_path = Path::new(&out_dir).join("tokenizer_data_generated.rs");
     println!("cargo:info=Generating embedded tokenizer data at {:?}...", tokenizer_data_path);
     
     // Read the tokenizer file content and serialize it for embedding
@@ -78,8 +77,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     
-    // Create the tokenizer_data.rs file with embedded data
+    // Create the tokenizer_data_generated.rs file with embedded data in OUT_DIR
     generate_tokenizer_data(&tokenizer_data_path, &tokenizer_content, config_content.as_deref())?;
+    
+    // Tell Cargo where to find the generated file
+    println!("cargo:rustc-env=TOKENIZER_DATA_GENERATED_PATH={}", tokenizer_data_path.to_string_lossy());
     
     // Enable the feature flags for the embedded model and tokenizer
     println!("cargo:rustc-cfg=feature=\"embedded_model\"");

@@ -9,6 +9,7 @@ pub struct GgufTokenizer {
     // Instead of Vec, use a merge map for O(1) lookup:
     merges: HashMap<(String, String), String>,
     special_tokens: HashMap<String, u32>,
+    #[allow(dead_code)] // Currently unused but might be useful in future optimizations
     max_token_length: usize,
 }
 
@@ -368,10 +369,8 @@ impl GgufTokenizer {
                 // Skip ChatML markers in normal text
                 if token.starts_with("<|") && token.ends_with("|>") {
                     // These should have been handled as special tokens, but just in case
-                    if token == "<|im_start|>" || token == "<|im_end|>" {
-                        i += 1;
-                        continue;
-                    } else if token.contains("system") || token.contains("user") || token.contains("assistant") {
+                    if token == "<|im_start|>" || token == "<|im_end|>" || 
+                       token.contains("system") || token.contains("user") || token.contains("assistant") {
                         i += 1;
                         continue;
                     }
@@ -501,8 +500,7 @@ impl GgufTokenizer {
         // Replace special token markers completely while preserving the token structure
         let cleaned = token
             .replace("##", "") // BERT-style continuation token
-            .replace('Ġ', " ") // GPT-2 space
-            .replace('▁', " ") // SentencePiece space
+            .replace(['Ġ', '▁'], " ") // GPT-2 and SentencePiece space
             .replace('Ċ', "\n") // GPT-2 newline
             .replace('Ĉ', "\t"); // GPT-2 tab
         
@@ -670,7 +668,7 @@ impl GgufTokenizer {
             println!("  Token ID {}: {:?} (len={})", id, token, token.len());
             
             // Special attention to high ID tokens which are often special tokens
-            if id >= 151600 && id <= 151700 {
+            if (151600..=151700).contains(&id) {
                 println!("  High ID token in important range: {:?} => ID {}", token, id);
             }
         }
@@ -774,7 +772,7 @@ impl GgufTokenizer {
             }
 
             // Case 1b: Nested array - first element is an array of strings
-            if let Some(gguf_file::Value::Array(token_strings)) = tokens.get(0) {
+            if let Some(gguf_file::Value::Array(token_strings)) = tokens.first() {
                 println!("Format: Nested array of strings");
                 for (i, token_value) in token_strings.iter().enumerate() {
                     if let gguf_file::Value::String(token) = token_value {
@@ -803,7 +801,7 @@ impl GgufTokenizer {
                     reverse_vocab.insert(token_id, token.clone());
                 } else if let gguf_file::Value::Array(token_data) = vocab_item {
                     // First element is token, second might be score
-                    if let Some(gguf_file::Value::String(token)) = token_data.get(0) {
+                    if let Some(gguf_file::Value::String(token)) = token_data.first() {
                         let token_id = i as u32;
                         vocab.insert(token.clone(), token_id);
                         reverse_vocab.insert(token_id, token.clone());
@@ -854,7 +852,7 @@ impl GgufTokenizer {
                 for token_pair in token_id_pairs {
                     if let gguf_file::Value::Array(pair) = token_pair {
                         if pair.len() >= 2 {
-                            if let (Some(gguf_file::Value::String(token)), Some(gguf_file::Value::U32(id))) = (pair.get(0), pair.get(1)) {
+                            if let (Some(gguf_file::Value::String(token)), Some(gguf_file::Value::U32(id))) = (pair.first(), pair.get(1)) {
                                 vocab.insert(token.clone(), *id);
                                 reverse_vocab.insert(*id, token.clone());
                             }
@@ -970,12 +968,12 @@ impl GgufTokenizer {
 
             // For backwards compatibility, also check if the first element is a nested array
             // (some older GGUF models might use this format)
-            if success_count == 0 && merge_values.len() > 0 {
-                if let Some(gguf_file::Value::Array(merge_pairs)) = merge_values.get(0) {
+            if success_count == 0 && !merge_values.is_empty() {
+                if let Some(gguf_file::Value::Array(merge_pairs)) = merge_values.first() {
                     println!("Found legacy format: nested array with {} entries", merge_pairs.len());
 
                     // Process all merges in the nested array
-                    for (_idx, merge_value) in merge_pairs.iter().enumerate() {
+                    for merge_value in merge_pairs.iter() {
                         if let gguf_file::Value::String(merge) = merge_value {
                             // Parse merge entry (format is typically "first second result")
                             let parts: Vec<&str> = merge.split_whitespace().collect();
@@ -1030,7 +1028,7 @@ impl GgufTokenizer {
 
                 // Process all merges in the alternative format
                 let mut success_count = 0;
-                for (_idx, merge_value) in bpe_merges.iter().enumerate() {
+                for merge_value in bpe_merges.iter() {
                     if let gguf_file::Value::String(merge) = merge_value {
                         // Parse merge entry
                         let parts: Vec<&str> = merge.split_whitespace().collect();
@@ -1090,7 +1088,7 @@ impl GgufTokenizer {
 
         for key in special_token_keys {
             if let Some(gguf_file::Value::U32(token_id)) = gguf_content.metadata.get(key) {
-                let token_name = key.split('.').last()
+                let token_name = key.split('.').next_back()
                     .unwrap_or(key)
                     .replace("_token_id", "");
 
@@ -1109,7 +1107,7 @@ impl GgufTokenizer {
             for mapping in token_mappings {
                 if let gguf_file::Value::Array(pair) = mapping {
                     if pair.len() >= 2 {
-                        if let (Some(gguf_file::Value::String(name)), Some(gguf_file::Value::U32(id))) = (pair.get(0), pair.get(1)) {
+                        if let (Some(gguf_file::Value::String(name)), Some(gguf_file::Value::U32(id))) = (pair.first(), pair.get(1)) {
                             // Remove angle brackets if present
                             let clean_name = name.trim_start_matches('<').trim_end_matches('>');
                             println!("Chat template special token: {} -> ID {}", name, id);
@@ -1156,15 +1154,13 @@ impl GgufTokenizer {
                 let mut found = false;
 
                 // First check the hint ID directly
-                if let Some(token_val) = tokens.get(id_hint) {
-                    if let gguf_file::Value::String(s) = token_val {
-                        if s.contains(token_str) || token_str.contains(s) {
-                            let name = token_str.trim_start_matches('<').trim_start_matches('|')
-                                .trim_end_matches('>').trim_end_matches('|');
-                            println!("Found special token at hint ID {}: {} = {}", id_hint, name, token_str);
-                            special_tokens.insert(name.to_string(), id_hint as u32);
-                            found = true;
-                        }
+                if let Some(gguf_file::Value::String(s)) = tokens.get(id_hint) {
+                    if s.contains(token_str) || token_str.contains(s) {
+                        let name = token_str.trim_start_matches('<').trim_start_matches('|')
+                            .trim_end_matches('>').trim_end_matches('|');
+                        println!("Found special token at hint ID {}: {} = {}", id_hint, name, token_str);
+                        special_tokens.insert(name.to_string(), id_hint as u32);
+                        found = true;
                     }
                 }
 
