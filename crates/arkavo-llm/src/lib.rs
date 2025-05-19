@@ -1,18 +1,27 @@
 // Model implementation - we now only use the Candle model
-mod candle_model;
-mod candle;
+mod candle_model_core;     // Core model structure and basic methods
+mod candle_model_create;   // Model creation methods
+mod candle_model_gguf;     // GGUF model loading functionality
+mod candle_transformer_layer; // Transformer layer definition
+mod candle_forward;        // Forward pass implementation 
+mod candle_generation;     // Token generation logic
+mod candle_kv_cache;       // Key-value cache for efficient generation
 
 // Tokenizer implementations
 mod tokenizer_hf;       // HuggingFace tokenizer (legacy - for non-GGUF models only)
-mod tokenizer_gguf;     // GGUF built-in tokenizer (for GGUF models)
+mod tokenizer_gguf_core;     // GGUF tokenizer core definitions
+mod tokenizer_gguf_encoding; // GGUF tokenizer encoding logic
+mod tokenizer_gguf_decoding; // GGUF tokenizer decoding logic
+mod tokenizer_gguf_loader;   // GGUF tokenizer loader functions
 mod tokenizer_data;     // Generated tokenizer data (legacy - for non-GGUF models only)
 mod embedded_model;     // Generated model data
 mod utils;
 
 // Re-export everything
-pub use candle_model::*;
+pub use candle_model_core::*;
 pub use tokenizer_hf::*;
-pub use tokenizer_gguf::*;
+pub use tokenizer_gguf_core::*;
+pub use candle_transformer_layer::*;
 pub use embedded_model::EMBEDDED_MODEL;
 pub use utils::*;
 
@@ -66,7 +75,7 @@ pub struct Qwen3Client {
     model: Option<CandleQwen3Model>,
     
     // Tokenizer - we use GGUF tokenizer for GGUF models, HF tokenizer for safetensors models
-    gguf_tokenizer: Option<tokenizer_gguf::GgufTokenizer>,
+    gguf_tokenizer: Option<GgufTokenizer>,
     hf_tokenizer: Option<tokenizer_hf::HfTokenizer>,
     
     // Flag to indicate which tokenizer we're using
@@ -103,7 +112,7 @@ impl Qwen3Client {
         
         // Initialize the Candle model - always use embedded model
         // which is included directly via include_bytes!
-        match candle_model::CandleQwen3Model::new_from_embedded(&self.config) {
+        match CandleQwen3Model::new_from_embedded(&self.config) {
             Ok(model) => {
                 println!("Successfully loaded embedded GGUF model");
                 self.model = Some(model);
@@ -117,7 +126,7 @@ impl Qwen3Client {
         // For GGUF models, extract the tokenizer data directly from the GGUF file
         if self.using_gguf_tokenizer {
             println!("Initializing GGUF tokenizer from embedded model data...");
-            match tokenizer_gguf::GgufTokenizer::new(crate::EMBEDDED_MODEL) {
+            match GgufTokenizer::new(crate::EMBEDDED_MODEL) {
                 Ok(tokenizer) => {
                     println!("Successfully initialized GGUF tokenizer with {} tokens", tokenizer.vocab_size());
                     

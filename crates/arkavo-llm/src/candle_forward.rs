@@ -2,9 +2,9 @@ use anyhow::{Result, anyhow};
 use candle_core::{Tensor, Module};
 use candle_nn::{ops, activation};
 
-use super::kv_cache::KVCache;
-use super::transformer_layer::TransformerLayer;
-use crate::candle_model::CandleQwen3Model;
+use crate::candle_kv_cache::KVCache;
+use crate::candle_transformer_layer::TransformerLayer;
+use crate::candle_model_core::CandleQwen3Model;
 
 impl CandleQwen3Model {
     /// Ensures the input tensor has the expected shape for matmul operations

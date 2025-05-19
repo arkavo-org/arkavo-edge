@@ -62,6 +62,7 @@ Arkavo Edge consists of several core components:
 - **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
 - **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
 - **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
+- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability.  Do not use generic names as a catch-all.
 
 ## Key Command Interfaces
 

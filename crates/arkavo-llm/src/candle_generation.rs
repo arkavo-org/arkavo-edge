@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow};
 use candle_core::Tensor;
 use std::time::Instant;
 
-use super::kv_cache::KVCache;
-use crate::candle_model::CandleQwen3Model;
+use crate::candle_kv_cache::KVCache;
+use crate::candle_model_core::CandleQwen3Model;
 
 impl CandleQwen3Model {
     /// Generates token IDs from the input token IDs
