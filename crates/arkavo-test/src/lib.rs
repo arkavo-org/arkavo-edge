@@ -10,7 +10,10 @@ pub struct TestResult {
     pub output: String,
 }
 
-pub fn run_tests(runner: TestRunner, _path: &str) -> Result<TestResult, Box<dyn std::error::Error>> {
+pub fn run_tests(
+    runner: TestRunner,
+    _path: &str,
+) -> Result<TestResult, Box<dyn std::error::Error>> {
     match runner {
         TestRunner::Python => Ok(TestResult {
             success: true,

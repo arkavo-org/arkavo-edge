@@ -10,3 +10,5 @@
 .classpath
 .project
 .settings/
+/crates/arkavo-llm/models/
+.DS_Store

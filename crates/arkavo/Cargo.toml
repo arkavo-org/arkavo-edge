@@ -8,7 +8,6 @@ description = "Main binary for the Arkavo agentic CLI tool"
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli" }
-anyhow = "1.0"
 
 [[bin]]
 name = "arkavo"
