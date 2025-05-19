@@ -45,8 +45,8 @@ Arkavo Edge uses the Qwen3-0.6B model for local LLM inference, ensuring privacy 
 To download the model from Hugging Face:
 
 1. Visit [Hugging Face Token Settings](https://huggingface.co/settings/tokens)
-2. Create a token with "Read" permission
-3. Enter the token in the CLI `huggingface-cli`
+2. Create a _token with "Read" permission
+3. Enter the _token in the CLI `huggingface-cli`
 
 #### Download the Model
 
@@ -57,8 +57,9 @@ mkdir -p crates/arkavo-llm/models
 
 Download the model directly to the target location
 
+Base model:
 ```bash
-huggingface-cli download Mattimax/DATA-AI_Chat_4_0.6B --local-dir crates/arkavo-llm/models
+huggingface-cli download Qwen/Qwen3-0.6B-Base --local-dir crates/arkavo-llm/models
 ```
 
 garbage output:

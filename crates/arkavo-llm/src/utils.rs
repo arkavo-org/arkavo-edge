@@ -3,9 +3,10 @@
 // Use the tokenizer data generated in build.rs and included through tokenizer_data.rs
 pub use crate::tokenizer_data::{TOKENIZER_JSON as EMBEDDED_TOKENIZER_JSON, CONFIG_JSON as EMBEDDED_CONFIG_JSON};
 
-// Use the embedded model if available, otherwise provide an empty placeholder
-// This allows the code to compile even when the model files are not present
-/// Embed the model files directly in the binary
+// Note: We no longer use EMBEDDED_MODEL_SAFETENSORS as we directly
+// embed the GGUF model with include_bytes! in embedded_model.rs
+// This is kept as an empty array for backward compatibility with existing code
+/// Legacy placeholder for embedded model data - now unused as the model is included directly
 pub static EMBEDDED_MODEL_SAFETENSORS: &[u8] = &[];
 
 /// Extracts the assistant's response from the generated text
@@ -288,7 +289,13 @@ fn clean_message(text: &str) -> String {
         
         // Tool markers
         "<tool_call>", "</tool_call>",
-        "<tool_response>", "</tool_response>"
+        "<tool_response>", "</tool_response>",
+        
+        // Remnants of special tokens being decoded badly by previous tokenizer
+        "Ĵ", "ĵ", "Ĝ", "ĝ", "Ħ", "ħ",
+        
+        // Spacing inconsistencies from improper merges
+        "Ġ", "▁", "##"
     ];
     
     // Remove all markers
@@ -296,6 +303,14 @@ fn clean_message(text: &str) -> String {
     for marker in markers {
         clean = clean.replace(marker, "");
     }
+    
+    // Normalize multiple spaces/newlines that can happen with BPE decoding
+    let re_whitespace = regex::Regex::new(r"\s+").unwrap();
+    clean = re_whitespace.replace_all(&clean, " ").to_string();
+    
+    // Normalize newlines
+    let re_newlines = regex::Regex::new(r"\n\s*\n+").unwrap();
+    clean = re_newlines.replace_all(&clean, "\n\n").to_string();
     
     // Remove any non-content lines and empty lines
     clean.lines()
@@ -348,19 +363,51 @@ pub fn debug_parse_prompt(prompt: &str) -> String {
 }
 
 /// Simple helper for loading an embedded model from bytes to temporary file
+/// This is now using the direct GGUF model bytes from embedded_model.rs
 pub fn get_embedded_model_path() -> std::io::Result<String> {
     use std::env::temp_dir;
     use std::fs::File;
     use std::io::Write;
+    use std::path::Path;
     
     // Create a temporary file with a consistent name to store the model
+    // We'll include a suffix indicating this is the F16 model to differentiate from other formats
     let mut temp_path = temp_dir();
-    temp_path.push("arkavo_embedded_model.bin");
+    temp_path.push("arkavo_embedded_model_f16.gguf");
     
-    // Write the model to the temporary file if it doesn't exist
-    if !temp_path.exists() {
+    // Check if file exists with the correct size
+    let should_write = if temp_path.exists() {
+        match std::fs::metadata(&temp_path) {
+            Ok(metadata) => {
+                // Verify file size matches embedded model size
+                if metadata.len() as usize != crate::EMBEDDED_MODEL.len() {
+                    println!("Temporary file exists but has wrong size, recreating");
+                    true
+                } else {
+                    println!("Using existing temporary file for GGUF model: {:?}", temp_path);
+                    false
+                }
+            },
+            Err(_) => true
+        }
+    } else {
+        true
+    };
+    
+    // Write the model to the temporary file if needed
+    if should_write {
+        println!("Writing embedded GGUF model to temporary file: {:?}", temp_path);
+        
+        // Ensure parent directory exists
+        if let Some(parent) = Path::new(&temp_path).parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        
         let mut file = File::create(&temp_path)?;
-        file.write_all(EMBEDDED_MODEL_SAFETENSORS)?;
+        file.write_all(crate::EMBEDDED_MODEL)?;
+        println!("Successfully wrote {} bytes to temporary file", crate::EMBEDDED_MODEL.len());
     }
     
     Ok(temp_path.to_string_lossy().to_string())

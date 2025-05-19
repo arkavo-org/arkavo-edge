@@ -92,6 +92,7 @@ dependencies = [
  "phf",
  "phf_codegen",
  "rand 0.8.5",
+ "regex",
  "safetensors",
  "serde_json",
  "thiserror 1.0.69",

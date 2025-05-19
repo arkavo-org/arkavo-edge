@@ -340,49 +340,115 @@ impl CandleQwen3Model {
             }
             
             // Lookup embedding for this token
-            let token_embedding = self.embedding.get(token_id as usize)?;
+            let token_embedding = match self.embedding.get(token_id as usize) {
+                Ok(embedding) => embedding,
+                Err(e) => {
+                    return Err(anyhow!("Failed to get embedding for token ID {}: {}", token_id, e));
+                }
+            };
             
-            // Get positional embedding
-            let pos_embedding = self.position_embedding.get(pos % 2048)?;
+            // Qwen3 uses RoPE in the attention mechanism, so we don't add position embeddings here
+            // First, ensure token embedding has the right shape
+            let token_emb_shaped = match token_embedding.shape().dims() {
+                // If already correct shape (batch_size=1, hidden_dim)
+                [hidden_dim] if *hidden_dim == self.hidden_dim => token_embedding.reshape((1, self.hidden_dim))?,
+                
+                // If tensor is already 2D with correct second dimension
+                [_batch_size, hidden_dim] if *hidden_dim == self.hidden_dim => token_embedding.clone(),
+                
+                // For other cases, use our helper to safely ensure dimensions
+                _ => self.ensure_expected_shape(&token_embedding, self.hidden_dim)?
+            };
             
-            // Make sure both tensors have matching dimensions for addition
-            let token_emb_shaped = self.ensure_expected_shape(&token_embedding, self.hidden_dim)?;
-            let pos_emb_shaped = self.ensure_expected_shape(&pos_embedding, self.hidden_dim)?;
-            
-            // Add token and position embeddings
-            let mut state = token_emb_shaped.add(&pos_emb_shaped)?;
+            // Use token embeddings as initial state - position encoding happens in attention via RoPE
+            let mut state = token_emb_shaped;
             
             // Process through transformer layers
             for (layer_idx, layer) in self.layers.iter().enumerate() {
+                // println!("Processing layer {}", layer_idx);
+                
                 // Layer normalization before attention
-                let norm_state = self.layer_norm(&state, &layer.attn_norm_weight, &layer.attn_norm_bias)?;
+                // println!("  Applying attention layer norm");
+                let norm_state = match self.layer_norm(&state, &layer.attn_norm_weight, &layer.attn_norm_bias) {
+                    Ok(ns) => ns,
+                    Err(e) => {
+                        println!("ERROR in attention layer norm at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in attention layer norm at layer {}: {}", layer_idx, e));
+                    }
+                };
                 
                 // Self-attention - use layer_idx to ensure we use the correct KV cache for each layer
-                let attn_output = self.self_attention(&norm_state, layer, layer_idx, pos, kv_cache)?;
+                // println!("  Applying self-attention");
+                let attn_output = match self.self_attention(&norm_state, layer, layer_idx, pos, kv_cache) {
+                    Ok(ao) => ao,
+                    Err(e) => {
+                        println!("ERROR in self-attention at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in self-attention at layer {}: {}", layer_idx, e));
+                    }
+                };
                 
                 // Residual connection
-                state = state.add(&attn_output)?;
+                // println!("  Adding residual connection after attention");
+                state = match state.add(&attn_output) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("ERROR in residual connection after attention at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in residual connection after attention at layer {}: {}", layer_idx, e));
+                    }
+                };
                 
                 // Layer normalization before feed-forward
-                let norm_state = self.layer_norm(&state, &layer.ff_norm_weight, &layer.ff_norm_bias)?;
+                // println!("  Applying feed-forward layer norm");
+                let norm_state = match self.layer_norm(&state, &layer.ff_norm_weight, &layer.ff_norm_bias) {
+                    Ok(ns) => ns,
+                    Err(e) => {
+                        println!("ERROR in feed-forward layer norm at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in feed-forward layer norm at layer {}: {}", layer_idx, e));
+                    }
+                };
                 
                 // Feed-forward
-                let ff_output = self.feed_forward(&norm_state, layer)?;
+                // println!("  Applying feed-forward network");
+                let ff_output = match self.feed_forward(&norm_state, layer) {
+                    Ok(ffo) => ffo,
+                    Err(e) => {
+                        println!("ERROR in feed-forward at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in feed-forward at layer {}: {}", layer_idx, e));
+                    }
+                };
                 
                 // Residual connection
-                state = state.add(&ff_output)?;
+                // println!("  Adding residual connection after feed-forward");
+                state = match state.add(&ff_output) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("ERROR in residual connection after feed-forward at layer {}: {}", layer_idx, e);
+                        return Err(anyhow!("Failed in residual connection after feed-forward at layer {}: {}", layer_idx, e));
+                    }
+                };
+                
+                // println!("  Finished layer {}", layer_idx);
             }
             
             // Final layer normalization
-            state = self.layer_norm(&state, &self.final_norm_weight, &self.final_norm_bias)?;
+            state = match self.layer_norm(&state, &self.final_norm_weight, &self.final_norm_bias) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Err(anyhow!("Failed in final layer normalization: {}", e));
+                }
+            };
             
             // Add state to hidden states
             hidden_states.push(state);
         }
         
+        // Make sure we have at least one hidden state
+        if hidden_states.is_empty() {
+            return Err(anyhow!("No hidden states produced - check your tokenizer and model compatibility"));
+        }
+        
         // Get the last hidden state
-        let last_hidden = hidden_states.last()
-            .ok_or_else(|| anyhow!("No hidden states produced"))?;
+        let last_hidden = &hidden_states[hidden_states.len() - 1];
         
         // Project to logits using LM head
         // This is using hardware-accelerated matrix multiplication
