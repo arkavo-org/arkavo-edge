@@ -11,3 +11,7 @@
 .project
 .settings/
 /crates/arkavo-llm/models/
+
+# Generated files
+/crates/arkavo-llm/src/tokenizer_data_generated.rs
+.DS_Store
