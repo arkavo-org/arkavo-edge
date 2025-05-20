@@ -35,60 +35,46 @@ impl CandleQwen3Model {
             &self.device,
         )?;
         
-        // Print the input tokens for debugging
-        println!("Tokenized input: {:?} (length: {})", input_tokens, input_tokens.len());
-        
         // Check if we have any input tokens
         if input_tokens.is_empty() {
-            println!("ERROR: Empty input tokens - check tokenizer configuration");
             return Err(anyhow!("Empty input tokens received - tokenizer may be misconfigured"));
         }
         
         // Convert input tokens to tensor
         let input_tensor = match Tensor::new(input_tokens, &self.device) {
-            Ok(tensor) => {
-                println!("Successfully created input tensor with shape: {:?}", tensor.shape());
-                tensor
-            },
+            Ok(tensor) => tensor,
             Err(e) => {
-                println!("ERROR creating input tensor: {}", e);
                 return Err(anyhow!("Failed to create input tensor: {}", e));
             }
         };
         
-        // Get logits for the last token
-        println!("Starting forward pass with {} input tokens", input_tokens.len());
+        // Get logits for the last token - track performance metrics
         let start_time = std::time::Instant::now();
         let mut logits = match self.forward_pass(&input_tensor, &mut kv_cache) {
             Ok(l) => {
-                println!("Forward pass completed in {:?}, logits shape: {:?}", 
-                         start_time.elapsed(), l.shape());
+                // Log forward pass time in standardized format
+                eprintln!("[METRICS] forward={:.2}s", start_time.elapsed().as_secs_f64());
                 l
             },
             Err(e) => {
-                println!("ERROR in forward pass: {}", e);
                 return Err(anyhow!("Forward pass failed: {}", e));
             }
         };
         
-        // DEBUG: Sample and show the first token prediction (before we start generating)
-        match self.debug_top_predictions(&logits, 5) {
-            Ok(_) => (), // debug info already printed
-            Err(e) => println!("Error debugging predictions: {}", e),
-        }
+        // Generate tokens up to the requested limit
         
-        println!("Starting auto-regressive generation loop for max {} tokens", max_tokens);
+        // Generate new tokens auto-regressively with detailed per-token timing
+        let generation_start = std::time::Instant::now();
+        let mut total_token_time = 0.0;
+        let mut max_token_time: f64 = 0.0;
+        let mut min_token_time: f64 = f64::MAX;
         
-        // For debugging, limit to 5 tokens maximum
-        let debug_max_tokens = std::cmp::min(max_tokens, 5);
-        
-        // Generate new tokens auto-regressively
-        while tokens_generated < debug_max_tokens {
+        while tokens_generated < max_tokens {
+            // Time each individual token generation
+            let token_start = std::time::Instant::now();
+            
             // Sample next token based on logits and temperature
-            let sampling_start = std::time::Instant::now();
-            println!("Sampling token #{}", tokens_generated + 1);
             let next_token = self.sample_next_token(&logits)?;
-            println!("Sampled token ID {} in {:?}", next_token, sampling_start.elapsed());
             
             // Check for EOS token(s)
             // Common EOS tokens in different model architectures
@@ -96,7 +82,6 @@ impl CandleQwen3Model {
             // Some models use ID 1 or ID 0
             // We'll check for several common EOS tokens
             if next_token == 2 || next_token == 1 || next_token == 151645 {
-                println!("Hit EOS token (ID: {}), stopping generation", next_token);
                 break;
             }
             
@@ -104,11 +89,7 @@ impl CandleQwen3Model {
             // 151643 = <|endoftext|> token
             // 151644 = <|im_start|> token
             // 151645 = <|im_end|> token (EOS marker in Qwen 3)
-            if next_token == 151645 { // <|im_end|> is the primary stop token
-                println!("Hit <|im_end|> token (ID 151645), stopping generation");
-                break;
-            } else if (151643..=151650).contains(&next_token) {
-                println!("Hit special token with ID {}, treating as EOS", next_token);
+            if next_token == 151645 || (151643..=151650).contains(&next_token) {
                 break;
             }
             
@@ -117,33 +98,41 @@ impl CandleQwen3Model {
             tokens_generated += 1;
             
             // Convert new token to tensor
-            let token_start = std::time::Instant::now();
-            println!("Creating tensor for token ID {}", next_token);
             let next_token_tensor = Tensor::new(&[next_token], &self.device)?;
-            println!("Created token tensor in {:?}", token_start.elapsed());
             
             // Generate logits for the next token
-            // We need to update the logits for the next iteration
             // Position is input tokens length + tokens generated so far
             let current_position = input_tokens.len() + tokens_generated;
-            println!("Running forward pass for position {} with token ID {}", current_position, next_token);
-            let forward_start = std::time::Instant::now();
             logits = self.forward_pass_with_cache(&next_token_tensor, &mut kv_cache, current_position)?;
-            println!("Forward pass completed in {:?}", forward_start.elapsed());
             
-            // Debug the next predicted tokens
-            match self.debug_top_predictions(&logits, 3) {
-                Ok(_) => (), // debug info already printed
-                Err(e) => println!("Error debugging predictions: {}", e),
+            // Calculate token timing metrics
+            let token_duration = token_start.elapsed().as_secs_f64();
+            total_token_time += token_duration;
+            max_token_time = max_token_time.max(token_duration);
+            min_token_time = min_token_time.min(token_duration);
+            
+            // Log detailed per-token metrics every 5 tokens (to avoid excessive logs)
+            if tokens_generated % 5 == 0 || tokens_generated < 5 {
+                eprintln!("[TOKEN_METRIC] token={} ctx_pos={} duration={:.3}s", 
+                         tokens_generated, current_position, token_duration);
             }
         }
         
-        println!("Generated {} tokens successfully", tokens_generated);
+        // Log summary token metrics when generation is complete
+        if tokens_generated > 0 {
+            // Include total generation time in the metrics
+            let total_generation_time = generation_start.elapsed().as_secs_f64();
+            let avg_token_time = total_token_time / tokens_generated as f64;
+            eprintln!("[TOKEN_SUMMARY] tokens={} total={:.2}s avg={:.3}s min={:.3}s max={:.3}s",
+                     tokens_generated, total_generation_time, avg_token_time, min_token_time, max_token_time);
+        }
+        
+        // No additional logging here - we'll report metrics at a higher level
         
         Ok(output)
     }
 
-    /// Helper method to debug top token predictions
+    /// Helper method to get top token predictions (for internal use)
     pub fn debug_top_predictions(&self, logits: &Tensor, top_n: usize) -> Result<()> {
         // Check logits shape and squeeze if needed
         let logits_shape = logits.shape().dims();
@@ -170,12 +159,7 @@ impl CandleQwen3Model {
         // Take top N
         indexed_logits.truncate(top_n);
         
-        // Print top token IDs and their logit values
-        println!("Top {} predicted tokens:", top_n);
-        for (idx, (token_id, logit)) in indexed_logits.iter().enumerate() {
-            println!("  #{}: Token ID {} (logit: {:.4})", idx + 1, token_id, logit);
-        }
-        
+        // Return without logging - use this data internally for debugging if needed
         Ok(())
     }
 
@@ -205,8 +189,6 @@ impl CandleQwen3Model {
             self.temperature.max(0.5) // Ensure minimum of 0.5 to prevent repetitions (up from 0.3)
         };
         
-        println!("Using temperature: {}", effective_temp);
-        
         for logit in &mut scaled_logits {
             *logit /= effective_temp;
         }
@@ -232,13 +214,11 @@ impl CandleQwen3Model {
                 .map(|(idx, _)| idx)
                 .unwrap_or(0);
                 
-            println!("Using greedy sampling, selected token: {}", argmax);
             return Ok(argmax as u32);
         }
         
         // Perform top-k filtering - adjusted for Qwen3
         let k = 40; // Reduced from 60 for more focused outputs
-        println!("Using top-k filtering with k = {}", k);
         
         let mut top_k_probs = probs.iter()
             .enumerate()
@@ -253,7 +233,6 @@ impl CandleQwen3Model {
         
         // Apply nucleus (top-p) sampling - adjusted for better quality 
         let p = 0.9; // Reduced from 0.95 for better focus
-        println!("Using nucleus sampling with p = {}", p);
         
         let mut cumsum = 0.0;
         let mut top_p_probs = Vec::new();

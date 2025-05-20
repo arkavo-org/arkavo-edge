@@ -17,7 +17,7 @@ impl CandleQwen3Model {
         temperature: f32,
         device: &Device,
     ) -> Result<Self> {
-        println!("Loading embedded GGUF model with size: {} bytes", crate::EMBEDDED_MODEL.len());
+        // Loading embedded model
         
         // Check if we're using GPU acceleration
         let using_gpu = matches!(device, Device::Metal(_) | Device::Cuda(_));
@@ -27,8 +27,7 @@ impl CandleQwen3Model {
         let _loading_device = Device::Cpu; // Unused but kept for clarity
         
         if using_gpu {
-            println!("Will load GGUF tensors on CPU first, then transfer to {}", 
-                     if matches!(device, Device::Metal(_)) { "Metal GPU" } else { "CUDA GPU" });
+            // Will transfer tensors to appropriate device
         }
         
         // Create a Cursor to read from the embedded bytes as if it were a file
@@ -37,11 +36,11 @@ impl CandleQwen3Model {
         // Parse the GGUF format header and metadata
         let gguf_content = match gguf_file::Content::read(&mut gguf_data) {
             Ok(content) => {
-                println!("Successfully parsed GGUF header with {} tensors", content.tensor_infos.len());
+                // Successfully parsed GGUF header
                 content
             },
             Err(e) => {
-                println!("Failed to parse GGUF header: {}", e);
+                // Failed to parse GGUF header
                 return Err(anyhow!("Failed to parse GGUF header: {}", e));
             }
         };
@@ -88,8 +87,8 @@ impl CandleQwen3Model {
                                     Ok(gpu_tensor) => {
                                         model_tensors.insert(tensor_name.clone(), gpu_tensor);
                                     },
-                                    Err(e) => {
-                                        println!("Warning: Failed to move tensor {} to GPU: {}", tensor_name, e);
+                                    Err(_) => {
+                                        // Failed to move tensor to GPU
                                         // Fall back to using the CPU tensor if we can't move to GPU
                                         model_tensors.insert(tensor_name.clone(), t);
                                     }
@@ -141,7 +140,7 @@ impl CandleQwen3Model {
             // For Qwen3, use a zero tensor since it uses rotary embeddings instead of positional
             .cloned()
             .unwrap_or_else(|| {
-                println!("Position embeddings not found, creating zero position embeddings");
+                // Creating zero position embeddings
                 // Create a default position embedding if not found - Qwen3 uses RoPE instead of position embeddings
                 // The zero tensor won't affect the actual positional encoding which happens in attention
                 Tensor::zeros((2048, hidden_dim), DType::F32, device)
@@ -157,7 +156,7 @@ impl CandleQwen3Model {
             .or_else(|| model_tensors.get("output_norm.weight"))  // Qwen3 GGUF format
             .cloned()
             .unwrap_or_else(|| {
-                println!("Final layer norm weights not found, using default ones");
+                // Using default layer norm weights
                 Tensor::ones(hidden_dim, DType::F32, device)
                     .expect("Failed to create default final norm weights")
             });

@@ -5,7 +5,7 @@ use crate::tokenizer_gguf_core::GgufTokenizer;
 impl GgufTokenizer {
     /// Decode token IDs back into text
     pub fn decode(&self, token_ids: &[u32]) -> Result<String> {
-        println!("Decoding {} tokens", token_ids.len());
+        // Decode tokens to text
         let mut result = String::new();
         
         // Special token IDs to handle differently
@@ -51,7 +51,7 @@ impl GgufTokenizer {
                         if token == "system" || token == "user" || token == "assistant" {
                             // Found a role, update current_role
                             current_role = Some(token);
-                            println!("Found role marker: {}", token);
+                            // Found role marker
                             i += 2; // Skip both tokens
                             continue;
                         }
@@ -73,7 +73,7 @@ impl GgufTokenizer {
                 }
                 // For other special tokens, skip them
                 else {
-                    println!("Skipping special token {}: {:?}", token_id, role_name);
+                    // Skip special token
                     i += 1;
                     continue;
                 }
@@ -83,7 +83,7 @@ impl GgufTokenizer {
             if let Some(token) = self.reverse_vocab.get(&token_id) {
                 // For debugging: log tokens during decoding
                 if i < 10 || i >= token_ids.len() - 5 {
-                    println!("Token {}: ID {} = '{}'", i, token_id, token.replace("\n", "\\n"));
+                    // Process regular token
                 }
                 
                 // Skip ChatML markers in normal text
@@ -122,7 +122,7 @@ impl GgufTokenizer {
                 current_block_text.push_str(&cleaned_token);
             } else {
                 // If we can't find the token, add a placeholder
-                println!("Unknown token ID: {}", token_id);
+                // Unknown token
                 current_block_text.push('�');
             }
             

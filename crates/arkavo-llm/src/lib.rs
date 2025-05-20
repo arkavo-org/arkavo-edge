@@ -108,31 +108,46 @@ impl Qwen3Client {
 
     /// Initializes the model and tokenizer
     pub async fn init(&mut self) -> Result<()> {
-        println!("Initializing Qwen3 model...");
+        let init_start = std::time::Instant::now();
+        
+        // Get detailed model information for metrics
+        // Format: base model name, size/quantization format, total size in MB
+        let model_size_mb = crate::EMBEDDED_MODEL.len() / (1024 * 1024);
+        
+        // Detect the current model variant from embedded_model.rs
+        let (model_base, quant_type) = self.detect_model_variant();
+        let model_format = "gguf";
+        let model_name = format!("{}-{}.{}", model_base, quant_type, model_format);
+        
+        // Get device information
+        let device_name = if self.config.use_gpu {
+            if cfg!(target_os = "macos") { "metal" } else { "cuda" }
+        } else {
+            "cpu"
+        };
+        
+        // Get context window size (typical for Qwen3-0.6B)
+        let context_window = 2048;
+        
+        // Log detailed model information and device at startup
+        eprintln!("[METRICS] model={} size={}MB ctx={} device={}", 
+                 model_name, model_size_mb, context_window, device_name);
         
         // Initialize the Candle model - always use embedded model
         // which is included directly via include_bytes!
         match CandleQwen3Model::new_from_embedded(&self.config) {
             Ok(model) => {
-                println!("Successfully loaded embedded GGUF model");
                 self.model = Some(model);
             },
             Err(err) => {
-                println!("Error loading model: {}", err);
                 return Err(anyhow::anyhow!("Failed to load embedded Qwen3 model: {}", err));
             }
         }
         
         // For GGUF models, extract the tokenizer data directly from the GGUF file
         if self.using_gguf_tokenizer {
-            println!("Initializing GGUF tokenizer from embedded model data...");
             match GgufTokenizer::new(crate::EMBEDDED_MODEL) {
                 Ok(tokenizer) => {
-                    println!("Successfully initialized GGUF tokenizer with {} tokens", tokenizer.vocab_size());
-                    
-                    // Print basic vocabulary information
-                    println!("GGUF tokenizer initialized with {} tokens", tokenizer.vocab_size());
-                    
                     // Do a simple verification to make sure basic tokens are present
                     let basic_token_test = [
                         (" ", 259),     // Space token ID
@@ -145,16 +160,13 @@ impl Qwen3Client {
                     for (token_str, expected_id) in &basic_token_test {
                         match tokenizer.encode(token_str) {
                             Ok(ids) if ids.contains(expected_id) => {
-                                println!("✓ Verified token: {} (found ID: {})", token_str, expected_id);
+                                // Token verified successfully
                             },
-                            Ok(ids) => {
+                            Ok(_) => {
                                 // This is a "soft" failure - we found a token, but not with the expected ID
-                                println!("! Basic token found with different ID: {} expected ID {}, got {:?}", 
-                                        token_str, expected_id, ids);
                                 // Don't consider this missing - the token can be encoded
                             },
                             Err(_) => {
-                                println!("! Error encoding basic token: {}", token_str);
                                 missing_tokens.push(*token_str);
                             }
                         }
@@ -162,17 +174,13 @@ impl Qwen3Client {
                     
                     // If critical tokens are missing, show a more detailed warning
                     if !missing_tokens.is_empty() {
-                        println!("\n⚠️ WARNING: Basic token verification failed for: {:?}", missing_tokens);
-                        println!("The tokenizer may not produce optimal results. Consider running tests to diagnose.");
-                    } else {
-                        println!("Basic tokenizer verification passed. Tokenizer is ready for use.");
+                        eprintln!("⚠️ WARNING: Basic token verification failed. The tokenizer may not produce optimal results.");
                     }
                     
                     self.gguf_tokenizer = Some(tokenizer);
                 },
-                Err(err) => {
-                    println!("Error initializing GGUF tokenizer: {}", err);
-                    println!("Falling back to HuggingFace tokenizer...");
+                Err(_) => {
+                    // Fall back to HuggingFace tokenizer
                     self.using_gguf_tokenizer = false;
                 }
             }
@@ -181,18 +189,18 @@ impl Qwen3Client {
         // Fall back to HuggingFace tokenizer if GGUF tokenizer initialization failed
         // or if HuggingFace tokenizer was explicitly requested
         if !self.using_gguf_tokenizer {
-            println!("Loading HuggingFace tokenizer...");
             match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
                 Ok(tokenizer) => {
-                    println!("Successfully loaded embedded HuggingFace tokenizer");
                     self.hf_tokenizer = Some(tokenizer);
                 }
                 Err(err) => {
-                    println!("Error loading HuggingFace tokenizer: {}", err);
                     return Err(anyhow::anyhow!("Failed to load any tokenizer: {}", err));
                 }
             }
         }
+        
+        // Log initialization time with standardized format
+        eprintln!("[METRICS] load={:.2}s", init_start.elapsed().as_secs_f64());
 
         Ok(())
     }
@@ -201,10 +209,9 @@ impl Qwen3Client {
     pub async fn generate(&self, prompt: &str) -> Result<String> {
         // Format the prompt using Qwen3's expected chat template
         let formatted_prompt = self.format_qwen3_prompt(prompt);
-        println!("Formatted prompt for Qwen3:");
-        println!("---BEGIN PROMPT---");
-        println!("{}", formatted_prompt);
-        println!("---END PROMPT---");
+        
+        // Start timing the overall inference process
+        let inference_start = std::time::Instant::now();
         
         // Use the appropriate tokenizer based on what was initialized
         let input_tokens = if self.using_gguf_tokenizer {
@@ -217,9 +224,9 @@ impl Qwen3Client {
             
             // Validate that our tokenization doesn't have UNK tokens (id 0)
             let unk_count = tokens.iter().filter(|&&id| id == 0).count();
-            if unk_count > 0 {
-                println!("⚠️ Warning: Input contains {} unknown tokens (<unk>) out of {} ({}%)", 
-                         unk_count, tokens.len(), 
+            if unk_count > 0 && (unk_count as f32 / tokens.len() as f32) > 0.05 {
+                // Only warn for significant unknown token rates (>5%)
+                eprintln!("⚠️ Warning: Input contains {}% unknown tokens", 
                          (unk_count as f32 / tokens.len() as f32) * 100.0);
             }
             
@@ -233,8 +240,6 @@ impl Qwen3Client {
             tokenizer.encode(&formatted_prompt)?
         };
         
-        println!("Input tokens: {} tokens", input_tokens.len());
-        
         // Generate response using Candle model
         let model = self.model
             .as_ref()
@@ -245,7 +250,10 @@ impl Qwen3Client {
             return Err(anyhow::anyhow!("No input tokens generated - check tokenizer configuration"));
         }
             
+        // Log forward pass timing
+        let generation_start = std::time::Instant::now();
         let all_tokens = model.generate(&input_tokens, self.config.max_tokens)?;
+        let generation_duration = generation_start.elapsed();
         
         // Extract only the newly generated tokens (excluding the input prompt)
         let output_tokens = if all_tokens.len() > input_tokens.len() {
@@ -254,54 +262,40 @@ impl Qwen3Client {
             vec![]
         };
         
-        println!("Generated {} new tokens", output_tokens.len());
-        
-        // Debug token IDs
-        if !output_tokens.is_empty() {
-            // Print first few token IDs for debugging
-            let max_debug_tokens = std::cmp::min(output_tokens.len(), 10);
-            println!("First {} generated token IDs: {:?}", max_debug_tokens, &output_tokens[..max_debug_tokens]);
-            
-            // Print tail tokens if longer than 10
-            if output_tokens.len() > 10 {
-                let tail_start = std::cmp::max(output_tokens.len() - 5, 10);
-                println!("Last 5 generated token IDs: {:?}", &output_tokens[tail_start..]);
-            }
-            
-            // Validate output token quality
-            let unk_count = output_tokens.iter().filter(|&&id| id == 0).count();
-            if unk_count > 0 {
-                println!("⚠️ Warning: Output contains {} unknown tokens (<unk>) out of {} ({}%)", 
-                         unk_count, output_tokens.len(), 
-                         (unk_count as f32 / output_tokens.len() as f32) * 100.0);
-            }
-        }
+        // Calculate tokens per second
+        let tokens_per_second = if generation_duration.as_secs_f64() > 0.0 {
+            output_tokens.len() as f64 / generation_duration.as_secs_f64()
+        } else {
+            0.0 // Avoid division by zero
+        };
         
         // If no tokens were generated, return an error
         if output_tokens.is_empty() {
             return Err(anyhow::anyhow!("No tokens generated by the model"));
         }
         
+        // Log critical issues only
+        let unk_count = output_tokens.iter().filter(|&&id| id == 0).count();
+        if unk_count > 0 && (unk_count as f32 / output_tokens.len() as f32) > 0.05 {
+            eprintln!("⚠️ Warning: Output contains {}% unknown tokens", 
+                     (unk_count as f32 / output_tokens.len() as f32) * 100.0);
+        }
+        
         // Decode response using the same tokenizer used for encoding
-        println!("Decoding tokens to text...");
         let raw_response = if self.using_gguf_tokenizer {
             // Use GGUF tokenizer
             let tokenizer = self.gguf_tokenizer
                 .as_ref()
                 .ok_or_else(|| LlmError::InferenceError("GGUF tokenizer not initialized".to_string()))?;
             
-            let decoded = tokenizer.decode(&output_tokens)?;
-            println!("Successfully decoded with GGUF tokenizer");
-            decoded
+            tokenizer.decode(&output_tokens)?
         } else {
             // Fall back to HuggingFace tokenizer
             let tokenizer = self.hf_tokenizer
                 .as_ref()
                 .ok_or_else(|| LlmError::InferenceError("HuggingFace tokenizer not initialized".to_string()))?;
             
-            let decoded = tokenizer.decode(&output_tokens)?;
-            println!("Successfully decoded with HF tokenizer");
-            decoded
+            tokenizer.decode(&output_tokens)?
         };
         
         // Process and clean the response
@@ -316,6 +310,24 @@ impl Qwen3Client {
             return Err(anyhow::anyhow!("Model output appears corrupted (contains {}% non-ASCII characters). This suggests a mismatch between the model and tokenizer.", 
                                      (non_ascii_ratio * 100.0) as i32));
         }
+        
+        // Log total inference metrics
+        let total_duration = inference_start.elapsed();
+        
+        // Calculate input prompt length in tokens for context metrics
+        let prompt_tokens = input_tokens.len();
+        let total_tokens = prompt_tokens + output_tokens.len();
+        
+        // Print standardized metrics log with context information
+        eprintln!(
+            "[METRICS] infer={:.2}s total={:.2}s prompt_tokens={} gen_tokens={} total_tokens={} tps={:.2}",
+            generation_duration.as_secs_f64(),
+            total_duration.as_secs_f64(),
+            prompt_tokens,
+            output_tokens.len(),
+            total_tokens,
+            tokens_per_second
+        );
 
         Ok(clean_response)
     }
@@ -368,5 +380,43 @@ impl Qwen3Client {
         // <|im_start|>assistant
         
         user_prompt.to_string()
+    }
+    
+    /// Detects the model variant and quantization type from embedded_model.rs
+    fn detect_model_variant(&self) -> (String, String) {
+        // Default values if detection fails
+        let model_base = "qwen3-0.6b".to_string();
+        let mut quant_type = "Q4_K_M".to_string();
+        
+        // Try to detect from the embedded model.rs file path
+        // This requires looking at the source code or using a regex
+        // As a fallback, we can use the file size to roughly identify the model
+        
+        // Model size heuristics for different quantization levels:
+        // - F16: ~1.2GB
+        // - Q8_0: ~600MB
+        // - Q5_K_M: ~500MB
+        // - Q4_K_M: ~460MB (current model)
+        // - Q2_K: ~350MB
+        
+        let model_size_mb = crate::EMBEDDED_MODEL.len() / (1024 * 1024);
+        
+        // Use size-based heuristics to detect model variant
+        if model_size_mb > 1000 {
+            quant_type = "F16".to_string();
+        } else if model_size_mb > 550 {
+            quant_type = "Q8_0".to_string();
+        } else if model_size_mb > 480 {
+            quant_type = "Q5_K_M".to_string();
+        } else if model_size_mb > 400 {
+            quant_type = "Q4_K_M".to_string();
+        } else if model_size_mb > 300 {
+            quant_type = "Q2_K".to_string();
+        }
+        
+        // For more accurate detection, we could inspect the GGUF header/metadata
+        // But that would require parsing the GGUF file
+        
+        (model_base, quant_type)
     }
 }

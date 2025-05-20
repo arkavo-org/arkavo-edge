@@ -10,48 +10,9 @@ impl GgufTokenizer {
         let mut gguf_data = Cursor::new(model_bytes);
         let gguf_content = gguf_file::Content::read(&mut gguf_data)?;
 
-        // Count how many metadata keys we have
-        println!("GGUF model has {} metadata keys", gguf_content.metadata.len());
+        // Track metadata without excessive logging
 
-        // Check specifically for Qwen3 vocab size info
-        if let Some(gguf_file::Value::U32(vocab_size)) = gguf_content.metadata.get("qwen3.vocab_size") {
-            println!("Found Qwen3 vocab_size: {}", vocab_size);
-        }
-
-        // Check for tokenizer.ggml special fields for Qwen3
-        if let Some(gguf_file::Value::U32(eos_id)) = gguf_content.metadata.get("tokenizer.ggml.eos_token_id") {
-            println!("Found EOS token ID: {}", eos_id);
-        }
-
-        if let Some(gguf_file::Value::U32(vocab_size)) = gguf_content.metadata.get("tokenizer.ggml.vocab_size") {
-            println!("Found tokenizer vocab_size: {}", vocab_size);
-        }
-
-        if let Some(gguf_file::Value::String(tokenizer_type)) = gguf_content.metadata.get("tokenizer.ggml.type") {
-            println!("Found tokenizer type: {}", tokenizer_type);
-        }
-
-        // Look for token-related keys specifically
-        for key in gguf_content.metadata.keys() {
-            if key.contains("token") || key.contains("vocab") {
-                match gguf_content.metadata.get(key) {
-                    Some(gguf_file::Value::Array(arr)) => {
-                        println!("Found token array key: {} with {} elements", key, arr.len());
-                        if !arr.is_empty() {
-                            // Print the type of the first element
-                            match &arr[0] {
-                                gguf_file::Value::String(_) => println!("  - First element is a String"),
-                                gguf_file::Value::Array(_) => println!("  - First element is an Array"),
-                                _ => println!("  - First element is another type"),
-                            }
-                        }
-                    },
-                    Some(gguf_file::Value::U32(val)) => println!("Found token U32 key: {} = {}", key, val),
-                    Some(gguf_file::Value::String(val)) => println!("Found token String key: {} = {}", key, val),
-                    _ => {}
-                }
-            }
-        }
+        // Scan for token-related metadata
 
         let mut vocab = HashMap::new();
         let mut reverse_vocab = HashMap::new();
@@ -73,80 +34,9 @@ impl GgufTokenizer {
             128 // Default to 128 if not specified
         };
 
-        println!("GGUF tokenizer initialized with {} tokens", vocab.len());
-
-        // Debug: Print sample tokens from the vocabulary (beginning, middle, and end)
-        println!("Sample of vocabulary tokens:");
-        
-        // First 50 tokens
-        println!("First 50 vocabulary tokens:");
-        for (token, &id) in vocab.iter().take(50) {
-            println!("  Token ID {}: {:?} (len={})", id, token, token.len());
-            
-            // Check for whitespace or special characters
-            if token.contains('Ġ') || token.contains('▁') || token.contains('Ċ') {
-                println!("  Potential whitespace marker: {:?} => ID {}", token, id);
-            }
-            
-            // Check for important tokens
-            if token == " " || token == "\n" || token == "\t" || token.contains("<|") {
-                println!("  Important token: {:?} => ID {}", token, id);
-            }
-            
-            // Check for digit tokens to confirm encoding format
-            if token.len() == 1 && token.chars().next().unwrap().is_ascii_digit() {
-                println!("  Digit token: {:?} => ID {}", token, id);
-            }
-        }
-        
-        // Sample from middle of vocabulary
-        println!("\nSample from middle of vocabulary (around ID 75000):");
-        let mid_point = vocab.len() / 2;
-        let mut mid_tokens = vocab.iter()
-            .filter(|(_, &id)| id >= (mid_point as u32 - 5) && id <= (mid_point as u32 + 5))
-            .collect::<Vec<_>>();
-        mid_tokens.sort_by_key(|(_, &id)| id);
-        for (token, &id) in mid_tokens {
-            println!("  Token ID {}: {:?} (len={})", id, token, token.len());
-        }
-        
-        // Last 50 tokens
-        println!("\nLast 50 vocabulary tokens:");
-        let mut last_tokens = vocab.iter()
-            .filter(|(_, &id)| id >= (vocab.len() as u32 - 50))
-            .collect::<Vec<_>>();
-        last_tokens.sort_by_key(|(_, &id)| id);
-        for (token, &id) in last_tokens {
-            println!("  Token ID {}: {:?} (len={})", id, token, token.len());
-            
-            // Special attention to high ID tokens which are often special tokens
-            if (151600..=151700).contains(&id) {
-                println!("  High ID token in important range: {:?} => ID {}", token, id);
-            }
-        }
-        
-        // Specific search for whitespace markers
-        println!("\nSearching for common whitespace markers:");
-        let whitespace_markers = ["Ġ", "▁", "Ċ", "ĉ", " ", "\n", "\t"];
-        for marker in &whitespace_markers {
-            for (token, &id) in vocab.iter() {
-                if token == marker {
-                    println!("  Found exact whitespace marker: {:?} => ID {}", token, id);
-                }
-                // Also check for tokens starting with these markers as they often represent words with leading space
-                else if token.starts_with(marker) && token.len() <= 5 {
-                    // println!("  Found token starting with whitespace marker: {:?} => ID {}", token, id);
-                }
-            }
-        }
-
-        // Debug: Check if common tokens are in the vocabulary
-        for &check in &[" ", "\n", "a", "t", "the"] {
-            if let Some(&id) = vocab.get(check) {
-                println!("  Common token {:?} found with ID {}", check, id);
-            } else {
-                println!("  WARNING: Common token {:?} NOT found in vocabulary", check);
-            }
+        // Check if we have a valid vocabulary size
+        if vocab.len() < 1000 {
+            println!("WARNING: Small vocabulary size ({}). This may indicate tokenizer initialization issues.", vocab.len());
         }
 
         Ok(Self {
@@ -168,11 +58,8 @@ impl GgufTokenizer {
 
         // Format 1: Direct string array in tokenizer.ggml.tokens
         if let Some(gguf_file::Value::Array(tokens)) = gguf_content.metadata.get("tokenizer.ggml.tokens") {
-            println!("Checking tokenizer.ggml.tokens array with {} elements", tokens.len());
-
             // Case 1a: Direct string array
             if tokens.iter().any(|v| matches!(v, gguf_file::Value::String(_))) {
-                println!("Format: Direct string array");
                 for (i, token_value) in tokens.iter().enumerate() {
                     if let gguf_file::Value::String(token) = token_value {
                         let token_id = i as u32;
@@ -182,41 +69,6 @@ impl GgufTokenizer {
                 }
 
                 if !vocab.is_empty() {
-                    println!("Loaded {} tokens from direct string array", vocab.len());
-
-                    // Check for ChatML special tokens in the vocabulary
-                    for i in 151640..151650 {
-                        if i < tokens.len() {
-                            if let gguf_file::Value::String(token) = &tokens[i] {
-                                println!("High token ID {}: {:?}", i, token);
-                            }
-                        }
-                    }
-
-                    // Check for common whitespace and special tokens for logging purposes
-                    let check_tokens = [
-                        " ", "\n", "\t", ".", "!", "?", ",", ":", ";",
-                        "<|im_start|>", "<|im_end|>", "<|endoftext|>"
-                    ];
-
-                    for &token in &check_tokens {
-                        if let Some(&id) = vocab.get(token) {
-                            println!("Found token {:?} in vocab with ID {}", token, id);
-                        } else {
-                            println!("WARNING: Token {:?} not found in vocab", token);
-                        }
-                    }
-
-                    // Report token counts in high token ID ranges (for special tokens)
-                    let special_ranges = [(151640, 151650), (150000, 150010), (100000, 100010)];
-                    for (start, end) in special_ranges {
-                        println!("Checking token ID range {}-{}:", start, end);
-                        for id in start..end {
-                            if let Some(token) = reverse_vocab.get(&id) {
-                                println!("  ID {}: {:?}", id, token);
-                            }
-                        }
-                    }
 
                     return;
                 }
@@ -224,7 +76,6 @@ impl GgufTokenizer {
 
             // Case 1b: Nested array - first element is an array of strings
             if let Some(gguf_file::Value::Array(token_strings)) = tokens.first() {
-                println!("Format: Nested array of strings");
                 for (i, token_value) in token_strings.iter().enumerate() {
                     if let gguf_file::Value::String(token) = token_value {
                         let token_id = i as u32;
@@ -234,7 +85,6 @@ impl GgufTokenizer {
                 }
 
                 if !vocab.is_empty() {
-                    println!("Loaded {} tokens from nested array", vocab.len());
                     return;
                 }
             }
@@ -242,7 +92,7 @@ impl GgufTokenizer {
 
         // Format 2: Check tokenizer.model.vocab (used in some llama.cpp GGUF files)
         if let Some(gguf_file::Value::Array(vocab_array)) = gguf_content.metadata.get("tokenizer.model.vocab") {
-            println!("Checking tokenizer.model.vocab with {} elements", vocab_array.len());
+            // Check tokenizer.model.vocab format
 
             for (i, vocab_item) in vocab_array.iter().enumerate() {
                 // Vocab items might be direct strings or arrays with token+score
@@ -261,14 +111,13 @@ impl GgufTokenizer {
             }
 
             if !vocab.is_empty() {
-                println!("Loaded {} tokens from tokenizer.model.vocab", vocab.len());
                 return;
             }
         }
 
         // Format 3: Check 'vocab' key (used in some GGUF files)
         if let Some(gguf_file::Value::Array(vocab_array)) = gguf_content.metadata.get("vocab") {
-            println!("Checking vocab with {} elements", vocab_array.len());
+            // Check vocab format
 
             for (i, token_value) in vocab_array.iter().enumerate() {
                 if let gguf_file::Value::String(token) = token_value {
@@ -279,7 +128,6 @@ impl GgufTokenizer {
             }
 
             if !vocab.is_empty() {
-                println!("Loaded {} tokens from vocab key", vocab.len());
                 return;
             }
         }
@@ -294,7 +142,6 @@ impl GgufTokenizer {
         };
 
         if vocab_size > 0 {
-            println!("Found vocab_size = {} in GGUF metadata", vocab_size);
 
             // Check if we have token ID mappings
             if let Some(gguf_file::Value::Array(token_id_pairs)) = gguf_content.metadata.get("tokenizer.ggml.token_id_pairs") {
@@ -339,19 +186,11 @@ impl GgufTokenizer {
         // Debug: check what merge-related keys exist in the GGUF metadata
         for key in gguf_content.metadata.keys() {
             if key.contains("merge") || key.contains("bpe") {
-                println!("Found potential merge data key: {}", key);
                 match gguf_content.metadata.get(key) {
-                    Some(gguf_file::Value::Array(arr)) => {
-                        println!("  - Is an array with {} elements", arr.len());
-                        if !arr.is_empty() {
-                            match &arr[0] {
-                                gguf_file::Value::Array(nested) => println!("  - First element is a nested array with {} elements", nested.len()),
-                                gguf_file::Value::String(s) => println!("  - First element is a string: {}", s),
-                                _ => println!("  - First element is some other type")
-                            }
-                        }
+                    Some(gguf_file::Value::Array(_arr)) => {
+                        // Check array contents
                     },
-                    Some(_) => println!("  - Not an array type"),
+                    Some(_) => { /* Not an array */ },
                     None => {}
                 }
             }
@@ -359,23 +198,14 @@ impl GgufTokenizer {
 
         // Process merges from tokenizer.ggml.merges (main format)
         if let Some(gguf_file::Value::Array(merge_values)) = gguf_content.metadata.get("tokenizer.ggml.merges") {
-            println!("Found tokenizer.ggml.merges with {} entries", merge_values.len());
-
-            // Sample first few merges for debugging
-            let sample_size = 5.min(merge_values.len());
-            println!("First {} merge entries (sample):", sample_size);
-            for (idx, merge_value) in merge_values.iter().take(sample_size).enumerate() {
-                if let gguf_file::Value::String(merge) = merge_value {
-                    println!("  [{}]: {}", idx, merge);
-                }
-            }
+            // Process merges from array
 
             // Process all merges directly from the array - DO NOT look for nested array
-            let mut byte_token_merges = 0;
-            let mut success_count = 0;
-            let mut failed_parse = 0;
+            let mut _byte_token_merges = 0;
+            let success_count = 0;
+            let mut _failed_parse = 0;
 
-            for (idx, merge_value) in merge_values.iter().enumerate() {
+            for (_idx, merge_value) in merge_values.iter().enumerate() {
                 if let gguf_file::Value::String(merge) = merge_value {
                     // Parse merge entry (format is typically "first second" or "first second result")
                     let parts: Vec<&str> = merge.split_whitespace().collect();
@@ -386,7 +216,7 @@ impl GgufTokenizer {
 
                         // See if these look like byte tokens
                         if first.parse::<u8>().is_ok() || second.parse::<u8>().is_ok() {
-                            byte_token_merges += 1;
+                            _byte_token_merges += 1;
                         }
 
                         let result = if parts.len() > 2 {
@@ -396,33 +226,24 @@ impl GgufTokenizer {
                         };
 
                         merges.insert((first, second), result);
-                        success_count += 1;
 
-                        // Print progress for large merge sets
-                        if idx > 0 && idx % 10000 == 0 {
-                            println!("Processed {} merges...", idx);
-                        }
+                        // Process large merge sets efficiently
                     } else {
-                        failed_parse += 1;
-                        if failed_parse <= 5 {
-                            println!("WARNING: Failed to parse merge entry: {}", merge);
+                        _failed_parse += 1;
+                        if _failed_parse <= 5 {
+                            // Failed to parse merge entry
                         }
                     }
                 }
             }
 
-            println!("Successfully loaded {} merge pairs into HashMap", success_count);
-            println!("Found {} byte-token merges", byte_token_merges);
-
-            if failed_parse > 0 {
-                println!("WARNING: Failed to parse {} merge entries", failed_parse);
-            }
+            // Loaded merge pairs successfully
 
             // For backwards compatibility, also check if the first element is a nested array
             // (some older GGUF models might use this format)
             if success_count == 0 && !merge_values.is_empty() {
                 if let Some(gguf_file::Value::Array(merge_pairs)) = merge_values.first() {
-                    println!("Found legacy format: nested array with {} entries", merge_pairs.len());
+                    // Found legacy format nested array
 
                     // Process all merges in the nested array
                     for merge_value in merge_pairs.iter() {
@@ -440,12 +261,11 @@ impl GgufTokenizer {
                                 };
 
                                 merges.insert((first, second), result);
-                                success_count += 1;
                             }
                         }
                     }
 
-                    println!("Legacy format: loaded {} merge pairs", success_count);
+                    // Legacy format loaded
                 }
             }
 
@@ -461,25 +281,23 @@ impl GgufTokenizer {
                     if first == &byte_str || second == &byte_str || result == &byte_str ||
                         first == &char_str || second == &char_str || result == &char_str {
                         found = true;
-                        println!("Critical byte {} ({:?}) found in merges: {} + {} -> {}",
-                                 byte, char::from_u32(byte as u32).unwrap_or('�'), first, second, result);
+                        // Critical byte found in merges
                     }
                 }
 
                 if !found {
-                    println!("WARNING: Critical byte {} ({:?}) NOT found in any merges",
-                             byte, char::from_u32(byte as u32).unwrap_or('�'));
+                    // Critical byte not found
                 }
             }
         } else {
-            println!("WARNING: No 'tokenizer.ggml.merges' found in GGUF metadata");
+            // No standard merges found in metadata
 
             // Try alternative merge keys if the standard one isn't found
             if let Some(gguf_file::Value::Array(bpe_merges)) = gguf_content.metadata.get("tokenizer.model.merges") {
-                println!("Found alternative 'tokenizer.model.merges' with {} entries", bpe_merges.len());
+                // Found alternative merges
 
                 // Process all merges in the alternative format
-                let mut success_count = 0;
+                let mut _success_count = 0;
                 for merge_value in bpe_merges.iter() {
                     if let gguf_file::Value::String(merge) = merge_value {
                         // Parse merge entry
@@ -495,32 +313,19 @@ impl GgufTokenizer {
                             };
 
                             merges.insert((first, second), result);
-                            success_count += 1;
                         }
                     }
                 }
 
-                println!("Successfully loaded {} merge pairs from alternative format", success_count);
+                // Loaded merge pairs from alternative format
             }
         }
 
         // If no merges found, print a warning
         if merges.is_empty() {
-            println!("WARNING: No merge rules loaded! Tokenization will likely produce many <unk> tokens");
+            // No merge rules found (warning)
         } else {
-            println!("Total merges loaded: {}", merges.len());
-
-            // Sample a few merges to show what they look like
-            println!("Sample of loaded merges:");
-            let mut count = 0;
-            for ((first, second), result) in &merges {
-                if count < 10 {
-                    println!("  {} + {} -> {}", first, second, result);
-                    count += 1;
-                } else {
-                    break;
-                }
-            }
+            // Merges loaded successfully
         }
 
         merges
@@ -545,7 +350,7 @@ impl GgufTokenizer {
                     .unwrap_or(key)
                     .replace("_token_id", "");
 
-                println!("Found special token in metadata: {} = {}", token_name, token_id);
+                // Found special token in metadata
                 special_tokens.insert(token_name, *token_id);
             }
         }
@@ -588,7 +393,7 @@ impl GgufTokenizer {
         };
 
         // Qwen3-specific special tokens - high token IDs
-        println!("Checking for Qwen3-specific special tokens in high ID range");
+        // Check for Qwen3-specific special tokens in high ID range
 
         // Define token strings to look for with UNIQUE IDs for each token
         let qwen_tokens = [
@@ -611,7 +416,7 @@ impl GgufTokenizer {
                     if s.contains(token_str) || token_str.contains(s) {
                         let name = token_str.trim_start_matches('<').trim_start_matches('|')
                             .trim_end_matches('>').trim_end_matches('|');
-                        println!("Found special token at hint ID {}: {} = {}", id_hint, name, token_str);
+                        // Found special token at hint ID
                         special_tokens.insert(name.to_string(), id_hint as u32);
                         found = true;
                     }
@@ -626,7 +431,7 @@ impl GgufTokenizer {
                                 if s.contains(token_str) || token_str.contains(s) {
                                     let name = token_str.trim_start_matches('<').trim_start_matches('|')
                                         .trim_end_matches('>').trim_end_matches('|');
-                                    println!("Found special token at ID {}: {} = {}", i, name, s);
+                                    // Found special token at ID
                                     special_tokens.insert(name.to_string(), i as u32);
                                     found = true;
                                     break;
@@ -643,7 +448,7 @@ impl GgufTokenizer {
                                     if s == token_str {
                                         let name = token_str.trim_start_matches('<').trim_start_matches('|')
                                             .trim_end_matches('>').trim_end_matches('|');
-                                        println!("Found special token in full vocab scan: {} = {} (ID {})", name, s, i);
+                                        // Found special token in full vocab scan
                                         special_tokens.insert(name.to_string(), i as u32);
                                         found = true;
                                         break;
@@ -658,7 +463,7 @@ impl GgufTokenizer {
                 if !found {
                     let name = token_str.trim_start_matches('<').trim_start_matches('|')
                         .trim_end_matches('>').trim_end_matches('|');
-                    println!("Using fallback ID for special token {}: ID {}", name, id_hint);
+                    // Using fallback ID
                     special_tokens.insert(name.to_string(), id_hint as u32);
                 }
             }
@@ -668,12 +473,12 @@ impl GgufTokenizer {
         // ChatML tokens for Qwen3 - set defaults if not found above
         if !special_tokens.contains_key("im_start") {
             special_tokens.insert("im_start".to_string(), 151643);
-            println!("Using fallback ID for <|im_start|>: 151643");
+            // Using fallback ID for im_start
         }
 
         if !special_tokens.contains_key("im_end") {
             special_tokens.insert("im_end".to_string(), 151645);
-            println!("Using fallback ID for <|im_end|>: 151645");
+            // Using fallback ID for im_end
         }
 
         // Set standard special tokens if not already set

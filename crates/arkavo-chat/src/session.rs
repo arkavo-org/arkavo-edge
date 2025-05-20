@@ -31,7 +31,7 @@ impl ChatSession {
     
     /// Initialize the chat session by setting up the LLM client
     pub async fn init(&mut self) -> Result<()> {
-        println!("Initializing Qwen3-0.6B LLM...");
+        eprintln!("Initializing Qwen3-0.6B...");
 
         let llm_config = Qwen3Config {
             temperature: 0.5,  // Lower temperature for more deterministic results
@@ -79,9 +79,6 @@ impl ChatSession {
         // Generate response
         let formatted_prompt = format_messages(&self.history);
         let client = self.llm_client.as_ref().unwrap();
-        
-        // Debug: Show the exact prompt being sent to model
-        println!("\nDEBUG: Sending prompt to model:\n{}", &formatted_prompt);
         
         // Add timeout to ensure the generate call doesn't hang
         use std::time::Duration;

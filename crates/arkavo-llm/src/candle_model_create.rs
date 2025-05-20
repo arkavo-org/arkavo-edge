@@ -114,20 +114,20 @@ impl CandleQwen3Model {
             if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
                 match Device::new_metal(0) {
                     Ok(dev) => {
-                        println!("Using Metal acceleration for GGUF model");
+                        // Using Metal acceleration
                         dev
                     },
                     Err(e) => {
-                        println!("Failed to initialize Metal: {}, falling back to CPU", e);
+                        eprintln!("Warning: Failed to initialize Metal: {}, falling back to CPU", e);
                         Device::Cpu
                     }
                 }
             } else {
-                println!("GPU acceleration requested but not available on this platform, using CPU");
+                // GPU acceleration not available
                 Device::Cpu
             }
         } else {
-            println!("Using CPU for GGUF model as requested");
+            // Using CPU as requested
             Device::Cpu
         };
         
@@ -192,6 +192,10 @@ impl CandleQwen3Model {
             
         let head_dim = hidden_dim / num_heads;
         
+        // Log model architecture metrics
+        eprintln!("[METRICS] arch=transformer layers={} heads={} hidden_dim={} vocab={}",
+                 num_layers, num_heads, hidden_dim, vocab_size);
+                 
         // Always use embedded GGUF model - it's directly included in the binary
         // via include_bytes! in embedded_model.rs
         Self::load_from_embedded_gguf(
