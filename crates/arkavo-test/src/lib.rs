@@ -9,6 +9,9 @@ pub mod reporting;
 pub mod integration;
 pub mod state_store;
 
+#[cfg(test)]
+mod state_store_test;
+
 use std::sync::Arc;
 use thiserror::Error;
 
