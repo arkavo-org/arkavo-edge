@@ -268,9 +268,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 jsonrpc: "2.0".to_string(),
                                 id: request.id,
                                 result: Some(json!({
-                                    "tool_name": tool_response.tool_name,
-                                    "result": tool_response.result,
-                                    "success": tool_response.success
+                                    "content": [{
+                                        "type": "text",
+                                        "text": serde_json::to_string_pretty(&tool_response.result)
+                                            .unwrap_or_else(|_| "Error serializing result".to_string())
+                                    }]
                                 })),
                                 error: None,
                             },
