@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Arkavo Edge is an open-source agentic CLI tool that aims to provide developer-centric capabilities for AI-agent development and framework maintenance. It focuses on secure, cost-efficient runtime for multi-file code transformations.
 
+**IMPORTANT**: This is a real production implementation, not a prototype, no placeholder, no demo. The codebase is intended for production release and should be maintained with appropriate quality standards.
+
 ## Build and Development Commands
 
 ```bash
@@ -18,6 +20,9 @@ cargo build --release
 # Run the project
 cargo run
 
+# Run chat with prompt
+cargo run --bin arkavo --profile dev -- chat --prompt Hi
+
 # Run tests
 cargo test
 
@@ -25,7 +30,7 @@ cargo test
 cargo test test_name
 
 # Code quality
-cargo clippy -D warnings
+cargo clippy -- -D warnings
 
 # Format code
 cargo fmt
@@ -53,6 +58,11 @@ Arkavo Edge consists of several core components:
 - **File size limit**: All source files should be kept under 400 lines of code to promote readability and maintainability.
 - **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
 - **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
+- **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
+- **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
+- **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
+- **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
+- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability.  Do not use generic names as a catch-all.
 
 ## Key Command Interfaces
 
@@ -68,14 +78,14 @@ The project will support the following main commands:
 
 The project follows these quality standards:
 
-- No warnings with `cargo clippy -D warnings`
+- No warnings with `cargo clippy -- -D warnings`
 - Test coverage target of ≥85%
-- Binary size ≤1 GB 
+- Binary size ≤4 GB 
 - All files under 400 LoC 
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render
 - Dependencies are kept to an absolute minimum (prefer std library solutions when possible)
-- Final binary should be small, fast, and have minimal runtime dependencies
+- Final binary should be large, fast, and have minimal runtime dependencies
 
 ## Git Workflow
 

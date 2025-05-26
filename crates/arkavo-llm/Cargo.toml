@@ -1,0 +1,49 @@
+[package]
+name = "arkavo-llm"
+version = "0.2.0"
+edition = "2021"
+description = "LLM integration for Arkavo Edge"
+license = "Apache-2.0"
+
+[features]
+default = ["embedded_model"]
+# Always embed the model weights in the binary
+embedded_model = []
+# Enables binary blob format for tokenizer data instead of Rust static data
+binary_tokenizer = ["dep:bincode"]
+# Use Candle backend for accelerated inference
+candle_backend = []
+# Use ndarray backend (legacy implementation)
+ndarray_backend = []
+# If generated tokenizer data is available (set by build.rs)
+use_generated_data = []
+
+[dependencies]
+anyhow = "1.0.75"
+thiserror = "1.0.49"
+safetensors = "0.4.1"
+
+# HuggingFace tokenizers library
+tokenizers = "0.21.1"
+
+# Candle dependencies for accelerated LLM inference
+candle-core = { version = "0.9.1", features = ["accelerate", "metal"] }
+candle-nn = "0.9.1"
+
+# Random number generator for _token sampling
+rand = "0.8.5"
+
+# PHF for static maps
+phf = { version = "0.11", features = ["macros"] }
+
+# Optional dependencies
+bincode = { version = "1.3", optional = true }
+futures = { version = "0.3" }
+serde_json = "1.0.140"
+regex = "1.8.0"
+
+[build-dependencies]
+serde_json = "1.0"
+phf = { version = "0.11", features = ["macros"] }
+phf_codegen = "0.11"
+bincode = { version = "1.3", optional = true }
