@@ -529,6 +529,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 },
                                 "required": ["action"]
                             }
+                        },
+                        {
+                            "name": "list_tests",
+                            "description": "List all available tests in the repository",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "filter": {
+                                        "type": "string",
+                                        "description": "Optional filter pattern for test names"
+                                    },
+                                    "test_type": {
+                                        "type": "string",
+                                        "enum": ["unit", "integration", "performance", "ui", "all"],
+                                        "description": "Type of tests to list"
+                                    }
+                                },
+                                "required": []
+                            }
                         }
                     ]
                 })),

@@ -7,6 +7,7 @@ pub mod gherkin;
 pub mod mcp;
 pub mod reporting;
 pub mod integration;
+pub mod state_store;
 
 use std::sync::Arc;
 use thiserror::Error;
@@ -60,5 +61,9 @@ impl TestHarness {
     
     pub fn state_manager(&self) -> &Arc<execution::state::StateManager> {
         &self.state_manager
+    }
+    
+    pub fn state_store(&self) -> Arc<state_store::StateStore> {
+        self.mcp_server.state_store().clone()
     }
 }

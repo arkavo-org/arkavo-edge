@@ -159,15 +159,13 @@ pub fn get_mcp_schema() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonschema::{Draft, JSONSchema};
+    use jsonschema;
     use serde_json::json;
 
     #[test]
     fn test_initialize_response_schema() {
         let schema = get_mcp_schema();
-        let compiled = JSONSchema::options()
-            .with_draft(Draft::Draft7)
-            .compile(&schema["definitions"]["InitializeResponse"])
+        let compiled = jsonschema::validator_for(&schema["definitions"]["InitializeResponse"])
             .unwrap();
 
         // Valid response
@@ -203,9 +201,7 @@ mod tests {
     #[test]
     fn test_tools_list_response_schema() {
         let schema = get_mcp_schema();
-        let compiled = JSONSchema::options()
-            .with_draft(Draft::Draft7)
-            .compile(&schema["definitions"]["ToolsListResponse"])
+        let compiled = jsonschema::validator_for(&schema["definitions"]["ToolsListResponse"])
             .unwrap();
 
         // Valid response
