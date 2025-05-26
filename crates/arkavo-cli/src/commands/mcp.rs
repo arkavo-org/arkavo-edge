@@ -73,8 +73,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 jsonrpc: "2.0".to_string(),
                 id: request.id,
                 result: Some(json!({
-            "name": "arkavo",
-            "version": "0.1.0",
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+                "name": "arkavo",
+                "version": "0.2.0"
+            },
             "capabilities": {
                 "tools": {
                     "available": [
