@@ -26,10 +26,6 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             print_usage();
             Ok(())
         },
-        "-v" | "--version" => {
-            print_version();
-            Ok(())
-        },
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
@@ -56,8 +52,4 @@ fn print_usage() {
     println!("OPTIONS:");
     println!("    -h, --help       Print help information");
     println!("    -v, --version    Print version information");
-}
-
-fn print_version() {
-    println!("arkavo {}", env!("CARGO_PKG_VERSION"));
 }
