@@ -1,6 +1,6 @@
 # Arkavo Edge — Open‑Source Requirements
 
-*Last updated: 26 Apr 2025*
+*Last updated: 26 May 2025*
 
 > **Goal** Provide an OSS toolkit that matches or exceeds the developer‑centric capabilities of **Claude Code** and **Aider** while keeping proprietary logic private.
 >
@@ -19,7 +19,7 @@
 | **Protocol Adapters** | MCP & A2A client impls                                 | Smart Router decision engine                     |
 | **Encryption**        | OpenTDF wrapping, local KMS support                    | Automated sensitivity tagging                    |
 | **Edge Vault CE**     | Web UI, CRUD APIs, SQLite driver                       | Enterprise policy engine, RBAC, SSO              |
-| **Test Harness**      | Local test runner adapter (pytest, npm, go test)       | Flaky‑test heuristics, cloud runners             |
+| **Test Harness**      | BDD/Gherkin parser, AI test mapper, iOS/Android bridge, dynamic test injection | Flaky‑test heuristics, cloud runners             |
 
 ---
 
@@ -32,7 +32,7 @@
 | `arkavo chat`    | Conversational agent with repo context & streaming diff previews.  |
 | `arkavo plan`    | Generates a change plan (tasks + affected files) before code edit. |
 | `arkavo apply`   | Executes plan, writes files, commits with descriptive message.     |
-| `arkavo test`    | Runs project tests; streams failures back to agent loop.           |
+| `arkavo test`    | AI‑driven test execution with BDD support & mobile app testing.    |
 | `arkavo vault …` | Import/export notes to **Edge Vault**.                             |
 
 ### Repository Awareness
@@ -62,10 +62,65 @@
 - Arkavo Community Web on `localhost:8191`.
 - Supports Markdown docs and code snippets with tag search.
 
-### Test Harness Adapter
+### Test Harness (AI‑Powered Testing)
 
-- Detect project language (Python/JS/Go/Rust).
-- Execute tests; capture stdout/stderr and coverage.
+#### Overview
+The test harness provides a unified AI‑driven testing framework that bridges business‑readable BDD specifications with deep behavioral testing capabilities for web and mobile applications.
+
+#### Core Components
+
+1. **Gherkin/BDD Layer**
+  - Parse `.feature` files with Given/When/Then syntax
+  - Natural language test specification support
+  - AI‑powered step mapping (no manual bindings required)
+  - Business‑readable test reports in Markdown/HTML
+
+2. **AI Planning Engine**
+  - LLM‑based test generation from natural language objectives
+  - Property‑based testing with invariant discovery
+  - Stateful exploration with automatic minimization
+  - Metamorphic relation identification
+
+3. **Mobile Bridge (iOS/Android)**
+  - Native FFI bridge to Swift/Kotlin test frameworks
+  - Direct app state inspection and mutation
+  - Snapshot/restore with branching execution paths
+  - Hot‑reload test injection without rebuilds
+
+4. **Execution Modes**
+  - **BDD Mode**: Execute Gherkin scenarios with AI step interpretation
+  - **Exploratory Mode**: AI autonomously explores app states
+  - **Property Mode**: Continuous invariant checking
+  - **Chaos Mode**: Deterministic failure injection
+
+5. **Performance Features**
+  - Dynamic test compilation (no xcodebuild cycles)
+  - Parallel execution across device pool
+  - Sub‑50ms action execution via native bridges
+  - Memory‑efficient state snapshots with LMDB
+
+#### Supported Platforms
+- **Languages**: Rust core with Swift/Kotlin bridges
+- **Mobile**: iOS (XCUITest), Android (Espresso/UiAutomator)
+- **Web**: Selenium/Playwright adapters
+- **Desktop**: Native app testing via accessibility APIs
+
+#### Test Commands
+
+| Command                        | Description                                                    |
+|--------------------------------|----------------------------------------------------------------|
+| `arkavo test`                  | Run all tests in current project                               |
+| `arkavo test --bdd`            | Execute BDD scenarios from `.feature` files                    |
+| `arkavo test --explore`        | AI explores app for specified duration                         |
+| `arkavo test --chaos`          | Inject failures while testing                                  |
+| `arkavo test --device iPhone`  | Target specific device/simulator                               |
+| `arkavo test --plan <goal>`    | Generate test plan from natural language goal                  |
+
+#### Output Formats
+- JUnit XML for CI integration
+- Business‑readable HTML reports
+- Slack/Discord webhooks
+- Video recordings of failures (mobile)
 
 ---
 
@@ -88,6 +143,8 @@
 - Automated data‑tagging & sensitivity heuristics.
 - Enterprise SSO, fine‑grained RBAC, analytics backend.
 - Proprietary model weights.
+- Cloud‑based device farms for testing.
+- Advanced flaky test detection algorithms.
 
 ---
 
@@ -95,9 +152,11 @@
 
 1. `arkavo plan` lists tasks and files for a refactor across ≥3 files.
 2. `arkavo apply` commits unified diff and code compiles (language‑specific check).
-3. `arkavo test` runs project tests; failures streamed back.
-4. Encryption on/off verified by round‑trip unit tests.
-5. CI pipeline green on macOS & Linux runners.
+3. `arkavo test` executes BDD scenarios and generates business reports.
+4. `arkavo test --explore` discovers at least one invariant violation in sample app.
+5. Mobile bridge successfully snapshots and restores app state.
+6. Encryption on/off verified by round‑trip unit tests.
+7. CI pipeline green on macOS & Linux runners.
 
 ---
 
@@ -113,24 +172,26 @@
 ## 🎯 Feature Summary & Priority
 
 * **P0 — MVP**
-    * Conversational CLI with repo context and unified‑diff edits
-    * Git auto‑commit & `undo`
-    * MCP & A2A client (stub router)
-    * OpenTDF encryption (local Arkavo Keystore)
-    * GPU terminal UI
-    * Edge Vault basic (SQLite + web UI)
+  * Conversational CLI with repo context and unified‑diff edits
+  * Git auto‑commit & `undo`
+  * MCP & A2A client (stub router)
+  * OpenTDF encryption (local Arkavo Keystore)
+  * GPU terminal UI
+  * Edge Vault basic (SQLite + web UI)
 
 * **P1 — Near‑Term**
-    * `plan` step with task graph
-    * Language‑agnostic test harness
-    * Multi‑language repo indexing
-    * HashiCorp Vault key backend
+  * `plan` step with task graph
+  * AI‑powered test harness with BDD support
+  * Mobile testing bridges (iOS/Android)
+  * Multi‑language repo indexing
+  * HashiCorp Vault key backend
 
 * **P2 — Future**
-    * Windows build
-    * Postgres storage & dashboards
-    * Fine‑tune on private knowledge base
-    * Analytics & policy editor
+  * Windows build
+  * Postgres storage & dashboards
+  * Fine‑tune on private knowledge base
+  * Analytics & policy editor
+  * Cloud device farm integration
 
 ---
 
@@ -158,5 +219,7 @@
 | **LLM Connectivity OOTB**              | Users must supply model creds                                | CLI setup wizard; optional Ollama local model download                                                                  |
 | **Commit Messages**                    | OSS lacks AI commit summaries                                | Basic template (`feat: {task}`) in OSS; advanced prompts proprietary                                                    |
 | **Edge Vault CE Value**                | Utility limited without RBAC                                 | Emphasise offline KB use cases; CSV import/export                                                                       |
+| **Mobile Testing Complexity**          | FFI bridges add build complexity                             | Pre‑built binaries for common platforms; Docker images with bridges installed                                           |
+| **AI Test Determinism**                | LLM‑generated tests may be flaky                             | Seed‑based generation; snapshot test outputs for regression detection                                                   |
 
 ---
