@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::time::timeout;
+use super::ios_tools::{UiInteractionKit, ScreenCaptureKit, UiQueryKit};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolRequest {
@@ -43,6 +44,11 @@ impl McpTestServer {
         tools.insert("snapshot".to_string(), Arc::new(SnapshotKit::new()));
         tools.insert("run_test".to_string(), Arc::new(RunTestKit::new()));
         
+        // Add iOS-specific tools
+        tools.insert("ui_interaction".to_string(), Arc::new(UiInteractionKit::new()));
+        tools.insert("screen_capture".to_string(), Arc::new(ScreenCaptureKit::new()));
+        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new()));
+        
         Ok(Self {
             tools: Arc::new(RwLock::new(tools)),
             metrics: Arc::new(Metrics::new()),
@@ -79,7 +85,8 @@ impl McpTestServer {
     fn is_allowed(&self, tool_name: &str, _params: &Value) -> bool {
         matches!(
             tool_name,
-            "query_state" | "mutate_state" | "snapshot" | "run_test"
+            "query_state" | "mutate_state" | "snapshot" | "run_test" |
+            "ui_interaction" | "screen_capture" | "ui_query"
         )
     }
     
