@@ -10,16 +10,16 @@
 
 ## Scope Overview
 
-| Layer                 | Included in OSS                                        | Proprietary / Closed                             |
-|-----------------------|--------------------------------------------------------|--------------------------------------------------|
-| **CLI Core**          | `arkavo` binary, command parser, multi‑step agent loop | –                                                |
-| **Terminal UI**       | GPU‑accelerated terminal integration                   | –                                                |
-| **Repo Mapper**       | Builds semantic map of repo; tracks changed files      | Advanced heuristics for file‑selection & ranking |
-| **Git Integration**   | Auto‑commit, branch handling, unified‑diff previews    | Commit‑message LLM prompt templates              |
-| **Protocol Adapters** | MCP & A2A client impls                                 | Smart Router decision engine                     |
-| **Encryption**        | OpenTDF wrapping, local KMS support                    | Automated sensitivity tagging                    |
-| **Edge Vault CE**     | Web UI, CRUD APIs, SQLite driver                       | Enterprise policy engine, RBAC, SSO              |
-| **Test Harness**      | BDD/Gherkin parser, AI test mapper, iOS/Android bridge, dynamic test injection | Flaky‑test heuristics, cloud runners             |
+| Layer                 | Included in OSS                                                                            | Proprietary / Closed                             |
+|-----------------------|--------------------------------------------------------------------------------------------|--------------------------------------------------|
+| **CLI Core**          | `arkavo` binary, command parser, multi‑step agent loop                                     | –                                                |
+| **Terminal UI**       | GPU‑accelerated terminal integration                                                       | –                                                |
+| **Repo Mapper**       | Builds semantic map of repo; tracks changed files                                          | Advanced heuristics for file‑selection & ranking |
+| **Git Integration**   | Auto‑commit, branch handling, unified‑diff previews                                        | Commit‑message LLM prompt templates              |
+| **Protocol Adapters** | MCP & A2A client impls                                                                     | Smart Router decision engine                     |
+| **Encryption**        | OpenTDF wrapping, local KMS support                                                        | Automated sensitivity tagging                    |
+| **Edge Vault CE**     | Web UI, CRUD APIs, SQLite driver                                                           | Enterprise policy engine, RBAC, SSO              |
+| **Test Harness**      | AI domain analysis, property discovery, state exploration, chaos injection, mobile bridges | Advanced bug pattern detection                   |
 
 ---
 
@@ -32,7 +32,7 @@
 | `arkavo chat`    | Conversational agent with repo context & streaming diff previews.  |
 | `arkavo plan`    | Generates a change plan (tasks + affected files) before code edit. |
 | `arkavo apply`   | Executes plan, writes files, commits with descriptive message.     |
-| `arkavo test`    | AI‑driven test execution with BDD support & mobile app testing.    |
+| `arkavo test`    | AI‑driven intelligent test generation and exploration.             |
 | `arkavo vault …` | Import/export notes to **Edge Vault**.                             |
 
 ### Repository Awareness
@@ -62,64 +62,58 @@
 - Arkavo Community Web on `localhost:8191`.
 - Supports Markdown docs and code snippets with tag search.
 
-### Test Harness (AI‑Powered Testing)
+### Test Harness (Intelligent Test Generation)
 
 #### Overview
-The test harness provides a unified AI‑driven testing framework that bridges business‑readable BDD specifications with deep behavioral testing capabilities for web and mobile applications.
+The test harness provides AI‑driven intelligent test generation that understands domain models, discovers edge cases, and systematically finds behavioral bugs that humans miss.
 
 #### Core Components
 
-1. **Gherkin/BDD Layer**
-  - Parse `.feature` files with Given/When/Then syntax
-  - Natural language test specification support
-  - AI‑powered step mapping (no manual bindings required)
-  - Business‑readable test reports in Markdown/HTML
-
-2. **AI Planning Engine**
-  - LLM‑based test generation from natural language objectives
-  - Property‑based testing with invariant discovery
-  - Stateful exploration with automatic minimization
+1. **AI Intelligence Engine**
+  - Domain model analysis and comprehension
+  - Property‑based test generation with invariant discovery
+  - State space exploration with automatic minimization
+  - Edge case generation beyond human imagination
   - Metamorphic relation identification
 
-3. **Mobile Bridge (iOS/Android)**
-  - Native FFI bridge to Swift/Kotlin test frameworks
-  - Direct app state inspection and mutation
-  - Snapshot/restore with branching execution paths
+2. **Execution Infrastructure**
+  - Native FFI bridges (Swift/Kotlin) for direct state manipulation
   - Hot‑reload test injection without rebuilds
+  - Snapshot/restore with branching execution paths
+  - Deterministic chaos injection
 
-4. **Execution Modes**
-  - **BDD Mode**: Execute Gherkin scenarios with AI step interpretation
-  - **Exploratory Mode**: AI autonomously explores app states
-  - **Property Mode**: Continuous invariant checking
-  - **Chaos Mode**: Deterministic failure injection
+3. **Test Generation Modes**
+  - **Intelligent Mode**: AI autonomously explores and finds bugs
+  - **Property Mode**: Discovers and verifies system invariants
+  - **Chaos Mode**: Injects failures to test resilience
+  - **Edge Case Mode**: Generates unusual but valid scenarios
 
-5. **Performance Features**
-  - Dynamic test compilation (no xcodebuild cycles)
-  - Parallel execution across device pool
-  - Sub‑50ms action execution via native bridges
-  - Memory‑efficient state snapshots with LMDB
+4. **Platform Support**
+  - **Languages**: Rust core with native bridges
+  - **Mobile**: iOS (XCUITest), Android (Espresso)
+  - **Backend**: Direct API and state testing
+  - **Performance**: Sub‑50ms execution, no build cycles
 
-#### Supported Platforms
-- **Languages**: Rust core with Swift/Kotlin bridges
-- **Mobile**: iOS (XCUITest), Android (Espresso/UiAutomator)
-- **Web**: Selenium/Playwright adapters
-- **Desktop**: Native app testing via accessibility APIs
+5. **Secondary Features**
+  - BDD/Gherkin parsing for business communication
+  - Natural language test specifications
+  - Business‑readable reports in multiple formats
 
 #### Test Commands
 
-| Command                        | Description                                                    |
-|--------------------------------|----------------------------------------------------------------|
-| `arkavo test`                  | Run all tests in current project                               |
-| `arkavo test --bdd`            | Execute BDD scenarios from `.feature` files                    |
-| `arkavo test --explore`        | AI explores app for specified duration                         |
-| `arkavo test --chaos`          | Inject failures while testing                                  |
-| `arkavo test --device iPhone`  | Target specific device/simulator                               |
-| `arkavo test --plan <goal>`    | Generate test plan from natural language goal                  |
+| Command                    | Description                         |
+|----------------------------|-------------------------------------|
+| `arkavo test`              | Run intelligent test generation     |
+| `arkavo test --explore`    | AI explores app states to find bugs |
+| `arkavo test --properties` | Discover and verify invariants      |
+| `arkavo test --chaos`      | Inject controlled failures          |
+| `arkavo test --edge-cases` | Generate edge cases for modules     |
+| `arkavo test --bdd`        | Execute business‑readable scenarios |
 
 #### Output Formats
+- Technical bug reports with minimal reproductions
 - JUnit XML for CI integration
-- Business‑readable HTML reports
-- Slack/Discord webhooks
+- Business‑readable HTML summaries
 - Video recordings of failures (mobile)
 
 ---
@@ -144,7 +138,7 @@ The test harness provides a unified AI‑driven testing framework that bridges b
 - Enterprise SSO, fine‑grained RBAC, analytics backend.
 - Proprietary model weights.
 - Cloud‑based device farms for testing.
-- Advanced flaky test detection algorithms.
+- Advanced bug pattern detection algorithms.
 
 ---
 
@@ -152,9 +146,9 @@ The test harness provides a unified AI‑driven testing framework that bridges b
 
 1. `arkavo plan` lists tasks and files for a refactor across ≥3 files.
 2. `arkavo apply` commits unified diff and code compiles (language‑specific check).
-3. `arkavo test` executes BDD scenarios and generates business reports.
-4. `arkavo test --explore` discovers at least one invariant violation in sample app.
-5. Mobile bridge successfully snapshots and restores app state.
+3. `arkavo test --explore` discovers at least one behavioral bug in sample app.
+4. `arkavo test --properties` generates valid invariants for domain model.
+5. Mobile bridge successfully manipulates app state without UI.
 6. Encryption on/off verified by round‑trip unit tests.
 7. CI pipeline green on macOS & Linux runners.
 
@@ -181,7 +175,7 @@ The test harness provides a unified AI‑driven testing framework that bridges b
 
 * **P1 — Near‑Term**
   * `plan` step with task graph
-  * AI‑powered test harness with BDD support
+  * Intelligent test generation with property discovery
   * Mobile testing bridges (iOS/Android)
   * Multi‑language repo indexing
   * HashiCorp Vault key backend
@@ -199,7 +193,7 @@ The test harness provides a unified AI‑driven testing framework that bridges b
 
 1. **Developer Experience First** Focus engineering sprints on the P0 feature set to deliver a fast, friction‑free first run and tight edit‑apply loop.
 2. **Highlight Security Differentiators** Feature OpenTDF encryption and on‑prem/offline modes prominently in docs and marketing collateral.
-3. **Expand Testing Strategy** Maintain ≥85 % coverage *and* add performance regression tests (latency & memory) in CI.
+3. **Emphasize AI Intelligence** Market the test harness as finding bugs developers don't know exist, not just running predefined tests.
 4. **Document the Boundary** Provide architectural diagrams and API contracts that clearly separate OSS modules from proprietary Smart Router components.
 5. **Cultivate Community** Launch a Discord/Matrix space, tag good first issues, and schedule monthly office hours to drive open‑core adoption.
 6. **Execute Roadmap** Proceed with licensing, public roadmap publication, design‑partner pilots, and benchmark shoots‑out versus Claude Code & Aider.

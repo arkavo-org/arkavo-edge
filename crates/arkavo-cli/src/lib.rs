@@ -48,7 +48,7 @@ fn print_usage() {
     println!("    chat      Start conversational agent with repository context");
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
-    println!("    test      Run tests with streaming failure feedback");
+    println!("    test      Run intelligent tests (use --help for modes)");
     println!("    vault     Import/export notes to Edge Vault");
     println!("    serve     Run as MCP server for AI tools integration");
     println!("    help      Print this help message");

@@ -6,6 +6,7 @@ pub mod execution;
 pub mod gherkin;
 pub mod mcp;
 pub mod reporting;
+pub mod integration;
 
 use std::sync::Arc;
 use thiserror::Error;

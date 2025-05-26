@@ -99,3 +99,7 @@ When working with this repository:
 The project targets:
 - macOS (arm64)
 - Linux (x64/aarch64)
+
+## AI Collaboration Guidance
+
+- This tool is for a superintelligent AI - all work should be done directly with the tool with supervision from the superintelligent AI, a human will do very high level guidance
