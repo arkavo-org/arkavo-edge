@@ -181,6 +181,69 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 },
                                 "required": ["query_type"]
                             }
+                        },
+                        {
+                            "name": "find_bugs",
+                            "description": "Find potential bugs and code issues in the codebase",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "language": {"type": "string", "enum": ["rust", "swift", "typescript", "python", "auto"]},
+                                    "bug_types": {"type": "array", "items": {"type": "string"}}
+                                }
+                            }
+                        },
+                        {
+                            "name": "intelligent_bug_finder",
+                            "description": "Use AI to find complex bugs in specific code modules",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "module": {"type": "string"},
+                                    "context": {"type": "string"},
+                                    "focus_areas": {"type": "array", "items": {"type": "string"}}
+                                },
+                                "required": ["module"]
+                            }
+                        },
+                        {
+                            "name": "discover_invariants",
+                            "description": "Discover invariants that should always be true in a system",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "system": {"type": "string"},
+                                    "code_context": {"type": "string"}
+                                },
+                                "required": ["system"]
+                            }
+                        },
+                        {
+                            "name": "chaos_test",
+                            "description": "Test system behavior under failure conditions",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "scenario": {"type": "string"},
+                                    "system_state": {"type": "object"},
+                                    "failure_types": {"type": "array", "items": {"type": "string"}}
+                                },
+                                "required": ["scenario"]
+                            }
+                        },
+                        {
+                            "name": "explore_edge_cases",
+                            "description": "Explore edge cases in system flows",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "flow": {"type": "string"},
+                                    "known_cases": {"type": "array", "items": {"type": "string"}},
+                                    "depth": {"type": "string", "enum": ["shallow", "deep", "exhaustive"]}
+                                },
+                                "required": ["flow"]
+                            }
                         }
                     ]
                 }
@@ -352,6 +415,69 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 },
                                 "required": ["query_type"]
+                            }
+                        },
+                        {
+                            "name": "find_bugs", 
+                            "description": "Find potential bugs and code issues in the codebase",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "language": {"type": "string", "enum": ["rust", "swift", "typescript", "python", "auto"]},
+                                    "bug_types": {"type": "array", "items": {"type": "string"}}
+                                }
+                            }
+                        },
+                        {
+                            "name": "intelligent_bug_finder", 
+                            "description": "Use AI to find complex bugs in specific code modules",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "module": {"type": "string"},
+                                    "context": {"type": "string"},
+                                    "focus_areas": {"type": "array", "items": {"type": "string"}}
+                                },
+                                "required": ["module"]
+                            }
+                        },
+                        {
+                            "name": "discover_invariants", 
+                            "description": "Discover invariants that should always be true in a system",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "system": {"type": "string"},
+                                    "code_context": {"type": "string"}
+                                },
+                                "required": ["system"]
+                            }
+                        },
+                        {
+                            "name": "chaos_test", 
+                            "description": "Test system behavior under failure conditions",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "scenario": {"type": "string"},
+                                    "system_state": {"type": "object"},
+                                    "failure_types": {"type": "array", "items": {"type": "string"}}
+                                },
+                                "required": ["scenario"]
+                            }
+                        },
+                        {
+                            "name": "explore_edge_cases", 
+                            "description": "Explore edge cases in system flows",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "flow": {"type": "string"},
+                                    "known_cases": {"type": "array", "items": {"type": "string"}},
+                                    "depth": {"type": "string", "enum": ["shallow", "deep", "exhaustive"]}
+                                },
+                                "required": ["flow"]
                             }
                         }
                     ]

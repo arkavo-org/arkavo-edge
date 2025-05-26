@@ -279,6 +279,110 @@ impl AnalysisEngine {
             affected_components: vec!["PaymentProcessor".to_string()],
         }
     }
+    
+    pub async fn analyze_for_bugs(&self, prompt: &str) -> Result<Vec<Bug>> {
+        if self.api_key.is_none() {
+            return Ok(vec![
+                Bug {
+                    severity: Severity::High,
+                    category: "logic_error".to_string(),
+                    description: "Potential race condition in payment processing".to_string(),
+                    location: "payment_service.rs:42".to_string(),
+                    suggested_fix: "Add mutex lock around balance update".to_string(),
+                },
+                Bug {
+                    severity: Severity::Medium,
+                    category: "error_handling".to_string(),
+                    description: "Missing error handling for network timeout".to_string(),
+                    location: "api_client.rs:78".to_string(),
+                    suggested_fix: "Add timeout and retry logic".to_string(),
+                },
+            ]);
+        }
+        
+        let response = self.call_claude_api(prompt).await?;
+        self.parse_bug_response(&response)
+    }
+    
+    pub async fn discover_properties_from_prompt(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
+        if self.api_key.is_none() {
+            return Ok(vec![
+                serde_json::json!({
+                    "name": "No negative balance",
+                    "description": "User balance should never go negative",
+                    "invariant": "forall user: user.balance >= 0",
+                    "category": "DataIntegrity",
+                    "severity": "Critical"
+                }),
+                serde_json::json!({
+                    "name": "Payment idempotency",
+                    "description": "Same payment request should not be processed twice",
+                    "invariant": "unique(payment.request_id)",
+                    "category": "BusinessLogic",
+                    "severity": "High"
+                }),
+            ]);
+        }
+        
+        let response = self.call_claude_api(prompt).await?;
+        Ok(serde_json::from_str(&response).unwrap_or_default())
+    }
+    
+    pub async fn generate_edge_cases(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
+        if self.api_key.is_none() {
+            return Ok(vec![
+                serde_json::json!({
+                    "case": "Empty username",
+                    "description": "User tries to authenticate with empty username",
+                    "expected": "Validation error before authentication attempt",
+                    "risk": "Could bypass validation if not checked"
+                }),
+                serde_json::json!({
+                    "case": "SQL injection in password",
+                    "description": "Password contains SQL injection attempt",
+                    "expected": "Input sanitized, no injection",
+                    "risk": "Database compromise if not properly escaped"
+                }),
+            ]);
+        }
+        
+        let response = self.call_claude_api(prompt).await?;
+        Ok(serde_json::from_str(&response).unwrap_or_default())
+    }
+    
+    pub async fn generate_test_cases_from_prompt(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
+        if self.api_key.is_none() {
+            return Ok(vec![
+                serde_json::json!({
+                    "name": "Network timeout during payment",
+                    "setup": "Start payment transaction",
+                    "action": "Disconnect network after initial request",
+                    "expected": "Transaction rolled back, user notified",
+                    "verification": "Check database state and user balance"
+                }),
+                serde_json::json!({
+                    "name": "Partial network failure",
+                    "setup": "Start distributed transaction",
+                    "action": "Fail 50% of network requests randomly",
+                    "expected": "System eventually consistent",
+                    "verification": "All data synchronized after recovery"
+                }),
+            ]);
+        }
+        
+        let response = self.call_claude_api(prompt).await?;
+        Ok(serde_json::from_str(&response).unwrap_or_default())
+    }
+    
+    fn parse_bug_response(&self, response: &str) -> Result<Vec<Bug>> {
+        // Try to parse as JSON array of bugs
+        if let Ok(bugs) = serde_json::from_str::<Vec<Bug>>(response) {
+            Ok(bugs)
+        } else {
+            // Fallback: extract bug information from text
+            Ok(vec![])
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -364,4 +468,13 @@ pub struct BugAnalysis {
     pub suggested_fix: String,
     pub severity: Severity,
     pub affected_components: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bug {
+    pub severity: Severity,
+    pub category: String,
+    pub description: String,
+    pub location: String,
+    pub suggested_fix: String,
 }

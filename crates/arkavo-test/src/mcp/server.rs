@@ -7,6 +7,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::time::timeout;
 use super::ios_tools::{UiInteractionKit, ScreenCaptureKit, UiQueryKit};
+use super::code_analysis_tools::{FindBugsKit, CodeAnalysisKit, TestAnalysisKit};
+use super::intelligent_tools::{IntelligentBugFinderKit, InvariantDiscoveryKit, ChaosTestingKit, EdgeCaseExplorerKit};
+use crate::ai::analysis_engine::AnalysisEngine;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolRequest {
@@ -39,6 +42,9 @@ impl McpTestServer {
     pub fn new() -> Result<Self> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
         
+        // Initialize analysis engine for intelligent tools
+        let analysis_engine = Arc::new(AnalysisEngine::new()?);
+        
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
         tools.insert("mutate_state".to_string(), Arc::new(MutateStateKit::new()));
         tools.insert("snapshot".to_string(), Arc::new(SnapshotKit::new()));
@@ -48,6 +54,21 @@ impl McpTestServer {
         tools.insert("ui_interaction".to_string(), Arc::new(UiInteractionKit::new()));
         tools.insert("screen_capture".to_string(), Arc::new(ScreenCaptureKit::new()));
         tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new()));
+        
+        // Add code analysis tools
+        tools.insert("find_bugs".to_string(), Arc::new(FindBugsKit::new()));
+        tools.insert("analyze_code".to_string(), Arc::new(CodeAnalysisKit::new()));
+        tools.insert("analyze_tests".to_string(), Arc::new(TestAnalysisKit::new()));
+        
+        // Add intelligent AI-powered tools
+        tools.insert("intelligent_bug_finder".to_string(), 
+            Arc::new(IntelligentBugFinderKit::new(analysis_engine.clone())));
+        tools.insert("discover_invariants".to_string(), 
+            Arc::new(InvariantDiscoveryKit::new(analysis_engine.clone())));
+        tools.insert("chaos_test".to_string(), 
+            Arc::new(ChaosTestingKit::new(analysis_engine.clone())));
+        tools.insert("explore_edge_cases".to_string(), 
+            Arc::new(EdgeCaseExplorerKit::new(analysis_engine.clone())));
         
         Ok(Self {
             tools: Arc::new(RwLock::new(tools)),
@@ -86,7 +107,10 @@ impl McpTestServer {
         matches!(
             tool_name,
             "query_state" | "mutate_state" | "snapshot" | "run_test" |
-            "ui_interaction" | "screen_capture" | "ui_query"
+            "ui_interaction" | "screen_capture" | "ui_query" |
+            "find_bugs" | "analyze_code" | "analyze_tests" |
+            "intelligent_bug_finder" | "discover_invariants" | 
+            "chaos_test" | "explore_edge_cases"
         )
     }
     
