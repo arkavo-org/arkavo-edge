@@ -26,11 +26,13 @@ impl StateManager {
             current_state: Arc::new(RwLock::new(Vec::new())),
         })
     }
-    
+
     pub fn create_snapshot(&self, name: &str) -> Result<String> {
-        let state = self.current_state.read()
+        let state = self
+            .current_state
+            .read()
             .map_err(|e| TestError::Execution(format!("Failed to read current state: {}", e)))?;
-        
+
         let snapshot = StateSnapshot {
             id: Uuid::new_v4().to_string(),
             name: name.to_string(),
@@ -38,57 +40,69 @@ impl StateManager {
             data: state.clone(),
             metadata: HashMap::new(),
         };
-        
+
         let id = snapshot.id.clone();
-        
-        self.snapshots.write()
+
+        self.snapshots
+            .write()
             .map_err(|e| TestError::Execution(format!("Failed to write snapshot: {}", e)))?
             .insert(id.clone(), snapshot);
-        
+
         Ok(id)
     }
-    
+
     pub fn restore_snapshot(&self, id: &str) -> Result<()> {
-        let snapshots = self.snapshots.read()
+        let snapshots = self
+            .snapshots
+            .read()
             .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
-        
-        let snapshot = snapshots.get(id)
+
+        let snapshot = snapshots
+            .get(id)
             .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {}", id)))?;
-        
-        let mut state = self.current_state.write()
+
+        let mut state = self
+            .current_state
+            .write()
             .map_err(|e| TestError::Execution(format!("Failed to write current state: {}", e)))?;
-        
+
         *state = snapshot.data.clone();
-        
+
         Ok(())
     }
-    
+
     pub fn list_snapshots(&self) -> Result<Vec<StateSnapshot>> {
-        let snapshots = self.snapshots.read()
+        let snapshots = self
+            .snapshots
+            .read()
             .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
-        
+
         let mut list: Vec<StateSnapshot> = snapshots.values().cloned().collect();
         list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        
+
         Ok(list)
     }
-    
+
     pub fn delete_snapshot(&self, id: &str) -> Result<()> {
-        self.snapshots.write()
+        self.snapshots
+            .write()
             .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
             .remove(id)
             .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {}", id)))?;
-        
+
         Ok(())
     }
-    
+
     pub fn branch_snapshot(&self, from_id: &str, new_name: &str) -> Result<String> {
-        let snapshots = self.snapshots.read()
+        let snapshots = self
+            .snapshots
+            .read()
             .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
-        
-        let parent = snapshots.get(from_id)
-            .ok_or_else(|| TestError::Execution(format!("Parent snapshot not found: {}", from_id)))?;
-        
+
+        let parent = snapshots.get(from_id).ok_or_else(|| {
+            TestError::Execution(format!("Parent snapshot not found: {}", from_id))
+        })?;
+
         let new_snapshot = StateSnapshot {
             id: Uuid::new_v4().to_string(),
             name: new_name.to_string(),
@@ -100,31 +114,36 @@ impl StateManager {
                 meta
             },
         };
-        
+
         let id = new_snapshot.id.clone();
-        
+
         drop(snapshots);
-        
-        self.snapshots.write()
+
+        self.snapshots
+            .write()
             .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
             .insert(id.clone(), new_snapshot);
-        
+
         Ok(id)
     }
-    
+
     pub fn get_current_state(&self) -> Result<Vec<u8>> {
-        let state = self.current_state.read()
+        let state = self
+            .current_state
+            .read()
             .map_err(|e| TestError::Execution(format!("Failed to read current state: {}", e)))?;
-        
+
         Ok(state.clone())
     }
-    
+
     pub fn set_current_state(&self, data: Vec<u8>) -> Result<()> {
-        let mut state = self.current_state.write()
+        let mut state = self
+            .current_state
+            .write()
             .map_err(|e| TestError::Execution(format!("Failed to write current state: {}", e)))?;
-        
+
         *state = data;
-        
+
         Ok(())
     }
 }

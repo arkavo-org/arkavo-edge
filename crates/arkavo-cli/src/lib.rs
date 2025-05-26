@@ -14,18 +14,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "vault" => commands::vault::execute(&args[1..]),
         "serve" => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async {
-                commands::mcp::run().await
-            })
-        },
+            runtime.block_on(async { commands::mcp::run().await })
+        }
         "help" => {
             print_usage();
             Ok(())
-        },
+        }
         "-h" | "--help" => {
             print_usage();
             Ok(())
-        },
+        }
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();

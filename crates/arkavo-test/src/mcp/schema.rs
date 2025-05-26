@@ -165,8 +165,8 @@ mod tests {
     #[test]
     fn test_initialize_response_schema() {
         let schema = get_mcp_schema();
-        let compiled = jsonschema::validator_for(&schema["definitions"]["InitializeResponse"])
-            .unwrap();
+        let compiled =
+            jsonschema::validator_for(&schema["definitions"]["InitializeResponse"]).unwrap();
 
         // Valid response
         let valid = json!({
@@ -201,8 +201,8 @@ mod tests {
     #[test]
     fn test_tools_list_response_schema() {
         let schema = get_mcp_schema();
-        let compiled = jsonschema::validator_for(&schema["definitions"]["ToolsListResponse"])
-            .unwrap();
+        let compiled =
+            jsonschema::validator_for(&schema["definitions"]["ToolsListResponse"]).unwrap();
 
         // Valid response
         let valid = json!({

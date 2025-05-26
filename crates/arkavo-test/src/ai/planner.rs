@@ -1,6 +1,6 @@
-use crate::{Result, TestError};
 use crate::ai::claude_client::ClaudeClient;
 use crate::mcp::tools::ToolRegistry;
+use crate::{Result, TestError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
@@ -112,18 +112,18 @@ impl TestPlanner {
             state_tracker: StateTracker::new(),
         }
     }
-    
+
     pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
         &self.tool_registry
     }
-    
+
     pub async fn plan_test_session(
         &self,
         objectives: Vec<String>,
         duration_minutes: u32,
     ) -> Result<TestPlan> {
         let state = self.get_initial_state().await?;
-        
+
         let strategy_prompt = format!(
             r#"Given the current application state and test objectives, generate a comprehensive test plan.
 
@@ -192,23 +192,27 @@ Example format:
   ]
 }}"#,
             serde_json::to_string_pretty(&state).unwrap_or_default(),
-            objectives.iter().map(|o| format!("- {}", o)).collect::<Vec<_>>().join("\n"),
+            objectives
+                .iter()
+                .map(|o| format!("- {}", o))
+                .collect::<Vec<_>>()
+                .join("\n"),
             duration_minutes
         );
-        
+
         let response = self.claude.complete(&strategy_prompt).await?;
-        
+
         self.parse_test_plan(&response, objectives, duration_minutes)
     }
-    
+
     pub async fn adaptive_exploration(&mut self) -> Result<Vec<Finding>> {
         let mut findings = Vec::new();
         let max_iterations = 100;
-        
+
         for _iteration in 0..max_iterations {
             let current_state = self.get_current_state().await?;
             let history = self.state_tracker.get_recent_actions(10);
-            
+
             let exploration_prompt = format!(
                 r#"You are exploring an application to find issues. Based on the current state and recent actions, decide the next action.
 
@@ -249,18 +253,19 @@ Example:
                 serde_json::to_string_pretty(&history).unwrap_or_default(),
                 serde_json::to_string_pretty(&findings).unwrap_or_default()
             );
-            
+
             let response = self.claude.complete(&exploration_prompt).await?;
-            let decision: ExplorationDecision = serde_json::from_str(&response)
-                .map_err(|e| TestError::Ai(format!("Failed to parse exploration decision: {}", e)))?;
-            
+            let decision: ExplorationDecision = serde_json::from_str(&response).map_err(|e| {
+                TestError::Ai(format!("Failed to parse exploration decision: {}", e))
+            })?;
+
             if decision.stop_exploration {
                 break;
             }
-            
+
             let action = decision.action.clone();
             let params = decision.parameters.clone();
-            
+
             match self.execute_action(&action, params.clone()).await {
                 Ok(result) => {
                     if let Some(issue) = self.detect_issue(&result, &decision.hypothesis).await? {
@@ -273,21 +278,22 @@ Example:
                         severity: Severity::High,
                         title: format!("Error during {}", action),
                         description: format!("Action failed: {}", e),
-                        reproduction_steps: vec![
-                            format!("Execute {} with parameters: {:?}", action, params)
-                        ],
+                        reproduction_steps: vec![format!(
+                            "Execute {} with parameters: {:?}",
+                            action, params
+                        )],
                         minimal_test: None,
                         timestamp: chrono::Utc::now(),
                     });
                 }
             }
-            
+
             self.state_tracker.record_action(action, params);
         }
-        
+
         Ok(findings)
     }
-    
+
     async fn get_initial_state(&self) -> Result<Value> {
         Ok(serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -295,14 +301,14 @@ Example:
             "version": "1.0.0"
         }))
     }
-    
+
     async fn get_current_state(&self) -> Result<Value> {
         Ok(serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "state": "current"
         }))
     }
-    
+
     async fn execute_action(&self, action: &str, params: Value) -> Result<Value> {
         Ok(serde_json::json!({
             "action": action,
@@ -310,15 +316,15 @@ Example:
             "result": "success"
         }))
     }
-    
+
     async fn detect_issue(&self, _result: &Value, _hypothesis: &str) -> Result<Option<Finding>> {
         Ok(None)
     }
-    
+
     async fn minimize_reproduction(&self, finding: Finding) -> Result<Finding> {
         Ok(finding)
     }
-    
+
     fn parse_test_plan(
         &self,
         response: &str,
@@ -327,8 +333,9 @@ Example:
     ) -> Result<TestPlan> {
         let parsed: serde_json::Value = serde_json::from_str(response)
             .map_err(|e| TestError::Ai(format!("Failed to parse test plan: {}", e)))?;
-        
-        let strategies = parsed.get("strategies")
+
+        let strategies = parsed
+            .get("strategies")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -336,8 +343,9 @@ Example:
                     .collect()
             })
             .unwrap_or_default();
-        
-        let invariants = parsed.get("invariants")
+
+        let invariants = parsed
+            .get("invariants")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -345,8 +353,9 @@ Example:
                     .collect()
             })
             .unwrap_or_default();
-        
-        let chaos_scenarios = parsed.get("chaos_scenarios")
+
+        let chaos_scenarios = parsed
+            .get("chaos_scenarios")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -354,8 +363,9 @@ Example:
                     .collect()
             })
             .unwrap_or_default();
-        
-        let benchmarks = parsed.get("benchmarks")
+
+        let benchmarks = parsed
+            .get("benchmarks")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -363,7 +373,7 @@ Example:
                     .collect()
             })
             .unwrap_or_default();
-        
+
         Ok(TestPlan {
             objectives,
             duration_minutes,
@@ -393,7 +403,7 @@ impl StateTracker {
             actions: std::sync::RwLock::new(Vec::new()),
         }
     }
-    
+
     pub fn record_action(&self, action: String, params: Value) {
         if let Ok(mut actions) = self.actions.write() {
             actions.push((action, params));
@@ -402,10 +412,11 @@ impl StateTracker {
             }
         }
     }
-    
+
     pub fn get_recent_actions(&self, count: usize) -> Vec<(String, Value)> {
         if let Ok(actions) = self.actions.read() {
-            actions.iter()
+            actions
+                .iter()
                 .rev()
                 .take(count)
                 .cloned()

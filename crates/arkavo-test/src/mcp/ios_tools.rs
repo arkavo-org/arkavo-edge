@@ -1,8 +1,8 @@
+use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Command;
-use super::server::{Tool, ToolSchema};
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
@@ -52,10 +52,11 @@ impl Default for UiInteractionKit {
 #[async_trait]
 impl Tool for UiInteractionKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
-        
+
         match action {
             "tap" => {
                 if let Some(target) = params.get("target") {
@@ -67,23 +68,25 @@ impl Tool for UiInteractionKit {
                             "Sign Up" => (200, 400),
                             _ => (200, 200),
                         };
-                        
+
                         Ok(serde_json::json!({
                             "success": true,
                             "action": "tap",
                             "target": {"text": text},
                             "coordinates": {"x": x, "y": y}
                         }))
-                    } else if let Some(accessibility_id) = target.get("accessibility_id").and_then(|v| v.as_str()) {
+                    } else if let Some(accessibility_id) =
+                        target.get("accessibility_id").and_then(|v| v.as_str())
+                    {
                         // For now, map known accessibility IDs to coordinates
                         let (x, y) = match accessibility_id {
                             "Sign Up" => (200, 400),
                             "Continue" => (200, 300),
                             _ => (200, 200), // Default center
                         };
-                        
+
                         let _device_id = get_active_device_id()?;
-                        
+
                         // Mock successful tap for accessibility ID
                         Ok(serde_json::json!({
                             "success": true,
@@ -95,34 +98,47 @@ impl Tool for UiInteractionKit {
                         // Use coordinates
                         let x = target.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
                         let y = target.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-                    
-                    // Execute tap via xcrun simctl
-                    let device_id = get_active_device_id()?;
-                    
-                    // Use applesimutils if available, otherwise fall back to direct input
-                    let output = if Command::new("applesimutils").arg("--version").output().is_ok() {
-                        Command::new("applesimutils")
-                            .args(["--byId", &device_id, "--tapAt", &format!("{},{}", x, y)])
+
+                        // Execute tap via xcrun simctl
+                        let device_id = get_active_device_id()?;
+
+                        // Use applesimutils if available, otherwise fall back to direct input
+                        let output = if Command::new("applesimutils")
+                            .arg("--version")
                             .output()
-                            .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?
-                    } else {
-                        // Fallback: use xcrun simctl io to send tap event
-                        Command::new("xcrun")
-                            .args(["simctl", "io", &device_id, "tap", &x.to_string(), &y.to_string()])
-                            .output()
-                            .unwrap_or_else(|_| {
-                                // If that fails, try boot and retry
-                                Command::new("xcrun")
-                                    .args(["simctl", "boot", &device_id])
-                                    .output()
-                                    .ok();
-                                Command::new("echo")
-                                    .arg("Tap simulation attempted")
-                                    .output()
-                                    .unwrap()
-                            })
-                    };
-                    
+                            .is_ok()
+                        {
+                            Command::new("applesimutils")
+                                .args(["--byId", &device_id, "--tapAt", &format!("{},{}", x, y)])
+                                .output()
+                                .map_err(|e| {
+                                    TestError::Mcp(format!("Failed to execute tap: {}", e))
+                                })?
+                        } else {
+                            // Fallback: use xcrun simctl io to send tap event
+                            Command::new("xcrun")
+                                .args([
+                                    "simctl",
+                                    "io",
+                                    &device_id,
+                                    "tap",
+                                    &x.to_string(),
+                                    &y.to_string(),
+                                ])
+                                .output()
+                                .unwrap_or_else(|_| {
+                                    // If that fails, try boot and retry
+                                    Command::new("xcrun")
+                                        .args(["simctl", "boot", &device_id])
+                                        .output()
+                                        .ok();
+                                    Command::new("echo")
+                                        .arg("Tap simulation attempted")
+                                        .output()
+                                        .unwrap()
+                                })
+                        };
+
                         Ok(serde_json::json!({
                             "success": output.status.success(),
                             "action": "tap",
@@ -132,30 +148,31 @@ impl Tool for UiInteractionKit {
                 } else {
                     Err(TestError::Mcp("Missing target for tap action".to_string()))
                 }
-            },
+            }
             "type_text" => {
-                let text = params.get("value")
+                let text = params
+                    .get("value")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| TestError::Mcp("Missing text value".to_string()))?;
-                
+
                 let _device_id = get_active_device_id()?;
-                
+
                 // Mock successful text input since we don't have idb
                 let output = Command::new("echo")
                     .arg(format!("Typed: {}", text))
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to type text: {}", e)))?;
-                
+
                 Ok(serde_json::json!({
                     "success": output.status.success(),
                     "action": "type_text",
                     "text": text
                 }))
-            },
+            }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -199,23 +216,24 @@ impl Default for ScreenCaptureKit {
 #[async_trait]
 impl Tool for ScreenCaptureKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let name = params.get("name")
+        let name = params
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing name parameter".to_string()))?;
-        
+
         let device_id = get_active_device_id()?;
         let path = format!("test_results/{}.png", name);
-        
+
         // Create directory if it doesn't exist
         std::fs::create_dir_all("test_results")
             .map_err(|e| TestError::Mcp(format!("Failed to create directory: {}", e)))?;
-        
+
         // Capture screenshot
         let output = Command::new("xcrun")
             .args(["simctl", "io", &device_id, "screenshot", &path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
-        
+
         // Always return a result, even on failure
         let mut result = if output.status.success() {
             serde_json::json!({
@@ -232,9 +250,13 @@ impl Tool for ScreenCaptureKit {
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })
         };
-        
+
         // If analyze is requested, add analysis placeholder
-        if params.get("analyze").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if params
+            .get("analyze")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             result["analysis"] = serde_json::json!({
                 "elements_detected": 0,
                 "text_found": [],
@@ -242,10 +264,10 @@ impl Tool for ScreenCaptureKit {
                 "input_fields": []
             });
         }
-        
+
         Ok(result)
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -294,10 +316,11 @@ impl Default for UiQueryKit {
 #[async_trait]
 impl Tool for UiQueryKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let query_type = params.get("query_type")
+        let query_type = params
+            .get("query_type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing query_type parameter".to_string()))?;
-        
+
         match query_type {
             "accessibility_tree" => {
                 // In production, this would use idb or XCUITest to get real data
@@ -315,55 +338,54 @@ impl Tool for UiQueryKit {
                         }
                     }
                 }))
-            },
-            "visible_elements" => {
-                Ok(serde_json::json!({
-                    "elements": [
-                        {
-                            "type": "TextField",
-                            "placeholder": "Email",
-                            "value": "",
-                            "frame": {"x": 50, "y": 200, "width": 300, "height": 40}
-                        },
-                        {
-                            "type": "Button",
-                            "title": "Continue",
-                            "enabled": true,
-                            "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
-                        }
-                    ]
-                }))
-            },
-            "text_content" => {
-                Ok(serde_json::json!({
-                    "texts": [
-                        {
-                            "text": "Welcome to Arkavo",
-                            "type": "heading",
-                            "frame": {"x": 50, "y": 100, "width": 300, "height": 40}
-                        },
-                        {
-                            "text": "Sign up to get started",
-                            "type": "subheading",
-                            "frame": {"x": 50, "y": 150, "width": 300, "height": 30}
-                        },
-                        {
-                            "text": "Email",
-                            "type": "label",
-                            "frame": {"x": 50, "y": 180, "width": 100, "height": 20}
-                        },
-                        {
-                            "text": "Continue",
-                            "type": "button",
-                            "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
-                        }
-                    ]
-                }))
-            },
-            _ => Err(TestError::Mcp(format!("Unsupported query type: {}", query_type))),
+            }
+            "visible_elements" => Ok(serde_json::json!({
+                "elements": [
+                    {
+                        "type": "TextField",
+                        "placeholder": "Email",
+                        "value": "",
+                        "frame": {"x": 50, "y": 200, "width": 300, "height": 40}
+                    },
+                    {
+                        "type": "Button",
+                        "title": "Continue",
+                        "enabled": true,
+                        "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
+                    }
+                ]
+            })),
+            "text_content" => Ok(serde_json::json!({
+                "texts": [
+                    {
+                        "text": "Welcome to Arkavo",
+                        "type": "heading",
+                        "frame": {"x": 50, "y": 100, "width": 300, "height": 40}
+                    },
+                    {
+                        "text": "Sign up to get started",
+                        "type": "subheading",
+                        "frame": {"x": 50, "y": 150, "width": 300, "height": 30}
+                    },
+                    {
+                        "text": "Email",
+                        "type": "label",
+                        "frame": {"x": 50, "y": 180, "width": 100, "height": 20}
+                    },
+                    {
+                        "text": "Continue",
+                        "type": "button",
+                        "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
+                    }
+                ]
+            })),
+            _ => Err(TestError::Mcp(format!(
+                "Unsupported query type: {}",
+                query_type
+            ))),
         }
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -374,41 +396,42 @@ fn get_active_device_id() -> Result<String> {
         .args(["simctl", "list", "devices", "booted"])
         .output()
         .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse device ID from output
     for line in stdout.lines() {
         if line.contains("(") && line.contains(")") && line.contains("Booted") {
             if let Some(start) = line.find('(') {
                 if let Some(end) = line.find(')') {
-                    return Ok(line[start+1..end].to_string());
+                    return Ok(line[start + 1..end].to_string());
                 }
             }
         }
     }
-    
+
     // Fallback: try to get any iPhone device
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices"])
         .output()
         .map_err(|e| TestError::Mcp(format!("Failed to list all devices: {}", e)))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     for line in stdout.lines() {
         if line.contains("iPhone") && line.contains("(") && line.contains(")") {
             if let Some(start) = line.find('(') {
                 if let Some(end) = line.find(')') {
-                    let device_id = line[start+1..end].to_string();
-                    if device_id.len() == 36 { // UUID length
+                    let device_id = line[start + 1..end].to_string();
+                    if device_id.len() == 36 {
+                        // UUID length
                         return Ok(device_id);
                     }
                 }
             }
         }
     }
-    
+
     // Ultimate fallback: return a placeholder ID
     // This helps avoid errors in mock scenarios
     Ok("MOCK-DEVICE-ID".to_string())

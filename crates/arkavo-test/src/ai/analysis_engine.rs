@@ -13,14 +13,14 @@ pub struct AnalysisEngine {
 impl AnalysisEngine {
     pub fn new() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
-        
+
         Ok(Self {
             client: reqwest::Client::new(),
             api_key,
             model: "claude-3-sonnet-20240229".to_string(),
         })
     }
-    
+
     pub fn with_api_key(api_key: String) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -32,13 +32,13 @@ impl AnalysisEngine {
     /// Analyze code to understand domain model and find testable properties
     pub async fn analyze_code(&self, code_context: &CodeContext) -> Result<DomainAnalysis> {
         let prompt = self.build_analysis_prompt(code_context);
-        
+
         // For now, return a mock analysis
         // In production, this would call Claude API
         if self.api_key.is_none() {
             return Ok(self.mock_analysis(code_context));
         }
-        
+
         // Real Claude API call would go here
         let response = self.call_claude_api(&prompt).await?;
         self.parse_analysis_response(&response)
@@ -57,20 +57,20 @@ impl AnalysisEngine {
              Format as JSON array of properties.",
             domain
         );
-        
+
         if self.api_key.is_none() {
             return Ok(self.mock_properties());
         }
-        
+
         let response = self.call_claude_api(&prompt).await?;
         self.parse_properties_response(&response)
     }
 
     /// Generate test cases that explore edge cases and try to break invariants
     pub async fn generate_test_cases(
-        &self, 
+        &self,
         property: &Property,
-        count: usize
+        count: usize,
     ) -> Result<Vec<TestCase>> {
         let prompt = format!(
             "Generate {} test cases that try to violate this property: {}\n\
@@ -79,21 +79,17 @@ impl AnalysisEngine {
              Format as JSON array of test cases.",
             count, property.invariant
         );
-        
+
         if self.api_key.is_none() {
             return Ok(self.mock_test_cases(property, count));
         }
-        
+
         let response = self.call_claude_api(&prompt).await?;
         self.parse_test_cases_response(&response)
     }
 
     /// Analyze test failure to provide actionable insights
-    pub async fn analyze_failure(
-        &self,
-        test_case: &TestCase,
-        error: &str
-    ) -> Result<BugAnalysis> {
+    pub async fn analyze_failure(&self, test_case: &TestCase, error: &str) -> Result<BugAnalysis> {
         let prompt = format!(
             "Analyze this test failure:\n\
              Test case: {:?}\n\
@@ -105,11 +101,11 @@ impl AnalysisEngine {
              4. Severity assessment",
             test_case, error
         );
-        
+
         if self.api_key.is_none() {
             return Ok(self.mock_bug_analysis(test_case, error));
         }
-        
+
         let response = self.call_claude_api(&prompt).await?;
         self.parse_bug_analysis_response(&response)
     }
@@ -131,9 +127,11 @@ impl AnalysisEngine {
     }
 
     async fn call_claude_api(&self, prompt: &str) -> Result<String> {
-        let api_key = self.api_key.as_ref()
+        let api_key = self
+            .api_key
+            .as_ref()
             .ok_or_else(|| TestError::Ai("No API key provided".to_string()))?;
-        
+
         let request_body = serde_json::json!({
             "model": self.model,
             "max_tokens": 4096,
@@ -142,8 +140,9 @@ impl AnalysisEngine {
                 "content": prompt
             }]
         });
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
@@ -152,15 +151,17 @@ impl AnalysisEngine {
             .send()
             .await
             .map_err(|e| TestError::Ai(format!("API request failed: {}", e)))?;
-        
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
             return Err(TestError::Ai(format!("API error: {}", error_text)));
         }
-        
-        let response_json: serde_json::Value = response.json().await
+
+        let response_json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| TestError::Ai(format!("Failed to parse response: {}", e)))?;
-        
+
         response_json["content"][0]["text"]
             .as_str()
             .ok_or_else(|| TestError::Ai("Invalid response format".to_string()))
@@ -200,20 +201,16 @@ impl AnalysisEngine {
                 Entity {
                     name: "Payment".to_string(),
                     attributes: vec!["amount".to_string(), "status".to_string()],
-                    relationships: HashMap::from([
-                        ("user".to_string(), "User".to_string())
-                    ]),
+                    relationships: HashMap::from([("user".to_string(), "User".to_string())]),
                 },
             ],
-            operations: vec![
-                Operation {
-                    name: "process_payment".to_string(),
-                    inputs: vec!["user_id".to_string(), "amount".to_string()],
-                    outputs: vec!["payment_id".to_string()],
-                    preconditions: vec!["user.balance >= amount".to_string()],
-                    postconditions: vec!["user.balance = old(user.balance) - amount".to_string()],
-                },
-            ],
+            operations: vec![Operation {
+                name: "process_payment".to_string(),
+                inputs: vec!["user_id".to_string(), "amount".to_string()],
+                outputs: vec!["payment_id".to_string()],
+                preconditions: vec!["user.balance >= amount".to_string()],
+                postconditions: vec!["user.balance = old(user.balance) - amount".to_string()],
+            }],
             invariants: vec![
                 "user.balance >= 0".to_string(),
                 "payment.amount > 0".to_string(),
@@ -246,26 +243,28 @@ impl AnalysisEngine {
     }
 
     fn mock_test_cases(&self, property: &Property, count: usize) -> Vec<TestCase> {
-        (0..count).map(|i| TestCase {
-            id: format!("test_{}", i),
-            property: property.name.clone(),
-            description: format!("Test case {} for {}", i, property.name),
-            inputs: self.generate_mock_inputs(i),
-            expected_behavior: if i % 5 == 0 {
-                ExpectedBehavior::Failure("Constraint violation".to_string())
-            } else {
-                ExpectedBehavior::Success
-            },
-        }).collect()
+        (0..count)
+            .map(|i| TestCase {
+                id: format!("test_{}", i),
+                property: property.name.clone(),
+                description: format!("Test case {} for {}", i, property.name),
+                inputs: self.generate_mock_inputs(i),
+                expected_behavior: if i % 5 == 0 {
+                    ExpectedBehavior::Failure("Constraint violation".to_string())
+                } else {
+                    ExpectedBehavior::Success
+                },
+            })
+            .collect()
     }
 
     fn generate_mock_inputs(&self, seed: usize) -> serde_json::Value {
         match seed % 5 {
-            0 => serde_json::json!({ "amount": -50.0 }),  // Negative amount
-            1 => serde_json::json!({ "amount": 1e10 }),   // Huge amount
-            2 => serde_json::json!({ "amount": 0.001 }),  // Tiny amount
+            0 => serde_json::json!({ "amount": -50.0 }), // Negative amount
+            1 => serde_json::json!({ "amount": 1e10 }),  // Huge amount
+            2 => serde_json::json!({ "amount": 0.001 }), // Tiny amount
             3 => serde_json::json!({ "concurrent": true }), // Race condition
-            _ => serde_json::json!({ "amount": 100.0 }),  // Normal case
+            _ => serde_json::json!({ "amount": 100.0 }), // Normal case
         }
     }
 
@@ -273,13 +272,14 @@ impl AnalysisEngine {
         BugAnalysis {
             test_case_id: test_case.id.clone(),
             root_cause: "Race condition in payment processing allows double charges".to_string(),
-            minimal_reproduction: "1. Send two identical payment requests\n2. Both succeed".to_string(),
+            minimal_reproduction: "1. Send two identical payment requests\n2. Both succeed"
+                .to_string(),
             suggested_fix: "Add distributed lock on payment request ID".to_string(),
             severity: Severity::Critical,
             affected_components: vec!["PaymentProcessor".to_string()],
         }
     }
-    
+
     pub async fn analyze_for_bugs(&self, prompt: &str) -> Result<Vec<Bug>> {
         if self.api_key.is_none() {
             return Ok(vec![
@@ -299,12 +299,15 @@ impl AnalysisEngine {
                 },
             ]);
         }
-        
+
         let response = self.call_claude_api(prompt).await?;
         self.parse_bug_response(&response)
     }
-    
-    pub async fn discover_properties_from_prompt(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
+
+    pub async fn discover_properties_from_prompt(
+        &self,
+        prompt: &str,
+    ) -> Result<Vec<serde_json::Value>> {
         if self.api_key.is_none() {
             return Ok(vec![
                 serde_json::json!({
@@ -323,11 +326,11 @@ impl AnalysisEngine {
                 }),
             ]);
         }
-        
+
         let response = self.call_claude_api(prompt).await?;
         Ok(serde_json::from_str(&response).unwrap_or_default())
     }
-    
+
     pub async fn generate_edge_cases(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
         if self.api_key.is_none() {
             return Ok(vec![
@@ -345,12 +348,15 @@ impl AnalysisEngine {
                 }),
             ]);
         }
-        
+
         let response = self.call_claude_api(prompt).await?;
         Ok(serde_json::from_str(&response).unwrap_or_default())
     }
-    
-    pub async fn generate_test_cases_from_prompt(&self, prompt: &str) -> Result<Vec<serde_json::Value>> {
+
+    pub async fn generate_test_cases_from_prompt(
+        &self,
+        prompt: &str,
+    ) -> Result<Vec<serde_json::Value>> {
         if self.api_key.is_none() {
             return Ok(vec![
                 serde_json::json!({
@@ -369,11 +375,11 @@ impl AnalysisEngine {
                 }),
             ]);
         }
-        
+
         let response = self.call_claude_api(prompt).await?;
         Ok(serde_json::from_str(&response).unwrap_or_default())
     }
-    
+
     fn parse_bug_response(&self, response: &str) -> Result<Vec<Bug>> {
         // Try to parse as JSON array of bugs
         if let Ok(bugs) = serde_json::from_str::<Vec<Bug>>(response) {

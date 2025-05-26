@@ -1,8 +1,8 @@
+use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Command;
-use super::server::{Tool, ToolSchema};
 
 pub struct BiometricKit {
     schema: ToolSchema,
@@ -44,32 +44,50 @@ impl Default for BiometricKit {
 #[async_trait]
 impl Tool for BiometricKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
-        
-        let biometric_type = params.get("biometric_type")
+
+        let biometric_type = params
+            .get("biometric_type")
             .and_then(|v| v.as_str())
             .unwrap_or("face_id");
-        
+
         // Get device ID
         let device_id = get_device_id()?;
-        
+
         match action {
             "enroll" => {
                 // Enroll biometric data
                 let output = Command::new("xcrun")
-                    .args(["simctl", "privacy", &device_id, "grant", "biometric", "com.arkavo.Arkavo"])
+                    .args([
+                        "simctl",
+                        "privacy",
+                        &device_id,
+                        "grant",
+                        "biometric",
+                        "com.arkavo.Arkavo",
+                    ])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to grant biometric permission: {}", e)))?;
-                
+                    .map_err(|e| {
+                        TestError::Mcp(format!("Failed to grant biometric permission: {}", e))
+                    })?;
+
                 if output.status.success() {
                     // Enroll Face ID
                     Command::new("xcrun")
-                        .args(["simctl", "ui", &device_id, "biometric", "enrollment", "--enrolled"])
+                        .args([
+                            "simctl",
+                            "ui",
+                            &device_id,
+                            "biometric",
+                            "enrollment",
+                            "--enrolled",
+                        ])
                         .output()
                         .ok();
-                    
+
                     Ok(serde_json::json!({
                         "success": true,
                         "action": "enroll",
@@ -83,7 +101,7 @@ impl Tool for BiometricKit {
                         "error": String::from_utf8_lossy(&output.stderr).to_string()
                     }))
                 }
-            },
+            }
             "match" => {
                 // Simulate successful biometric match
                 let output = Command::new("xcrun")
@@ -96,28 +114,28 @@ impl Tool for BiometricKit {
                             .output()
                             .unwrap()
                     });
-                
+
                 Ok(serde_json::json!({
                     "success": output.status.success(),
                     "action": "match",
                     "biometric_type": biometric_type,
                     "message": "Biometric authentication successful"
                 }))
-            },
+            }
             "fail" => {
                 // Simulate failed biometric match
                 Command::new("xcrun")
                     .args(["simctl", "ui", &device_id, "biometric", "nomatch"])
                     .output()
                     .ok();
-                
+
                 Ok(serde_json::json!({
                     "success": true,
                     "action": "fail",
                     "biometric_type": biometric_type,
                     "message": "Biometric authentication failed"
                 }))
-            },
+            }
             "cancel" => {
                 // Cancel biometric prompt
                 Ok(serde_json::json!({
@@ -126,11 +144,11 @@ impl Tool for BiometricKit {
                     "biometric_type": biometric_type,
                     "message": "Biometric authentication cancelled"
                 }))
-            },
+            }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -175,13 +193,13 @@ impl Default for SystemDialogKit {
 #[async_trait]
 impl Tool for SystemDialogKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
-        
-        let button_text = params.get("button_text")
-            .and_then(|v| v.as_str());
-        
+
+        let button_text = params.get("button_text").and_then(|v| v.as_str());
+
         // Map action to common button texts
         let button = match (action, button_text) {
             (_, Some(text)) => text,
@@ -191,7 +209,7 @@ impl Tool for SystemDialogKit {
             ("deny", _) => "Don't Allow",
             _ => "OK",
         };
-        
+
         Ok(serde_json::json!({
             "success": true,
             "action": action,
@@ -199,7 +217,7 @@ impl Tool for SystemDialogKit {
             "message": format!("System dialog handled: tapped '{}'", button)
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -211,20 +229,20 @@ fn get_device_id() -> Result<String> {
         .args(["simctl", "list", "devices", "booted"])
         .output()
         .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse device ID from output
     for line in stdout.lines() {
         if line.contains("(") && line.contains(")") && line.contains("Booted") {
             if let Some(start) = line.find('(') {
                 if let Some(end) = line.find(')') {
-                    return Ok(line[start+1..end].to_string());
+                    return Ok(line[start + 1..end].to_string());
                 }
             }
         }
     }
-    
+
     // Return known device ID as fallback
     Ok("132B1310-2AF5-45F4-BB8E-CA5A2FEB9481".to_string())
 }

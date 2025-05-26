@@ -40,19 +40,19 @@ impl ClaudeClient {
             .timeout(Duration::from_secs(60))
             .build()
             .expect("Failed to create HTTP client");
-        
+
         Self {
             client,
             api_key,
             model: "claude-3-sonnet-20240229".to_string(),
         }
     }
-    
+
     pub fn with_model(mut self, model: String) -> Self {
         self.model = model;
         self
     }
-    
+
     pub async fn complete(&self, prompt: &str) -> Result<String> {
         let request = ClaudeRequest {
             model: self.model.clone(),
@@ -63,8 +63,9 @@ impl ClaudeClient {
             max_tokens: 4096,
             temperature: 0.0,
         };
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -73,7 +74,7 @@ impl ClaudeClient {
             .send()
             .await
             .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {}", e)))?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -82,19 +83,19 @@ impl ClaudeClient {
                 status, error_text
             )));
         }
-        
+
         let claude_response: ClaudeResponse = response
             .json()
             .await
             .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {}", e)))?;
-        
+
         claude_response
             .content
             .first()
             .map(|c| c.text.clone())
             .ok_or_else(|| TestError::Ai("Empty response from Claude".to_string()))
     }
-    
+
     pub async fn complete_with_context(
         &self,
         prompt: &str,
@@ -105,15 +106,16 @@ impl ClaudeClient {
             role: "user".to_string(),
             content: prompt.to_string(),
         });
-        
+
         let request = ClaudeRequest {
             model: self.model.clone(),
             messages,
             max_tokens: 4096,
             temperature: 0.0,
         };
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -122,7 +124,7 @@ impl ClaudeClient {
             .send()
             .await
             .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {}", e)))?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
@@ -131,12 +133,12 @@ impl ClaudeClient {
                 status, error_text
             )));
         }
-        
+
         let claude_response: ClaudeResponse = response
             .json()
             .await
             .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {}", e)))?;
-        
+
         claude_response
             .content
             .first()

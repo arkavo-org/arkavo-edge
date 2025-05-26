@@ -42,20 +42,18 @@ impl ToolRegistry {
             tools: std::collections::HashMap::new(),
         }
     }
-    
+
     pub fn register(&mut self, tool: Box<dyn TestTool>) {
         let definition = tool.definition();
         self.tools.insert(definition.name.clone(), tool);
     }
-    
+
     pub fn get(&self, name: &str) -> Option<&dyn TestTool> {
         self.tools.get(name).map(|boxed| &**boxed)
     }
-    
+
     pub fn list_tools(&self) -> Vec<ToolDefinition> {
-        self.tools.values()
-            .map(|tool| tool.definition())
-            .collect()
+        self.tools.values().map(|tool| tool.definition()).collect()
     }
 }
 

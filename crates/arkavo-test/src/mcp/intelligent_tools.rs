@@ -1,8 +1,8 @@
-use crate::{Result, TestError};
+use super::server::{Tool, ToolSchema};
 use crate::ai::analysis_engine::AnalysisEngine;
+use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
-use super::server::{Tool, ToolSchema};
 use std::sync::Arc;
 
 pub struct IntelligentBugFinderKit {
@@ -44,14 +44,13 @@ impl IntelligentBugFinderKit {
 #[async_trait]
 impl Tool for IntelligentBugFinderKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let module = params.get("module")
+        let module = params
+            .get("module")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing module parameter".to_string()))?;
-        
-        let context = params.get("context")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        
+
+        let context = params.get("context").and_then(|v| v.as_str()).unwrap_or("");
+
         // Use AI to analyze the module
         let analysis_prompt = format!(
             "Analyze the {} module for potential bugs. Context: {}. \
@@ -59,11 +58,12 @@ impl Tool for IntelligentBugFinderKit {
              edge cases, and logic errors. Provide specific examples.",
             module, context
         );
-        
-        let bugs = self.analysis_engine
+
+        let bugs = self
+            .analysis_engine
             .analyze_for_bugs(&analysis_prompt)
             .await?;
-        
+
         Ok(serde_json::json!({
             "module": module,
             "bugs": bugs,
@@ -71,7 +71,7 @@ impl Tool for IntelligentBugFinderKit {
             "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -87,7 +87,8 @@ impl InvariantDiscoveryKit {
         Self {
             schema: ToolSchema {
                 name: "discover_invariants".to_string(),
-                description: "Discover invariants that should always be true in a system".to_string(),
+                description: "Discover invariants that should always be true in a system"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -111,21 +112,24 @@ impl InvariantDiscoveryKit {
 #[async_trait]
 impl Tool for InvariantDiscoveryKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let system = params.get("system")
+        let system = params
+            .get("system")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing system parameter".to_string()))?;
-        
-        let code_context = params.get("code_context")
+
+        let code_context = params
+            .get("code_context")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        
-        let invariants = self.analysis_engine
+
+        let invariants = self
+            .analysis_engine
             .discover_properties_from_prompt(&format!(
                 "What invariants should always be true in the {}? Context: {}",
                 system, code_context
             ))
             .await?;
-        
+
         Ok(serde_json::json!({
             "system": system,
             "invariants": invariants,
@@ -133,7 +137,7 @@ impl Tool for InvariantDiscoveryKit {
             "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -178,12 +182,14 @@ impl ChaosTestingKit {
 #[async_trait]
 impl Tool for ChaosTestingKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let scenario = params.get("scenario")
+        let scenario = params
+            .get("scenario")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing scenario parameter".to_string()))?;
-        
+
         // Generate chaos test cases using AI
-        let test_cases = self.analysis_engine
+        let test_cases = self
+            .analysis_engine
             .generate_test_cases_from_prompt(&format!(
                 "Generate chaos engineering test cases for: {}. \
                  Include: timing issues, partial failures, cascading failures, \
@@ -191,7 +197,7 @@ impl Tool for ChaosTestingKit {
                 scenario
             ))
             .await?;
-        
+
         Ok(serde_json::json!({
             "scenario": scenario,
             "test_cases": test_cases,
@@ -202,7 +208,7 @@ impl Tool for ChaosTestingKit {
             "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -248,16 +254,19 @@ impl EdgeCaseExplorerKit {
 #[async_trait]
 impl Tool for EdgeCaseExplorerKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let flow = params.get("flow")
+        let flow = params
+            .get("flow")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing flow parameter".to_string()))?;
-        
-        let depth = params.get("depth")
+
+        let depth = params
+            .get("depth")
             .and_then(|v| v.as_str())
             .unwrap_or("deep");
-        
+
         // Use AI to explore edge cases
-        let edge_cases = self.analysis_engine
+        let edge_cases = self
+            .analysis_engine
             .generate_edge_cases(&format!(
                 "Explore edge cases in the {}. Depth: {}. \
                  Consider: boundary values, invalid inputs, timing issues, \
@@ -265,7 +274,7 @@ impl Tool for EdgeCaseExplorerKit {
                 flow, depth
             ))
             .await?;
-        
+
         Ok(serde_json::json!({
             "flow": flow,
             "edge_cases": edge_cases,
@@ -279,7 +288,7 @@ impl Tool for EdgeCaseExplorerKit {
             "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }

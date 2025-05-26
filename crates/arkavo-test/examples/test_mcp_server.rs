@@ -1,5 +1,5 @@
-use arkavo_test::{TestHarness, TestError};
 use arkavo_test::mcp::server::ToolRequest;
+use arkavo_test::{TestError, TestHarness};
 use serde_json::json;
 
 #[tokio::main]
@@ -8,10 +8,10 @@ async fn main() -> Result<(), TestError> {
 
     // Initialize the test harness
     let harness = TestHarness::new()?;
-    
+
     // Get access to the MCP server
     let mcp_server = harness.mcp_server();
-    
+
     // Demonstrate MCP tools
     println!("Available MCP tools:");
     println!("  - query_state: Query application state");
@@ -31,7 +31,7 @@ async fn main() -> Result<(), TestError> {
             }
         }),
     };
-    
+
     match mcp_server.call_tool(query_request).await {
         Ok(response) => println!("Response: {}\n", serde_json::to_string_pretty(&response)?),
         Err(e) => println!("Error: {}\n", e),
@@ -46,7 +46,7 @@ async fn main() -> Result<(), TestError> {
             "timeout": 30
         }),
     };
-    
+
     match mcp_server.call_tool(test_request).await {
         Ok(response) => println!("Response: {}\n", serde_json::to_string_pretty(&response)?),
         Err(e) => println!("Error: {}\n", e),
@@ -61,7 +61,7 @@ async fn main() -> Result<(), TestError> {
             "name": "test_checkpoint_1"
         }),
     };
-    
+
     match mcp_server.call_tool(snapshot_request).await {
         Ok(response) => println!("Response: {}\n", serde_json::to_string_pretty(&response)?),
         Err(e) => println!("Error: {}\n", e),
@@ -79,7 +79,7 @@ async fn main() -> Result<(), TestError> {
             }
         }),
     };
-    
+
     match mcp_server.call_tool(mutate_request).await {
         Ok(response) => println!("Response: {}\n", serde_json::to_string_pretty(&response)?),
         Err(e) => println!("Error: {}\n", e),
@@ -93,7 +93,7 @@ async fn main() -> Result<(), TestError> {
             "action": "list"
         }),
     };
-    
+
     match mcp_server.call_tool(list_request).await {
         Ok(response) => println!("Response: {}\n", serde_json::to_string_pretty(&response)?),
         Err(e) => println!("Error: {}\n", e),

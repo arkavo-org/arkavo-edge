@@ -1,4 +1,4 @@
-use arkavo_test::{TestHarness, TestError};
+use arkavo_test::{TestError, TestHarness};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -69,9 +69,13 @@ async fn main() -> Result<(), TestError> {
     // Step 1: Analyze the code to discover properties
     println!("Step 1: Discovering properties in payment module...");
     let properties = discover_properties("payment_processor").await?;
-    
+
     for prop in &properties {
-        println!("  Found: {} (confidence: {:.0}%)", prop.name, prop.confidence * 100.0);
+        println!(
+            "  Found: {} (confidence: {:.0}%)",
+            prop.name,
+            prop.confidence * 100.0
+        );
         println!("    {}", prop.description);
     }
     println!();
@@ -79,15 +83,19 @@ async fn main() -> Result<(), TestError> {
     // Step 2: Generate tests for high-confidence properties
     println!("Step 2: Generating tests for discovered properties...");
     let critical_property = &properties[0]; // "No double charges"
-    
+
     let test_cases = generate_tests(&critical_property.invariant, 100).await?;
-    println!("  Generated {} test cases for '{}'", test_cases.len(), critical_property.name);
+    println!(
+        "  Generated {} test cases for '{}'",
+        test_cases.len(),
+        critical_property.name
+    );
     println!();
 
     // Step 3: Execute tests and find bugs
     println!("Step 3: Executing tests to find bugs...");
     let bugs = execute_intelligent_tests(test_cases).await?;
-    
+
     if bugs.is_empty() {
         println!("  ✅ No bugs found!");
     } else {
@@ -97,7 +105,7 @@ async fn main() -> Result<(), TestError> {
             println!("  {}", bug.description);
             println!("\n  Minimal reproduction:");
             println!("  {}", bug.minimal_reproduction);
-            
+
             if let Some(fix) = &bug.suggested_fix {
                 println!("\n  Suggested fix:");
                 println!("  {}", fix);
@@ -111,8 +119,11 @@ async fn main() -> Result<(), TestError> {
     let chaos_results = run_chaos_tests("checkout_flow").await?;
     println!("  Injected {} failures", chaos_results.failures_injected);
     println!("  System recovered: {}", chaos_results.recovered);
-    println!("  Data consistency maintained: {}", chaos_results.consistent);
-    
+    println!(
+        "  Data consistency maintained: {}",
+        chaos_results.consistent
+    );
+
     println!("\n=== Demo Complete ===");
     println!("\nThis demonstrates how Claude Code can use Arkavo to:");
     println!("1. Understand your domain model");
@@ -130,7 +141,8 @@ async fn discover_properties(module: &str) -> Result<Vec<DiscoveredProperty>, Te
     Ok(vec![
         DiscoveredProperty {
             name: "No double charges".to_string(),
-            description: "A payment should never be charged twice for the same transaction".to_string(),
+            description: "A payment should never be charged twice for the same transaction"
+                .to_string(),
             invariant: "forall tx: payment_count(tx.id) <= 1".to_string(),
             confidence: 0.95,
         },
@@ -151,17 +163,19 @@ async fn discover_properties(module: &str) -> Result<Vec<DiscoveredProperty>, Te
 
 async fn generate_tests(invariant: &str, count: usize) -> Result<Vec<TestCase>, TestError> {
     // Generate test cases that try to violate the invariant
-    Ok((0..count).map(|i| TestCase {
-        id: format!("test_{}", i),
-        description: format!("Test case {} for invariant: {}", i, invariant),
-        inputs: generate_edge_case_inputs(i),
-    }).collect())
+    Ok((0..count)
+        .map(|i| TestCase {
+            id: format!("test_{}", i),
+            description: format!("Test case {} for invariant: {}", i, invariant),
+            inputs: generate_edge_case_inputs(i),
+        })
+        .collect())
 }
 
 fn generate_edge_case_inputs(seed: usize) -> serde_json::Value {
     // Generate edge cases based on seed
     match seed % 5 {
-        0 => json!({ "amount": 0.01, "currency": "USD" }),  // Minimum amount
+        0 => json!({ "amount": 0.01, "currency": "USD" }), // Minimum amount
         1 => json!({ "amount": 999999.99, "currency": "USD" }), // Maximum amount
         2 => json!({ "amount": 100.001, "currency": "USD" }), // Precision edge case
         3 => json!({ "amount": -50.00, "currency": "USD" }), // Negative amount

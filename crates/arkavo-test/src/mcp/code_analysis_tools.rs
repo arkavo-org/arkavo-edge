@@ -1,9 +1,9 @@
+use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
-use super::server::{Tool, ToolSchema};
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
 
 pub struct FindBugsKit {
     schema: ToolSchema,
@@ -52,35 +52,38 @@ impl Default for FindBugsKit {
 #[async_trait]
 impl Tool for FindBugsKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let path = params.get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
-        
-        let language = params.get("language")
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+
+        let language = params
+            .get("language")
             .and_then(|v| v.as_str())
             .unwrap_or("auto");
-        
-        let bug_types = params.get("bug_types")
+
+        let bug_types = params
+            .get("bug_types")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
             .unwrap_or_else(|| vec!["all"]);
-        
+
         // Determine language if auto
         let detected_language = if language == "auto" {
             detect_language(path)?
         } else {
             language.to_string()
         };
-        
+
         // Run analysis based on language
         let bugs = match detected_language.as_str() {
             "rust" => analyze_rust(path, &bug_types).await?,
             "swift" => analyze_swift(path, &bug_types).await?,
-            _ => return Err(TestError::Mcp(format!("Unsupported language: {}", detected_language))),
+            _ => {
+                return Err(TestError::Mcp(format!(
+                    "Unsupported language: {}",
+                    detected_language
+                )));
+            }
         };
-        
+
         Ok(serde_json::json!({
             "language": detected_language,
             "path": path,
@@ -91,7 +94,7 @@ impl Tool for FindBugsKit {
             }
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -136,14 +139,16 @@ impl Default for CodeAnalysisKit {
 #[async_trait]
 impl Tool for CodeAnalysisKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let file_path = params.get("file_path")
+        let file_path = params
+            .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing file_path parameter".to_string()))?;
-        
-        let _analysis_type = params.get("analysis_type")
+
+        let _analysis_type = params
+            .get("analysis_type")
             .and_then(|v| v.as_str())
             .unwrap_or("all");
-        
+
         Ok(serde_json::json!({
             "file_path": file_path,
             "analysis": {
@@ -167,7 +172,7 @@ impl Tool for CodeAnalysisKit {
             }
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -211,13 +216,14 @@ impl Default for TestAnalysisKit {
 #[async_trait]
 impl Tool for TestAnalysisKit {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let project_path = params.get("project_path")
+        let project_path = params
+            .get("project_path")
             .and_then(|v| v.as_str())
             .unwrap_or(".");
-        
+
         // Run test coverage analysis
         let coverage = analyze_test_coverage(project_path).await?;
-        
+
         Ok(serde_json::json!({
             "project_path": project_path,
             "coverage": coverage,
@@ -235,7 +241,7 @@ impl Tool for TestAnalysisKit {
             }
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
@@ -251,13 +257,13 @@ fn detect_language(path: &str) -> Result<String> {
     if Path::new(path).join("Package.swift").exists() {
         return Ok("swift".to_string());
     }
-    
+
     // Check file extensions in directory
     let output = Command::new("find")
         .args([path, "-name", "*.rs", "-o", "-name", "*.swift"])
         .output()
         .map_err(|e| TestError::Mcp(format!("Failed to detect language: {}", e)))?;
-    
+
     let files = String::from_utf8_lossy(&output.stdout);
     if files.contains(".rs") {
         Ok("rust".to_string())
@@ -270,7 +276,7 @@ fn detect_language(path: &str) -> Result<String> {
 
 async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
     let mut bugs = Vec::new();
-    
+
     // Run clippy for Rust analysis
     if bug_types.contains(&"all") || bug_types.iter().any(|&t| t != "all") {
         let output = Command::new("cargo")
@@ -278,7 +284,7 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
             .current_dir(path)
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run clippy: {}", e)))?;
-        
+
         // Parse clippy output
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if let Ok(msg) = serde_json::from_str::<Value>(line) {
@@ -296,13 +302,13 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
             }
         }
     }
-    
+
     Ok(bugs)
 }
 
 async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
     let mut bugs = Vec::new();
-    
+
     // Search for common Swift anti-patterns
     if bug_types.contains(&"all") || bug_types.contains(&"memory") {
         // Look for force unwrapping
@@ -310,7 +316,7 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
             .args(["-rn", "--include=*.swift", r"!\s*[{.\[(]", path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to search for patterns: {}", e)))?;
-        
+
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if let Some((file_line, _)) = line.split_once(':') {
                 if let Some((file, line_num)) = file_line.rsplit_once(':') {
@@ -325,7 +331,7 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
             }
         }
     }
-    
+
     Ok(bugs)
 }
 

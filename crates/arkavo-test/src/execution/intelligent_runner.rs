@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::ai::{AnalysisEngine, CodeContext, Property, TestCase as AiTestCase, BugAnalysis};
+use crate::ai::{AnalysisEngine, BugAnalysis, CodeContext, Property, TestCase as AiTestCase};
 use crate::execution::state::StateManager;
 use std::path::Path;
 use std::time::Instant;
@@ -29,7 +29,7 @@ impl IntelligentRunner {
 
         for file_path in &code_files {
             let context = self.load_code_context(file_path).await?;
-            
+
             // Step 2: Analyze domain model
             let analysis = self.analysis_engine.analyze_code(&context).await?;
             report.entities_found += analysis.entities.len();
@@ -43,7 +43,7 @@ impl IntelligentRunner {
             for property in &properties {
                 let test_results = self.test_property(property).await?;
                 report.tests_executed += test_results.len();
-                
+
                 for result in test_results {
                     if result.failed {
                         report.bugs_found += 1;
@@ -64,12 +64,12 @@ impl IntelligentRunner {
         let mut report = PropertyReport::new();
 
         let code_files = self.find_code_files(path).await?;
-        
+
         for file_path in &code_files {
             let context = self.load_code_context(file_path).await?;
             let analysis = self.analysis_engine.analyze_code(&context).await?;
             let properties = self.analysis_engine.discover_properties(&analysis).await?;
-            
+
             for property in properties {
                 // Verify the property with generated tests
                 let verification = self.verify_property(&property).await?;
@@ -83,7 +83,7 @@ impl IntelligentRunner {
     /// Generate edge cases for specific modules
     pub async fn generate_edge_cases(&self, module: &str) -> Result<EdgeCaseReport> {
         let mut report = EdgeCaseReport::new();
-        
+
         // Find relevant code for the module
         let context = CodeContext {
             file_path: format!("src/{}.rs", module),
@@ -92,7 +92,7 @@ impl IntelligentRunner {
         };
 
         let analysis = self.analysis_engine.analyze_code(&context).await?;
-        
+
         // Focus on edge cases
         for edge_case in &analysis.edge_cases {
             report.edge_cases.push(EdgeCase {
@@ -107,10 +107,13 @@ impl IntelligentRunner {
 
     async fn test_property(&self, property: &Property) -> Result<Vec<TestResult>> {
         let mut results = Vec::new();
-        
+
         // Generate test cases
-        let test_cases = self.analysis_engine.generate_test_cases(property, 50).await?;
-        
+        let test_cases = self
+            .analysis_engine
+            .generate_test_cases(property, 50)
+            .await?;
+
         for test_case in test_cases {
             let result = self.execute_test_case(&test_case).await?;
             results.push(result);
@@ -122,7 +125,7 @@ impl IntelligentRunner {
     async fn execute_test_case(&self, test_case: &AiTestCase) -> Result<TestResult> {
         // Create a snapshot before test
         let snapshot_id = self.state_manager.create_snapshot(&test_case.id)?;
-        
+
         // Execute the test (this would integrate with actual test execution)
         let start_time = Instant::now();
         let execution_result = self.simulate_test_execution(test_case).await;
@@ -143,9 +146,10 @@ impl IntelligentRunner {
             Err(error) => {
                 result.failed = true;
                 result.error = Some(error.clone());
-                
+
                 // Analyze the failure
-                let bug_analysis = self.analysis_engine
+                let bug_analysis = self
+                    .analysis_engine
                     .analyze_failure(test_case, &error)
                     .await?;
                 result.bug_analysis = Some(bug_analysis);
@@ -159,10 +163,13 @@ impl IntelligentRunner {
     }
 
     async fn verify_property(&self, property: &Property) -> Result<PropertyVerification> {
-        let test_cases = self.analysis_engine.generate_test_cases(property, 100).await?;
+        let test_cases = self
+            .analysis_engine
+            .generate_test_cases(property, 100)
+            .await?;
         let mut passed = 0;
         let mut failed = 0;
-        
+
         for test_case in test_cases {
             let result = self.execute_test_case(&test_case).await?;
             if result.failed {
@@ -224,13 +231,17 @@ pub async fn process_payment(user_id: &str, amount: f64) -> Result<Payment> {
     // Process payment...
     Ok(Payment { ... })
 }
-"#.to_string()
+"#
+            .to_string()
         } else {
             "// Mock code".to_string()
         }
     }
 
-    async fn simulate_test_execution(&self, test_case: &AiTestCase) -> std::result::Result<(), String> {
+    async fn simulate_test_execution(
+        &self,
+        test_case: &AiTestCase,
+    ) -> std::result::Result<(), String> {
         // Simulate test execution
         // In real implementation, would execute actual test
         match &test_case.expected_behavior {

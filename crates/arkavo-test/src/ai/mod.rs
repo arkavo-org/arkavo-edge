@@ -1,14 +1,8 @@
+pub mod analysis_engine;
 pub mod claude_client;
 pub mod planner;
-pub mod analysis_engine;
 
 pub use analysis_engine::{
-    AnalysisEngine, 
-    CodeContext, 
-    DomainAnalysis, 
-    Property, 
-    PropertyCategory,
+    AnalysisEngine, BugAnalysis, CodeContext, DomainAnalysis, Property, PropertyCategory, Severity,
     TestCase,
-    BugAnalysis,
-    Severity,
 };
