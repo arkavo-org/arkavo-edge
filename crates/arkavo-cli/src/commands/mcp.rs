@@ -84,7 +84,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "query_state",
                             "description": "Query application state",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "entity": {"type": "string"},
@@ -96,7 +96,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "mutate_state",
                             "description": "Mutate application state",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "entity": {"type": "string"},
@@ -109,7 +109,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "snapshot",
                             "description": "Manage state snapshots",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "action": {"type": "string", "enum": ["create", "restore", "list"]},
@@ -121,7 +121,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "run_test",
                             "description": "Execute test scenarios",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "test_name": {"type": "string"},
@@ -133,7 +133,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "ui_interaction",
                             "description": "Interact with iOS UI elements",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button"]},
@@ -154,7 +154,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "screen_capture",
                             "description": "Capture and analyze iOS screen",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "name": {"type": "string"},
@@ -166,7 +166,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             "name": "ui_query",
                             "description": "Query UI element state and properties",
-                            "parameters": {
+                            "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "query_type": {"type": "string", "enum": ["accessibility_tree", "visible_elements", "text_content"]},
@@ -253,13 +253,107 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 id: request.id,
                 result: Some(json!({
                     "tools": [
-                        {"name": "query_state", "description": "Query application state"},
-                        {"name": "mutate_state", "description": "Mutate application state"},
-                        {"name": "snapshot", "description": "Manage state snapshots"},
-                        {"name": "run_test", "description": "Execute test scenarios"},
-                        {"name": "ui_interaction", "description": "Interact with iOS UI elements"},
-                        {"name": "screen_capture", "description": "Capture and analyze iOS screen"},
-                        {"name": "ui_query", "description": "Query UI element state and properties"}
+                        {
+                            "name": "query_state", 
+                            "description": "Query application state",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "entity": {"type": "string"},
+                                    "filter": {"type": "object"}
+                                },
+                                "required": ["entity"]
+                            }
+                        },
+                        {
+                            "name": "mutate_state", 
+                            "description": "Mutate application state",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "entity": {"type": "string"},
+                                    "action": {"type": "string"},
+                                    "data": {"type": "object"}
+                                },
+                                "required": ["entity", "action"]
+                            }
+                        },
+                        {
+                            "name": "snapshot", 
+                            "description": "Manage state snapshots",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["create", "restore", "list"]},
+                                    "name": {"type": "string"}
+                                },
+                                "required": ["action"]
+                            }
+                        },
+                        {
+                            "name": "run_test", 
+                            "description": "Execute test scenarios",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "test_name": {"type": "string"},
+                                    "timeout": {"type": "integer"}
+                                },
+                                "required": ["test_name"]
+                            }
+                        },
+                        {
+                            "name": "ui_interaction", 
+                            "description": "Interact with iOS UI elements",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button"]},
+                                    "target": {
+                                        "type": "object",
+                                        "properties": {
+                                            "x": {"type": "number"},
+                                            "y": {"type": "number"},
+                                            "text": {"type": "string"},
+                                            "accessibility_id": {"type": "string"}
+                                        }
+                                    },
+                                    "value": {"type": "string"}
+                                },
+                                "required": ["action"]
+                            }
+                        },
+                        {
+                            "name": "screen_capture", 
+                            "description": "Capture and analyze iOS screen",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "analyze": {"type": "boolean"}
+                                },
+                                "required": ["name"]
+                            }
+                        },
+                        {
+                            "name": "ui_query", 
+                            "description": "Query UI element state and properties",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query_type": {"type": "string", "enum": ["accessibility_tree", "visible_elements", "text_content"]},
+                                    "filter": {
+                                        "type": "object",
+                                        "properties": {
+                                            "element_type": {"type": "string"},
+                                            "text_contains": {"type": "string"},
+                                            "accessibility_label": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "required": ["query_type"]
+                            }
+                        }
                     ]
                 })),
                 error: None,
