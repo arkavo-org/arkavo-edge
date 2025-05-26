@@ -244,6 +244,30 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 },
                                 "required": ["flow"]
                             }
+                        },
+                        {
+                            "name": "biometric_auth",
+                            "description": "Handle Face ID/Touch ID authentication prompts",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["enroll", "match", "fail", "cancel"]},
+                                    "biometric_type": {"type": "string", "enum": ["face_id", "touch_id"]}
+                                },
+                                "required": ["action"]
+                            }
+                        },
+                        {
+                            "name": "system_dialog",
+                            "description": "Handle iOS system dialogs and alerts",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["accept", "dismiss", "allow", "deny"]},
+                                    "button_text": {"type": "string"}
+                                },
+                                "required": ["action"]
+                            }
                         }
                     ]
                 }
@@ -480,6 +504,30 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     "depth": {"type": "string", "enum": ["shallow", "deep", "exhaustive"]}
                                 },
                                 "required": ["flow"]
+                            }
+                        },
+                        {
+                            "name": "biometric_auth", 
+                            "description": "Handle Face ID/Touch ID authentication prompts",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["enroll", "match", "fail", "cancel"]},
+                                    "biometric_type": {"type": "string", "enum": ["face_id", "touch_id"]}
+                                },
+                                "required": ["action"]
+                            }
+                        },
+                        {
+                            "name": "system_dialog", 
+                            "description": "Handle iOS system dialogs and alerts",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["accept", "dismiss", "allow", "deny"]},
+                                    "button_text": {"type": "string"}
+                                },
+                                "required": ["action"]
                             }
                         }
                     ]

@@ -7,6 +7,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::time::timeout;
 use super::ios_tools::{UiInteractionKit, ScreenCaptureKit, UiQueryKit};
+use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::code_analysis_tools::{FindBugsKit, CodeAnalysisKit, TestAnalysisKit};
 use super::intelligent_tools::{IntelligentBugFinderKit, InvariantDiscoveryKit, ChaosTestingKit, EdgeCaseExplorerKit};
 use crate::ai::analysis_engine::AnalysisEngine;
@@ -54,6 +55,8 @@ impl McpTestServer {
         tools.insert("ui_interaction".to_string(), Arc::new(UiInteractionKit::new()));
         tools.insert("screen_capture".to_string(), Arc::new(ScreenCaptureKit::new()));
         tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new()));
+        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new()));
+        tools.insert("system_dialog".to_string(), Arc::new(SystemDialogKit::new()));
         
         // Add code analysis tools
         tools.insert("find_bugs".to_string(), Arc::new(FindBugsKit::new()));
@@ -108,6 +111,7 @@ impl McpTestServer {
             tool_name,
             "query_state" | "mutate_state" | "snapshot" | "run_test" |
             "ui_interaction" | "screen_capture" | "ui_query" |
+            "biometric_auth" | "system_dialog" |
             "find_bugs" | "analyze_code" | "analyze_tests" |
             "intelligent_bug_finder" | "discover_invariants" | 
             "chaos_test" | "explore_edge_cases"
