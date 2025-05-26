@@ -271,6 +271,32 @@ impl Tool for UiQueryKit {
                     ]
                 }))
             },
+            "text_content" => {
+                Ok(serde_json::json!({
+                    "texts": [
+                        {
+                            "text": "Welcome to Arkavo",
+                            "type": "heading",
+                            "frame": {"x": 50, "y": 100, "width": 300, "height": 40}
+                        },
+                        {
+                            "text": "Sign up to get started",
+                            "type": "subheading",
+                            "frame": {"x": 50, "y": 150, "width": 300, "height": 30}
+                        },
+                        {
+                            "text": "Email",
+                            "type": "label",
+                            "frame": {"x": 50, "y": 180, "width": 100, "height": 20}
+                        },
+                        {
+                            "text": "Continue",
+                            "type": "button",
+                            "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
+                        }
+                    ]
+                }))
+            },
             _ => Err(TestError::Mcp(format!("Unsupported query type: {}", query_type))),
         }
     }
