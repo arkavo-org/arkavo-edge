@@ -37,11 +37,42 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     
     let mcp_server = harness.mcp_server();
     
-    // Send initialization response
-    let init_response = JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id: json!(1),
-        result: Some(json!({
+    eprintln!("Arkavo MCP Server starting...");
+    
+    // Main request/response loop
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    
+    let reader = io::BufReader::new(stdin);
+    for line in reader.lines() {
+        let line = line?;
+        
+        // Parse JSON-RPC request
+        let request: JsonRpcRequest = match serde_json::from_str(&line) {
+            Ok(req) => req,
+            Err(e) => {
+                let error_response = JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: json!(null),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32700,
+                        message: format!("Parse error: {}", e),
+                        data: None,
+                    }),
+                };
+                writeln!(stdout, "{}", serde_json::to_string(&error_response)?)?;
+                stdout.flush()?;
+                continue;
+            }
+        };
+        
+        // Handle request
+        let response = match request.method.as_str() {
+            "initialize" => JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: request.id,
+                result: Some(json!({
             "name": "arkavo",
             "version": "0.1.0",
             "capabilities": {
@@ -95,47 +126,65 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 },
                                 "required": ["test_name"]
                             }
+                        },
+                        {
+                            "name": "ui_interaction",
+                            "description": "Interact with iOS UI elements",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button"]},
+                                    "target": {
+                                        "type": "object",
+                                        "properties": {
+                                            "x": {"type": "number"},
+                                            "y": {"type": "number"},
+                                            "text": {"type": "string"},
+                                            "accessibility_id": {"type": "string"}
+                                        }
+                                    },
+                                    "value": {"type": "string"}
+                                },
+                                "required": ["action"]
+                            }
+                        },
+                        {
+                            "name": "screen_capture",
+                            "description": "Capture and analyze iOS screen",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "analyze": {"type": "boolean"}
+                                },
+                                "required": ["name"]
+                            }
+                        },
+                        {
+                            "name": "ui_query",
+                            "description": "Query UI element state and properties",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "query_type": {"type": "string", "enum": ["accessibility_tree", "visible_elements", "text_content"]},
+                                    "filter": {
+                                        "type": "object",
+                                        "properties": {
+                                            "element_type": {"type": "string"},
+                                            "text_contains": {"type": "string"},
+                                            "accessibility_label": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "required": ["query_type"]
+                            }
                         }
                     ]
                 }
             }
         })),
         error: None,
-    };
-    
-    eprintln!("Arkavo MCP Server started");
-    
-    // Main request/response loop
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    
-    let reader = io::BufReader::new(stdin);
-    for line in reader.lines() {
-        let line = line?;
-        
-        // Parse JSON-RPC request
-        let request: JsonRpcRequest = match serde_json::from_str(&line) {
-            Ok(req) => req,
-            Err(e) => {
-                let error_response = JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: json!(null),
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32700,
-                        message: format!("Parse error: {}", e),
-                        data: None,
-                    }),
-                };
-                writeln!(stdout, "{}", serde_json::to_string(&error_response)?)?;
-                stdout.flush()?;
-                continue;
-            }
-        };
-        
-        // Handle request
-        let response = match request.method.as_str() {
-            "initialize" => init_response.clone(),
+    },
             
             "tools/call" => {
                 if let Some(params) = request.params {
@@ -204,7 +253,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         {"name": "query_state", "description": "Query application state"},
                         {"name": "mutate_state", "description": "Mutate application state"},
                         {"name": "snapshot", "description": "Manage state snapshots"},
-                        {"name": "run_test", "description": "Execute test scenarios"}
+                        {"name": "run_test", "description": "Execute test scenarios"},
+                        {"name": "ui_interaction", "description": "Interact with iOS UI elements"},
+                        {"name": "screen_capture", "description": "Capture and analyze iOS screen"},
+                        {"name": "ui_query", "description": "Query UI element state and properties"}
                     ]
                 })),
                 error: None,
