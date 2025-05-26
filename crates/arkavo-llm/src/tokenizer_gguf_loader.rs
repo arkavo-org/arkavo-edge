@@ -165,18 +165,37 @@ impl GgufTokenizer {
             }
         }
 
-        // Fallback to basic ASCII vocabulary only if we couldn't find any tokens
-        println!("WARNING: No tokens found in GGUF metadata, creating basic ASCII vocabulary");
-        println!("This indicates a problem extracting the vocabulary from the GGUF file");
-        println!("Text generation may produce incorrect results");
-
-        // Generate a byte-level vocabulary - only as a last resort
+        // Fallback to enhanced vocabulary if we couldn't find any tokens
+        eprintln!("WARNING: No tokens found in GGUF metadata, creating enhanced vocabulary");
+        eprintln!("This indicates a problem extracting the vocabulary from the GGUF file");
+        
+        // First add basic ASCII characters that must be in any vocabulary (0-255)
         for i in 0..256 {
             let c = char::from_u32(i).unwrap_or('�');
             let token = c.to_string();
             vocab.insert(token.clone(), i);
             reverse_vocab.insert(i, token);
         }
+        
+        // Add GPT-2 style whitespace tokens (which Qwen3 uses)
+        let special_tokens = [
+            ("Ġ", 220),       // Space marker in GPT-2 tokenizers
+            ("Ċ", 198),       // Newline marker
+            ("Ĉ", 199),       // Tab marker
+            ("<|im_start|>", 151644),  // ChatML start token
+            ("<|im_end|>", 151645),    // ChatML end token
+            ("<|endoftext|>", 151643), // EOS token
+            ("<|system|>", 151646),    // System role marker
+            ("<|user|>", 151647),      // User role marker
+            ("<|assistant|>", 151648)  // Assistant role marker
+        ];
+        
+        for (token, id) in special_tokens.iter() {
+            vocab.insert(token.to_string(), *id);
+            reverse_vocab.insert(*id, token.to_string());
+        }
+        
+        eprintln!("Created fallback vocabulary with {} tokens", vocab.len());
     }
 
     /// Extract BPE merges from GGUF metadata

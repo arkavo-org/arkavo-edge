@@ -30,24 +30,15 @@ impl HfTokenizer {
     
     /// Encode text into token IDs
     pub fn encode(&self, text: &str) -> Result<Vec<u32>> {
-        println!("Tokenizing text of length {}", text.len());
-        let encoding = match self.tokenizer.encode(text, true) {
-            Ok(enc) => {
-                println!("Successfully encoded text to tokens");
-                enc
-            },
-            Err(e) => {
-                println!("ERROR: Failed to encode text: {}", e);
-                return Err(anyhow!("Failed to encode text: {}", e));
-            }
-        };
+        // Remove debug logging to avoid cluttering the output
+        let encoding = self.tokenizer.encode(text, true)
+            .map_err(|e| anyhow!("Failed to encode text: {}", e))?;
         
         let ids = encoding.get_ids().to_vec();
-        println!("Generated {} tokens: {:?}", ids.len(), ids);
         
         // Validate we have some tokens
-        if ids.is_empty() {
-            println!("WARNING: Tokenizer produced empty token sequence");
+        if ids.is_empty() && !text.is_empty() {
+            eprintln!("WARNING: Tokenizer produced empty token sequence for non-empty input");
         }
         
         Ok(ids)

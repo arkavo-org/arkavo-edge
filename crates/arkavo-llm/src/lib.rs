@@ -15,6 +15,7 @@ mod tokenizer_gguf_decoding; // GGUF tokenizer decoding logic
 mod tokenizer_gguf_loader;   // GGUF tokenizer loader functions
 mod tokenizer_data;     // Generated tokenizer data (legacy - for non-GGUF models only)
 mod embedded_model;     // Generated model data
+mod tokenizer_debug;    // Debug tools for tokenizer analysis
 mod utils;
 
 // Re-export everything
@@ -23,6 +24,7 @@ pub use tokenizer_hf::*;
 pub use tokenizer_gguf_core::*;
 pub use candle_transformer_layer::*;
 pub use embedded_model::EMBEDDED_MODEL;
+pub use tokenizer_debug::*;
 pub use utils::*;
 
 use anyhow::Result;
@@ -90,12 +92,13 @@ impl Qwen3Client {
             model: None,
             gguf_tokenizer: None,
             hf_tokenizer: None,
-            using_gguf_tokenizer: true, // Default to GGUF tokenizer for embedded models
+            using_gguf_tokenizer: false, // Default to HuggingFace tokenizer for reliable tokenization
         }
     }
     
     /// Creates a new Qwen3Client using HuggingFace tokenizer explicitly
-    /// This is only for non-GGUF models and should generally be avoided for GGUF models
+    /// This option is available when you want to use a specific HuggingFace tokenizer
+    /// instead of the one embedded in the GGUF model
     pub fn new_with_hf_tokenizer(config: Qwen3Config) -> Self {
         Self {
             config,
@@ -144,43 +147,52 @@ impl Qwen3Client {
             }
         }
         
-        // For GGUF models, extract the tokenizer data directly from the GGUF file
+        // For testing purposes, we can try to load the GGUF tokenizer if explicitly requested
         if self.using_gguf_tokenizer {
             match GgufTokenizer::new(crate::EMBEDDED_MODEL) {
                 Ok(tokenizer) => {
                     // Do a simple verification to make sure basic tokens are present
                     let basic_token_test = [
-                        (" ", 259),     // Space token ID
-                        ("\n", 285),    // Newline token ID
-                        ("<|im_start|>", 151643), // Common special token
+                        (" ", 220),     // Space token ID (GPT-2 style)
+                        ("!", 0),       // Exclamation mark - should be present
+                        ("<|im_start|>", 151644), // ChatML start token
+                        ("<|im_end|>", 151645),   // ChatML end token
                     ];
                     
                     // Quick verification for critical tokens to validate the tokenizer
-                    let mut missing_tokens = Vec::new();
+                    let mut has_missing_tokens = false;
                     for (token_str, expected_id) in &basic_token_test {
                         match tokenizer.encode(token_str) {
-                            Ok(ids) if ids.contains(expected_id) => {
-                                // Token verified successfully
+                            Ok(ids) if ids.contains(expected_id) || expected_id == &0 => {
+                                // Token verified successfully or we're checking for UNK (0)
+                                if token_str == &"!" && ids.contains(&0) {
+                                    // Found an issue - exclamation mark is UNK
+                                    has_missing_tokens = true;
+                                    eprintln!("⚠️ WARNING: '!' character produces UNK tokens with GGUF tokenizer");
+                                }
                             },
-                            Ok(_) => {
-                                // This is a "soft" failure - we found a token, but not with the expected ID
-                                // Don't consider this missing - the token can be encoded
+                            Ok(ids) => {
+                                eprintln!("⚠️ WARNING: Token '{}' found but with ID {:?} (expected {})",
+                                          token_str, ids, expected_id);
                             },
                             Err(_) => {
-                                missing_tokens.push(*token_str);
+                                has_missing_tokens = true;
+                                eprintln!("⚠️ WARNING: Token '{}' failed to encode with GGUF tokenizer", token_str);
                             }
                         }
                     }
                     
                     // If critical tokens are missing, show a more detailed warning
-                    if !missing_tokens.is_empty() {
-                        eprintln!("⚠️ WARNING: Basic token verification failed. The tokenizer may not produce optimal results.");
+                    if has_missing_tokens {
+                        eprintln!("⚠️ WARNING: GGUF tokenizer verification failed. Falling back to HuggingFace tokenizer.");
+                        self.using_gguf_tokenizer = false;
+                    } else {
+                        self.gguf_tokenizer = Some(tokenizer);
                     }
-                    
-                    self.gguf_tokenizer = Some(tokenizer);
                 },
-                Err(_) => {
+                Err(e) => {
                     // Fall back to HuggingFace tokenizer
+                    eprintln!("⚠️ WARNING: Failed to load GGUF tokenizer: {}. Falling back to HuggingFace tokenizer.", e);
                     self.using_gguf_tokenizer = false;
                 }
             }
@@ -189,13 +201,50 @@ impl Qwen3Client {
         // Fall back to HuggingFace tokenizer if GGUF tokenizer initialization failed
         // or if HuggingFace tokenizer was explicitly requested
         if !self.using_gguf_tokenizer {
-            match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
-                Ok(tokenizer) => {
-                    self.hf_tokenizer = Some(tokenizer);
+            // Attempt to load from the models directory first
+            let tokenizer_paths = [
+                "models/tokenizer.json",
+                "./models/tokenizer.json",
+                "./crates/arkavo-llm/models/tokenizer.json",
+                "../crates/arkavo-llm/models/tokenizer.json",
+            ];
+            
+            let mut loaded_from_file = false;
+            
+            // Try loading from file paths first
+            for path in &tokenizer_paths {
+                if std::path::Path::new(path).exists() {
+                    match tokenizer_hf::HfTokenizer::new(path) {
+                        Ok(tokenizer) => {
+                            eprintln!("✓ HuggingFace tokenizer loaded from {}", path);
+                            self.hf_tokenizer = Some(tokenizer);
+                            loaded_from_file = true;
+                            break;
+                        },
+                        Err(e) => {
+                            eprintln!("⚠️ Failed to load HF tokenizer from {}: {}", path, e);
+                        }
+                    }
                 }
-                Err(err) => {
-                    return Err(anyhow::anyhow!("Failed to load any tokenizer: {}", err));
+            }
+            
+            // Fall back to embedded JSON if file loading failed
+            if !loaded_from_file {
+                eprintln!("Attempting to load HF tokenizer from embedded bytes");
+                match tokenizer_hf::HfTokenizer::from_bytes(utils::EMBEDDED_TOKENIZER_JSON) {
+                    Ok(tokenizer) => {
+                        eprintln!("✓ HuggingFace tokenizer loaded from embedded bytes");
+                        self.hf_tokenizer = Some(tokenizer);
+                    },
+                    Err(err) => {
+                        return Err(anyhow::anyhow!("Failed to load any tokenizer: {}", err));
+                    }
                 }
+            }
+            
+            // Ensure we have a tokenizer
+            if self.hf_tokenizer.is_none() {
+                return Err(anyhow::anyhow!("Failed to load any tokenizer"));
             }
         }
         

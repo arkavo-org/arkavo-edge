@@ -21,7 +21,7 @@ cargo build --release
 cargo run
 
 # Run chat with prompt
-cargo run -- chat --prompt "Hi"
+cargo run --bin arkavo --profile dev -- chat --prompt Hi
 
 # Run tests
 cargo test
