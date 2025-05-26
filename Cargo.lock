@@ -76,6 +76,8 @@ dependencies = [
  "arkavo-repo",
  "arkavo-terminal",
  "arkavo-test",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

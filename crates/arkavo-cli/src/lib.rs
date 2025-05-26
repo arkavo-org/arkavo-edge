@@ -12,6 +12,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
+        "serve" => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async {
+                commands::mcp::run().await
+            })
+        },
         "help" => {
             print_usage();
             Ok(())
@@ -44,6 +50,7 @@ fn print_usage() {
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run tests with streaming failure feedback");
     println!("    vault     Import/export notes to Edge Vault");
+    println!("    serve     Run as MCP server for AI tools integration");
     println!("    help      Print this help message");
     println!();
     println!("OPTIONS:");

@@ -10,6 +10,80 @@ A developer-centric agentic CLI tool for AI-agent development and framework main
 - GPU-accelerated terminal UI
 - Repository mapping and file tracking
 - Encrypted storage with Edge Vault
+- **AI-powered test harness with MCP server support**
+
+## Test Harness with MCP Server
+
+Arkavo Edge includes an AI-driven test harness that can be used as an MCP (Model Context Protocol) server, making it ideal for use with Claude Code and other AI development tools.
+
+### Key Capabilities
+
+- **Gherkin/BDD Support**: Parse and execute `.feature` files with natural language test specifications
+- **MCP Server Integration**: Expose test tools via MCP protocol for AI-driven testing
+- **State Management**: Query, mutate, and snapshot application state during tests
+- **Business-Readable Reports**: Generate reports in Markdown, HTML, JSON, and Slack formats
+- **Mobile Testing Support**: iOS bridge with FFI for native app testing
+
+### Using with Claude Code
+
+To use the Arkavo test harness as an MCP server in Claude Code:
+
+1. **Build the project first**:
+   ```bash
+   cargo build --release
+   ```
+
+2. **Configure MCP in Claude Code settings**:
+   ```json
+   {
+     "mcpServers": {
+       "arkavo": {
+         "command": "/path/to/arkavo-edge/target/release/arkavo",
+         "args": ["serve"],
+         "cwd": "/path/to/your/project"
+       }
+     }
+   }
+   ```
+
+3. **Available MCP Tools**:
+   - `query_state`: Query application state (e.g., `{"entity": "user", "filter": {"field": "balance"}}`)
+   - `mutate_state`: Modify application state (e.g., `{"entity": "user", "action": "update", "data": {...}}`)
+   - `snapshot`: Create/restore state snapshots (e.g., `{"action": "create", "name": "checkpoint1"}`)
+   - `run_test`: Execute test scenarios (e.g., `{"test_name": "login_test", "timeout": 30}`)
+
+3. **Example Gherkin Test**:
+   ```gherkin
+   Feature: User Authentication
+     Scenario: Successful login
+       Given a user with valid credentials
+       When the user attempts to login
+       Then the login should succeed
+       And the user should see the dashboard
+   ```
+
+### Running Tests
+
+```bash
+# Run all tests in current project
+arkavo test
+
+# Run BDD/Gherkin tests
+arkavo test --bdd
+
+# Run with specific feature file
+arkavo test --feature tests/auth.feature
+
+# Generate test plan from natural language
+arkavo test --plan "Test user login with 2FA enabled"
+```
+
+### Example Integration
+
+See `crates/arkavo-test/examples/` for complete examples:
+- `test_mcp_server.rs`: Demonstrates MCP server functionality
+- `simple_test_demo.rs`: Shows Gherkin test execution
+- `banking_app.feature`: Example BDD test specification
 
 ## Usage
 
@@ -28,6 +102,9 @@ arkavo test
 
 # Import/export notes to Edge Vault
 arkavo vault
+
+# Run as MCP server for AI tools integration
+arkavo serve
 ```
 
 ## Development
