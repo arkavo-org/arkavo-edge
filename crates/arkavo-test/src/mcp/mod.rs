@@ -1,4 +1,5 @@
 pub mod biometric_dialog_handler;
+pub mod biometric_test_scenarios;
 pub mod code_analysis_tools;
 pub mod coordinate_tools;
 pub mod deeplink_tools;

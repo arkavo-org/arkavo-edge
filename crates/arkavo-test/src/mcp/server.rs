@@ -1,4 +1,5 @@
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
+use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
 use super::coordinate_tools::CoordinateConverterKit;
 use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
@@ -138,6 +139,16 @@ impl McpTestServer {
         tools.insert(
             "face_id_status".to_string(),
             Arc::new(FaceIdStatusChecker::new(device_manager.clone())),
+        );
+
+        // Add biometric test scenario tools
+        tools.insert(
+            "biometric_test_scenario".to_string(),
+            Arc::new(BiometricTestScenario::new(device_manager.clone())),
+        );
+        tools.insert(
+            "smart_biometric_handler".to_string(),
+            Arc::new(SmartBiometricHandler::new(device_manager.clone())),
         );
 
         // Add code analysis tools
