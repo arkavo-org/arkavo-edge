@@ -7,3 +7,56 @@ license.workspace = true
 description = "Test harness for the Arkavo agentic CLI tool - local test runner adapter for various languages"
 
 [dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# MCP protocol
+arkavo-protocol = { path = "../arkavo-protocol" }
+
+# Gherkin parsing
+gherkin = "0.14"
+
+# State management
+bincode = "1.3"
+
+# HTTP client for AI integration
+reqwest = { version = "0.12", features = ["json"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID generation
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Template engine for reporting
+handlebars = "6.3"
+
+# Test utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# File system
+glob = "0.3"
+
+# JSON Schema validation
+jsonschema = "0.26"
+
+[build-dependencies]
+cc = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.6"
+tempfile = "3.14"
