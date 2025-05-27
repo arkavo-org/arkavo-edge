@@ -178,7 +178,7 @@ jobs:
 
       - name: Codesign binary
         run: |
-          codesign --force --options=runtime --timestamp --sign "Developer ID Application: Your Name (TEAMID)" target/aarch64-apple-darwin/release/arkavo
+          codesign --force --options=runtime --timestamp --sign "Developer ID Application: Arkavo LLC (M8GS7ZT95Y)" target/aarch64-apple-darwin/release/arkavo
 
       - name: Prepare binary
         run: |
