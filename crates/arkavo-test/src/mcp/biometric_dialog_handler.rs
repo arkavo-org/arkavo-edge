@@ -247,7 +247,6 @@ impl AccessibilityDialogHandler {
             device_manager,
         }
     }
-
 }
 
 #[async_trait]

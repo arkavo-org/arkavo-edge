@@ -169,12 +169,25 @@ impl Tool for BiometricKit {
                 }))
             }
             "cancel" => {
-                // Cancel biometric prompt
+                // Cancel biometric prompt using multiple methods
+                // First try the standard biometric cancel
+                Command::new("xcrun")
+                    .args(["simctl", "ui", &device_id, "biometric", "cancel"])
+                    .output()
+                    .ok();
+
+                // Also send ESC key to dismiss dialog
+                Command::new("xcrun")
+                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                    .output()
+                    .ok();
+
                 Ok(serde_json::json!({
                     "success": true,
                     "action": "cancel",
                     "biometric_type": biometric_type,
-                    "message": "Biometric authentication cancelled"
+                    "message": "Biometric authentication cancelled",
+                    "method": "biometric_cancel_and_escape_key"
                 }))
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
