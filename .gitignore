@@ -10,3 +10,9 @@
 .classpath
 .project
 .settings/
+.DS_Store
+/test_results/
+
+# Test/demo scripts
+test_*.sh
+demo_*.sh
