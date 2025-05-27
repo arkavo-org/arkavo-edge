@@ -1,15 +1,18 @@
 use super::server::{Tool, ToolSchema};
-use crate::{Result, TestError};
+use crate::{bridge::ios_ffi::RustTestHarness, Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 pub struct BiometricKit {
     schema: ToolSchema,
+    #[allow(dead_code)]
+    harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl BiometricKit {
-    pub fn new() -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "biometric_auth".to_string(),
@@ -31,15 +34,11 @@ impl BiometricKit {
                     "required": ["action"]
                 }),
             },
+            harness,
         }
     }
 }
 
-impl Default for BiometricKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl Tool for BiometricKit {
@@ -156,10 +155,12 @@ impl Tool for BiometricKit {
 
 pub struct SystemDialogKit {
     schema: ToolSchema,
+    #[allow(dead_code)]
+    harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl SystemDialogKit {
-    pub fn new() -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "system_dialog".to_string(),
@@ -180,15 +181,11 @@ impl SystemDialogKit {
                     "required": ["action"]
                 }),
             },
+            harness,
         }
     }
 }
 
-impl Default for SystemDialogKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl Tool for SystemDialogKit {

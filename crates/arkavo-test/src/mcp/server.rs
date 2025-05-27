@@ -5,6 +5,7 @@ use super::intelligent_tools::{
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use crate::ai::analysis_engine::AnalysisEngine;
+use crate::bridge::ios_ffi::RustTestHarness;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
@@ -35,6 +36,8 @@ pub struct McpTestServer {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Tool>>>>,
     metrics: Arc<Metrics>,
     state_store: Arc<StateStore>,
+    #[allow(dead_code)]
+    ios_harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl std::fmt::Debug for McpTestServer {
@@ -43,6 +46,7 @@ impl std::fmt::Debug for McpTestServer {
             .field("tools", &"<tools>")
             .field("metrics", &self.metrics)
             .field("state_store", &"<state>")
+            .field("ios_harness", &"<harness>")
             .finish()
     }
 }
@@ -53,6 +57,9 @@ impl McpTestServer {
 
         // Initialize analysis engine for intelligent tools
         let analysis_engine = Arc::new(AnalysisEngine::new()?);
+        
+        // Initialize iOS harness
+        let ios_harness = Arc::new(Mutex::new(RustTestHarness::new()));
 
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
         tools.insert("mutate_state".to_string(), Arc::new(MutateStateKit::new()));
@@ -63,17 +70,17 @@ impl McpTestServer {
         // Add iOS-specific tools
         tools.insert(
             "ui_interaction".to_string(),
-            Arc::new(UiInteractionKit::new()),
+            Arc::new(UiInteractionKit::new(ios_harness.clone())),
         );
         tools.insert(
             "screen_capture".to_string(),
-            Arc::new(ScreenCaptureKit::new()),
+            Arc::new(ScreenCaptureKit::new(ios_harness.clone())),
         );
-        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new()));
-        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new()));
+        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new(ios_harness.clone())));
+        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new(ios_harness.clone())));
         tools.insert(
             "system_dialog".to_string(),
-            Arc::new(SystemDialogKit::new()),
+            Arc::new(SystemDialogKit::new(ios_harness.clone())),
         );
 
         // Add code analysis tools
@@ -135,6 +142,7 @@ impl McpTestServer {
             tools: Arc::new(RwLock::new(updated_tools)),
             metrics: Arc::new(Metrics::new()),
             state_store,
+            ios_harness,
         })
     }
 

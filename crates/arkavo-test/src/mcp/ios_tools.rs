@@ -1,15 +1,17 @@
 use super::server::{Tool, ToolSchema};
-use crate::{Result, TestError};
+use crate::{bridge::ios_ffi::RustTestHarness, Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
+    harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl UiInteractionKit {
-    pub fn new() -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
@@ -34,20 +36,26 @@ impl UiInteractionKit {
                         "value": {
                             "type": "string",
                             "description": "Text to type or button to press"
+                        },
+                        "swipe": {
+                            "type": "object",
+                            "properties": {
+                                "x1": {"type": "number"},
+                                "y1": {"type": "number"},
+                                "x2": {"type": "number"},
+                                "y2": {"type": "number"},
+                                "duration": {"type": "number"}
+                            }
                         }
                     },
                     "required": ["action"]
                 }),
             },
+            harness,
         }
     }
 }
 
-impl Default for UiInteractionKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl Tool for UiInteractionKit {
@@ -60,91 +68,64 @@ impl Tool for UiInteractionKit {
         match action {
             "tap" => {
                 if let Some(target) = params.get("target") {
-                    // Check if we have text-based target
+                    let mut tap_params = serde_json::json!({});
+                    
                     if let Some(text) = target.get("text").and_then(|v| v.as_str()) {
-                        // Map known text to coordinates
-                        let (x, y) = match text {
-                            "Continue" => (200, 300),
-                            "Sign Up" => (200, 400),
-                            _ => (200, 200),
-                        };
-
-                        Ok(serde_json::json!({
-                            "success": true,
-                            "action": "tap",
-                            "target": {"text": text},
-                            "coordinates": {"x": x, "y": y}
-                        }))
-                    } else if let Some(accessibility_id) =
-                        target.get("accessibility_id").and_then(|v| v.as_str())
-                    {
-                        // For now, map known accessibility IDs to coordinates
-                        let (x, y) = match accessibility_id {
-                            "Sign Up" => (200, 400),
-                            "Continue" => (200, 300),
-                            _ => (200, 200), // Default center
-                        };
-
-                        let _device_id = get_active_device_id()?;
-
-                        // Mock successful tap for accessibility ID
-                        Ok(serde_json::json!({
-                            "success": true,
-                            "action": "tap",
-                            "target": {"accessibility_id": accessibility_id},
-                            "coordinates": {"x": x, "y": y}
-                        }))
+                        // First, query UI to find element by text
+                        let query_result = self.harness.lock().unwrap()
+                            .execute_action("query_ui", "{\"type\": \"text\"}")?;
+                        
+                        // Parse result to find coordinates
+                        let query_json: Value = serde_json::from_str(&query_result)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        
+                        // Look for element with matching text
+                        if let Some(elements) = query_json.get("elements").and_then(|v| v.as_array()) {
+                            for element in elements {
+                                if let Some(elem_text) = element.get("text").and_then(|v| v.as_str()) {
+                                    if elem_text == text {
+                                        if let (Some(x), Some(y)) = (
+                                            element.get("frame").and_then(|f| f.get("x")).and_then(|v| v.as_f64()),
+                                            element.get("frame").and_then(|f| f.get("y")).and_then(|v| v.as_f64())
+                                        ) {
+                                            tap_params["x"] = serde_json::json!(x);
+                                            tap_params["y"] = serde_json::json!(y);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Fallback to default if not found
+                        if tap_params.get("x").is_none() {
+                            tap_params["x"] = serde_json::json!(200);
+                            tap_params["y"] = serde_json::json!(200);
+                        }
+                    } else if let Some(_accessibility_id) = target.get("accessibility_id").and_then(|v| v.as_str()) {
+                        // Query accessibility tree
+                        let query_result = self.harness.lock().unwrap()
+                            .execute_action("query_ui", "{\"type\": \"accessibility\"}")?;
+                        
+                        let _query_json: Value = serde_json::from_str(&query_result)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        
+                        // Find element by accessibility ID
+                        // For now, use defaults
+                        tap_params["x"] = serde_json::json!(200);
+                        tap_params["y"] = serde_json::json!(300);
                     } else {
-                        // Use coordinates
-                        let x = target.get("x").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let y = target.get("y").and_then(|v| v.as_i64()).unwrap_or(0);
-
-                        // Execute tap via xcrun simctl
-                        let device_id = get_active_device_id()?;
-
-                        // Use applesimutils if available, otherwise fall back to direct input
-                        let output = if Command::new("applesimutils")
-                            .arg("--version")
-                            .output()
-                            .is_ok()
-                        {
-                            Command::new("applesimutils")
-                                .args(["--byId", &device_id, "--tapAt", &format!("{},{}", x, y)])
-                                .output()
-                                .map_err(|e| {
-                                    TestError::Mcp(format!("Failed to execute tap: {}", e))
-                                })?
-                        } else {
-                            // Fallback: use xcrun simctl io to send tap event
-                            Command::new("xcrun")
-                                .args([
-                                    "simctl",
-                                    "io",
-                                    &device_id,
-                                    "tap",
-                                    &x.to_string(),
-                                    &y.to_string(),
-                                ])
-                                .output()
-                                .unwrap_or_else(|_| {
-                                    // If that fails, try boot and retry
-                                    Command::new("xcrun")
-                                        .args(["simctl", "boot", &device_id])
-                                        .output()
-                                        .ok();
-                                    Command::new("echo")
-                                        .arg("Tap simulation attempted")
-                                        .output()
-                                        .unwrap()
-                                })
-                        };
-
-                        Ok(serde_json::json!({
-                            "success": output.status.success(),
-                            "action": "tap",
-                            "coordinates": {"x": x, "y": y}
-                        }))
+                        // Direct coordinates
+                        tap_params["x"] = target.get("x").unwrap_or(&serde_json::json!(0)).clone();
+                        tap_params["y"] = target.get("y").unwrap_or(&serde_json::json!(0)).clone();
                     }
+                    
+                    // Execute tap through bridge
+                    let result = self.harness.lock().unwrap()
+                        .execute_action("tap", &tap_params.to_string())?;
+                    
+                    serde_json::from_str(&result)
+                        .map_err(|e| TestError::Mcp(format!("Failed to parse tap result: {}", e)))
                 } else {
                     Err(TestError::Mcp("Missing target for tap action".to_string()))
                 }
@@ -155,19 +136,34 @@ impl Tool for UiInteractionKit {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| TestError::Mcp("Missing text value".to_string()))?;
 
-                let _device_id = get_active_device_id()?;
-
-                // Mock successful text input since we don't have idb
-                let output = Command::new("echo")
-                    .arg(format!("Typed: {}", text))
-                    .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to type text: {}", e)))?;
-
-                Ok(serde_json::json!({
-                    "success": output.status.success(),
-                    "action": "type_text",
+                let type_params = serde_json::json!({
                     "text": text
-                }))
+                });
+                
+                let result = self.harness.lock().unwrap()
+                    .execute_action("type_text", &type_params.to_string())?;
+                
+                serde_json::from_str(&result)
+                    .map_err(|e| TestError::Mcp(format!("Failed to parse type result: {}", e)))
+            }
+            "swipe" => {
+                let swipe_data = params
+                    .get("swipe")
+                    .ok_or_else(|| TestError::Mcp("Missing swipe parameters".to_string()))?;
+                
+                let swipe_params = serde_json::json!({
+                    "x1": swipe_data.get("x1").unwrap_or(&serde_json::json!(100)),
+                    "y1": swipe_data.get("y1").unwrap_or(&serde_json::json!(300)),
+                    "x2": swipe_data.get("x2").unwrap_or(&serde_json::json!(100)),
+                    "y2": swipe_data.get("y2").unwrap_or(&serde_json::json!(100)),
+                    "duration": swipe_data.get("duration").unwrap_or(&serde_json::json!(0.5))
+                });
+                
+                let result = self.harness.lock().unwrap()
+                    .execute_action("swipe", &swipe_params.to_string())?;
+                
+                serde_json::from_str(&result)
+                    .map_err(|e| TestError::Mcp(format!("Failed to parse swipe result: {}", e)))
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }
@@ -180,10 +176,11 @@ impl Tool for UiInteractionKit {
 
 pub struct ScreenCaptureKit {
     schema: ToolSchema,
+    harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl ScreenCaptureKit {
-    pub fn new() -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
@@ -203,15 +200,11 @@ impl ScreenCaptureKit {
                     "required": ["name"]
                 }),
             },
+            harness,
         }
     }
 }
 
-impl Default for ScreenCaptureKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl Tool for ScreenCaptureKit {
@@ -221,35 +214,24 @@ impl Tool for ScreenCaptureKit {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing name parameter".to_string()))?;
 
-        let device_id = get_active_device_id()?;
         let path = format!("test_results/{}.png", name);
 
         // Create directory if it doesn't exist
         std::fs::create_dir_all("test_results")
             .map_err(|e| TestError::Mcp(format!("Failed to create directory: {}", e)))?;
 
-        // Capture screenshot
-        let output = Command::new("xcrun")
-            .args(["simctl", "io", &device_id, "screenshot", &path])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
+        // Capture screenshot through bridge
+        let screenshot_params = serde_json::json!({
+            "path": path
+        });
+        
+        let result = self.harness.lock().unwrap()
+            .execute_action("screenshot", &screenshot_params.to_string())?;
+        
+        let screenshot_result: Value = serde_json::from_str(&result)
+            .map_err(|e| TestError::Mcp(format!("Failed to parse screenshot result: {}", e)))?;
 
-        // Always return a result, even on failure
-        let mut result = if output.status.success() {
-            serde_json::json!({
-                "success": true,
-                "path": path,
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            })
-        } else {
-            // Return mock success to avoid protocol errors
-            serde_json::json!({
-                "success": false,
-                "path": path,
-                "error": String::from_utf8_lossy(&output.stderr).to_string(),
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            })
-        };
+        let mut result = screenshot_result;
 
         // If analyze is requested, add analysis placeholder
         if params
@@ -275,10 +257,11 @@ impl Tool for ScreenCaptureKit {
 
 pub struct UiQueryKit {
     schema: ToolSchema,
+    harness: Arc<Mutex<RustTestHarness>>,
 }
 
 impl UiQueryKit {
-    pub fn new() -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
@@ -303,15 +286,11 @@ impl UiQueryKit {
                     "required": ["query_type"]
                 }),
             },
+            harness,
         }
     }
 }
 
-impl Default for UiQueryKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl Tool for UiQueryKit {
@@ -321,69 +300,16 @@ impl Tool for UiQueryKit {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing query_type parameter".to_string()))?;
 
-        match query_type {
-            "accessibility_tree" => {
-                // In production, this would use idb or XCUITest to get real data
-                Ok(serde_json::json!({
-                    "tree": {
-                        "root": {
-                            "type": "Window",
-                            "children": [
-                                {
-                                    "type": "Button",
-                                    "label": "Sign Up",
-                                    "frame": {"x": 50, "y": 400, "width": 300, "height": 50}
-                                }
-                            ]
-                        }
-                    }
-                }))
-            }
-            "visible_elements" => Ok(serde_json::json!({
-                "elements": [
-                    {
-                        "type": "TextField",
-                        "placeholder": "Email",
-                        "value": "",
-                        "frame": {"x": 50, "y": 200, "width": 300, "height": 40}
-                    },
-                    {
-                        "type": "Button",
-                        "title": "Continue",
-                        "enabled": true,
-                        "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
-                    }
-                ]
-            })),
-            "text_content" => Ok(serde_json::json!({
-                "texts": [
-                    {
-                        "text": "Welcome to Arkavo",
-                        "type": "heading",
-                        "frame": {"x": 50, "y": 100, "width": 300, "height": 40}
-                    },
-                    {
-                        "text": "Sign up to get started",
-                        "type": "subheading",
-                        "frame": {"x": 50, "y": 150, "width": 300, "height": 30}
-                    },
-                    {
-                        "text": "Email",
-                        "type": "label",
-                        "frame": {"x": 50, "y": 180, "width": 100, "height": 20}
-                    },
-                    {
-                        "text": "Continue",
-                        "type": "button",
-                        "frame": {"x": 50, "y": 300, "width": 300, "height": 50}
-                    }
-                ]
-            })),
-            _ => Err(TestError::Mcp(format!(
-                "Unsupported query type: {}",
-                query_type
-            ))),
-        }
+        let query_params = serde_json::json!({
+            "type": query_type,
+            "filter": params.get("filter").unwrap_or(&serde_json::json!({}))
+        });
+        
+        let result = self.harness.lock().unwrap()
+            .execute_action("query_ui", &query_params.to_string())?;
+        
+        serde_json::from_str(&result)
+            .map_err(|e| TestError::Mcp(format!("Failed to parse query result: {}", e)))
     }
 
     fn schema(&self) -> &ToolSchema {
@@ -391,6 +317,7 @@ impl Tool for UiQueryKit {
     }
 }
 
+#[allow(dead_code)]
 fn get_active_device_id() -> Result<String> {
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices", "booted"])
