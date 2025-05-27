@@ -1,5 +1,5 @@
-pub mod mcp;
 pub mod a2a;
+pub mod mcp;
 
 pub struct Client;
 
@@ -13,7 +13,7 @@ impl Client {
     pub fn new() -> Self {
         Client
     }
-    
+
     pub fn send_message(&self, message: &str) -> Result<String, Box<dyn std::error::Error>> {
         Ok(format!("Response to: {}", message))
     }

@@ -1,76 +1,63 @@
 # Arkavo Edge
 
-A developer-centric agentic CLI tool for AI-agent development and framework maintenance, focusing on secure, cost-efficient runtime for multi-file code transformations.
+AI-powered developer toolkit for secure, intelligent code transformation and testing.
 
-## Features
-
-- Conversational agent with repository context
-- Change planning and execution with automatic commit generation
-- Test integration with the agent feedback loop
-- GPU-accelerated terminal UI
-- Repository mapping and file tracking
-- Encrypted storage with Edge Vault
-
-## Usage
+## Quick Start
 
 ```bash
-# Start conversational agent
+# Start interactive agent
 arkavo chat
 
-# Generate a change plan before edits
-arkavo plan
-
-# Execute plan and commit changes
-arkavo apply
-
-# Run tests with streaming failure feedback
-arkavo test
-
-# Import/export notes to Edge Vault
-arkavo vault
+# Run intelligent tests
+arkavo test --explore
 ```
 
-## Development
+## Key Features
 
-```bash
-# Build the project
-cargo build
+### 🤖 AI Code Agent
+- Multi-file refactoring with repository context
+- Automatic commit generation
+- GPU-accelerated terminal UI
 
-# Run the project
-cargo run
+### 🧠 Intelligent Test Generation
+- AI understands your domain model and finds bugs you didn't think of
+- Property-based testing with automatic invariant discovery
+- State space exploration and chaos engineering
+- MCP server for integration with Claude Code and other AI tools
 
-# Run tests
-cargo test
+### 🔒 Security First
+- OpenTDF encryption on all payloads
+- Local-first with Edge Vault storage
+- No data leaves your control
 
-# Code quality
-cargo clippy -D warnings
+## MCP Server for Claude Code
 
-# Format code
-cargo fmt
+Configure in Claude Code settings:
+```json
+{
+  "mcpServers": {
+    "arkavo": {
+      "command": "/path/to/arkavo",
+      "args": ["serve"]
+    }
+  }
+}
 ```
 
-## Platforms
+Then ask the AI to:
+- "Find bugs in my payment processing logic"
+- "What invariants should always be true in my user system?"
+- "Test what happens when the network fails during checkout"
+- "Explore edge cases in the authentication flow"
 
-- macOS (arm64)
-- Linux (x64/aarch64)
-- Windows (future support)
+## Commands
+
+- `arkavo chat` - Interactive AI agent
+- `arkavo test` - Run intelligent tests
+- `arkavo plan` - Preview changes
+- `arkavo apply` - Execute changes
+- `arkavo serve` - MCP server mode
 
 ## License
 
-Arkavo Edge is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
-
-```
-Copyright 2025 Arkavo Edge Contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+Apache 2.0 - See LICENSE file for details.

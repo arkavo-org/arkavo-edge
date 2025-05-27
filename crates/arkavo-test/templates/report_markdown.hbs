@@ -1,0 +1,49 @@
+# {{title}}
+
+**Generated:** {{timestamp}}
+
+## Summary
+
+- **Total Scenarios:** {{summary.total_scenarios}}
+- **Pass Rate:** {{summary.pass_rate}}%
+- **Duration:** {{summary.duration}}
+
+| Status | Count |
+|--------|-------|
+| ✅ Passed | {{summary.passed}} |
+| ❌ Failed | {{summary.failed}} |
+| ⏭️ Skipped | {{summary.skipped}} |
+
+## Scenarios
+
+{{#each scenarios}}
+### {{name}}
+
+**Status:** {{status}}  
+**Duration:** {{duration}}
+
+{{#if ai_insights}}
+**AI Insights:** {{ai_insights}}
+{{/if}}
+
+{{#if minimal_reproduction}}
+**Minimal Reproduction:**
+```
+{{minimal_reproduction}}
+```
+{{/if}}
+
+#### Steps:
+{{#each steps}}
+- **{{keyword}}** {{text}}
+  - Status: {{status}}
+  {{#if error}}
+  - Error: {{error}}
+  {{/if}}
+  {{#if screenshot}}
+  - Screenshot: {{screenshot}}
+  {{/if}}
+{{/each}}
+
+---
+{{/each}}

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        .summary {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .metric {
+            display: inline-block;
+            margin: 10px 20px 10px 0;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .scenario {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status-passed { color: #27ae60; }
+        .status-failed { color: #e74c3c; }
+        .status-skipped { color: #f39c12; }
+        .step {
+            padding: 10px;
+            margin: 5px 0;
+            border-left: 3px solid #ecf0f1;
+        }
+        .step.passed { border-color: #27ae60; }
+        .step.failed { border-color: #e74c3c; }
+        .step.skipped { border-color: #f39c12; }
+        .error {
+            background: #fee;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        .ai-insights {
+            background: #e8f4f8;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>{{title}}</h1>
+    <p><strong>Generated:</strong> {{timestamp}}</p>
+    
+    <div class="summary">
+        <h2>Summary</h2>
+        <div class="metric">
+            <div class="metric-label">Total Scenarios</div>
+            <div class="metric-value">{{summary.total_scenarios}}</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Pass Rate</div>
+            <div class="metric-value">{{summary.pass_rate}}%</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Passed</div>
+            <div class="metric-value status-passed">{{summary.passed}}</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Failed</div>
+            <div class="metric-value status-failed">{{summary.failed}}</div>
+        </div>
+        <div class="metric">
+            <div class="metric-label">Duration</div>
+            <div class="metric-value">{{summary.duration}}</div>
+        </div>
+    </div>
+    
+    <h2>Scenarios</h2>
+    {{#each scenarios}}
+    <div class="scenario">
+        <h3>{{name}}</h3>
+        <p class="status-{{status}}"><strong>Status:</strong> {{status}}</p>
+        <p><strong>Duration:</strong> {{duration}}</p>
+        
+        {{#if ai_insights}}
+        <div class="ai-insights">
+            <strong>AI Insights:</strong> {{ai_insights}}
+        </div>
+        {{/if}}
+        
+        {{#if minimal_reproduction}}
+        <div class="reproduction">
+            <strong>Minimal Reproduction:</strong>
+            <pre>{{minimal_reproduction}}</pre>
+        </div>
+        {{/if}}
+        
+        <h4>Steps:</h4>
+        {{#each steps}}
+        <div class="step {{status}}">
+            <strong>{{keyword}}</strong> {{text}}
+            <div class="status-{{status}}">Status: {{status}}</div>
+            {{#if error}}
+            <div class="error">Error: {{error}}</div>
+            {{/if}}
+            {{#if screenshot}}
+            <div>Screenshot: <a href="{{screenshot}}">{{screenshot}}</a></div>
+            {{/if}}
+        </div>
+        {{/each}}
+    </div>
+    {{/each}}
+</body>
+</html>

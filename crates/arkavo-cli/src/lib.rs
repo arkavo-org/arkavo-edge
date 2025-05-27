@@ -12,18 +12,18 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
+        "serve" => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { commands::mcp::run().await })
+        }
         "help" => {
             print_usage();
             Ok(())
-        },
+        }
         "-h" | "--help" => {
             print_usage();
             Ok(())
-        },
-        "-v" | "--version" => {
-            print_version();
-            Ok(())
-        },
+        }
         _ => {
             eprintln!("Error: Unknown command '{}'", args[0]);
             print_usage();
@@ -42,15 +42,12 @@ fn print_usage() {
     println!("    chat      Start conversational agent with repository context");
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
-    println!("    test      Run tests with streaming failure feedback");
+    println!("    test      Run intelligent tests (use --help for modes)");
     println!("    vault     Import/export notes to Edge Vault");
+    println!("    serve     Run as MCP server for AI tools integration");
     println!("    help      Print this help message");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Print help information");
     println!("    -v, --version    Print version information");
-}
-
-fn print_version() {
-    println!("arkavo {}", env!("CARGO_PKG_VERSION"));
 }
