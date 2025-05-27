@@ -6,7 +6,9 @@ pub mod execution;
 pub mod gherkin;
 pub mod integration;
 pub mod mcp;
+pub mod persistent_state;
 pub mod reporting;
+pub mod security;
 pub mod state_store;
 
 #[cfg(test)]
@@ -40,6 +42,9 @@ pub enum TestError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, TestError>;

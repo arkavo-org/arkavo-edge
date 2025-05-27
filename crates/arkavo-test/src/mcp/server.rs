@@ -5,6 +5,7 @@ use super::intelligent_tools::{
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use crate::ai::analysis_engine::AnalysisEngine;
+use crate::security::{validate_command, validate_test_name, validate_timeout};
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
 use async_trait::async_trait;
@@ -13,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use tokio::process::Command;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
@@ -656,6 +657,9 @@ impl TestExecutor {
     }
 
     async fn run_test(&self, test_name: &str) -> Result<Value> {
+        // Validate test name to prevent command injection
+        validate_test_name(test_name)?;
+
         // Detect project type and run appropriate test command
         let start_time = Instant::now();
 
@@ -726,14 +730,30 @@ impl TestExecutor {
     }
 
     async fn run_rust_test(&self, test_name: &str) -> Result<(&'static str, String)> {
-        let output = Command::new("cargo")
-            .arg("test")
-            .arg(test_name)
-            .arg("--")
-            .arg("--nocapture")
-            .current_dir(&self.working_dir)
-            .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {}", e)))?;
+        // Validate command
+        validate_command("cargo")?;
+
+        // Run with timeout
+        let timeout_duration = validate_timeout(Some(300)); // 5 minutes default
+        
+        let output = timeout(
+            timeout_duration,
+            Command::new("cargo")
+                .arg("test")
+                .arg(test_name)
+                .arg("--")
+                .arg("--nocapture")
+                .current_dir(&self.working_dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| {
+            TestError::Execution(format!(
+                "Test '{}' timed out after {:?}",
+                test_name, timeout_duration
+            ))
+        })?
+        .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -751,6 +771,7 @@ impl TestExecutor {
                 .arg(test_name)
                 .current_dir(&self.working_dir)
                 .output()
+                .await
                 .map_err(|e| TestError::Execution(format!("Failed to run swift test: {}", e)))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -822,6 +843,7 @@ impl TestExecutor {
         let output = cmd
             .current_dir(&self.working_dir)
             .output()
+            .await
             .map_err(|e| TestError::Execution(format!("Failed to run xcodebuild test: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -848,6 +870,7 @@ impl TestExecutor {
             .args(&test_runner[1..])
             .current_dir(&self.working_dir)
             .output()
+            .await
             .map_err(|e| TestError::Execution(format!("Failed to run JS test: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -864,7 +887,8 @@ impl TestExecutor {
             .arg(test_name)
             .arg("-v")
             .current_dir(&self.working_dir)
-            .output();
+            .output()
+            .await;
 
         let output = match output {
             Ok(o) => o,
@@ -876,6 +900,7 @@ impl TestExecutor {
                     .arg(test_name)
                     .current_dir(&self.working_dir)
                     .output()
+                    .await
                     .map_err(|e| {
                         TestError::Execution(format!("Failed to run Python test: {}", e))
                     })?
@@ -895,6 +920,7 @@ impl TestExecutor {
             .arg("-v")
             .current_dir(&self.working_dir)
             .output()
+            .await
             .map_err(|e| TestError::Execution(format!("Failed to run go test: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1041,6 +1067,7 @@ impl TestExecutor {
             .arg("--list")
             .current_dir(&self.working_dir)
             .output()
+            .await
             .map_err(|e| TestError::Execution(format!("Failed to list Rust tests: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1118,7 +1145,8 @@ impl TestExecutor {
                 .arg("test")
                 .arg("list")
                 .current_dir(&self.working_dir)
-                .output();
+                .output()
+                .await;
 
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1276,7 +1304,8 @@ impl TestExecutor {
                                 .arg("-workspace")
                                 .arg(path.to_string_lossy().to_string())
                                 .current_dir(&self.working_dir)
-                                .output();
+                                .output()
+                                .await;
 
                             if let Ok(output) = scheme_output {
                                 let stdout = String::from_utf8_lossy(&output.stdout);
