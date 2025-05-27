@@ -43,7 +43,6 @@ impl BiometricKit {
     }
 }
 
-
 #[async_trait]
 impl Tool for BiometricKit {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -57,8 +56,38 @@ impl Tool for BiometricKit {
             .and_then(|v| v.as_str())
             .unwrap_or("face_id");
 
-        // Get device ID
-        let device_id = get_device_id()?;
+        // Get target device
+        let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+            // Verify device exists
+            if self.device_manager.get_device(id).is_none() {
+                return Ok(serde_json::json!({
+                    "error": {
+                        "code": "DEVICE_NOT_FOUND",
+                        "message": format!("Device '{}' not found", id),
+                        "details": {
+                            "suggestion": "Use device_management tool with 'list' action to see available devices"
+                        }
+                    }
+                }));
+            }
+            id.to_string()
+        } else {
+            // Use active device
+            match self.device_manager.get_active_device() {
+                Some(device) => device.id,
+                None => {
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_ACTIVE_DEVICE",
+                            "message": "No active device set and no device_id specified",
+                            "details": {
+                                "suggestion": "Use device_management tool to set an active device or specify device_id"
+                            }
+                        }
+                    }));
+                }
+            }
+        };
 
         match action {
             "enroll" => {
@@ -193,7 +222,6 @@ impl SystemDialogKit {
     }
 }
 
-
 #[async_trait]
 impl Tool for SystemDialogKit {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -203,6 +231,39 @@ impl Tool for SystemDialogKit {
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
 
         let button_text = params.get("button_text").and_then(|v| v.as_str());
+
+        // Get target device
+        let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+            // Verify device exists
+            if self.device_manager.get_device(id).is_none() {
+                return Ok(serde_json::json!({
+                    "error": {
+                        "code": "DEVICE_NOT_FOUND",
+                        "message": format!("Device '{}' not found", id),
+                        "details": {
+                            "suggestion": "Use device_management tool with 'list' action to see available devices"
+                        }
+                    }
+                }));
+            }
+            id.to_string()
+        } else {
+            // Use active device
+            match self.device_manager.get_active_device() {
+                Some(device) => device.id,
+                None => {
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_ACTIVE_DEVICE",
+                            "message": "No active device set and no device_id specified",
+                            "details": {
+                                "suggestion": "Use device_management tool to set an active device or specify device_id"
+                            }
+                        }
+                    }));
+                }
+            }
+        };
 
         // Map action to common button texts
         let button = match (action, button_text) {
@@ -225,28 +286,4 @@ impl Tool for SystemDialogKit {
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }
-}
-
-fn get_device_id() -> Result<String> {
-    // Try to get booted device
-    let output = Command::new("xcrun")
-        .args(["simctl", "list", "devices", "booted"])
-        .output()
-        .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Parse device ID from output
-    for line in stdout.lines() {
-        if line.contains("(") && line.contains(")") && line.contains("Booted") {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.find(')') {
-                    return Ok(line[start + 1..end].to_string());
-                }
-            }
-        }
-    }
-
-    // Return known device ID as fallback
-    Ok("132B1310-2AF5-45F4-BB8E-CA5A2FEB9481".to_string())
 }

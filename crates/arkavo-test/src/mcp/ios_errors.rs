@@ -1,5 +1,5 @@
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 
 pub enum IOSToolError {
     NoSimulatorAvailable,
@@ -22,7 +22,7 @@ impl IOSToolError {
                     }
                 }
             }),
-            
+
             IOSToolError::BridgeNotConnected => json!({
                 "error": {
                     "code": "IOS_BRIDGE_NOT_CONNECTED",
@@ -33,7 +33,7 @@ impl IOSToolError {
                     }
                 }
             }),
-            
+
             IOSToolError::SimulatorNotBooted => json!({
                 "error": {
                     "code": "SIMULATOR_NOT_BOOTED",
@@ -44,7 +44,7 @@ impl IOSToolError {
                     }
                 }
             }),
-            
+
             IOSToolError::XcodeNotInstalled => json!({
                 "error": {
                     "code": "XCODE_NOT_INSTALLED",
@@ -55,7 +55,7 @@ impl IOSToolError {
                     }
                 }
             }),
-            
+
             IOSToolError::InvalidDeviceId => json!({
                 "error": {
                     "code": "INVALID_DEVICE_ID",
@@ -74,16 +74,16 @@ pub fn check_ios_availability() -> Result<(), IOSToolError> {
     if std::env::consts::OS != "macos" {
         return Err(IOSToolError::BridgeNotConnected);
     }
-    
+
     // Check if xcrun is available
     match std::process::Command::new("xcrun")
         .arg("--version")
         .output()
     {
-        Ok(output) if output.status.success() => {},
+        Ok(output) if output.status.success() => {}
         _ => return Err(IOSToolError::XcodeNotInstalled),
     }
-    
+
     // Check for booted simulator
     match std::process::Command::new("xcrun")
         .args(["simctl", "list", "devices", "booted"])

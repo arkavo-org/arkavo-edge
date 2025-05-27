@@ -4,6 +4,7 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
+use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -62,7 +63,6 @@ impl UiInteractionKit {
     }
 }
 
-
 #[async_trait]
 impl Tool for UiInteractionKit {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -70,7 +70,7 @@ impl Tool for UiInteractionKit {
             .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
-        
+
         // Get target device
         let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             // Verify device exists
@@ -110,10 +110,10 @@ impl Tool for UiInteractionKit {
                 if let Err(e) = check_ios_availability() {
                     return Ok(e.to_response());
                 }
-                
+
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
-                    
+
                     if let Some(text) = target.get("text").and_then(|v| v.as_str()) {
                         // Text-based tapping requires XCTest integration
                         return Ok(serde_json::json!({
@@ -126,7 +126,9 @@ impl Tool for UiInteractionKit {
                                 }
                             }
                         }));
-                    } else if let Some(accessibility_id) = target.get("accessibility_id").and_then(|v| v.as_str()) {
+                    } else if let Some(accessibility_id) =
+                        target.get("accessibility_id").and_then(|v| v.as_str())
+                    {
                         // Accessibility-based tapping requires XCTest integration
                         return Ok(serde_json::json!({
                             "error": {
@@ -143,48 +145,128 @@ impl Tool for UiInteractionKit {
                         tap_params["x"] = target.get("x").unwrap_or(&serde_json::json!(0)).clone();
                         tap_params["y"] = target.get("y").unwrap_or(&serde_json::json!(0)).clone();
                     }
-                    
+
                     // Get device ID
-                    let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
-                        id.to_string()
-                    } else {
-                        match self.device_manager.get_active_device() {
-                            Some(device) => device.id,
-                            None => {
-                                self.device_manager.refresh_devices().ok();
-                                match self.device_manager.get_booted_devices().first() {
-                                    Some(device) => device.id.clone(),
-                                    None => return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
+                    let device_id =
+                        if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+                            id.to_string()
+                        } else {
+                            match self.device_manager.get_active_device() {
+                                Some(device) => device.id,
+                                None => {
+                                    self.device_manager.refresh_devices().ok();
+                                    match self.device_manager.get_booted_devices().first() {
+                                        Some(device) => device.id.clone(),
+                                        None => {
+                                            return Ok(serde_json::json!({
+                                                "error": {
+                                                    "code": "NO_BOOTED_DEVICE",
+                                                    "message": "No booted iOS device found"
+                                                }
+                                            }));
                                         }
-                                    }))
+                                    }
                                 }
                             }
-                        }
-                    };
-                    
+                        };
+
                     // Execute tap using xcrun simctl directly
                     let x = tap_params["x"].as_f64().unwrap_or(0.0);
                     let y = tap_params["y"].as_f64().unwrap_or(0.0);
-                    
-                    let output = Command::new("xcrun")
-                        .args(["simctl", "io", &device_id, "tap", &x.to_string(), &y.to_string()])
+
+                    // Get device info for coordinate validation
+                    let device_info = self.device_manager.get_device(&device_id);
+                    let device_type = device_info
+                        .as_ref()
+                        .map(|d| d.device_type.as_str())
+                        .unwrap_or("unknown");
+
+                    // Common iOS device logical resolutions (in points, not pixels)
+                    let (max_x, max_y) = match device_type {
+                        s if s.contains("iPhone-16-Pro-Max") => (430.0, 932.0),
+                        s if s.contains("iPhone-16-Pro") || s.contains("iPhone-15-Pro") => {
+                            (393.0, 852.0)
+                        }
+                        s if s.contains("iPhone-16-Plus") || s.contains("iPhone-15-Plus") => {
+                            (428.0, 926.0)
+                        }
+                        s if s.contains("iPhone-16") || s.contains("iPhone-15") => (390.0, 844.0),
+                        s if s.contains("iPhone-SE") => (375.0, 667.0),
+                        s if s.contains("iPad") => (820.0, 1180.0),
+                        _ => (393.0, 852.0), // Default to iPhone Pro size
+                    };
+
+                    // Validate and adjust coordinates
+                    let adjusted_x = x.min(max_x - 1.0).max(0.0);
+                    let adjusted_y = y.min(max_y - 1.0).max(0.0);
+
+                    // Try multiple tap methods
+                    let output = if let Ok(fb_output) = Command::new("fbsimctl")
+                        .args([
+                            &device_id,
+                            "tap",
+                            &adjusted_x.to_string(),
+                            &adjusted_y.to_string(),
+                        ])
                         .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
-                    
-                    Ok(serde_json::json!({
+                    {
+                        fb_output
+                    } else if let Ok(apple_output) = Command::new("applesimutils")
+                        .args([
+                            "--byId",
+                            &device_id,
+                            "--tapAt",
+                            &format!("{},{}", adjusted_x, adjusted_y),
+                        ])
+                        .output()
+                    {
+                        apple_output
+                    } else {
+                        // Fallback to sending events via Instruments if available
+                        Command::new("xcrun")
+                            .args(["instruments", "-w", &device_id, "-t", "Blank", "-e", "UIASCRIPT", 
+                                   &format!("UIATarget.localTarget().tap({{{}, {}}})", adjusted_x, adjusted_y)])
+                            .output()
+                            .unwrap_or_else(|_| {
+                                // Final fallback - return error with helpful message
+                                std::process::Output {
+                                    status: std::process::ExitStatus::from_raw(1),
+                                    stdout: Vec::new(),
+                                    stderr: b"Unable to send tap event. Install one of these tools:\n\
+                                         - fbsimctl: brew install facebook/fb/fbsimctl\n\
+                                         - applesimutils: brew install applesimutils\n\
+                                         - Or use Xcode's Accessibility Inspector to interact with the simulator\n\
+                                         \n\
+                                         Note: Direct tap via 'xcrun simctl' may not be available in your Xcode version.".to_vec(),
+                                }
+                            })
+                    };
+
+                    let mut response = serde_json::json!({
                         "success": output.status.success(),
                         "action": "tap",
-                        "coordinates": {"x": x, "y": y},
+                        "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                        "original_coordinates": {"x": x, "y": y},
                         "device_id": device_id,
-                        "error": if !output.status.success() {
-                            Some(String::from_utf8_lossy(&output.stderr).to_string())
-                        } else {
-                            None
-                        }
-                    }))
+                        "device_type": device_type,
+                        "logical_resolution": {"width": max_x, "height": max_y}
+                    });
+
+                    if !output.status.success() {
+                        response["error"] = serde_json::json!({
+                            "message": String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                            "note": "Coordinates are in logical points, not pixels. For retina displays, divide pixel coordinates by the scale factor (2x or 3x)."
+                        });
+                    }
+
+                    if x != adjusted_x || y != adjusted_y {
+                        response["warning"] = serde_json::json!(format!(
+                            "Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})",
+                            x, y, adjusted_x, adjusted_y
+                        ));
+                    }
+
+                    Ok(response)
                 } else {
                     Err(TestError::Mcp("Missing target for tap action".to_string()))
                 }
@@ -194,7 +276,7 @@ impl Tool for UiInteractionKit {
                 if let Err(e) = check_ios_availability() {
                     return Ok(e.to_response());
                 }
-                
+
                 let text = params
                     .get("value")
                     .and_then(|v| v.as_str())
@@ -210,23 +292,25 @@ impl Tool for UiInteractionKit {
                             self.device_manager.refresh_devices().ok();
                             match self.device_manager.get_booted_devices().first() {
                                 Some(device) => device.id.clone(),
-                                None => return Ok(serde_json::json!({
-                                    "error": {
-                                        "code": "NO_BOOTED_DEVICE",
-                                        "message": "No booted iOS device found"
-                                    }
-                                }))
+                                None => {
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "NO_BOOTED_DEVICE",
+                                            "message": "No booted iOS device found"
+                                        }
+                                    }));
+                                }
                             }
                         }
                     }
                 };
-                
+
                 // Type text using xcrun simctl directly
                 let output = Command::new("xcrun")
                     .args(["simctl", "io", &device_id, "type", text])
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to type text: {}", e)))?;
-                
+
                 Ok(serde_json::json!({
                     "success": output.status.success(),
                     "action": "type_text",
@@ -244,11 +328,11 @@ impl Tool for UiInteractionKit {
                 if let Err(e) = check_ios_availability() {
                     return Ok(e.to_response());
                 }
-                
+
                 let swipe_data = params
                     .get("swipe")
                     .ok_or_else(|| TestError::Mcp("Missing swipe parameters".to_string()))?;
-                
+
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
@@ -259,34 +343,57 @@ impl Tool for UiInteractionKit {
                             self.device_manager.refresh_devices().ok();
                             match self.device_manager.get_booted_devices().first() {
                                 Some(device) => device.id.clone(),
-                                None => return Ok(serde_json::json!({
-                                    "error": {
-                                        "code": "NO_BOOTED_DEVICE",
-                                        "message": "No booted iOS device found"
-                                    }
-                                }))
+                                None => {
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "NO_BOOTED_DEVICE",
+                                            "message": "No booted iOS device found"
+                                        }
+                                    }));
+                                }
                             }
                         }
                     }
                 };
-                
-                let x1 = swipe_data.get("x1").and_then(|v| v.as_f64()).unwrap_or(100.0);
-                let y1 = swipe_data.get("y1").and_then(|v| v.as_f64()).unwrap_or(300.0);
-                let x2 = swipe_data.get("x2").and_then(|v| v.as_f64()).unwrap_or(100.0);
-                let y2 = swipe_data.get("y2").and_then(|v| v.as_f64()).unwrap_or(100.0);
-                let duration = swipe_data.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.5);
-                
+
+                let x1 = swipe_data
+                    .get("x1")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0);
+                let y1 = swipe_data
+                    .get("y1")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(300.0);
+                let x2 = swipe_data
+                    .get("x2")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0);
+                let y2 = swipe_data
+                    .get("y2")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0);
+                let duration = swipe_data
+                    .get("duration")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5);
+
                 // Swipe using xcrun simctl directly
                 let output = Command::new("xcrun")
                     .args([
-                        "simctl", "io", &device_id, "swipe",
-                        &x1.to_string(), &y1.to_string(),
-                        &x2.to_string(), &y2.to_string(),
-                        "--duration", &duration.to_string()
+                        "simctl",
+                        "io",
+                        &device_id,
+                        "swipe",
+                        &x1.to_string(),
+                        &y1.to_string(),
+                        &x2.to_string(),
+                        &y2.to_string(),
+                        "--duration",
+                        &duration.to_string(),
                     ])
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to execute swipe: {}", e)))?;
-                
+
                 Ok(serde_json::json!({
                     "success": output.status.success(),
                     "action": "swipe",
@@ -347,7 +454,6 @@ impl ScreenCaptureKit {
     }
 }
 
-
 #[async_trait]
 impl Tool for ScreenCaptureKit {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -355,7 +461,7 @@ impl Tool for ScreenCaptureKit {
         if let Err(e) = check_ios_availability() {
             return Ok(e.to_response());
         }
-        
+
         let name = params
             .get("name")
             .and_then(|v| v.as_str())
@@ -378,26 +484,28 @@ impl Tool for ScreenCaptureKit {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
-                        None => return Ok(serde_json::json!({
-                            "error": {
-                                "code": "NO_BOOTED_DEVICE",
-                                "message": "No booted iOS device found",
-                                "details": {
-                                    "suggestion": "Boot a simulator with 'xcrun simctl boot <device-id>'"
+                        None => {
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found",
+                                    "details": {
+                                        "suggestion": "Boot a simulator with 'xcrun simctl boot <device-id>'"
+                                    }
                                 }
-                            }
-                        }))
+                            }));
+                        }
                     }
                 }
             }
         };
-        
+
         // Capture screenshot using xcrun simctl directly
         let output = Command::new("xcrun")
             .args(["simctl", "io", &device_id, "screenshot", &path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
-        
+
         let mut result = if output.status.success() {
             serde_json::json!({
                 "success": true,
@@ -476,7 +584,6 @@ impl UiQueryKit {
     }
 }
 
-
 #[async_trait]
 impl Tool for UiQueryKit {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -484,7 +591,7 @@ impl Tool for UiQueryKit {
         if let Err(e) = check_ios_availability() {
             return Ok(e.to_response());
         }
-        
+
         let query_type = params
             .get("query_type")
             .and_then(|v| v.as_str())
@@ -500,17 +607,19 @@ impl Tool for UiQueryKit {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
-                        None => return Ok(serde_json::json!({
-                            "error": {
-                                "code": "NO_BOOTED_DEVICE",
-                                "message": "No booted iOS device found"
-                            }
-                        }))
+                        None => {
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
+                                }
+                            }));
+                        }
                     }
                 }
             }
         };
-        
+
         // For now, return mock data as simctl doesn't have direct UI query support
         // In a real implementation, this would use accessibility APIs
         match query_type {
@@ -539,7 +648,10 @@ impl Tool for UiQueryKit {
                 "device_id": device_id,
                 "note": "Text extraction requires XCTest framework integration"
             })),
-            _ => Err(TestError::Mcp(format!("Unknown query type: {}", query_type)))
+            _ => Err(TestError::Mcp(format!(
+                "Unknown query type: {}",
+                query_type
+            ))),
         }
     }
 

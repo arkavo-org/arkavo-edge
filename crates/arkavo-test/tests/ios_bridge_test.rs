@@ -8,7 +8,6 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_interaction_tap() {
-        
         let device_manager = Arc::new(DeviceManager::new());
         let ui_kit = UiInteractionKit::new(device_manager);
 
@@ -23,7 +22,7 @@ mod ios_bridge_tests {
 
         let result = ui_kit.execute(params).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         // Check for either success or simulated response
         assert!(response.is_object());
@@ -31,7 +30,6 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_interaction_type_text() {
-        
         let device_manager = Arc::new(DeviceManager::new());
         let ui_kit = UiInteractionKit::new(device_manager);
 
@@ -42,7 +40,7 @@ mod ios_bridge_tests {
 
         let result = ui_kit.execute(params).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         // Check for either success or simulated response
         assert!(response.is_object());
@@ -50,7 +48,6 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_interaction_swipe() {
-        
         let device_manager = Arc::new(DeviceManager::new());
         let ui_kit = UiInteractionKit::new(device_manager);
 
@@ -67,7 +64,7 @@ mod ios_bridge_tests {
 
         let result = ui_kit.execute(params).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         // Check for either success or simulated response
         assert!(response.is_object());
@@ -75,7 +72,6 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_screen_capture() {
-        
         let device_manager = Arc::new(DeviceManager::new());
         let capture_kit = ScreenCaptureKit::new(device_manager);
 
@@ -85,7 +81,7 @@ mod ios_bridge_tests {
 
         let result = capture_kit.execute(params).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         // Check for either success or simulated response
         assert!(response.is_object());
@@ -96,7 +92,6 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_query() {
-        
         let device_manager = Arc::new(DeviceManager::new());
         let query_kit = UiQueryKit::new(device_manager);
 
@@ -106,7 +101,7 @@ mod ios_bridge_tests {
 
         let result = query_kit.execute(params).await;
         assert!(result.is_ok());
-        
+
         let response = result.unwrap();
         // Check for either success or simulated response
         assert!(response.is_object());
@@ -115,20 +110,20 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_device_management() {
         let device_manager = Arc::new(DeviceManager::new());
-        
+
         // Test listing devices
         let devices = device_manager.get_all_devices();
         println!("Found {} devices", devices.len());
-        
+
         // Test getting booted devices
         let booted = device_manager.get_booted_devices();
         println!("Found {} booted devices", booted.len());
-        
+
         // Test active device management
         if let Some(first_booted) = booted.first() {
             let result = device_manager.set_active_device(&first_booted.id);
             assert!(result.is_ok());
-            
+
             let active = device_manager.get_active_device();
             assert!(active.is_some());
             assert_eq!(active.unwrap().id, first_booted.id);

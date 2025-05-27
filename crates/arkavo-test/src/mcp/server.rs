@@ -1,4 +1,6 @@
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
+use super::coordinate_tools::CoordinateConverterKit;
+use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
 use super::intelligent_tools::{
@@ -57,7 +59,7 @@ impl McpTestServer {
 
         // Initialize analysis engine for intelligent tools
         let analysis_engine = Arc::new(AnalysisEngine::new()?);
-        
+
         // Initialize device manager
         let device_manager = Arc::new(DeviceManager::new());
 
@@ -72,7 +74,23 @@ impl McpTestServer {
             "device_management".to_string(),
             Arc::new(DeviceManagementKit::new(device_manager.clone())),
         );
-        
+
+        // Add coordinate converter tool
+        tools.insert(
+            "coordinate_converter".to_string(),
+            Arc::new(CoordinateConverterKit::new()),
+        );
+
+        // Add deep link and app launcher tools
+        tools.insert(
+            "deep_link".to_string(),
+            Arc::new(DeepLinkKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "app_launcher".to_string(),
+            Arc::new(AppLauncherKit::new(device_manager.clone())),
+        );
+
         // Add iOS-specific tools
         tools.insert(
             "ui_interaction".to_string(),
@@ -82,8 +100,14 @@ impl McpTestServer {
             "screen_capture".to_string(),
             Arc::new(ScreenCaptureKit::new(device_manager.clone())),
         );
-        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new(device_manager.clone())));
-        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new(device_manager.clone())));
+        tools.insert(
+            "ui_query".to_string(),
+            Arc::new(UiQueryKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "biometric_auth".to_string(),
+            Arc::new(BiometricKit::new(device_manager.clone())),
+        );
         tools.insert(
             "system_dialog".to_string(),
             Arc::new(SystemDialogKit::new(device_manager.clone())),
@@ -164,7 +188,7 @@ impl McpTestServer {
     pub fn state_store(&self) -> &Arc<StateStore> {
         &self.state_store
     }
-    
+
     pub fn device_manager(&self) -> &Arc<DeviceManager> {
         &self.device_manager
     }
@@ -197,6 +221,9 @@ impl McpTestServer {
                 | "run_test"
                 | "list_tests"
                 | "device_management"
+                | "coordinate_converter"
+                | "deep_link"
+                | "app_launcher"
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"

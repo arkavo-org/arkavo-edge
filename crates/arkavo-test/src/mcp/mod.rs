@@ -1,4 +1,6 @@
 pub mod code_analysis_tools;
+pub mod coordinate_tools;
+pub mod deeplink_tools;
 pub mod device_manager;
 pub mod device_tools;
 pub mod intelligent_tools;

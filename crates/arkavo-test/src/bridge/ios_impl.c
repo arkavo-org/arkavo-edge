@@ -338,6 +338,7 @@ char* ios_bridge_get_current_state(void* bridge) {
 }
 
 char* ios_bridge_mutate_state(void* bridge, const char* entity, const char* action, const char* data) {
+    (void)data; // Currently unused
     IOSBridgeImpl* impl = (IOSBridgeImpl*)bridge;
     
     if (strcmp(entity, "simulator") == 0) {
@@ -390,6 +391,9 @@ void* ios_bridge_create_snapshot(void* bridge, size_t* size) {
 }
 
 void ios_bridge_restore_snapshot(void* bridge, const void* data, size_t size) {
+    (void)bridge; // Currently unused
+    (void)data; // Currently unused
+    (void)size; // Currently unused
     // Parse snapshot data and restore state
     // For now, this is a no-op as simulator state is managed externally
 }
