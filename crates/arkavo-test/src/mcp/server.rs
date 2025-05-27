@@ -1,4 +1,6 @@
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
+use super::device_manager::DeviceManager;
+use super::device_tools::DeviceManagementKit;
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
@@ -38,6 +40,7 @@ pub struct McpTestServer {
     state_store: Arc<StateStore>,
     #[allow(dead_code)]
     ios_harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl std::fmt::Debug for McpTestServer {
@@ -47,6 +50,7 @@ impl std::fmt::Debug for McpTestServer {
             .field("metrics", &self.metrics)
             .field("state_store", &"<state>")
             .field("ios_harness", &"<harness>")
+            .field("device_manager", &"<device_manager>")
             .finish()
     }
 }
@@ -58,8 +62,9 @@ impl McpTestServer {
         // Initialize analysis engine for intelligent tools
         let analysis_engine = Arc::new(AnalysisEngine::new()?);
         
-        // Initialize iOS harness
+        // Initialize iOS harness and device manager
         let ios_harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        let device_manager = Arc::new(DeviceManager::new());
 
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
         tools.insert("mutate_state".to_string(), Arc::new(MutateStateKit::new()));
@@ -67,20 +72,26 @@ impl McpTestServer {
         tools.insert("run_test".to_string(), Arc::new(RunTestKit::new()));
         tools.insert("list_tests".to_string(), Arc::new(ListTestsKit::new()));
 
+        // Add device management tool
+        tools.insert(
+            "device_management".to_string(),
+            Arc::new(DeviceManagementKit::new(device_manager.clone())),
+        );
+        
         // Add iOS-specific tools
         tools.insert(
             "ui_interaction".to_string(),
-            Arc::new(UiInteractionKit::new(ios_harness.clone())),
+            Arc::new(UiInteractionKit::new(ios_harness.clone(), device_manager.clone())),
         );
         tools.insert(
             "screen_capture".to_string(),
-            Arc::new(ScreenCaptureKit::new(ios_harness.clone())),
+            Arc::new(ScreenCaptureKit::new(ios_harness.clone(), device_manager.clone())),
         );
-        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new(ios_harness.clone())));
-        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new(ios_harness.clone())));
+        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new(ios_harness.clone(), device_manager.clone())));
+        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new(ios_harness.clone(), device_manager.clone())));
         tools.insert(
             "system_dialog".to_string(),
-            Arc::new(SystemDialogKit::new(ios_harness.clone())),
+            Arc::new(SystemDialogKit::new(ios_harness.clone(), device_manager.clone())),
         );
 
         // Add code analysis tools
@@ -143,6 +154,7 @@ impl McpTestServer {
             metrics: Arc::new(Metrics::new()),
             state_store,
             ios_harness,
+            device_manager,
         })
     }
 
@@ -157,6 +169,10 @@ impl McpTestServer {
 
     pub fn state_store(&self) -> &Arc<StateStore> {
         &self.state_store
+    }
+    
+    pub fn device_manager(&self) -> &Arc<DeviceManager> {
+        &self.device_manager
     }
 
     pub async fn call_tool(&self, request: ToolRequest) -> Result<ToolResponse> {
@@ -186,6 +202,7 @@ impl McpTestServer {
                 | "snapshot"
                 | "run_test"
                 | "list_tests"
+                | "device_management"
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"

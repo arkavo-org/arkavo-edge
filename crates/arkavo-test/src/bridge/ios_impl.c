@@ -185,15 +185,33 @@ static char* get_accessibility_tree(IOSBridgeImpl* bridge) {
 char* ios_bridge_execute_action(void* bridge, const char* action, const char* params) {
     IOSBridgeImpl* impl = (IOSBridgeImpl*)bridge;
     
-    if (!impl || !impl->device_id) {
+    // Extract device_id from params if provided
+    char* device_id = NULL;
+    char* device_id_str = strstr(params, "\"device_id\":\"");
+    if (device_id_str) {
+        device_id_str += 13; // Skip past "device_id":"
+        char* end = strchr(device_id_str, '"');
+        if (end) {
+            size_t len = end - device_id_str;
+            device_id = malloc(len + 1);
+            memcpy(device_id, device_id_str, len);
+            device_id[len] = '\0';
+        }
+    }
+    
+    if (!impl) {
         impl = malloc(sizeof(IOSBridgeImpl));
-        impl->device_id = get_booted_device_id();
+        impl->device_id = device_id ? device_id : get_booted_device_id();
         impl->bundle_id = strdup("com.arkavo.testapp");
         impl->xctest_session = NULL;
         
         if (!impl->device_id) {
-            return strdup("{\"error\": \"No booted iOS simulator found\"}");
+            return strdup("{\"error\": \"No iOS device specified or found\"}");
         }
+    } else if (device_id) {
+        // Update device_id if provided
+        if (impl->device_id) free(impl->device_id);
+        impl->device_id = device_id;
     }
     
     // Parse action and params (simple JSON parsing)

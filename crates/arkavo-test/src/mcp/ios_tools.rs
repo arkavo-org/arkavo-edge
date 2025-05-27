@@ -1,3 +1,5 @@
+use super::device_manager::DeviceManager;
+use super::ios_errors::check_ios_availability;
 use super::server::{Tool, ToolSchema};
 use crate::{bridge::ios_ffi::RustTestHarness, Result, TestError};
 use async_trait::async_trait;
@@ -8,10 +10,11 @@ use std::sync::{Arc, Mutex};
 pub struct UiInteractionKit {
     schema: ToolSchema,
     harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl UiInteractionKit {
-    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>, device_manager: Arc<DeviceManager>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
@@ -23,6 +26,10 @@ impl UiInteractionKit {
                             "type": "string",
                             "enum": ["tap", "swipe", "type_text", "press_button"],
                             "description": "UI interaction type"
+                        },
+                        "device_id": {
+                            "type": "string",
+                            "description": "Optional device ID. If not specified, uses active device."
                         },
                         "target": {
                             "type": "object",
@@ -52,6 +59,7 @@ impl UiInteractionKit {
                 }),
             },
             harness,
+            device_manager,
         }
     }
 }
@@ -64,9 +72,47 @@ impl Tool for UiInteractionKit {
             .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
+        
+        // Get target device
+        let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+            // Verify device exists
+            if self.device_manager.get_device(id).is_none() {
+                return Ok(serde_json::json!({
+                    "error": {
+                        "code": "DEVICE_NOT_FOUND",
+                        "message": format!("Device '{}' not found", id),
+                        "details": {
+                            "suggestion": "Use device_management tool with 'list' action to see available devices"
+                        }
+                    }
+                }));
+            }
+            id.to_string()
+        } else {
+            // Use active device
+            match self.device_manager.get_active_device() {
+                Some(device) => device.id,
+                None => {
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_ACTIVE_DEVICE",
+                            "message": "No active device set and no device_id specified",
+                            "details": {
+                                "suggestion": "Use device_management tool to set an active device or specify device_id"
+                            }
+                        }
+                    }));
+                }
+            }
+        };
 
         match action {
             "tap" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+                
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
                     
@@ -131,6 +177,11 @@ impl Tool for UiInteractionKit {
                 }
             }
             "type_text" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+                
                 let text = params
                     .get("value")
                     .and_then(|v| v.as_str())
@@ -147,6 +198,11 @@ impl Tool for UiInteractionKit {
                     .map_err(|e| TestError::Mcp(format!("Failed to parse type result: {}", e)))
             }
             "swipe" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+                
                 let swipe_data = params
                     .get("swipe")
                     .ok_or_else(|| TestError::Mcp("Missing swipe parameters".to_string()))?;
@@ -177,10 +233,11 @@ impl Tool for UiInteractionKit {
 pub struct ScreenCaptureKit {
     schema: ToolSchema,
     harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl ScreenCaptureKit {
-    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>, device_manager: Arc<DeviceManager>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
@@ -192,6 +249,10 @@ impl ScreenCaptureKit {
                             "type": "string",
                             "description": "Name for the screenshot"
                         },
+                        "device_id": {
+                            "type": "string",
+                            "description": "Optional device ID. If not specified, uses active device."
+                        },
                         "analyze": {
                             "type": "boolean",
                             "description": "Whether to analyze the screenshot"
@@ -201,6 +262,7 @@ impl ScreenCaptureKit {
                 }),
             },
             harness,
+            device_manager,
         }
     }
 }
@@ -209,6 +271,11 @@ impl ScreenCaptureKit {
 #[async_trait]
 impl Tool for ScreenCaptureKit {
     async fn execute(&self, params: Value) -> Result<Value> {
+        // Check iOS availability first
+        if let Err(e) = check_ios_availability() {
+            return Ok(e.to_response());
+        }
+        
         let name = params
             .get("name")
             .and_then(|v| v.as_str())
@@ -258,10 +325,11 @@ impl Tool for ScreenCaptureKit {
 pub struct UiQueryKit {
     schema: ToolSchema,
     harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl UiQueryKit {
-    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>, device_manager: Arc<DeviceManager>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
@@ -273,6 +341,10 @@ impl UiQueryKit {
                             "type": "string",
                             "enum": ["accessibility_tree", "visible_elements", "text_content"],
                             "description": "Type of UI query"
+                        },
+                        "device_id": {
+                            "type": "string",
+                            "description": "Optional device ID. If not specified, uses active device."
                         },
                         "filter": {
                             "type": "object",
@@ -287,6 +359,7 @@ impl UiQueryKit {
                 }),
             },
             harness,
+            device_manager,
         }
     }
 }
@@ -295,6 +368,11 @@ impl UiQueryKit {
 #[async_trait]
 impl Tool for UiQueryKit {
     async fn execute(&self, params: Value) -> Result<Value> {
+        // Check iOS availability first
+        if let Err(e) = check_ios_availability() {
+            return Ok(e.to_response());
+        }
+        
         let query_type = params
             .get("query_type")
             .and_then(|v| v.as_str())

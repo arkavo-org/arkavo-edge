@@ -1,3 +1,4 @@
+use super::device_manager::DeviceManager;
 use super::server::{Tool, ToolSchema};
 use crate::{bridge::ios_ffi::RustTestHarness, Result, TestError};
 use async_trait::async_trait;
@@ -9,10 +10,11 @@ pub struct BiometricKit {
     schema: ToolSchema,
     #[allow(dead_code)]
     harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl BiometricKit {
-    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>, device_manager: Arc<DeviceManager>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "biometric_auth".to_string(),
@@ -25,6 +27,10 @@ impl BiometricKit {
                             "enum": ["enroll", "match", "fail", "cancel"],
                             "description": "Biometric action to perform"
                         },
+                        "device_id": {
+                            "type": "string",
+                            "description": "Optional device ID. If not specified, uses active device."
+                        },
                         "biometric_type": {
                             "type": "string",
                             "enum": ["face_id", "touch_id"],
@@ -35,6 +41,7 @@ impl BiometricKit {
                 }),
             },
             harness,
+            device_manager,
         }
     }
 }
@@ -157,10 +164,11 @@ pub struct SystemDialogKit {
     schema: ToolSchema,
     #[allow(dead_code)]
     harness: Arc<Mutex<RustTestHarness>>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl SystemDialogKit {
-    pub fn new(harness: Arc<Mutex<RustTestHarness>>) -> Self {
+    pub fn new(harness: Arc<Mutex<RustTestHarness>>, device_manager: Arc<DeviceManager>) -> Self {
         Self {
             schema: ToolSchema {
                 name: "system_dialog".to_string(),
@@ -173,6 +181,10 @@ impl SystemDialogKit {
                             "enum": ["accept", "dismiss", "allow", "deny"],
                             "description": "Action to perform on system dialog"
                         },
+                        "device_id": {
+                            "type": "string",
+                            "description": "Optional device ID. If not specified, uses active device."
+                        },
                         "button_text": {
                             "type": "string",
                             "description": "Specific button text to tap"
@@ -182,6 +194,7 @@ impl SystemDialogKit {
                 }),
             },
             harness,
+            device_manager,
         }
     }
 }

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod ios_bridge_tests {
     use arkavo_test::bridge::ios_ffi::RustTestHarness;
+    use arkavo_test::mcp::device_manager::DeviceManager;
     use arkavo_test::mcp::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
     use arkavo_test::mcp::server::Tool;
     use serde_json::json;
@@ -9,7 +10,8 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_ui_interaction_tap() {
         let harness = Arc::new(Mutex::new(RustTestHarness::new()));
-        let ui_kit = UiInteractionKit::new(harness.clone());
+        let device_manager = Arc::new(DeviceManager::new());
+        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
 
         // Test tap with coordinates
         let params = json!({
@@ -31,7 +33,8 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_ui_interaction_type_text() {
         let harness = Arc::new(Mutex::new(RustTestHarness::new()));
-        let ui_kit = UiInteractionKit::new(harness.clone());
+        let device_manager = Arc::new(DeviceManager::new());
+        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
 
         let params = json!({
             "action": "type_text",
@@ -49,7 +52,8 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_ui_interaction_swipe() {
         let harness = Arc::new(Mutex::new(RustTestHarness::new()));
-        let ui_kit = UiInteractionKit::new(harness.clone());
+        let device_manager = Arc::new(DeviceManager::new());
+        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
 
         let params = json!({
             "action": "swipe",
@@ -73,7 +77,8 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_screen_capture() {
         let harness = Arc::new(Mutex::new(RustTestHarness::new()));
-        let capture_kit = ScreenCaptureKit::new(harness.clone());
+        let device_manager = Arc::new(DeviceManager::new());
+        let capture_kit = ScreenCaptureKit::new(harness.clone(), device_manager);
 
         let params = json!({
             "name": "test_screenshot"
@@ -93,7 +98,8 @@ mod ios_bridge_tests {
     #[tokio::test]
     async fn test_ui_query() {
         let harness = Arc::new(Mutex::new(RustTestHarness::new()));
-        let query_kit = UiQueryKit::new(harness.clone());
+        let device_manager = Arc::new(DeviceManager::new());
+        let query_kit = UiQueryKit::new(harness.clone(), device_manager);
 
         let params = json!({
             "query_type": "accessibility_tree"
