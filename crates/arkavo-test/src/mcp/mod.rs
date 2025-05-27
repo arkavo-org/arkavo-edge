@@ -4,6 +4,7 @@ pub mod coordinate_tools;
 pub mod deeplink_tools;
 pub mod device_manager;
 pub mod device_tools;
+pub mod face_id_control;
 pub mod idb_ui_tools;
 pub mod intelligent_tools;
 pub mod ios_biometric_tools;

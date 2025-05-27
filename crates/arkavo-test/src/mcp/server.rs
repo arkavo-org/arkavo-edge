@@ -4,6 +4,7 @@ use super::coordinate_tools::CoordinateConverterKit;
 use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
+use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
 use super::idb_ui_tools::IdbUiKit;
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
@@ -127,6 +128,16 @@ impl McpTestServer {
         tools.insert(
             "accessibility_dialog_handler".to_string(),
             Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add Face ID control tools
+        tools.insert(
+            "face_id_control".to_string(),
+            Arc::new(FaceIdController::new(device_manager.clone())),
+        );
+        tools.insert(
+            "face_id_status".to_string(),
+            Arc::new(FaceIdStatusChecker::new(device_manager.clone())),
         );
 
         // Add code analysis tools
