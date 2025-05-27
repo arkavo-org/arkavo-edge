@@ -1,17 +1,16 @@
 #[cfg(test)]
 mod ios_bridge_tests {
-    use arkavo_test::bridge::ios_ffi::RustTestHarness;
     use arkavo_test::mcp::device_manager::DeviceManager;
     use arkavo_test::mcp::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
     use arkavo_test::mcp::server::Tool;
     use serde_json::json;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_ui_interaction_tap() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        
         let device_manager = Arc::new(DeviceManager::new());
-        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
+        let ui_kit = UiInteractionKit::new(device_manager);
 
         // Test tap with coordinates
         let params = json!({
@@ -32,9 +31,9 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_interaction_type_text() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        
         let device_manager = Arc::new(DeviceManager::new());
-        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
+        let ui_kit = UiInteractionKit::new(device_manager);
 
         let params = json!({
             "action": "type_text",
@@ -51,9 +50,9 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_interaction_swipe() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        
         let device_manager = Arc::new(DeviceManager::new());
-        let ui_kit = UiInteractionKit::new(harness.clone(), device_manager);
+        let ui_kit = UiInteractionKit::new(device_manager);
 
         let params = json!({
             "action": "swipe",
@@ -76,9 +75,9 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_screen_capture() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        
         let device_manager = Arc::new(DeviceManager::new());
-        let capture_kit = ScreenCaptureKit::new(harness.clone(), device_manager);
+        let capture_kit = ScreenCaptureKit::new(device_manager);
 
         let params = json!({
             "name": "test_screenshot"
@@ -97,9 +96,9 @@ mod ios_bridge_tests {
 
     #[tokio::test]
     async fn test_ui_query() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+        
         let device_manager = Arc::new(DeviceManager::new());
-        let query_kit = UiQueryKit::new(harness.clone(), device_manager);
+        let query_kit = UiQueryKit::new(device_manager);
 
         let params = json!({
             "query_type": "accessibility_tree"
@@ -114,28 +113,25 @@ mod ios_bridge_tests {
     }
 
     #[tokio::test]
-    async fn test_harness_state_management() {
-        let harness = Arc::new(Mutex::new(RustTestHarness::new()));
+    async fn test_device_management() {
+        let device_manager = Arc::new(DeviceManager::new());
         
-        // Test checkpoint creation
-        {
-            let mut h = harness.lock().unwrap();
-            let result = h.checkpoint("test_checkpoint");
-            assert!(result.is_ok());
-        }
+        // Test listing devices
+        let devices = device_manager.get_all_devices();
+        println!("Found {} devices", devices.len());
         
-        // Test branching
-        {
-            let mut h = harness.lock().unwrap();
-            let result = h.branch("test_checkpoint", "new_branch");
-            assert!(result.is_ok());
-        }
+        // Test getting booted devices
+        let booted = device_manager.get_booted_devices();
+        println!("Found {} booted devices", booted.len());
         
-        // Test restore
-        {
-            let mut h = harness.lock().unwrap();
-            let result = h.restore("test_checkpoint");
+        // Test active device management
+        if let Some(first_booted) = booted.first() {
+            let result = device_manager.set_active_device(&first_booted.id);
             assert!(result.is_ok());
+            
+            let active = device_manager.get_active_device();
+            assert!(active.is_some());
+            assert_eq!(active.unwrap().id, first_booted.id);
         }
     }
 }
