@@ -1,8 +1,10 @@
+use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
 use super::coordinate_tools::CoordinateConverterKit;
 use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
+use super::idb_ui_tools::IdbUiKit;
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
@@ -111,6 +113,20 @@ impl McpTestServer {
         tools.insert(
             "system_dialog".to_string(),
             Arc::new(SystemDialogKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "idb_ui".to_string(),
+            Arc::new(IdbUiKit::new(device_manager.clone())),
+        );
+
+        // Add biometric dialog handlers (no external dependencies)
+        tools.insert(
+            "biometric_dialog_handler".to_string(),
+            Arc::new(BiometricDialogHandler::new(device_manager.clone())),
+        );
+        tools.insert(
+            "accessibility_dialog_handler".to_string(),
+            Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
         );
 
         // Add code analysis tools
