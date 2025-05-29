@@ -176,6 +176,10 @@ jobs:
           command: build
           args: --release --target aarch64-apple-darwin
 
+      - name: Strip binary
+        run: |
+          strip target/aarch64-apple-darwin/release/arkavo
+
       - name: Codesign binary
         run: |
           codesign --force --options=runtime --timestamp --sign "Developer ID Application: Arkavo LLC (M8GS7ZT95Y)" target/aarch64-apple-darwin/release/arkavo
@@ -183,7 +187,6 @@ jobs:
       - name: Prepare binary
         run: |
           cd target/aarch64-apple-darwin/release
-          strip arkavo
           tar -czf arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz arkavo
           shasum -a 256 arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz > arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz.sha256
 
