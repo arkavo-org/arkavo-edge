@@ -1,12 +1,17 @@
 use super::device_manager::DeviceManager;
 use super::ios_errors::check_ios_availability;
 use super::server::{Tool, ToolSchema};
+use super::xctest_unix_bridge::XCTestUnixBridge;
+use super::xctest_compiler::XCTestCompiler;
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::OnceCell;
+
+static XCTEST_BRIDGE: OnceCell<Option<Arc<Mutex<XCTestUnixBridge>>>> = OnceCell::const_new();
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
@@ -76,6 +81,50 @@ impl UiInteractionKit {
             },
             device_manager,
         }
+    }
+    
+    /// Get or initialize the XCTest bridge
+    async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
+        XCTEST_BRIDGE.get_or_init(|| async {
+            // Try to compile and set up XCTest runner
+            match self.setup_xctest_runner().await {
+                Ok(bridge) => {
+                    eprintln!("XCTest runner initialized successfully");
+                    Some(Arc::new(Mutex::new(bridge)))
+                },
+                Err(e) => {
+                    eprintln!("Failed to initialize XCTest runner: {}. Falling back to AppleScript.", e);
+                    None
+                }
+            }
+        }).await.clone()
+    }
+    
+    /// Set up the XCTest runner
+    async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
+        // Compile XCTest bundle if needed
+        let compiler = XCTestCompiler::new()?;
+        let bundle_path = compiler.get_xctest_bundle()?;
+        
+        // Get active device
+        let device = self.device_manager.get_active_device()
+            .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
+        
+        // Install to simulator
+        compiler.install_to_simulator(&device.id, &bundle_path)?;
+        
+        // Start Unix socket bridge
+        let mut bridge = XCTestUnixBridge::new();
+        bridge.start().await?;
+        
+        // Run the test bundle
+        // Note: This is simplified - in reality we'd need to handle the test execution properly
+        compiler.run_tests(&device.id, "com.arkavo.testrunner")?;
+        
+        // Connect to the runner
+        bridge.connect_to_runner().await?;
+        
+        Ok(bridge)
     }
 }
 
