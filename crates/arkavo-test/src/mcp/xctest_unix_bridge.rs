@@ -21,7 +21,7 @@ pub struct TapCommand {
     pub timeout: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TargetType {
     Coordinate,
