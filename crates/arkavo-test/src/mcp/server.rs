@@ -128,10 +128,7 @@ impl McpTestServer {
             "simulator_control".to_string(),
             Arc::new(SimulatorControl::new()),
         );
-        tools.insert(
-            "app_management".to_string(),
-            Arc::new(AppManagement::new()),
-        );
+        tools.insert("app_management".to_string(), Arc::new(AppManagement::new()));
         tools.insert(
             "file_operations".to_string(),
             Arc::new(FileOperations::new()),
@@ -146,7 +143,7 @@ impl McpTestServer {
             "accessibility_dialog_handler".to_string(),
             Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
         );
-        
+
         // Add passkey dialog handler for biometric enrollment dialogs
         tools.insert(
             "passkey_dialog".to_string(),
@@ -258,14 +255,14 @@ impl McpTestServer {
             .tools
             .read()
             .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
-        
+
         let mut schemas = Vec::new();
         for (name, tool) in tools.iter() {
             if self.is_allowed(name, &serde_json::Value::Null) {
                 schemas.push(tool.schema().clone());
             }
         }
-        
+
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(schemas)
     }
@@ -1683,10 +1680,7 @@ impl Tool for ListTestsKit {
             .and_then(|v| v.as_str())
             .unwrap_or("all");
 
-        let page = params
-            .get("page")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as usize;
+        let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
         let page_size = params
             .get("page_size")
@@ -1700,7 +1694,7 @@ impl Tool for ListTestsKit {
         let total_count = tests.len();
         let start_idx = (page - 1) * page_size;
         let end_idx = std::cmp::min(start_idx + page_size, total_count);
-        
+
         // Paginate results
         let paginated_tests = if start_idx < total_count {
             tests.drain(start_idx..end_idx).collect::<Vec<_>>()
@@ -1715,7 +1709,7 @@ impl Tool for ListTestsKit {
                 "page": page,
                 "page_size": page_size,
                 "total_count": total_count,
-                "total_pages": (total_count + page_size - 1) / page_size,
+                "total_pages": total_count.div_ceil(page_size),
                 "has_next": end_idx < total_count,
                 "has_prev": page > 1
             },
@@ -1724,7 +1718,8 @@ impl Tool for ListTestsKit {
 
         // Check response size and trim if needed
         let response_str = serde_json::to_string(&response)?;
-        if response_str.len() > 100_000 { // ~100KB limit
+        if response_str.len() > 100_000 {
+            // ~100KB limit
             // Return summary only
             Ok(serde_json::json!({
                 "error": "Response too large",
@@ -1732,7 +1727,7 @@ impl Tool for ListTestsKit {
                 "pagination": {
                     "total_count": total_count,
                     "suggested_page_size": 20,
-                    "total_pages": (total_count + 19) / 20
+                    "total_pages": total_count.div_ceil(20)
                 },
                 "hint": "Try using 'filter' parameter or smaller 'page_size'"
             }))

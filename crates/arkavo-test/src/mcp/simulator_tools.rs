@@ -10,6 +10,12 @@ pub struct SimulatorControl {
     simulator_manager: Arc<Mutex<SimulatorManager>>,
 }
 
+impl Default for SimulatorControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimulatorControl {
     pub fn new() -> Self {
         Self {
@@ -147,6 +153,12 @@ pub struct AppManagement {
     simulator_manager: Arc<Mutex<SimulatorManager>>,
 }
 
+impl Default for AppManagement {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppManagement {
     pub fn new() -> Self {
         Self {
@@ -249,19 +261,18 @@ impl Tool for AppManagement {
                 let args: Vec<&str> = if let Some(arguments) = params.get("arguments") {
                     arguments
                         .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                        })
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
                         .unwrap_or_default()
                 } else {
                     vec![]
                 };
 
                 // Log the launch attempt
-                eprintln!("MCP: Attempting to launch app {} on device {}", bundle_id, device_id);
-                
+                eprintln!(
+                    "MCP: Attempting to launch app {} on device {}",
+                    bundle_id, device_id
+                );
+
                 match manager.launch_app(device_id, bundle_id, &args) {
                     Ok(pid) => {
                         eprintln!("MCP: App launched successfully with PID: {}", pid);
@@ -272,7 +283,7 @@ impl Tool for AppManagement {
                             "device_id": device_id,
                             "bundle_id": bundle_id
                         }))
-                    },
+                    }
                     Err(e) => {
                         eprintln!("MCP: Failed to launch app: {}", e);
                         Ok(serde_json::json!({
@@ -325,6 +336,12 @@ impl Tool for AppManagement {
 pub struct FileOperations {
     schema: ToolSchema,
     simulator_manager: Arc<Mutex<SimulatorManager>>,
+}
+
+impl Default for FileOperations {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FileOperations {

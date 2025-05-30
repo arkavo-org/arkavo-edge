@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 fn main() {
     println!("🚀 XCUITest Integration Demo\n");
-    
+
     // Show the architecture
     println!("Architecture Overview:");
     println!("====================");
@@ -23,11 +23,11 @@ fn main() {
     println!("   └─> Executes tap commands using native XCUITest APIs");
     println!("   └─> Returns results with element information");
     println!();
-    
+
     // Show example usage
     println!("Example Usage:");
     println!("=============");
-    
+
     // Example 1: Tap by text
     println!("1. Tap by Text:");
     println!("   ```rust");
@@ -38,7 +38,7 @@ fn main() {
     println!("   let response = bridge.send_tap_command(tap_cmd).await?;");
     println!("   ```");
     println!();
-    
+
     // Example 2: Tap by accessibility ID
     println!("2. Tap by Accessibility ID:");
     println!("   ```rust");
@@ -49,7 +49,7 @@ fn main() {
     println!("   let response = bridge.send_tap_command(tap_cmd).await?;");
     println!("   ```");
     println!();
-    
+
     // Example 3: Tap by coordinates
     println!("3. Tap by Coordinates:");
     println!("   ```rust");
@@ -57,7 +57,7 @@ fn main() {
     println!("   let response = bridge.send_tap_command(tap_cmd).await?;");
     println!("   ```");
     println!();
-    
+
     // Show the flow
     println!("Complete Flow:");
     println!("=============");
@@ -70,7 +70,7 @@ fn main() {
     println!("7. Taps the element using native XCUITest");
     println!("8. Returns success with element details (type, frame, etc.)");
     println!();
-    
+
     // Show benefits
     println!("Benefits over AppleScript:");
     println!("=========================");
@@ -81,28 +81,36 @@ fn main() {
     println!("✅ More reliable coordinate mapping");
     println!("✅ Native iOS testing framework");
     println!();
-    
+
     // Check if templates exist
     let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("templates")
         .join("XCTestRunner");
-    
+
     if template_dir.exists() {
         println!("📁 Templates found at: {}", template_dir.display());
-        
+
         let swift_template = template_dir.join("ArkavoTestRunner.swift.template");
         if swift_template.exists() {
-            println!("   ✅ Swift template: {} bytes", 
-                std::fs::metadata(&swift_template).map(|m| m.len()).unwrap_or(0));
+            println!(
+                "   ✅ Swift template: {} bytes",
+                std::fs::metadata(&swift_template)
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            );
         }
-        
+
         let plist_template = template_dir.join("Info.plist.template");
         if plist_template.exists() {
-            println!("   ✅ Info.plist: {} bytes",
-                std::fs::metadata(&plist_template).map(|m| m.len()).unwrap_or(0));
+            println!(
+                "   ✅ Info.plist: {} bytes",
+                std::fs::metadata(&plist_template)
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            );
         }
     }
-    
+
     println!();
     println!("🎉 XCUITest integration is ready for use!");
     println!();

@@ -95,16 +95,22 @@ fn init_schemas() {
         ]
     });
 
-    REQUEST_SCHEMA.set(ValidationOptions::default()
-        .with_draft(Draft::Draft7)
-        .build(&request_schema)
-        .expect("Failed to compile request schema"))
+    REQUEST_SCHEMA
+        .set(
+            ValidationOptions::default()
+                .with_draft(Draft::Draft7)
+                .build(&request_schema)
+                .expect("Failed to compile request schema"),
+        )
         .expect("Failed to set request schema");
 
-    RESPONSE_SCHEMA.set(ValidationOptions::default()
-        .with_draft(Draft::Draft7)
-        .build(&response_schema)
-        .expect("Failed to compile response schema"))
+    RESPONSE_SCHEMA
+        .set(
+            ValidationOptions::default()
+                .with_draft(Draft::Draft7)
+                .build(&response_schema)
+                .expect("Failed to compile response schema"),
+        )
         .expect("Failed to set response schema");
 }
 
@@ -154,27 +160,35 @@ struct JsonRpcError {
 
 fn validate_request(request: &Value) -> Result<(), String> {
     let validator = REQUEST_SCHEMA.get().expect("Schema not initialized");
-    
-    if let Err(_) = validator.validate(request) {
-        let error_messages: Vec<String> = validator.iter_errors(request)
+
+    if validator.validate(request).is_err() {
+        let error_messages: Vec<String> = validator
+            .iter_errors(request)
             .map(|e| format!("{}: {}", e.instance_path, e))
             .collect();
-        return Err(format!("Request validation failed: {}", error_messages.join(", ")));
+        return Err(format!(
+            "Request validation failed: {}",
+            error_messages.join(", ")
+        ));
     }
-    
+
     Ok(())
 }
 
 fn validate_response(response: &Value) -> Result<(), String> {
     let validator = RESPONSE_SCHEMA.get().expect("Schema not initialized");
-    
-    if let Err(_) = validator.validate(response) {
-        let error_messages: Vec<String> = validator.iter_errors(response)
+
+    if validator.validate(response).is_err() {
+        let error_messages: Vec<String> = validator
+            .iter_errors(response)
             .map(|e| format!("{}: {}", e.instance_path, e))
             .collect();
-        return Err(format!("Response validation failed: {}", error_messages.join(", ")));
+        return Err(format!(
+            "Response validation failed: {}",
+            error_messages.join(", ")
+        ));
     }
-    
+
     Ok(())
 }
 
@@ -186,18 +200,27 @@ fn success_response(id: JsonRpcId, result: Value) -> JsonRpcResponse {
     })
 }
 
-fn error_response(id: JsonRpcId, code: i32, message: String, data: Option<Value>) -> JsonRpcResponse {
+fn error_response(
+    id: JsonRpcId,
+    code: i32,
+    message: String,
+    data: Option<Value>,
+) -> JsonRpcResponse {
     JsonRpcResponse::Error(JsonRpcErrorResponse {
         jsonrpc: "2.0".to_string(),
         id,
-        error: JsonRpcError { code, message, data },
+        error: JsonRpcError {
+            code,
+            message,
+            data,
+        },
     })
 }
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize schemas
     init_schemas();
-    
+
     // Initialize test harness
     let harness = TestHarness::new()
         .map_err(|e| anyhow::anyhow!("Failed to initialize test harness: {}", e))?;
@@ -205,7 +228,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mcp_server = harness.mcp_server();
 
     eprintln!("Arkavo MCP Server starting with schema validation...");
-    
+
     // Set up panic handler to ensure clean JSON-RPC error on panic
     std::panic::set_hook(Box::new(|panic_info| {
         eprintln!("MCP Server panic: {:?}", panic_info);
@@ -222,7 +245,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(l) => {
                 eprintln!("MCP Server received: {}", l);
                 l
-            },
+            }
             Err(e) => {
                 eprintln!("Error reading input: {}", e);
                 continue;
@@ -243,7 +266,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Validate request schema
         if let Err(e) = validate_request(&json_value) {
             eprintln!("Request validation error: {}", e);
-            
+
             // Try to extract ID for error response
             if let Some(id) = json_value.get("id") {
                 if let Ok(id_val) = serde_json::from_value::<JsonRpcId>(id.clone()) {
@@ -251,15 +274,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         id_val,
                         INVALID_REQUEST,
                         format!("Invalid request: {}", e),
-                        None
+                        None,
                     );
-                    
+
                     let resp_json = serde_json::to_value(&error_resp)?;
                     if let Err(e) = validate_response(&resp_json) {
                         eprintln!("ERROR: Generated invalid error response: {}", e);
                         continue;
                     }
-                    
+
                     writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
                     stdout.flush()?;
                 }
@@ -278,18 +301,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // Handle request
         let response = match request.method.as_str() {
-            "initialize" => success_response(request.id, json!({
-                "protocolVersion": "2024-11-05",
-                "serverInfo": {
-                    "name": "arkavo",
-                    "version": env!("CARGO_PKG_VERSION")
-                },
-                "capabilities": {
-                    "tools": {
-                        "available": get_tool_list()
+            "initialize" => success_response(
+                request.id,
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "arkavo",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "capabilities": {
+                        "tools": {
+                            "available": get_tool_list()
+                        }
                     }
-                }
-            })),
+                }),
+            ),
 
             "tools/call" => {
                 if let Some(params) = request.params {
@@ -308,36 +334,45 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some(error_obj) = tool_response.result.get("error") {
                                     if !error_obj.is_null() {
                                         // Tool returned an actual error - convert to JSON-RPC error
-                                        let error_code = error_obj.get("code")
+                                        let error_code = error_obj
+                                            .get("code")
                                             .and_then(|c| c.as_str())
                                             .unwrap_or("TOOL_ERROR");
-                                        let error_msg = error_obj.get("message")
+                                        let error_msg = error_obj
+                                            .get("message")
                                             .and_then(|m| m.as_str())
                                             .unwrap_or("Tool execution failed");
-                                        
+
                                         error_response(
                                             request.id,
                                             INTERNAL_ERROR,
                                             format!("{}: {}", error_code, error_msg),
-                                            Some(tool_response.result)
+                                            Some(tool_response.result),
                                         )
                                     } else {
                                         // error field is null, treat as success
                                         // Check response size before formatting
-                                        let result_str = serde_json::to_string_pretty(&tool_response.result)
-                                            .unwrap_or_else(|_| "Error serializing result".to_string());
-                                        
+                                        let result_str =
+                                            serde_json::to_string_pretty(&tool_response.result)
+                                                .unwrap_or_else(|_| {
+                                                    "Error serializing result".to_string()
+                                                });
+
                                         // Limit response size to prevent MCP client errors
                                         let trimmed_result = if result_str.len() > 50_000 {
-                                            eprintln!("WARNING: Tool response too large ({} bytes), truncating", result_str.len());
-                                            format!("{}\n\n... (truncated, original size: {} bytes)", 
-                                                &result_str[..50_000], 
+                                            eprintln!(
+                                                "WARNING: Tool response too large ({} bytes), truncating",
+                                                result_str.len()
+                                            );
+                                            format!(
+                                                "{}\n\n... (truncated, original size: {} bytes)",
+                                                &result_str[..50_000],
                                                 result_str.len()
                                             )
                                         } else {
                                             result_str
                                         };
-                                        
+
                                         // Normal successful response
                                         success_response(
                                             request.id,
@@ -346,25 +381,32 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     "type": "text",
                                                     "text": trimmed_result
                                                 }]
-                                            })
+                                            }),
                                         )
                                     }
                                 } else {
                                     // Check response size before formatting
-                                    let result_str = serde_json::to_string_pretty(&tool_response.result)
-                                        .unwrap_or_else(|_| "Error serializing result".to_string());
-                                    
+                                    let result_str =
+                                        serde_json::to_string_pretty(&tool_response.result)
+                                            .unwrap_or_else(|_| {
+                                                "Error serializing result".to_string()
+                                            });
+
                                     // Limit response size to prevent MCP client errors
                                     let trimmed_result = if result_str.len() > 50_000 {
-                                        eprintln!("WARNING: Tool response too large ({} bytes), truncating", result_str.len());
-                                        format!("{}\n\n... (truncated, original size: {} bytes)", 
-                                            &result_str[..50_000], 
+                                        eprintln!(
+                                            "WARNING: Tool response too large ({} bytes), truncating",
+                                            result_str.len()
+                                        );
+                                        format!(
+                                            "{}\n\n... (truncated, original size: {} bytes)",
+                                            &result_str[..50_000],
                                             result_str.len()
                                         )
                                     } else {
                                         result_str
                                     };
-                                    
+
                                     // Normal successful response
                                     success_response(
                                         request.id,
@@ -373,15 +415,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 "type": "text",
                                                 "text": trimmed_result
                                             }]
-                                        })
+                                        }),
                                     )
                                 }
-                            },
+                            }
                             Err(e) => error_response(
                                 request.id,
                                 INTERNAL_ERROR,
                                 format!("Tool execution error: {}", e),
-                                None
+                                None,
                             ),
                         }
                     } else {
@@ -389,7 +431,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             request.id,
                             INVALID_PARAMS,
                             "Invalid parameters".to_string(),
-                            None
+                            None,
                         )
                     }
                 } else {
@@ -397,20 +439,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         request.id,
                         INVALID_PARAMS,
                         "Missing parameters".to_string(),
-                        None
+                        None,
                     )
                 }
             }
 
-            "tools/list" => success_response(request.id, json!({
-                "tools": get_tool_list()
-            })),
+            "tools/list" => success_response(
+                request.id,
+                json!({
+                    "tools": get_tool_list()
+                }),
+            ),
 
             _ => error_response(
                 request.id,
                 METHOD_NOT_FOUND,
                 format!("Method not found: {}", request.method),
-                None
+                None,
             ),
         };
 
@@ -418,8 +463,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let response_json = serde_json::to_value(&response)?;
         if let Err(e) = validate_response(&response_json) {
             eprintln!("ERROR: Generated invalid response: {}", e);
-            eprintln!("Response was: {}", serde_json::to_string_pretty(&response_json)?);
-            
+            eprintln!(
+                "Response was: {}",
+                serde_json::to_string_pretty(&response_json)?
+            );
+
             // Send internal error instead
             let error_resp = error_response(
                 match &response {
@@ -428,9 +476,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 INTERNAL_ERROR,
                 "Internal server error: Invalid response generated".to_string(),
-                None
+                None,
             );
-            
+
             writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
             stdout.flush()?;
             continue;
@@ -805,7 +853,7 @@ fn get_tool_list() -> Vec<Value> {
                     }
                 }
             }
-        })
+        }),
     ]
 }
 
@@ -825,7 +873,7 @@ mod tests {
     #[test]
     fn test_request_validation() {
         setup();
-        
+
         // Valid request
         let valid_request = json!({
             "jsonrpc": "2.0",
@@ -834,14 +882,14 @@ mod tests {
             "params": {}
         });
         assert!(validate_request(&valid_request).is_ok());
-        
+
         // Missing jsonrpc
         let invalid_request = json!({
             "id": 1,
             "method": "test"
         });
         assert!(validate_request(&invalid_request).is_err());
-        
+
         // Wrong jsonrpc version
         let invalid_request = json!({
             "jsonrpc": "1.0",
@@ -849,7 +897,7 @@ mod tests {
             "method": "test"
         });
         assert!(validate_request(&invalid_request).is_err());
-        
+
         // Null id
         let invalid_request = json!({
             "jsonrpc": "2.0",
@@ -862,7 +910,7 @@ mod tests {
     #[test]
     fn test_response_validation() {
         setup();
-        
+
         // Valid success response
         let valid_response = json!({
             "jsonrpc": "2.0",
@@ -870,7 +918,7 @@ mod tests {
             "result": {"test": "value"}
         });
         assert!(validate_response(&valid_response).is_ok());
-        
+
         // Valid error response
         let valid_error = json!({
             "jsonrpc": "2.0",
@@ -881,7 +929,7 @@ mod tests {
             }
         });
         assert!(validate_response(&valid_error).is_ok());
-        
+
         // Invalid - has both result and error
         let invalid_response = json!({
             "jsonrpc": "2.0",
@@ -893,7 +941,7 @@ mod tests {
             }
         });
         assert!(validate_response(&invalid_response).is_err());
-        
+
         // Invalid - missing required fields
         let invalid_response = json!({
             "jsonrpc": "2.0",

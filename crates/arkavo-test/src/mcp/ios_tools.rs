@@ -1,15 +1,15 @@
 use super::device_manager::DeviceManager;
 use super::ios_errors::check_ios_availability;
 use super::server::{Tool, ToolSchema};
-use super::xctest_unix_bridge::{XCTestUnixBridge, TapCommand, CommandResponse};
 use super::xctest_compiler::XCTestCompiler;
+use super::xctest_unix_bridge::{CommandResponse, TapCommand, XCTestUnixBridge};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
-use tokio::sync::{OnceCell, Mutex};
+use tokio::sync::{Mutex, OnceCell};
 
 static XCTEST_BRIDGE: OnceCell<Option<Arc<Mutex<XCTestUnixBridge>>>> = OnceCell::const_new();
 
@@ -82,55 +82,67 @@ impl UiInteractionKit {
             device_manager,
         }
     }
-    
+
     /// Send a tap command through XCTest bridge (helper to avoid mutex issues)
-    async fn send_xctest_tap(&self, bridge_arc: Arc<Mutex<XCTestUnixBridge>>, command: TapCommand) -> Result<CommandResponse> {
+    async fn send_xctest_tap(
+        &self,
+        bridge_arc: Arc<Mutex<XCTestUnixBridge>>,
+        command: TapCommand,
+    ) -> Result<CommandResponse> {
         // Now that we're using tokio::sync::Mutex, we can properly implement this
         let bridge = bridge_arc.lock().await;
         bridge.send_tap_command(command).await
     }
-    
+
     /// Get or initialize the XCTest bridge
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
-        XCTEST_BRIDGE.get_or_init(|| async {
-            // Try to compile and set up XCTest runner
-            match self.setup_xctest_runner().await {
-                Ok(bridge) => {
-                    eprintln!("XCTest runner initialized successfully");
-                    Some(Arc::new(Mutex::new(bridge)))
-                },
-                Err(e) => {
-                    eprintln!("Failed to initialize XCTest runner: {}. Falling back to AppleScript.", e);
-                    None
+        XCTEST_BRIDGE
+            .get_or_init(|| async {
+                // Try to compile and set up XCTest runner
+                match self.setup_xctest_runner().await {
+                    Ok(bridge) => {
+                        eprintln!("XCTest runner initialized successfully");
+                        Some(Arc::new(Mutex::new(bridge)))
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to initialize XCTest runner: {}. Falling back to AppleScript.",
+                            e
+                        );
+                        None
+                    }
                 }
-            }
-        }).await.clone()
+            })
+            .await
+            .clone()
     }
-    
+
     /// Set up the XCTest runner
     async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
         // Compile XCTest bundle if needed
         let compiler = XCTestCompiler::new()?;
         let bundle_path = compiler.get_xctest_bundle()?;
-        
+
         // Get active device
-        let device = self.device_manager.get_active_device()
+        let device = self
+            .device_manager
+            .get_active_device()
             .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
-        
+
         // Install to simulator
         compiler.install_to_simulator(&device.id, &bundle_path)?;
-        
+
         // Start Unix socket bridge
         let mut bridge = XCTestUnixBridge::new();
         bridge.start().await?;
-        
+
         // Run the test bundle
         // Note: This is simplified - in reality we'd need to handle the test execution properly
         compiler.run_tests(&device.id, "com.arkavo.testrunner")?;
-        
+
         // Connect to the runner
         bridge.connect_to_runner().await?;
-        
+
         Ok(bridge)
     }
 }
@@ -179,33 +191,38 @@ impl Tool for UiInteractionKit {
         match action {
             "analyze_layout" => {
                 // Capture screenshot and analyze device layout using AI vision
-                let device = self.device_manager.get_active_device()
+                let device = self
+                    .device_manager
+                    .get_active_device()
                     .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
                 let device_id = device.id.clone();
-                
+
                 // First capture a screenshot of the entire simulator window
                 let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
                 let screenshot_name = format!("layout_analysis_{}.png", timestamp);
                 let screenshot_path = format!("test_results/{}", screenshot_name);
-                
+
                 // Ensure test_results directory exists
-                std::fs::create_dir_all("test_results")
-                    .map_err(|e| TestError::Mcp(format!("Failed to create test_results directory: {}", e)))?;
-                
+                std::fs::create_dir_all("test_results").map_err(|e| {
+                    TestError::Mcp(format!("Failed to create test_results directory: {}", e))
+                })?;
+
                 // Capture the entire simulator window using screencapture
                 let window_capture = Command::new("screencapture")
-                    .args(&["-l", "-o", "-x", &screenshot_path])
-                    .arg(format!("$(osascript -e 'tell application \"System Events\" to tell process \"Simulator\" to get id of front window')"))
+                    .args(["-l", "-o", "-x", &screenshot_path])
+                    .arg("$(osascript -e 'tell application \"System Events\" to tell process \"Simulator\" to get id of front window')")
                     .output();
-                
+
                 // If window capture fails, fall back to simulator screenshot
                 if window_capture.is_err() || !window_capture.unwrap().status.success() {
                     // Use simctl to capture device screen only
                     let output = Command::new("xcrun")
-                        .args(&["simctl", "io", &device_id, "screenshot", &screenshot_path])
+                        .args(["simctl", "io", &device_id, "screenshot", &screenshot_path])
                         .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
-                    
+                        .map_err(|e| {
+                            TestError::Mcp(format!("Failed to capture screenshot: {}", e))
+                        })?;
+
                     if !output.status.success() {
                         return Ok(serde_json::json!({
                             "action": "analyze_layout",
@@ -214,14 +231,14 @@ impl Tool for UiInteractionKit {
                         }));
                     }
                 }
-                
+
                 // Get device info for context
                 let device_info = self.device_manager.get_device(&device_id);
                 let device_type = device_info
                     .as_ref()
                     .map(|d| d.device_type.as_str())
                     .unwrap_or("unknown");
-                
+
                 Ok(serde_json::json!({
                     "action": "analyze_layout",
                     "success": true,
@@ -256,7 +273,10 @@ impl Tool for UiInteractionKit {
                         target.get("accessibility_id").and_then(|v| v.as_str())
                     {
                         // Try XCUITest for accessibility ID tapping
-                        eprintln!("Attempting XCUITest tap by accessibility ID: {}", accessibility_id);
+                        eprintln!(
+                            "Attempting XCUITest tap by accessibility ID: {}",
+                            accessibility_id
+                        );
                         use_xctest = true;
                         xctest_command = Some(XCTestUnixBridge::create_accessibility_tap(
                             accessibility_id.to_string(),
@@ -266,7 +286,7 @@ impl Tool for UiInteractionKit {
                         // Direct coordinates - check if we should use XCUITest
                         let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        
+
                         // Try XCUITest if bridge is available
                         if let Some(_bridge) = self.get_xctest_bridge().await {
                             use_xctest = true;
@@ -277,20 +297,22 @@ impl Tool for UiInteractionKit {
                             tap_params["y"] = serde_json::json!(y);
                         }
                     }
-                    
+
                     // If using XCUITest, try to execute the tap
                     if use_xctest && xctest_command.is_some() {
                         if let Some(bridge_arc) = self.get_xctest_bridge().await {
                             let command = xctest_command.unwrap();
-                            
+
                             // Check if connected first
                             let is_connected = {
                                 let bridge = bridge_arc.lock().await;
                                 bridge.is_connected()
                             };
-                            
+
                             if !is_connected {
-                                eprintln!("XCUITest bridge not connected, falling back to AppleScript");
+                                eprintln!(
+                                    "XCUITest bridge not connected, falling back to AppleScript"
+                                );
                                 if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
                                     tap_params["x"] = x.clone();
                                     tap_params["y"] = y.clone();
@@ -317,8 +339,13 @@ impl Tool for UiInteractionKit {
                                             }));
                                         } else {
                                             // XCUITest failed, fall back to AppleScript for coordinates
-                                            eprintln!("XCUITest tap failed: {:?}, falling back to AppleScript", response.error);
-                                            if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                            eprintln!(
+                                                "XCUITest tap failed: {:?}, falling back to AppleScript",
+                                                response.error
+                                            );
+                                            if let (Some(x), Some(y)) =
+                                                (target.get("x"), target.get("y"))
+                                            {
                                                 tap_params["x"] = x.clone();
                                                 tap_params["y"] = y.clone();
                                             } else {
@@ -334,9 +361,14 @@ impl Tool for UiInteractionKit {
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("XCUITest error: {}, falling back to AppleScript", e);
+                                        eprintln!(
+                                            "XCUITest error: {}, falling back to AppleScript",
+                                            e
+                                        );
                                         // Fall back to AppleScript for coordinates
-                                        if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                        if let (Some(x), Some(y)) =
+                                            (target.get("x"), target.get("y"))
+                                        {
                                             tap_params["x"] = x.clone();
                                             tap_params["y"] = y.clone();
                                         } else {
@@ -489,21 +521,29 @@ impl Tool for UiInteractionKit {
                                 end tell
                             end tell
                         end tell"#,
-                        adjusted_x, max_x, adjusted_y, max_y,
-                        adjusted_x, max_x, adjusted_y, max_y,
-                        adjusted_x, max_x, adjusted_y, max_y
+                        adjusted_x,
+                        max_x,
+                        adjusted_y,
+                        max_y,
+                        adjusted_x,
+                        max_x,
+                        adjusted_y,
+                        max_y,
+                        adjusted_x,
+                        max_x,
+                        adjusted_y,
+                        max_y
                     );
 
                     let output = Command::new("osascript")
                         .arg("-e")
                         .arg(&applescript)
                         .output()
-                        .unwrap_or_else(|e| {
-                            std::process::Output {
-                                status: std::process::ExitStatus::from_raw(1),
-                                stdout: Vec::new(),
-                                stderr: format!("Failed to execute tap via AppleScript: {}", e).into_bytes(),
-                            }
+                        .unwrap_or_else(|e| std::process::Output {
+                            status: std::process::ExitStatus::from_raw(1),
+                            stdout: Vec::new(),
+                            stderr: format!("Failed to execute tap via AppleScript: {}", e)
+                                .into_bytes(),
                         });
 
                     let mut response = serde_json::json!({
@@ -548,7 +588,7 @@ impl Tool for UiInteractionKit {
                     .get("value")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| TestError::Mcp("Missing text value".to_string()))?;
-                
+
                 // Help AI agents who try to use action names as text values
                 if text == "clear_text" || text == "delete_key" || text == "select_all" {
                     return Ok(serde_json::json!({
@@ -600,10 +640,10 @@ impl Tool for UiInteractionKit {
                     .arg(activate_script)
                     .output()
                     .ok();
-                
+
                 // Small delay to ensure focus
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                
+
                 // Type the text using AppleScript
                 let type_script = format!(
                     r#"tell application "System Events"
@@ -614,7 +654,7 @@ impl Tool for UiInteractionKit {
                     end tell"#,
                     text.replace("\"", "\\\"").replace("\\", "\\\\")
                 );
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(&type_script)
@@ -672,7 +712,7 @@ impl Tool for UiInteractionKit {
                         end tell
                     end tell
                 "#;
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(clear_script)
@@ -702,7 +742,7 @@ impl Tool for UiInteractionKit {
                         end tell
                     end tell
                 "#;
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(select_script)
@@ -722,29 +762,29 @@ impl Tool for UiInteractionKit {
                 }
 
                 // Get repeat count (how many times to press delete)
-                let count = params
-                    .get("count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(1) as usize;
+                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
                 // Press delete key using key code 51
                 let mut delete_script = r#"
                     tell application "System Events"
                         tell process "Simulator"
-                            set frontmost to true"#.to_string();
-                
+                            set frontmost to true"#
+                    .to_string();
+
                 for _ in 0..count {
                     delete_script.push_str("\n            key code 51"); // Delete key
                     if count > 1 {
                         delete_script.push_str("\n            delay 0.05");
                     }
                 }
-                
-                delete_script.push_str(r#"
+
+                delete_script.push_str(
+                    r#"
                         end tell
                     end tell
-                "#);
-                
+                "#,
+                );
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(&delete_script)
@@ -773,7 +813,7 @@ impl Tool for UiInteractionKit {
                         end tell
                     end tell
                 "#;
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(copy_script)
@@ -801,7 +841,7 @@ impl Tool for UiInteractionKit {
                         end tell
                     end tell
                 "#;
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(paste_script)
@@ -825,12 +865,9 @@ impl Tool for UiInteractionKit {
                     .get("direction")
                     .and_then(|v| v.as_str())
                     .unwrap_or("down");
-                
-                let amount = params
-                    .get("amount")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(5) as usize;
-                
+
+                let amount = params.get("amount").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+
                 // Map direction to key codes
                 let key_code = match direction {
                     "up" => "126",
@@ -839,7 +876,7 @@ impl Tool for UiInteractionKit {
                     "right" => "124",
                     _ => "125", // default to down
                 };
-                
+
                 let scroll_script = format!(
                     r#"tell application "Simulator"
                         activate
@@ -855,10 +892,9 @@ impl Tool for UiInteractionKit {
                             end repeat
                         end tell
                     end tell"#,
-                    amount,
-                    key_code
+                    amount, key_code
                 );
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(&scroll_script)
@@ -886,7 +922,7 @@ impl Tool for UiInteractionKit {
                 }
 
                 let swipe_data = params.get("swipe");
-                
+
                 // Provide helpful error if swipe parameters are missing or incorrect format
                 if swipe_data.is_none() {
                     return Ok(serde_json::json!({
@@ -898,7 +934,7 @@ impl Tool for UiInteractionKit {
                                     "action": "swipe",
                                     "swipe": {
                                         "x1": "start x coordinate",
-                                        "y1": "start y coordinate", 
+                                        "y1": "start y coordinate",
                                         "x2": "end x coordinate",
                                         "y2": "end y coordinate",
                                         "duration": "optional duration in seconds (default 0.5)"
@@ -926,7 +962,7 @@ impl Tool for UiInteractionKit {
                         }
                     }));
                 }
-                
+
                 let swipe_data = swipe_data.unwrap();
 
                 // Get device ID
@@ -975,9 +1011,9 @@ impl Tool for UiInteractionKit {
 
                 // Determine swipe direction and use scroll instead
                 let is_vertical = (x2 - x1).abs() < (y2 - y1).abs();
-                let is_scroll_down = y2 < y1;  // Swipe up = scroll down
+                let is_scroll_down = y2 < y1; // Swipe up = scroll down
                 let is_scroll_right = x2 < x1; // Swipe left = scroll right
-                
+
                 // Use AppleScript with key events for scrolling
                 let scroll_script = if is_vertical {
                     let key_code = if is_scroll_down { "125" } else { "126" }; // down: 125, up: 126
@@ -1018,7 +1054,7 @@ impl Tool for UiInteractionKit {
                         key_code
                     )
                 };
-                
+
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(&scroll_script)
@@ -1029,11 +1065,9 @@ impl Tool for UiInteractionKit {
                     "success": output.status.success(),
                     "action": "swipe",
                     "method": "scroll_simulation",
-                    "direction": if is_vertical { 
+                    "direction": if is_vertical {
                         if is_scroll_down { "scroll_down" } else { "scroll_up" }
-                    } else {
-                        if is_scroll_right { "scroll_right" } else { "scroll_left" }
-                    },
+                    } else if is_scroll_right { "scroll_right" } else { "scroll_left" },
                     "coordinates": {
                         "x1": x1, "y1": y1,
                         "x2": x2, "y2": y2

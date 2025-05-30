@@ -240,7 +240,15 @@ impl SimulatorManager {
         };
 
         let output = Command::new("xcrun")
-            .args(["simctl", "spawn", udid, "cp", "-f", local_path, &container_path])
+            .args([
+                "simctl",
+                "spawn",
+                udid,
+                "cp",
+                "-f",
+                local_path,
+                &container_path,
+            ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to push file: {}", e)))?;
 

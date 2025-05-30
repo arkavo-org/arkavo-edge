@@ -82,23 +82,30 @@ impl Tool for PasskeyDialogHandler {
             "dismiss_enrollment_warning" => {
                 // For dialogs that say "Simulator requires enrolled biometrics to use passkeys"
                 // These typically have a "Cancel" button at the bottom
-                
+
                 // Method 1: Try to tap common Cancel button location
                 let cancel_locations = vec![
-                    (196.5, 550.0),  // Center bottom for iPhone Pro
-                    (196.5, 500.0),  // Slightly higher
-                    (196.5, 600.0),  // Slightly lower
-                    (100.0, 550.0),  // Left side
-                    (293.0, 550.0),  // Right side
+                    (196.5, 550.0), // Center bottom for iPhone Pro
+                    (196.5, 500.0), // Slightly higher
+                    (196.5, 600.0), // Slightly lower
+                    (100.0, 550.0), // Left side
+                    (293.0, 550.0), // Right side
                 ];
 
                 let mut success = false;
                 for (x, y) in &cancel_locations {
                     let output = Command::new("xcrun")
-                        .args(["simctl", "io", &device_id, "tap", &x.to_string(), &y.to_string()])
+                        .args([
+                            "simctl",
+                            "io",
+                            &device_id,
+                            "tap",
+                            &x.to_string(),
+                            &y.to_string(),
+                        ])
                         .output()
                         .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-                    
+
                     if output.status.success() {
                         success = true;
                         break;
@@ -122,20 +129,27 @@ impl Tool for PasskeyDialogHandler {
             "accept_enrollment" => {
                 // If there's a button to proceed with enrollment
                 // This would typically be in the center of the dialog
-                
+
                 let ok_locations = vec![
-                    (196.5, 450.0),  // Center middle
-                    (196.5, 400.0),  // Higher center
-                    (196.5, 500.0),  // Lower center
+                    (196.5, 450.0), // Center middle
+                    (196.5, 400.0), // Higher center
+                    (196.5, 500.0), // Lower center
                 ];
 
                 let mut success = false;
                 for (x, y) in &ok_locations {
                     let output = Command::new("xcrun")
-                        .args(["simctl", "io", &device_id, "tap", &x.to_string(), &y.to_string()])
+                        .args([
+                            "simctl",
+                            "io",
+                            &device_id,
+                            "tap",
+                            &x.to_string(),
+                            &y.to_string(),
+                        ])
                         .output()
                         .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-                    
+
                     if output.status.success() {
                         success = true;
                         break;
@@ -151,7 +165,7 @@ impl Tool for PasskeyDialogHandler {
             }
             "cancel_dialog" => {
                 // Generic cancel for any passkey-related dialog
-                
+
                 // Method 1: Send ESC key
                 let esc_output = Command::new("xcrun")
                     .args(["simctl", "io", &device_id, "sendkey", "escape"])
@@ -180,20 +194,27 @@ impl Tool for PasskeyDialogHandler {
             "tap_settings" => {
                 // If the dialog has a "Settings" button to go to biometric settings
                 // This is typically on the right side of the dialog
-                
+
                 let settings_locations = vec![
-                    (293.0, 450.0),  // Right middle
-                    (300.0, 500.0),  // Right lower
-                    (280.0, 400.0),  // Right upper
+                    (293.0, 450.0), // Right middle
+                    (300.0, 500.0), // Right lower
+                    (280.0, 400.0), // Right upper
                 ];
 
                 let mut success = false;
                 for (x, y) in &settings_locations {
                     let output = Command::new("xcrun")
-                        .args(["simctl", "io", &device_id, "tap", &x.to_string(), &y.to_string()])
+                        .args([
+                            "simctl",
+                            "io",
+                            &device_id,
+                            "tap",
+                            &x.to_string(),
+                            &y.to_string(),
+                        ])
                         .output()
                         .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-                    
+
                     if output.status.success() {
                         success = true;
                         break;

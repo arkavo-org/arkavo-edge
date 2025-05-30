@@ -65,7 +65,7 @@ impl BiometricKit {
     fn try_simctl_biometric(&self, device_id: &str, args: &[&str]) -> Result<std::process::Output> {
         let mut cmd_args = vec!["simctl", "ui", device_id, "biometric"];
         cmd_args.extend_from_slice(args);
-        
+
         let output = Command::new("xcrun")
             .args(&cmd_args)
             .output()
@@ -73,7 +73,9 @@ impl BiometricKit {
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("Unknown subcommand") || stderr.contains("unrecognized") {
-            return Err(TestError::Mcp("Biometric UI commands not supported".to_string()));
+            return Err(TestError::Mcp(
+                "Biometric UI commands not supported".to_string(),
+            ));
         }
 
         Ok(output)
@@ -81,20 +83,17 @@ impl BiometricKit {
 
     fn send_notification(&self, device_id: &str, title: &str, body: &str) -> Result<()> {
         Command::new("xcrun")
-            .args([
-                "simctl",
-                "push",
-                device_id,
-                "com.arkavo.Arkavo",
-                "-",
-            ])
-            .env("SIMCTL_CHILD_NOTIFICATION_PAYLOAD", format!(
-                r#"{{"aps":{{"alert":{{"title":"{}","body":"{}"}}}}}}"#,
-                title, body
-            ))
+            .args(["simctl", "push", device_id, "com.arkavo.Arkavo", "-"])
+            .env(
+                "SIMCTL_CHILD_NOTIFICATION_PAYLOAD",
+                format!(
+                    r#"{{"aps":{{"alert":{{"title":"{}","body":"{}"}}}}}}"#,
+                    title, body
+                ),
+            )
             .output()
             .ok();
-        
+
         Ok(())
     }
 }
@@ -127,7 +126,9 @@ impl Tool for BiometricKit {
         match action {
             "enroll" => {
                 // Method 1: Try simctl ui biometric enrollment (Xcode 13+)
-                if let Ok(output) = self.try_simctl_biometric(&device_id, &["enrollment", "--enrolled"]) {
+                if let Ok(output) =
+                    self.try_simctl_biometric(&device_id, &["enrollment", "--enrolled"])
+                {
                     if output.status.success() {
                         return Ok(serde_json::json!({
                             "success": true,
@@ -142,10 +143,14 @@ impl Tool for BiometricKit {
                 // Method 2: Check if we can use alternate approaches
                 // Privacy grant often fails with "Operation not permitted" on simulators
                 // Instead, provide guidance and workarounds
-                
+
                 // Try to notify about manual enrollment
-                self.send_notification(&device_id, "Manual Enrollment Required", 
-                    "Please use Simulator menu: Device > Face ID/Touch ID > Enrolled").ok();
+                self.send_notification(
+                    &device_id,
+                    "Manual Enrollment Required",
+                    "Please use Simulator menu: Device > Face ID/Touch ID > Enrolled",
+                )
+                .ok();
 
                 // Return success with instructions - the AI can proceed knowing enrollment needs manual action
                 Ok(serde_json::json!({
@@ -178,8 +183,12 @@ impl Tool for BiometricKit {
                 }
 
                 // Method 2: Send notification about successful match
-                self.send_notification(&device_id, "Authentication Success", 
-                    "Face ID/Touch ID authentication simulated").ok();
+                self.send_notification(
+                    &device_id,
+                    "Authentication Success",
+                    "Face ID/Touch ID authentication simulated",
+                )
+                .ok();
 
                 // Method 3: Try to tap on a likely "Continue" or "OK" button
                 Command::new("xcrun")
@@ -211,8 +220,12 @@ impl Tool for BiometricKit {
                 }
 
                 // Method 2: Send notification about failed match
-                self.send_notification(&device_id, "Authentication Failed", 
-                    "Face ID/Touch ID authentication failed").ok();
+                self.send_notification(
+                    &device_id,
+                    "Authentication Failed",
+                    "Face ID/Touch ID authentication failed",
+                )
+                .ok();
 
                 Ok(serde_json::json!({
                     "success": true,
@@ -225,7 +238,7 @@ impl Tool for BiometricKit {
             }
             "cancel" => {
                 // Method 1: Try simctl ui biometric cancel (Xcode 13+)
-                if let Ok(_) = self.try_simctl_biometric(&device_id, &["cancel"]) {
+                if self.try_simctl_biometric(&device_id, &["cancel"]).is_ok() {
                     return Ok(serde_json::json!({
                         "success": true,
                         "action": "cancel",

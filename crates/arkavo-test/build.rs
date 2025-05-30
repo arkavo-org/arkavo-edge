@@ -11,7 +11,7 @@ fn main() {
                 .file("src/bridge/ios_impl.c")
                 .warnings(true)
                 .compile("ios_bridge");
-            
+
             // Link with CoreFoundation framework
             println!("cargo:rustc-link-lib=framework=CoreFoundation");
         }
