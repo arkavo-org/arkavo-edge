@@ -1,122 +1,20 @@
 use arkavo_test::TestHarness;
 use arkavo_test::mcp::server::ToolRequest;
-use jsonschema::{Draft, ValidationOptions, Validator};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
-use std::sync::OnceLock;
 
 // Standard JSON-RPC error codes
-#[allow(dead_code)]
 const PARSE_ERROR: i32 = -32700;
 const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
 const INVALID_PARAMS: i32 = -32602;
 const INTERNAL_ERROR: i32 = -32603;
 
-// Schema validators
-static REQUEST_SCHEMA: OnceLock<Validator> = OnceLock::new();
-static RESPONSE_SCHEMA: OnceLock<Validator> = OnceLock::new();
-
-fn init_schemas() {
-    // JSON-RPC Request Schema based on MCP TypeScript definitions
-    let request_schema = json!({
-        "type": "object",
-        "properties": {
-            "jsonrpc": {
-                "type": "string",
-                "const": "2.0"
-            },
-            "id": {
-                "oneOf": [
-                    {"type": "string"},
-                    {"type": "number"}
-                ]
-            },
-            "method": {
-                "type": "string"
-            },
-            "params": {
-                "type": "object"
-            }
-        },
-        "required": ["jsonrpc", "id", "method"],
-        "additionalProperties": false
-    });
-
-    // JSON-RPC Response Schema (success or error)
-    let response_schema = json!({
-        "oneOf": [
-            {
-                "type": "object",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {"type": "string"},
-                            {"type": "number"}
-                        ]
-                    },
-                    "result": {}
-                },
-                "required": ["jsonrpc", "id", "result"],
-                "additionalProperties": false
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {"type": "string"},
-                            {"type": "number"}
-                        ]
-                    },
-                    "error": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "message": {"type": "string"},
-                            "data": {}
-                        },
-                        "required": ["code", "message"],
-                        "additionalProperties": false
-                    }
-                },
-                "required": ["jsonrpc", "id", "error"],
-                "additionalProperties": false
-            }
-        ]
-    });
-
-    REQUEST_SCHEMA
-        .set(
-            ValidationOptions::default()
-                .with_draft(Draft::Draft7)
-                .build(&request_schema)
-                .expect("Failed to compile request schema"),
-        )
-        .expect("Failed to set request schema");
-
-    RESPONSE_SCHEMA
-        .set(
-            ValidationOptions::default()
-                .with_draft(Draft::Draft7)
-                .build(&response_schema)
-                .expect("Failed to compile response schema"),
-        )
-        .expect("Failed to set response schema");
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
+    #[serde(deserialize_with = "deserialize_id")]
     id: JsonRpcId,
     method: String,
     params: Option<Value>,
@@ -127,6 +25,24 @@ struct JsonRpcRequest {
 enum JsonRpcId {
     Number(i64),
     String(String),
+}
+
+fn deserialize_id<'de, D>(deserializer: D) -> Result<JsonRpcId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(JsonRpcId::Number(i))
+            } else {
+                Err(serde::de::Error::custom("id must be an integer or string"))
+            }
+        }
+        Value::String(s) => Ok(JsonRpcId::String(s)),
+        _ => Err(serde::de::Error::custom("id must be a number or string")),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,38 +74,12 @@ struct JsonRpcError {
     data: Option<Value>,
 }
 
-fn validate_request(request: &Value) -> Result<(), String> {
-    let validator = REQUEST_SCHEMA.get().expect("Schema not initialized");
-
-    if validator.validate(request).is_err() {
-        let error_messages: Vec<String> = validator
-            .iter_errors(request)
-            .map(|e| format!("{}: {}", e.instance_path, e))
-            .collect();
-        return Err(format!(
-            "Request validation failed: {}",
-            error_messages.join(", ")
-        ));
-    }
-
-    Ok(())
-}
-
-fn validate_response(response: &Value) -> Result<(), String> {
-    let validator = RESPONSE_SCHEMA.get().expect("Schema not initialized");
-
-    if validator.validate(response).is_err() {
-        let error_messages: Vec<String> = validator
-            .iter_errors(response)
-            .map(|e| format!("{}: {}", e.instance_path, e))
-            .collect();
-        return Err(format!(
-            "Response validation failed: {}",
-            error_messages.join(", ")
-        ));
-    }
-
-    Ok(())
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsonRpcNotification {
+    jsonrpc: String,
+    method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<Value>,
 }
 
 fn success_response(id: JsonRpcId, result: Value) -> JsonRpcResponse {
@@ -200,35 +90,23 @@ fn success_response(id: JsonRpcId, result: Value) -> JsonRpcResponse {
     })
 }
 
-fn error_response(
-    id: JsonRpcId,
-    code: i32,
-    message: String,
-    data: Option<Value>,
-) -> JsonRpcResponse {
+fn error_response(id: JsonRpcId, code: i32, message: String, data: Option<Value>) -> JsonRpcResponse {
     JsonRpcResponse::Error(JsonRpcErrorResponse {
         jsonrpc: "2.0".to_string(),
         id,
-        error: JsonRpcError {
-            code,
-            message,
-            data,
-        },
+        error: JsonRpcError { code, message, data },
     })
 }
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize schemas
-    init_schemas();
-
     // Initialize test harness
     let harness = TestHarness::new()
         .map_err(|e| anyhow::anyhow!("Failed to initialize test harness: {}", e))?;
 
     let mcp_server = harness.mcp_server();
 
-    eprintln!("Arkavo MCP Server starting with schema validation...");
-
+    eprintln!("Arkavo MCP Server starting...");
+    
     // Set up panic handler to ensure clean JSON-RPC error on panic
     std::panic::set_hook(Box::new(|panic_info| {
         eprintln!("MCP Server panic: {:?}", panic_info);
@@ -245,77 +123,40 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(l) => {
                 eprintln!("MCP Server received: {}", l);
                 l
-            }
+            },
             Err(e) => {
                 eprintln!("Error reading input: {}", e);
                 continue;
             }
         };
 
-        // Parse as JSON first
-        let json_value: Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("JSON parse error: {}", e);
-                // For parse errors, we can't send a proper error response
-                // because we don't have a request ID
-                continue;
-            }
-        };
-
-        // Validate request schema
-        if let Err(e) = validate_request(&json_value) {
-            eprintln!("Request validation error: {}", e);
-
-            // Try to extract ID for error response
-            if let Some(id) = json_value.get("id") {
-                if let Ok(id_val) = serde_json::from_value::<JsonRpcId>(id.clone()) {
-                    let error_resp = error_response(
-                        id_val,
-                        INVALID_REQUEST,
-                        format!("Invalid request: {}", e),
-                        None,
-                    );
-
-                    let resp_json = serde_json::to_value(&error_resp)?;
-                    if let Err(e) = validate_response(&resp_json) {
-                        eprintln!("ERROR: Generated invalid error response: {}", e);
-                        continue;
-                    }
-
-                    writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
-                    stdout.flush()?;
-                }
-            }
-            continue;
-        }
-
-        // Parse into typed request
-        let request: JsonRpcRequest = match serde_json::from_value(json_value) {
+        // Parse JSON-RPC request
+        let request: JsonRpcRequest = match serde_json::from_str(&line) {
             Ok(req) => req,
             Err(e) => {
-                eprintln!("Failed to parse request: {}", e);
+                // For parse errors, we can't get the ID from the request
+                // The JSON-RPC spec says to omit the response entirely for parse errors
+                // or send a notification (no id field) if we must respond
+                eprintln!("Parse error: {}", e);
+                // Skip this malformed request
                 continue;
             }
         };
 
         // Handle request
         let response = match request.method.as_str() {
-            "initialize" => success_response(
-                request.id,
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {
-                        "name": "arkavo",
-                        "version": env!("CARGO_PKG_VERSION")
-                    },
-                    "capabilities": {
-                        "tools": {
-                            "available": get_tool_list()
-                        }
+            "initialize" => success_response(request.id, json!({
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
+                    "name": "arkavo",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "tools": {
+                        "available": get_tool_list()
                     }
-                }),
-            ),
+                }
+            })),
 
             "tools/call" => {
                 if let Some(params) = request.params {
@@ -330,100 +171,41 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                         match mcp_server.call_tool(tool_request).await {
                             Ok(tool_response) => {
-                                // Check if the tool returned an error object (and it's not null)
+                                // Check if the tool returned an error object
                                 if let Some(error_obj) = tool_response.result.get("error") {
-                                    if !error_obj.is_null() {
-                                        // Tool returned an actual error - convert to JSON-RPC error
-                                        let error_code = error_obj
-                                            .get("code")
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or("TOOL_ERROR");
-                                        let error_msg = error_obj
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .unwrap_or("Tool execution failed");
-
-                                        error_response(
-                                            request.id,
-                                            INTERNAL_ERROR,
-                                            format!("{}: {}", error_code, error_msg),
-                                            Some(tool_response.result),
-                                        )
-                                    } else {
-                                        // error field is null, treat as success
-                                        // Check response size before formatting
-                                        let result_str =
-                                            serde_json::to_string_pretty(&tool_response.result)
-                                                .unwrap_or_else(|_| {
-                                                    "Error serializing result".to_string()
-                                                });
-
-                                        // Limit response size to prevent MCP client errors
-                                        let trimmed_result = if result_str.len() > 50_000 {
-                                            eprintln!(
-                                                "WARNING: Tool response too large ({} bytes), truncating",
-                                                result_str.len()
-                                            );
-                                            format!(
-                                                "{}\n\n... (truncated, original size: {} bytes)",
-                                                &result_str[..50_000],
-                                                result_str.len()
-                                            )
-                                        } else {
-                                            result_str
-                                        };
-
-                                        // Normal successful response
-                                        success_response(
-                                            request.id,
-                                            json!({
-                                                "content": [{
-                                                    "type": "text",
-                                                    "text": trimmed_result
-                                                }]
-                                            }),
-                                        )
-                                    }
+                                    // Tool returned an error - convert to JSON-RPC error
+                                    let error_code = error_obj.get("code")
+                                        .and_then(|c| c.as_str())
+                                        .unwrap_or("TOOL_ERROR");
+                                    let error_msg = error_obj.get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("Tool execution failed");
+                                    
+                                    error_response(
+                                        request.id,
+                                        INTERNAL_ERROR,
+                                        format!("{}: {}", error_code, error_msg),
+                                        Some(tool_response.result)
+                                    )
                                 } else {
-                                    // Check response size before formatting
-                                    let result_str =
-                                        serde_json::to_string_pretty(&tool_response.result)
-                                            .unwrap_or_else(|_| {
-                                                "Error serializing result".to_string()
-                                            });
-
-                                    // Limit response size to prevent MCP client errors
-                                    let trimmed_result = if result_str.len() > 50_000 {
-                                        eprintln!(
-                                            "WARNING: Tool response too large ({} bytes), truncating",
-                                            result_str.len()
-                                        );
-                                        format!(
-                                            "{}\n\n... (truncated, original size: {} bytes)",
-                                            &result_str[..50_000],
-                                            result_str.len()
-                                        )
-                                    } else {
-                                        result_str
-                                    };
-
                                     // Normal successful response
                                     success_response(
                                         request.id,
                                         json!({
                                             "content": [{
                                                 "type": "text",
-                                                "text": trimmed_result
+                                                "text": serde_json::to_string_pretty(&tool_response.result)
+                                                    .unwrap_or_else(|_| "Error serializing result".to_string())
                                             }]
-                                        }),
+                                        })
                                     )
                                 }
-                            }
+                            },
                             Err(e) => error_response(
                                 request.id,
                                 INTERNAL_ERROR,
                                 format!("Tool execution error: {}", e),
-                                None,
+                                None
                             ),
                         }
                     } else {
@@ -431,7 +213,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             request.id,
                             INVALID_PARAMS,
                             "Invalid parameters".to_string(),
-                            None,
+                            None
                         )
                     }
                 } else {
@@ -439,52 +221,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         request.id,
                         INVALID_PARAMS,
                         "Missing parameters".to_string(),
-                        None,
+                        None
                     )
                 }
             }
 
-            "tools/list" => success_response(
-                request.id,
-                json!({
-                    "tools": get_tool_list()
-                }),
-            ),
+            "tools/list" => success_response(request.id, json!({
+                "tools": get_tool_list()
+            })),
 
             _ => error_response(
                 request.id,
                 METHOD_NOT_FOUND,
                 format!("Method not found: {}", request.method),
-                None,
+                None
             ),
         };
 
-        // Validate response before sending
-        let response_json = serde_json::to_value(&response)?;
-        if let Err(e) = validate_response(&response_json) {
-            eprintln!("ERROR: Generated invalid response: {}", e);
-            eprintln!(
-                "Response was: {}",
-                serde_json::to_string_pretty(&response_json)?
-            );
-
-            // Send internal error instead
-            let error_resp = error_response(
-                match &response {
-                    JsonRpcResponse::Success(s) => s.id.clone(),
-                    JsonRpcResponse::Error(e) => e.id.clone(),
-                },
-                INTERNAL_ERROR,
-                "Internal server error: Invalid response generated".to_string(),
-                None,
-            );
-
-            writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
-            stdout.flush()?;
-            continue;
-        }
-
-        // Send validated response
+        // Send response
         let response_str = serde_json::to_string(&response)?;
         eprintln!("MCP Server sending response: {}", response_str);
         writeln!(stdout, "{}", response_str)?;
@@ -547,11 +301,11 @@ fn get_tool_list() -> Vec<Value> {
         }),
         json!({
             "name": "ui_interaction",
-            "description": "Interact with iOS UI elements. SCROLLING: Use {\"action\":\"scroll\",\"direction\":\"down\",\"amount\":10} instead of swipe. TEXT EDITING: clear_text, delete_key are SEPARATE ACTIONS! CORRECT: {\"action\":\"clear_text\"} WRONG: {\"action\":\"type_text\",\"value\":\"clear_text\"}. WORKFLOW: 1) screen_capture, 2) tap field, 3) clear_text, 4) type_text. TAP BY TEXT: Not supported - use coordinates from vision analysis.",
+            "description": "Interact with iOS UI elements. IMPORTANT FOR AI AGENTS: 1) Always use screen_capture first to see the UI state. 2) For text input: tap the text field first, then use type_text. 3) Use analyze_layout for AI vision analysis of UI elements. 4) Coordinate-based interactions only (no text/accessibility selectors).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button", "analyze_layout", "clear_text", "select_all", "delete_key", "copy", "paste", "scroll"]},
+                    "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button", "analyze_layout"]},
                     "device_id": {"type": "string"},
                     "target": {
                         "type": "object",
@@ -563,22 +317,6 @@ fn get_tool_list() -> Vec<Value> {
                         }
                     },
                     "value": {"type": "string"},
-                    "count": {
-                        "type": "integer",
-                        "description": "Number of times to repeat an action (used with delete_key)",
-                        "minimum": 1
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["up", "down", "left", "right"],
-                        "description": "Scroll direction (for scroll action)"
-                    },
-                    "amount": {
-                        "type": "integer",
-                        "description": "Number of scroll steps (for scroll action, default: 5)",
-                        "minimum": 1,
-                        "maximum": 50
-                    },
                     "swipe": {
                         "type": "object",
                         "properties": {
@@ -827,126 +565,14 @@ fn get_tool_list() -> Vec<Value> {
         }),
         json!({
             "name": "list_tests",
-            "description": "List all available tests in the repository. AI AGENTS: This tool returns paginated results. Use page_size=20 to avoid large responses. Check pagination.has_next to see if more pages exist.",
+            "description": "List all available tests in the repository",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "filter": {
-                        "type": "string",
-                        "description": "Optional filter pattern for test names"
-                    },
-                    "test_type": {
-                        "type": "string",
-                        "enum": ["unit", "integration", "performance", "ui", "all"],
-                        "description": "Type of tests to list (default: all)"
-                    },
-                    "page": {
-                        "type": "integer",
-                        "description": "Page number (1-based, default: 1)",
-                        "minimum": 1
-                    },
-                    "page_size": {
-                        "type": "integer",
-                        "description": "Tests per page (default: 50, max: 200)",
-                        "minimum": 1,
-                        "maximum": 200
-                    }
+                    "filter": {"type": "string"},
+                    "test_type": {"type": "string", "enum": ["unit", "integration", "performance", "ui", "all"]}
                 }
             }
-        }),
+        })
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Once;
-
-    static INIT: Once = Once::new();
-
-    fn setup() {
-        INIT.call_once(|| {
-            init_schemas();
-        });
-    }
-
-    #[test]
-    fn test_request_validation() {
-        setup();
-
-        // Valid request
-        let valid_request = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "test",
-            "params": {}
-        });
-        assert!(validate_request(&valid_request).is_ok());
-
-        // Missing jsonrpc
-        let invalid_request = json!({
-            "id": 1,
-            "method": "test"
-        });
-        assert!(validate_request(&invalid_request).is_err());
-
-        // Wrong jsonrpc version
-        let invalid_request = json!({
-            "jsonrpc": "1.0",
-            "id": 1,
-            "method": "test"
-        });
-        assert!(validate_request(&invalid_request).is_err());
-
-        // Null id
-        let invalid_request = json!({
-            "jsonrpc": "2.0",
-            "id": null,
-            "method": "test"
-        });
-        assert!(validate_request(&invalid_request).is_err());
-    }
-
-    #[test]
-    fn test_response_validation() {
-        setup();
-
-        // Valid success response
-        let valid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"test": "value"}
-        });
-        assert!(validate_response(&valid_response).is_ok());
-
-        // Valid error response
-        let valid_error = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32600,
-                "message": "Invalid request"
-            }
-        });
-        assert!(validate_response(&valid_error).is_ok());
-
-        // Invalid - has both result and error
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {},
-            "error": {
-                "code": -32600,
-                "message": "Invalid"
-            }
-        });
-        assert!(validate_response(&invalid_response).is_err());
-
-        // Invalid - missing required fields
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1
-        });
-        assert!(validate_response(&invalid_response).is_err());
-    }
 }
