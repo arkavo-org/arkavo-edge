@@ -1,9 +1,19 @@
+use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
+use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
+use super::coordinate_tools::CoordinateConverterKit;
+use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
+use super::device_manager::DeviceManager;
+use super::device_tools::DeviceManagementKit;
+use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
+use super::idb_ui_tools::IdbUiKit;
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
+use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -35,6 +45,7 @@ pub struct McpTestServer {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Tool>>>>,
     metrics: Arc<Metrics>,
     state_store: Arc<StateStore>,
+    device_manager: Arc<DeviceManager>,
 }
 
 impl std::fmt::Debug for McpTestServer {
@@ -43,6 +54,7 @@ impl std::fmt::Debug for McpTestServer {
             .field("tools", &"<tools>")
             .field("metrics", &self.metrics)
             .field("state_store", &"<state>")
+            .field("device_manager", &"<device_manager>")
             .finish()
     }
 }
@@ -54,26 +66,108 @@ impl McpTestServer {
         // Initialize analysis engine for intelligent tools
         let analysis_engine = Arc::new(AnalysisEngine::new()?);
 
+        // Initialize device manager
+        let device_manager = Arc::new(DeviceManager::new());
+
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
         tools.insert("mutate_state".to_string(), Arc::new(MutateStateKit::new()));
         tools.insert("snapshot".to_string(), Arc::new(SnapshotKit::new()));
         tools.insert("run_test".to_string(), Arc::new(RunTestKit::new()));
         tools.insert("list_tests".to_string(), Arc::new(ListTestsKit::new()));
 
+        // Add device management tool
+        tools.insert(
+            "device_management".to_string(),
+            Arc::new(DeviceManagementKit::new(device_manager.clone())),
+        );
+
+        // Add coordinate converter tool
+        tools.insert(
+            "coordinate_converter".to_string(),
+            Arc::new(CoordinateConverterKit::new()),
+        );
+
+        // Add deep link and app launcher tools
+        tools.insert(
+            "deep_link".to_string(),
+            Arc::new(DeepLinkKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "app_launcher".to_string(),
+            Arc::new(AppLauncherKit::new(device_manager.clone())),
+        );
+
         // Add iOS-specific tools
         tools.insert(
             "ui_interaction".to_string(),
-            Arc::new(UiInteractionKit::new()),
+            Arc::new(UiInteractionKit::new(device_manager.clone())),
         );
         tools.insert(
             "screen_capture".to_string(),
-            Arc::new(ScreenCaptureKit::new()),
+            Arc::new(ScreenCaptureKit::new(device_manager.clone())),
         );
-        tools.insert("ui_query".to_string(), Arc::new(UiQueryKit::new()));
-        tools.insert("biometric_auth".to_string(), Arc::new(BiometricKit::new()));
+        tools.insert(
+            "ui_query".to_string(),
+            Arc::new(UiQueryKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "biometric_auth".to_string(),
+            Arc::new(BiometricKit::new(device_manager.clone())),
+        );
         tools.insert(
             "system_dialog".to_string(),
-            Arc::new(SystemDialogKit::new()),
+            Arc::new(SystemDialogKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "idb_ui".to_string(),
+            Arc::new(IdbUiKit::new(device_manager.clone())),
+        );
+
+        // Add simulator management tools (IDB functionality in Rust)
+        tools.insert(
+            "simulator_control".to_string(),
+            Arc::new(SimulatorControl::new()),
+        );
+        tools.insert("app_management".to_string(), Arc::new(AppManagement::new()));
+        tools.insert(
+            "file_operations".to_string(),
+            Arc::new(FileOperations::new()),
+        );
+
+        // Add biometric dialog handlers (no external dependencies)
+        tools.insert(
+            "biometric_dialog_handler".to_string(),
+            Arc::new(BiometricDialogHandler::new(device_manager.clone())),
+        );
+        tools.insert(
+            "accessibility_dialog_handler".to_string(),
+            Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add passkey dialog handler for biometric enrollment dialogs
+        tools.insert(
+            "passkey_dialog".to_string(),
+            Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add Face ID control tools
+        tools.insert(
+            "face_id_control".to_string(),
+            Arc::new(FaceIdController::new(device_manager.clone())),
+        );
+        tools.insert(
+            "face_id_status".to_string(),
+            Arc::new(FaceIdStatusChecker::new(device_manager.clone())),
+        );
+
+        // Add biometric test scenario tools
+        tools.insert(
+            "biometric_test_scenario".to_string(),
+            Arc::new(BiometricTestScenario::new(device_manager.clone())),
+        );
+        tools.insert(
+            "smart_biometric_handler".to_string(),
+            Arc::new(SmartBiometricHandler::new(device_manager.clone())),
         );
 
         // Add code analysis tools
@@ -135,6 +229,7 @@ impl McpTestServer {
             tools: Arc::new(RwLock::new(updated_tools)),
             metrics: Arc::new(Metrics::new()),
             state_store,
+            device_manager,
         })
     }
 
@@ -149,6 +244,27 @@ impl McpTestServer {
 
     pub fn state_store(&self) -> &Arc<StateStore> {
         &self.state_store
+    }
+
+    pub fn device_manager(&self) -> &Arc<DeviceManager> {
+        &self.device_manager
+    }
+
+    pub fn get_all_tools(&self) -> Result<Vec<ToolSchema>> {
+        let tools = self
+            .tools
+            .read()
+            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
+
+        let mut schemas = Vec::new();
+        for (name, tool) in tools.iter() {
+            if self.is_allowed(name, &serde_json::Value::Null) {
+                schemas.push(tool.schema().clone());
+            }
+        }
+
+        schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(schemas)
     }
 
     pub async fn call_tool(&self, request: ToolRequest) -> Result<ToolResponse> {
@@ -178,11 +294,19 @@ impl McpTestServer {
                 | "snapshot"
                 | "run_test"
                 | "list_tests"
+                | "device_management"
+                | "coordinate_converter"
+                | "deep_link"
+                | "app_launcher"
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"
                 | "biometric_auth"
                 | "system_dialog"
+                | "passkey_dialog"
+                | "simulator_control"
+                | "app_management"
+                | "file_operations"
                 | "find_bugs"
                 | "analyze_code"
                 | "analyze_tests"
@@ -1520,6 +1644,17 @@ impl ListTestsKit {
                             "type": "string",
                             "enum": ["unit", "integration", "performance", "ui", "all"],
                             "description": "Type of tests to list"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number (1-based), defaults to 1",
+                            "minimum": 1
+                        },
+                        "page_size": {
+                            "type": "integer",
+                            "description": "Number of tests per page, defaults to 50",
+                            "minimum": 1,
+                            "maximum": 200
                         }
                     },
                     "required": []
@@ -1545,14 +1680,60 @@ impl Tool for ListTestsKit {
             .and_then(|v| v.as_str())
             .unwrap_or("all");
 
-        let executor = TestExecutor::new();
-        let tests = executor.discover_tests(filter, test_type).await?;
+        let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
-        Ok(serde_json::json!({
-            "tests": tests,
-            "count": tests.len(),
+        let page_size = params
+            .get("page_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+
+        let executor = TestExecutor::new();
+        let mut tests = executor.discover_tests(filter, test_type).await?;
+
+        // Calculate pagination
+        let total_count = tests.len();
+        let start_idx = (page - 1) * page_size;
+        let end_idx = std::cmp::min(start_idx + page_size, total_count);
+
+        // Paginate results
+        let paginated_tests = if start_idx < total_count {
+            tests.drain(start_idx..end_idx).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Create response with pagination info
+        let response = serde_json::json!({
+            "tests": paginated_tests,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_count.div_ceil(page_size),
+                "has_next": end_idx < total_count,
+                "has_prev": page > 1
+            },
             "timestamp": chrono::Utc::now().to_rfc3339()
-        }))
+        });
+
+        // Check response size and trim if needed
+        let response_str = serde_json::to_string(&response)?;
+        if response_str.len() > 100_000 {
+            // ~100KB limit
+            // Return summary only
+            Ok(serde_json::json!({
+                "error": "Response too large",
+                "message": "Test list exceeds size limit. Use filters or pagination.",
+                "pagination": {
+                    "total_count": total_count,
+                    "suggested_page_size": 20,
+                    "total_pages": total_count.div_ceil(20)
+                },
+                "hint": "Try using 'filter' parameter or smaller 'page_size'"
+            }))
+        } else {
+            Ok(response)
+        }
     }
 
     fn schema(&self) -> &ToolSchema {

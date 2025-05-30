@@ -12,7 +12,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
-        "serve" => {
+        "serve" | "mcp" => {
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { commands::mcp::run().await })
         }

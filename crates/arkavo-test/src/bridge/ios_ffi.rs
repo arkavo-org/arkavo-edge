@@ -29,8 +29,15 @@ impl RustTestHarness {
     pub fn execute_action(&self, action: &str, params: &str) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({
-                "status": "simulated",
-                "message": "iOS bridge not connected"
+                "error": {
+                    "code": "IOS_BRIDGE_NOT_CONNECTED",
+                    "message": "iOS bridge is not connected. Please ensure you're running on macOS with a booted iOS simulator.",
+                    "details": {
+                        "action_requested": action,
+                        "platform": std::env::consts::OS,
+                        "suggestion": "Run 'xcrun simctl boot <device>' to start a simulator"
+                    }
+                }
             })
             .to_string());
         }
@@ -63,8 +70,13 @@ impl RustTestHarness {
     pub fn get_current_state(&self) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({
-                "status": "simulated",
-                "state": {}
+                "error": {
+                    "code": "IOS_BRIDGE_NOT_CONNECTED",
+                    "message": "Cannot retrieve state - iOS bridge is not connected",
+                    "details": {
+                        "platform": std::env::consts::OS
+                    }
+                }
             })
             .to_string());
         }
@@ -88,8 +100,15 @@ impl RustTestHarness {
     pub fn mutate_state(&self, entity: &str, action: &str, data: &str) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({
-                "status": "simulated",
-                "success": true
+                "error": {
+                    "code": "IOS_BRIDGE_NOT_CONNECTED",
+                    "message": "Cannot mutate state - iOS bridge is not connected",
+                    "details": {
+                        "entity": entity,
+                        "action": action,
+                        "platform": std::env::consts::OS
+                    }
+                }
             })
             .to_string());
         }

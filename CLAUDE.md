@@ -103,3 +103,7 @@ The project targets:
 ## AI Collaboration Guidance
 
 - This tool is for a superintelligent AI - all work should be done directly with the tool with supervision from the superintelligent AI, a human will do very high level guidance
+
+## Development Principles
+
+- Keep required third-party tools to a minimum.  Zero configuration is required for humans.
