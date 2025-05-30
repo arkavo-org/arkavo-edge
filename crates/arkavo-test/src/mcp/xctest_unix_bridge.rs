@@ -2,10 +2,10 @@ use crate::{Result, TestError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +56,11 @@ impl XCTestUnixBridge {
             server_handle: None,
             client_stream: None,
         }
+    }
+    
+    /// Check if the bridge is connected to the XCTest runner
+    pub fn is_connected(&self) -> bool {
+        self.client_stream.is_some()
     }
     
     pub fn socket_path(&self) -> &Path {
@@ -133,7 +138,7 @@ impl XCTestUnixBridge {
         
         // Register response handler
         {
-            let mut handlers = self.response_handlers.lock().unwrap();
+            let mut handlers = self.response_handlers.lock().await;
             handlers.insert(command.id.clone(), tx);
         }
         
@@ -142,7 +147,7 @@ impl XCTestUnixBridge {
             .map_err(|e| TestError::Mcp(format!("Failed to serialize command: {}", e)))?;
         
         {
-            let mut stream = stream.lock().unwrap();
+            let mut stream = stream.lock().await;
             stream.write_all(command_json.as_bytes()).await
                 .map_err(|e| TestError::Mcp(format!("Failed to send command: {}", e)))?;
             stream.write_all(b"\n").await
@@ -157,7 +162,7 @@ impl XCTestUnixBridge {
             Ok(Err(_)) => Err(TestError::Mcp("Response channel closed".to_string())),
             Err(_) => {
                 // Remove handler on timeout
-                let mut handlers = self.response_handlers.lock().unwrap();
+                let mut handlers = self.response_handlers.lock().await;
                 handlers.remove(&command.id);
                 
                 Err(TestError::Mcp("Command timed out".to_string()))
@@ -231,7 +236,7 @@ async fn handle_client(
                 if let Ok(response) = serde_json::from_str::<CommandResponse>(&line) {
                     // Find and notify the waiting handler
                     let handler = {
-                        let mut handlers = response_handlers.lock().unwrap();
+                        let mut handlers = response_handlers.lock().await;
                         handlers.remove(&response.id)
                     };
                     

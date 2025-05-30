@@ -1,15 +1,15 @@
 use super::device_manager::DeviceManager;
 use super::ios_errors::check_ios_availability;
 use super::server::{Tool, ToolSchema};
-use super::xctest_unix_bridge::XCTestUnixBridge;
+use super::xctest_unix_bridge::{XCTestUnixBridge, TapCommand, CommandResponse};
 use super::xctest_compiler::XCTestCompiler;
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
-use tokio::sync::OnceCell;
+use std::sync::Arc;
+use tokio::sync::{OnceCell, Mutex};
 
 static XCTEST_BRIDGE: OnceCell<Option<Arc<Mutex<XCTestUnixBridge>>>> = OnceCell::const_new();
 
@@ -81,6 +81,13 @@ impl UiInteractionKit {
             },
             device_manager,
         }
+    }
+    
+    /// Send a tap command through XCTest bridge (helper to avoid mutex issues)
+    async fn send_xctest_tap(&self, bridge_arc: Arc<Mutex<XCTestUnixBridge>>, command: TapCommand) -> Result<CommandResponse> {
+        // Now that we're using tokio::sync::Mutex, we can properly implement this
+        let bridge = bridge_arc.lock().await;
+        bridge.send_tap_command(command).await
     }
     
     /// Get or initialize the XCTest bridge
@@ -234,46 +241,130 @@ impl Tool for UiInteractionKit {
 
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
+                    let mut use_xctest = false;
+                    let mut xctest_command = None;
 
                     if let Some(text) = target.get("text").and_then(|v| v.as_str()) {
-                        // Text-based tapping requires XCTest integration
-                        return Ok(serde_json::json!({
-                            "error": {
-                                "code": "TEXT_TAP_NOT_SUPPORTED",
-                                "message": "Cannot tap by text without XCTest. Use coordinates instead!",
-                                "requested_text": text,
-                                "solution": "Use this workflow to tap buttons by text:",
-                                "workflow": [
-                                    "1. Use screen_capture to take a screenshot",
-                                    "2. Read the screenshot image file to see the UI",
-                                    "3. Use your vision to find the button/text location",
-                                    "4. Use tap with coordinates: {\"action\":\"tap\",\"target\":{\"x\":X,\"y\":Y}}"
-                                ],
-                                "example": {
-                                    "action": "tap",
-                                    "target": {"x": 350, "y": 850},
-                                    "device_id": "YOUR-DEVICE-ID"
-                                }
-                            }
-                        }));
+                        // Try XCUITest for text-based tapping
+                        eprintln!("Attempting XCUITest tap by text: {}", text);
+                        use_xctest = true;
+                        xctest_command = Some(XCTestUnixBridge::create_text_tap(
+                            text.to_string(),
+                            Some(10.0), // 10 second timeout
+                        ));
                     } else if let Some(accessibility_id) =
                         target.get("accessibility_id").and_then(|v| v.as_str())
                     {
-                        // Accessibility-based tapping requires XCTest integration
-                        return Ok(serde_json::json!({
-                            "error": {
-                                "code": "ACCESSIBILITY_TAP_NOT_SUPPORTED",
-                                "message": "Tapping by accessibility ID requires XCTest framework integration",
-                                "details": {
-                                    "accessibility_id": accessibility_id,
-                                    "suggestion": "Use coordinate-based tap instead"
+                        // Try XCUITest for accessibility ID tapping
+                        eprintln!("Attempting XCUITest tap by accessibility ID: {}", accessibility_id);
+                        use_xctest = true;
+                        xctest_command = Some(XCTestUnixBridge::create_accessibility_tap(
+                            accessibility_id.to_string(),
+                            Some(10.0), // 10 second timeout
+                        ));
+                    } else {
+                        // Direct coordinates - check if we should use XCUITest
+                        let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        
+                        // Try XCUITest if bridge is available
+                        if let Some(_bridge) = self.get_xctest_bridge().await {
+                            use_xctest = true;
+                            xctest_command = Some(XCTestUnixBridge::create_coordinate_tap(x, y));
+                        } else {
+                            // Fall back to AppleScript
+                            tap_params["x"] = serde_json::json!(x);
+                            tap_params["y"] = serde_json::json!(y);
+                        }
+                    }
+                    
+                    // If using XCUITest, try to execute the tap
+                    if use_xctest && xctest_command.is_some() {
+                        if let Some(bridge_arc) = self.get_xctest_bridge().await {
+                            let command = xctest_command.unwrap();
+                            
+                            // Check if connected first
+                            let is_connected = {
+                                let bridge = bridge_arc.lock().await;
+                                bridge.is_connected()
+                            };
+                            
+                            if !is_connected {
+                                eprintln!("XCUITest bridge not connected, falling back to AppleScript");
+                                if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                    tap_params["x"] = x.clone();
+                                    tap_params["y"] = y.clone();
+                                } else {
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "XCUITEST_NOT_CONNECTED",
+                                            "message": "XCUITest bridge not connected",
+                                            "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                        }
+                                    }));
+                                }
+                            } else {
+                                // Send the tap command using our helper method
+                                match self.send_xctest_tap(bridge_arc, command).await {
+                                    Ok(response) => {
+                                        if response.success {
+                                            return Ok(serde_json::json!({
+                                                "success": true,
+                                                "action": "tap",
+                                                "method": "xcuitest",
+                                                "response": response.result,
+                                                "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active")
+                                            }));
+                                        } else {
+                                            // XCUITest failed, fall back to AppleScript for coordinates
+                                            eprintln!("XCUITest tap failed: {:?}, falling back to AppleScript", response.error);
+                                            if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                                tap_params["x"] = x.clone();
+                                                tap_params["y"] = y.clone();
+                                            } else {
+                                                // Can't fall back for text/accessibility taps
+                                                return Ok(serde_json::json!({
+                                                    "error": {
+                                                        "code": "XCUITEST_TAP_FAILED",
+                                                        "message": response.error.unwrap_or_else(|| "XCUITest tap failed".to_string()),
+                                                        "suggestion": "For text/accessibility taps, use screen_capture and tap with coordinates instead"
+                                                    }
+                                                }));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("XCUITest error: {}, falling back to AppleScript", e);
+                                        // Fall back to AppleScript for coordinates
+                                        if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                            tap_params["x"] = x.clone();
+                                            tap_params["y"] = y.clone();
+                                        } else {
+                                            // Can't fall back for text/accessibility taps
+                                            return Ok(serde_json::json!({
+                                                "error": {
+                                                    "code": "XCUITEST_BRIDGE_ERROR",
+                                                    "message": format!("XCUITest bridge error: {}", e),
+                                                    "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                                }
+                                            }));
+                                        }
+                                    }
                                 }
                             }
-                        }));
-                    } else {
-                        // Direct coordinates
-                        tap_params["x"] = target.get("x").unwrap_or(&serde_json::json!(0)).clone();
-                        tap_params["y"] = target.get("y").unwrap_or(&serde_json::json!(0)).clone();
+                        } else {
+                            // No XCUITest bridge available
+                            if target.get("x").is_none() || target.get("y").is_none() {
+                                // Can't proceed without coordinates
+                                return Ok(serde_json::json!({
+                                    "error": {
+                                        "code": "XCUITEST_NOT_AVAILABLE",
+                                        "message": "XCUITest not available and no coordinates provided",
+                                        "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                    }
+                                }));
+                            }
+                        }
                     }
 
                     // Get device ID
@@ -1207,6 +1298,31 @@ impl Tool for UiQueryKit {
 
     fn schema(&self) -> &ToolSchema {
         &self.schema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_xctest_tap_command_creation() {
+        // Test that we can create tap commands
+        let coord_tap = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
+        assert_eq!(coord_tap.x, Some(100.0));
+        assert_eq!(coord_tap.y, Some(200.0));
+        assert!(coord_tap.text.is_none());
+        assert!(coord_tap.accessibility_id.is_none());
+
+        let text_tap = XCTestUnixBridge::create_text_tap("Login".to_string(), Some(5.0));
+        assert_eq!(text_tap.text, Some("Login".to_string()));
+        assert_eq!(text_tap.timeout, Some(5.0));
+        assert!(text_tap.x.is_none());
+        assert!(text_tap.y.is_none());
+
+        let acc_tap = XCTestUnixBridge::create_accessibility_tap("login_button".to_string(), None);
+        assert_eq!(acc_tap.accessibility_id, Some("login_button".to_string()));
+        assert!(acc_tap.timeout.is_none());
     }
 }
 
