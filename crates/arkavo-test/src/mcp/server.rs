@@ -12,6 +12,8 @@ use super::intelligent_tools::{
 };
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
+use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -121,6 +123,20 @@ impl McpTestServer {
             Arc::new(IdbUiKit::new(device_manager.clone())),
         );
 
+        // Add simulator management tools (IDB functionality in Rust)
+        tools.insert(
+            "simulator_control".to_string(),
+            Arc::new(SimulatorControl::new()),
+        );
+        tools.insert(
+            "app_management".to_string(),
+            Arc::new(AppManagement::new()),
+        );
+        tools.insert(
+            "file_operations".to_string(),
+            Arc::new(FileOperations::new()),
+        );
+
         // Add biometric dialog handlers (no external dependencies)
         tools.insert(
             "biometric_dialog_handler".to_string(),
@@ -129,6 +145,12 @@ impl McpTestServer {
         tools.insert(
             "accessibility_dialog_handler".to_string(),
             Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
+        );
+        
+        // Add passkey dialog handler for biometric enrollment dialogs
+        tools.insert(
+            "passkey_dialog".to_string(),
+            Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
         );
 
         // Add Face ID control tools
@@ -231,6 +253,23 @@ impl McpTestServer {
         &self.device_manager
     }
 
+    pub fn get_all_tools(&self) -> Result<Vec<ToolSchema>> {
+        let tools = self
+            .tools
+            .read()
+            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
+        
+        let mut schemas = Vec::new();
+        for (name, tool) in tools.iter() {
+            if self.is_allowed(name, &serde_json::Value::Null) {
+                schemas.push(tool.schema().clone());
+            }
+        }
+        
+        schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(schemas)
+    }
+
     pub async fn call_tool(&self, request: ToolRequest) -> Result<ToolResponse> {
         if !self.is_allowed(&request.tool_name, &request.params) {
             return Err(TestError::Mcp("Tool not allowed".to_string()));
@@ -267,6 +306,10 @@ impl McpTestServer {
                 | "ui_query"
                 | "biometric_auth"
                 | "system_dialog"
+                | "passkey_dialog"
+                | "simulator_control"
+                | "app_management"
+                | "file_operations"
                 | "find_bugs"
                 | "analyze_code"
                 | "analyze_tests"
@@ -1604,6 +1647,17 @@ impl ListTestsKit {
                             "type": "string",
                             "enum": ["unit", "integration", "performance", "ui", "all"],
                             "description": "Type of tests to list"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number (1-based), defaults to 1",
+                            "minimum": 1
+                        },
+                        "page_size": {
+                            "type": "integer",
+                            "description": "Number of tests per page, defaults to 50",
+                            "minimum": 1,
+                            "maximum": 200
                         }
                     },
                     "required": []
@@ -1629,14 +1683,62 @@ impl Tool for ListTestsKit {
             .and_then(|v| v.as_str())
             .unwrap_or("all");
 
-        let executor = TestExecutor::new();
-        let tests = executor.discover_tests(filter, test_type).await?;
+        let page = params
+            .get("page")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
 
-        Ok(serde_json::json!({
-            "tests": tests,
-            "count": tests.len(),
+        let page_size = params
+            .get("page_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as usize;
+
+        let executor = TestExecutor::new();
+        let mut tests = executor.discover_tests(filter, test_type).await?;
+
+        // Calculate pagination
+        let total_count = tests.len();
+        let start_idx = (page - 1) * page_size;
+        let end_idx = std::cmp::min(start_idx + page_size, total_count);
+        
+        // Paginate results
+        let paginated_tests = if start_idx < total_count {
+            tests.drain(start_idx..end_idx).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Create response with pagination info
+        let response = serde_json::json!({
+            "tests": paginated_tests,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": (total_count + page_size - 1) / page_size,
+                "has_next": end_idx < total_count,
+                "has_prev": page > 1
+            },
             "timestamp": chrono::Utc::now().to_rfc3339()
-        }))
+        });
+
+        // Check response size and trim if needed
+        let response_str = serde_json::to_string(&response)?;
+        if response_str.len() > 100_000 { // ~100KB limit
+            // Return summary only
+            Ok(serde_json::json!({
+                "error": "Response too large",
+                "message": "Test list exceeds size limit. Use filters or pagination.",
+                "pagination": {
+                    "total_count": total_count,
+                    "suggested_page_size": 20,
+                    "total_pages": (total_count + 19) / 20
+                },
+                "hint": "Try using 'filter' parameter or smaller 'page_size'"
+            }))
+        } else {
+            Ok(response)
+        }
     }
 
     fn schema(&self) -> &ToolSchema {

@@ -9,10 +9,11 @@ fn main() {
             // Use real implementation on Apple platforms
             cc::Build::new()
                 .file("src/bridge/ios_impl.c")
-                .flag("-framework")
-                .flag("CoreFoundation")
                 .warnings(true)
                 .compile("ios_bridge");
+            
+            // Link with CoreFoundation framework
+            println!("cargo:rustc-link-lib=framework=CoreFoundation");
         }
         _ => {
             // Use stub on other platforms

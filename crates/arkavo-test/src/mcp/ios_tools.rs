@@ -18,14 +18,14 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements".to_string(),
+                description: "Interact with iOS UI elements. CRITICAL: clear_text, delete_key, etc are SEPARATE ACTIONS! Example: To clear a field use {\"action\":\"clear_text\"} NOT {\"action\":\"type_text\",\"value\":\"clear_text\"}. TEXT INPUT WORKFLOW: 1) {\"action\":\"tap\",\"target\":{\"x\":X,\"y\":Y}} on field, 2) {\"action\":\"clear_text\"} to clear it, 3) {\"action\":\"type_text\",\"value\":\"new text\"}. DELETE: Use {\"action\":\"delete_key\",\"count\":10} to delete 10 chars. NO IDB COMMANDS!".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["tap", "swipe", "type_text", "press_button"],
-                            "description": "UI interaction type"
+                            "enum": ["tap", "swipe", "type_text", "press_button", "analyze_layout", "clear_text", "select_all", "delete_key", "copy", "paste", "scroll"],
+                            "description": "UI interaction type. Use 'analyze_layout' to capture and analyze screen with AI vision for accurate coordinates"
                         },
                         "device_id": {
                             "type": "string",
@@ -43,6 +43,22 @@ impl UiInteractionKit {
                         "value": {
                             "type": "string",
                             "description": "Text to type or button to press"
+                        },
+                        "count": {
+                            "type": "integer",
+                            "description": "Number of times to repeat delete_key action (default: 1)",
+                            "minimum": 1
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["up", "down", "left", "right"],
+                            "description": "Scroll direction (used with scroll action)"
+                        },
+                        "amount": {
+                            "type": "integer",
+                            "description": "Number of scroll steps (used with scroll action, default: 5)",
+                            "minimum": 1,
+                            "maximum": 50
                         },
                         "swipe": {
                             "type": "object",
@@ -105,6 +121,62 @@ impl Tool for UiInteractionKit {
         };
 
         match action {
+            "analyze_layout" => {
+                // Capture screenshot and analyze device layout using AI vision
+                let device = self.device_manager.get_active_device()
+                    .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
+                let device_id = device.id.clone();
+                
+                // First capture a screenshot of the entire simulator window
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+                let screenshot_name = format!("layout_analysis_{}.png", timestamp);
+                let screenshot_path = format!("test_results/{}", screenshot_name);
+                
+                // Ensure test_results directory exists
+                std::fs::create_dir_all("test_results")
+                    .map_err(|e| TestError::Mcp(format!("Failed to create test_results directory: {}", e)))?;
+                
+                // Capture the entire simulator window using screencapture
+                let window_capture = Command::new("screencapture")
+                    .args(&["-l", "-o", "-x", &screenshot_path])
+                    .arg(format!("$(osascript -e 'tell application \"System Events\" to tell process \"Simulator\" to get id of front window')"))
+                    .output();
+                
+                // If window capture fails, fall back to simulator screenshot
+                if window_capture.is_err() || !window_capture.unwrap().status.success() {
+                    // Use simctl to capture device screen only
+                    let output = Command::new("xcrun")
+                        .args(&["simctl", "io", &device_id, "screenshot", &screenshot_path])
+                        .output()
+                        .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
+                    
+                    if !output.status.success() {
+                        return Ok(serde_json::json!({
+                            "action": "analyze_layout",
+                            "success": false,
+                            "error": String::from_utf8_lossy(&output.stderr).to_string()
+                        }));
+                    }
+                }
+                
+                // Get device info for context
+                let device_info = self.device_manager.get_device(&device_id);
+                let device_type = device_info
+                    .as_ref()
+                    .map(|d| d.device_type.as_str())
+                    .unwrap_or("unknown");
+                
+                Ok(serde_json::json!({
+                    "action": "analyze_layout",
+                    "success": true,
+                    "screenshot_path": screenshot_path,
+                    "device_id": device_id,
+                    "device_type": device_type,
+                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All text fields, buttons, and interactive elements with their center coordinates\n2. Any text labels or placeholders that indicate what each field is for\n3. The current screen/view being displayed\n4. Suggested next actions based on the UI state",
+                    "next_steps": "After reading and analyzing the image, use tap to click on elements, type_text to enter text (after tapping text fields), or swipe to scroll",
+                    "usage_hint": "After analysis, you can use the provided coordinates directly with the tap action"
+                }))
+            }
             "tap" => {
                 // Check iOS availability first
                 if let Err(e) = check_ios_availability() {
@@ -119,10 +191,19 @@ impl Tool for UiInteractionKit {
                         return Ok(serde_json::json!({
                             "error": {
                                 "code": "TEXT_TAP_NOT_SUPPORTED",
-                                "message": "Tapping by text requires XCTest framework integration",
-                                "details": {
-                                    "text": text,
-                                    "suggestion": "Use coordinate-based tap instead"
+                                "message": "Cannot tap by text without XCTest. Use coordinates instead!",
+                                "requested_text": text,
+                                "solution": "Use this workflow to tap buttons by text:",
+                                "workflow": [
+                                    "1. Use screen_capture to take a screenshot",
+                                    "2. Read the screenshot image file to see the UI",
+                                    "3. Use your vision to find the button/text location",
+                                    "4. Use tap with coordinates: {\"action\":\"tap\",\"target\":{\"x\":X,\"y\":Y}}"
+                                ],
+                                "example": {
+                                    "action": "tap",
+                                    "target": {"x": 350, "y": 850},
+                                    "device_id": "YOUR-DEVICE-ID"
                                 }
                             }
                         }));
@@ -200,47 +281,90 @@ impl Tool for UiInteractionKit {
                     let adjusted_x = x.min(max_x - 1.0).max(0.0);
                     let adjusted_y = y.min(max_y - 1.0).max(0.0);
 
-                    // Try multiple tap methods
-                    let output = if let Ok(fb_output) = Command::new("fbsimctl")
-                        .args([
-                            &device_id,
-                            "tap",
-                            &adjusted_x.to_string(),
-                            &adjusted_y.to_string(),
-                        ])
+                    // Use AppleScript with Accessibility API to find the actual device screen
+                    let applescript = format!(
+                        r#"tell application "Simulator"
+                            activate
+                            delay 0.1
+                            tell application "System Events"
+                                tell process "Simulator"
+                                    set frontmost to true
+                                    
+                                    try
+                                        -- Try to find the device screen using Accessibility
+                                        -- The device screen is typically an AXGroup within the window
+                                        set deviceScreen to missing value
+                                        set uiElements to UI elements of front window
+                                        
+                                        repeat with elem in uiElements
+                                            if role of elem is "AXGroup" then
+                                                set deviceScreen to elem
+                                                exit repeat
+                                            end if
+                                        end repeat
+                                        
+                                        if deviceScreen is not missing value then
+                                            -- Found the device screen element
+                                            set {{screenX, screenY}} to position of deviceScreen
+                                            set {{screenWidth, screenHeight}} to size of deviceScreen
+                                            
+                                            -- Map logical coordinates to screen coordinates
+                                            set clickX to screenX + ({} * screenWidth / {})
+                                            set clickY to screenY + ({} * screenHeight / {})
+                                        else
+                                            -- Fallback: couldn't find device screen, use window with estimates
+                                            set simWindow to front window
+                                            set {{windowX, windowY}} to position of simWindow
+                                            set {{windowWidth, windowHeight}} to size of simWindow
+                                            
+                                            -- Default estimates (will vary by device)
+                                            set titleBarHeight to 28
+                                            set bezelSize to 20
+                                            
+                                            -- Calculate estimated content area
+                                            set contentX to windowX + bezelSize
+                                            set contentY to windowY + titleBarHeight + bezelSize
+                                            set contentWidth to windowWidth - (bezelSize * 2)
+                                            set contentHeight to windowHeight - titleBarHeight - (bezelSize * 2)
+                                            
+                                            set clickX to contentX + ({} * contentWidth / {})
+                                            set clickY to contentY + ({} * contentHeight / {})
+                                        end if
+                                        
+                                        -- Perform the click
+                                        click at {{clickX, clickY}}
+                                        
+                                    on error errMsg
+                                        -- If all else fails, try a simple click based on window position
+                                        set simWindow to front window
+                                        set {{windowX, windowY}} to position of simWindow
+                                        set {{windowWidth, windowHeight}} to size of simWindow
+                                        
+                                        -- Very rough estimate
+                                        set clickX to windowX + 30 + ({} * (windowWidth - 60) / {})
+                                        set clickY to windowY + 50 + ({} * (windowHeight - 80) / {})
+                                        
+                                        click at {{clickX, clickY}}
+                                    end try
+                                end tell
+                            end tell
+                        end tell"#,
+                        adjusted_x, max_x, adjusted_y, max_y,
+                        adjusted_x, max_x, adjusted_y, max_y,
+                        adjusted_x, max_x, adjusted_y, max_y
+                    );
+
+                    let output = Command::new("osascript")
+                        .arg("-e")
+                        .arg(&applescript)
                         .output()
-                    {
-                        fb_output
-                    } else if let Ok(apple_output) = Command::new("applesimutils")
-                        .args([
-                            "--byId",
-                            &device_id,
-                            "--tapAt",
-                            &format!("{},{}", adjusted_x, adjusted_y),
-                        ])
-                        .output()
-                    {
-                        apple_output
-                    } else {
-                        // Fallback to sending events via Instruments if available
-                        Command::new("xcrun")
-                            .args(["instruments", "-w", &device_id, "-t", "Blank", "-e", "UIASCRIPT", 
-                                   &format!("UIATarget.localTarget().tap({{{}, {}}})", adjusted_x, adjusted_y)])
-                            .output()
-                            .unwrap_or_else(|_| {
-                                // Final fallback - return error with helpful message
-                                std::process::Output {
-                                    status: std::process::ExitStatus::from_raw(1),
-                                    stdout: Vec::new(),
-                                    stderr: b"Unable to send tap event. Install one of these tools:\n\
-                                         - fbsimctl: brew install facebook/fb/fbsimctl\n\
-                                         - applesimutils: brew install applesimutils\n\
-                                         - Or use Xcode's Accessibility Inspector to interact with the simulator\n\
-                                         \n\
-                                         Note: Direct tap via 'xcrun simctl' may not be available in your Xcode version.".to_vec(),
-                                }
-                            })
-                    };
+                        .unwrap_or_else(|e| {
+                            std::process::Output {
+                                status: std::process::ExitStatus::from_raw(1),
+                                stdout: Vec::new(),
+                                stderr: format!("Failed to execute tap via AppleScript: {}", e).into_bytes(),
+                            }
+                        });
 
                     let mut response = serde_json::json!({
                         "success": output.status.success(),
@@ -249,13 +373,16 @@ impl Tool for UiInteractionKit {
                         "original_coordinates": {"x": x, "y": y},
                         "device_id": device_id,
                         "device_type": device_type,
-                        "logical_resolution": {"width": max_x, "height": max_y}
+                        "logical_resolution": {"width": max_x, "height": max_y},
+                        "tap_method": "accessibility_applescript"
                     });
 
                     if !output.status.success() {
+                        let error_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
                         response["error"] = serde_json::json!({
-                            "message": String::from_utf8_lossy(&output.stderr).trim().to_string(),
-                            "note": "Coordinates are in logical points, not pixels. For retina displays, divide pixel coordinates by the scale factor (2x or 3x)."
+                            "message": error_msg,
+                            "fallback_action": "If tap fails, try: 1) Ensure Simulator is frontmost app, 2) Use screen_capture to verify UI state, 3) Adjust coordinates if needed",
+                            "coordinates_note": "Coordinates are in logical points relative to the simulator screen content."
                         });
                     }
 
@@ -281,6 +408,26 @@ impl Tool for UiInteractionKit {
                     .get("value")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| TestError::Mcp("Missing text value".to_string()))?;
+                
+                // Help AI agents who try to use action names as text values
+                if text == "clear_text" || text == "delete_key" || text == "select_all" {
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "INCORRECT_ACTION_USAGE",
+                            "message": format!("'{}' is an ACTION, not text to type!", text),
+                            "correct_usage": {
+                                "clear_text": {"action": "clear_text"},
+                                "delete_key": {"action": "delete_key", "count": 10},
+                                "select_all": {"action": "select_all"}
+                            },
+                            "example_workflow": [
+                                "1. Tap field: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}}",
+                                "2. Clear it: {\"action\":\"clear_text\"}",
+                                "3. Type text: {\"action\":\"type_text\",\"value\":\"actual text to type\"}"
+                            ]
+                        }
+                    }));
+                }
 
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
@@ -305,9 +452,32 @@ impl Tool for UiInteractionKit {
                     }
                 };
 
-                // Type text using xcrun simctl directly
-                let output = Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "type", text])
+                // Type text using AppleScript
+                // First ensure the Simulator is active
+                let activate_script = r#"tell application "Simulator" to activate"#;
+                Command::new("osascript")
+                    .arg("-e")
+                    .arg(activate_script)
+                    .output()
+                    .ok();
+                
+                // Small delay to ensure focus
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                
+                // Type the text using AppleScript
+                let type_script = format!(
+                    r#"tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            keystroke "{}"
+                        end tell
+                    end tell"#,
+                    text.replace("\"", "\\\"").replace("\\", "\\\\")
+                );
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(&type_script)
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to type text: {}", e)))?;
 
@@ -316,6 +486,252 @@ impl Tool for UiInteractionKit {
                     "action": "type_text",
                     "text": text,
                     "device_id": device_id,
+                    "method": "applescript_keystroke",
+                    "error": if !output.status.success() {
+                        Some(String::from_utf8_lossy(&output.stderr).to_string())
+                    } else {
+                        None
+                    },
+                    "note": "Text typed using AppleScript keystroke simulation.",
+                    "ai_hint": "IMPORTANT: You must tap on a text field first to focus it before using type_text. To clear existing text, use clear_text action or select_all followed by delete_key. Workflow: 1) screen_capture, 2) tap on text field, 3) clear_text, 4) type_text. DO NOT use idb commands directly - use MCP tools instead."
+                }))
+            }
+            "clear_text" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Get device ID
+                let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+                    id.to_string()
+                } else {
+                    match self.device_manager.get_active_device() {
+                        Some(device) => device.id,
+                        None => {
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
+                                }
+                            }));
+                        }
+                    }
+                };
+
+                // Clear text by selecting all and deleting
+                let clear_script = r#"
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            -- Select all text
+                            keystroke "a" using command down
+                            delay 0.1
+                            -- Delete selected text
+                            key code 51
+                        end tell
+                    end tell
+                "#;
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(clear_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to clear text: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "clear_text",
+                    "device_id": device_id,
+                    "method": "select_all_and_delete",
+                    "note": "Cleared text field by selecting all (Cmd+A) and deleting"
+                }))
+            }
+            "select_all" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Select all text using Cmd+A
+                let select_script = r#"
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            keystroke "a" using command down
+                        end tell
+                    end tell
+                "#;
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(select_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to select all: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "select_all",
+                    "method": "cmd_a"
+                }))
+            }
+            "delete_key" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Get repeat count (how many times to press delete)
+                let count = params
+                    .get("count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1) as usize;
+
+                // Press delete key using key code 51
+                let mut delete_script = r#"
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true"#.to_string();
+                
+                for _ in 0..count {
+                    delete_script.push_str("\n            key code 51"); // Delete key
+                    if count > 1 {
+                        delete_script.push_str("\n            delay 0.05");
+                    }
+                }
+                
+                delete_script.push_str(r#"
+                        end tell
+                    end tell
+                "#);
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(&delete_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to press delete: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "delete_key",
+                    "count": count,
+                    "note": format!("Pressed delete key {} time(s)", count)
+                }))
+            }
+            "copy" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Copy using Cmd+C
+                let copy_script = r#"
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            keystroke "c" using command down
+                        end tell
+                    end tell
+                "#;
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(copy_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to copy: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "copy",
+                    "method": "cmd_c"
+                }))
+            }
+            "paste" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Paste using Cmd+V
+                let paste_script = r#"
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            keystroke "v" using command down
+                        end tell
+                    end tell
+                "#;
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(paste_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to paste: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "paste",
+                    "method": "cmd_v"
+                }))
+            }
+            "scroll" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                // Get direction and amount
+                let direction = params
+                    .get("direction")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("down");
+                
+                let amount = params
+                    .get("amount")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(5) as usize;
+                
+                // Map direction to key codes
+                let key_code = match direction {
+                    "up" => "126",
+                    "down" => "125",
+                    "left" => "123",
+                    "right" => "124",
+                    _ => "125", // default to down
+                };
+                
+                let scroll_script = format!(
+                    r#"tell application "Simulator"
+                        activate
+                    end tell
+                    
+                    tell application "System Events"
+                        tell process "Simulator"
+                            set frontmost to true
+                            -- Simulate arrow key presses for scrolling
+                            repeat {} times
+                                key code {}
+                                delay 0.05
+                            end repeat
+                        end tell
+                    end tell"#,
+                    amount,
+                    key_code
+                );
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(&scroll_script)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute scroll: {}", e)))?;
+
+                Ok(serde_json::json!({
+                    "success": output.status.success(),
+                    "action": "scroll",
+                    "direction": direction,
+                    "amount": amount,
+                    "method": "arrow_keys",
+                    "note": "Scrolled using arrow key simulation",
                     "error": if !output.status.success() {
                         Some(String::from_utf8_lossy(&output.stderr).to_string())
                     } else {
@@ -329,9 +745,49 @@ impl Tool for UiInteractionKit {
                     return Ok(e.to_response());
                 }
 
-                let swipe_data = params
-                    .get("swipe")
-                    .ok_or_else(|| TestError::Mcp("Missing swipe parameters".to_string()))?;
+                let swipe_data = params.get("swipe");
+                
+                // Provide helpful error if swipe parameters are missing or incorrect format
+                if swipe_data.is_none() {
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "MISSING_SWIPE_PARAMS",
+                            "message": "Missing swipe parameters. Swipe requires a 'swipe' object with coordinates.",
+                            "details": {
+                                "required_format": {
+                                    "action": "swipe",
+                                    "swipe": {
+                                        "x1": "start x coordinate",
+                                        "y1": "start y coordinate", 
+                                        "x2": "end x coordinate",
+                                        "y2": "end y coordinate",
+                                        "duration": "optional duration in seconds (default 0.5)"
+                                    }
+                                },
+                                "example": {
+                                    "action": "swipe",
+                                    "swipe": {
+                                        "x1": 215,
+                                        "y1": 600,
+                                        "x2": 215,
+                                        "y2": 200,
+                                        "duration": 0.5
+                                    }
+                                },
+                                "note": "Swipe from (x1,y1) to (x2,y2). For scrolling down, use y2 < y1.",
+                                "common_swipes": {
+                                    "scroll_down": {"x1": 200, "y1": 600, "x2": 200, "y2": 200},
+                                    "scroll_up": {"x1": 200, "y1": 200, "x2": 200, "y2": 600},
+                                    "swipe_left": {"x1": 300, "y1": 400, "x2": 100, "y2": 400},
+                                    "swipe_right": {"x1": 100, "y1": 400, "x2": 300, "y2": 400}
+                                },
+                                "ai_workflow": "1) Use screen_capture to see current UI, 2) Calculate swipe coordinates based on screen content, 3) Use swipe action with proper coordinates"
+                            }
+                        }
+                    }));
+                }
+                
+                let swipe_data = swipe_data.unwrap();
 
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
@@ -377,32 +833,75 @@ impl Tool for UiInteractionKit {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.5);
 
-                // Swipe using xcrun simctl directly
-                let output = Command::new("xcrun")
-                    .args([
-                        "simctl",
-                        "io",
-                        &device_id,
-                        "swipe",
-                        &x1.to_string(),
-                        &y1.to_string(),
-                        &x2.to_string(),
-                        &y2.to_string(),
-                        "--duration",
-                        &duration.to_string(),
-                    ])
+                // Determine swipe direction and use scroll instead
+                let is_vertical = (x2 - x1).abs() < (y2 - y1).abs();
+                let is_scroll_down = y2 < y1;  // Swipe up = scroll down
+                let is_scroll_right = x2 < x1; // Swipe left = scroll right
+                
+                // Use AppleScript with key events for scrolling
+                let scroll_script = if is_vertical {
+                    let key_code = if is_scroll_down { "125" } else { "126" }; // down: 125, up: 126
+                    format!(
+                        r#"tell application "Simulator"
+                            activate
+                        end tell
+                        
+                        tell application "System Events"
+                            tell process "Simulator"
+                                set frontmost to true
+                                -- Simulate arrow key presses for scrolling
+                                repeat 10 times
+                                    key code {}
+                                    delay 0.05
+                                end repeat
+                            end tell
+                        end tell"#,
+                        key_code
+                    )
+                } else {
+                    let key_code = if is_scroll_right { "124" } else { "123" }; // right: 124, left: 123
+                    format!(
+                        r#"tell application "Simulator"
+                            activate
+                        end tell
+                        
+                        tell application "System Events"
+                            tell process "Simulator"
+                                set frontmost to true
+                                -- Simulate arrow key presses for horizontal scrolling
+                                repeat 10 times
+                                    key code {}
+                                    delay 0.05
+                                end repeat
+                            end tell
+                        end tell"#,
+                        key_code
+                    )
+                };
+                
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(&scroll_script)
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to execute swipe: {}", e)))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
                     "action": "swipe",
+                    "method": "scroll_simulation",
+                    "direction": if is_vertical { 
+                        if is_scroll_down { "scroll_down" } else { "scroll_up" }
+                    } else {
+                        if is_scroll_right { "scroll_right" } else { "scroll_left" }
+                    },
                     "coordinates": {
                         "x1": x1, "y1": y1,
                         "x2": x2, "y2": y2
                     },
                     "duration": duration,
                     "device_id": device_id,
+                    "note": "Swipe simulated using arrow keys. For better scrolling, use the 'scroll' action instead.",
+                    "suggestion": "Use {\"action\":\"scroll\",\"direction\":\"down\",\"amount\":10} for more reliable scrolling",
                     "error": if !output.status.success() {
                         Some(String::from_utf8_lossy(&output.stderr).to_string())
                     } else {
@@ -429,7 +928,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture and analyze iOS screen".to_string(),
+                description: "Capture iOS screen. AI AGENTS: Use this before any UI interaction to see current state. The screenshot will be saved to test_results/<name>.png. You can then read the image file to analyze UI elements and their positions.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -554,7 +1053,7 @@ impl UiQueryKit {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
-                description: "Query UI element state and properties".to_string(),
+                description: "Query UI elements (LIMITED). AI AGENTS: This tool has limited functionality without XCTest. Instead, use this workflow: 1) screen_capture to get screenshot, 2) Read the image file, 3) Use your vision capabilities to identify UI elements and coordinates, 4) Use tap/swipe/type_text with those coordinates.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -620,33 +1119,35 @@ impl Tool for UiQueryKit {
             }
         };
 
-        // For now, return mock data as simctl doesn't have direct UI query support
-        // In a real implementation, this would use accessibility APIs
+        // Since we can't access UI elements directly without XCTest,
+        // provide guidance on alternative approaches
         match query_type {
             "accessibility_tree" => Ok(serde_json::json!({
-                "tree": {
-                    "root": {
-                        "type": "Application",
-                        "children": [
-                            {
-                                "type": "Window",
-                                "frame": {"x": 0, "y": 0, "width": 393, "height": 852},
-                                "children": []
-                            }
-                        ]
-                    }
-                },
-                "device_id": device_id
-            })),
-            "visible_elements" => Ok(serde_json::json!({
-                "elements": [],
                 "device_id": device_id,
-                "note": "Element detection requires XCTest framework integration"
+                "status": "not_available",
+                "alternative": "Use screen_capture tool to take a screenshot, then analyze visually",
+                "note": "Direct accessibility tree access requires XCTest. Consider using coordinate-based interactions with known UI layouts."
             })),
+            "visible_elements" => {
+                // For AI agents, suggest using screenshot analysis instead
+                Ok(serde_json::json!({
+                    "device_id": device_id,
+                    "elements": [],
+                    "status": "limited_support",
+                    "alternatives": {
+                        "method1": "Use screen_capture to take screenshot and analyze the image",
+                        "method2": "Use known coordinates for common UI elements based on app design",
+                        "method3": "Try tapping at different coordinates and observe results"
+                    },
+                    "note": "Without XCTest, element detection is not available. AI agents should use visual analysis of screenshots."
+                }))
+            }
             "text_content" => Ok(serde_json::json!({
-                "texts": [],
                 "device_id": device_id,
-                "note": "Text extraction requires XCTest framework integration"
+                "texts": [],
+                "status": "not_available",
+                "alternative": "Use screen_capture tool and analyze text in the screenshot image",
+                "note": "Direct text extraction requires XCTest. Screenshots can be analyzed for text content."
             })),
             _ => Err(TestError::Mcp(format!(
                 "Unknown query type: {}",
