@@ -36,22 +36,22 @@ pub struct CommandParameters {
     pub text: Option<String>,
     pub accessibility_id: Option<String>,
     pub timeout: Option<f64>,
-    
+
     // Swipe parameters
     pub x1: Option<f64>,
     pub y1: Option<f64>,
     pub x2: Option<f64>,
     pub y2: Option<f64>,
     pub duration: Option<f64>,
-    
+
     // Type text parameters
     pub text_to_type: Option<String>,
     pub clear_first: Option<bool>,
-    
+
     // Scroll parameters
     pub direction: Option<String>,
     pub distance: Option<f64>,
-    
+
     // Long press parameters
     pub press_duration: Option<f64>,
 }
@@ -179,7 +179,7 @@ impl XCTestUnixBridge {
     pub async fn send_tap_command(&self, command: TapCommand) -> Result<CommandResponse> {
         self.send_command(command).await
     }
-    
+
     /// Send a command and wait for response
     pub async fn send_command(&self, command: Command) -> Result<CommandResponse> {
         let stream = self
@@ -307,7 +307,7 @@ impl XCTestUnixBridge {
             },
         }
     }
-    
+
     /// Create a swipe command
     pub fn create_swipe(x1: f64, y1: f64, x2: f64, y2: f64, duration: Option<f64>) -> Command {
         Command {
@@ -333,7 +333,7 @@ impl XCTestUnixBridge {
             },
         }
     }
-    
+
     /// Create a type text command
     pub fn create_type_text(text: String, clear_first: bool) -> Command {
         Command {
