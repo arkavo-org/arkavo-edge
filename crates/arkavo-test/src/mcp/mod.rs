@@ -19,3 +19,4 @@ pub mod simulator_tools;
 pub mod tools;
 pub mod xctest_compiler;
 pub mod xctest_unix_bridge;
+pub mod xctest_enhanced;
