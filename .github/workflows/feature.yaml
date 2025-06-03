@@ -61,7 +61,8 @@ jobs:
         run: cargo test --all-features
       
       - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
+        run: |
+          curl -L https://github.com/xd009642/tarpaulin/releases/download/0.31.2/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xzf - -C $HOME/.cargo/bin
           
       - name: Generate test coverage
         run: cargo tarpaulin --ignore-tests --workspace --out Xml
