@@ -1343,20 +1343,23 @@ mod tests {
     fn test_xctest_tap_command_creation() {
         // Test that we can create tap commands
         let coord_tap = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
-        assert_eq!(coord_tap.x, Some(100.0));
-        assert_eq!(coord_tap.y, Some(200.0));
-        assert!(coord_tap.text.is_none());
-        assert!(coord_tap.accessibility_id.is_none());
+        assert_eq!(coord_tap.parameters.x, Some(100.0));
+        assert_eq!(coord_tap.parameters.y, Some(200.0));
+        assert!(coord_tap.parameters.text.is_none());
+        assert!(coord_tap.parameters.accessibility_id.is_none());
 
         let text_tap = XCTestUnixBridge::create_text_tap("Login".to_string(), Some(5.0));
-        assert_eq!(text_tap.text, Some("Login".to_string()));
-        assert_eq!(text_tap.timeout, Some(5.0));
-        assert!(text_tap.x.is_none());
-        assert!(text_tap.y.is_none());
+        assert_eq!(text_tap.parameters.text, Some("Login".to_string()));
+        assert_eq!(text_tap.parameters.timeout, Some(5.0));
+        assert!(text_tap.parameters.x.is_none());
+        assert!(text_tap.parameters.y.is_none());
 
         let acc_tap = XCTestUnixBridge::create_accessibility_tap("login_button".to_string(), None);
-        assert_eq!(acc_tap.accessibility_id, Some("login_button".to_string()));
-        assert!(acc_tap.timeout.is_none());
+        assert_eq!(
+            acc_tap.parameters.accessibility_id,
+            Some("login_button".to_string())
+        );
+        assert!(acc_tap.parameters.timeout.is_none());
     }
 }
 

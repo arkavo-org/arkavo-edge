@@ -8,17 +8,52 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CommandType {
+    Tap,
+    Swipe,
+    TypeText,
+    Scroll,
+    LongPress,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TapCommand {
+pub struct Command {
     pub id: String,
-    #[serde(rename = "targetType")]
-    pub target_type: TargetType,
+    #[serde(rename = "type")]
+    pub command_type: CommandType,
+    pub parameters: CommandParameters,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandParameters {
+    // Tap parameters
+    pub target_type: Option<TargetType>,
     pub x: Option<f64>,
     pub y: Option<f64>,
     pub text: Option<String>,
-    #[serde(rename = "accessibilityId")]
     pub accessibility_id: Option<String>,
     pub timeout: Option<f64>,
+
+    // Swipe parameters
+    pub x1: Option<f64>,
+    pub y1: Option<f64>,
+    pub x2: Option<f64>,
+    pub y2: Option<f64>,
+    pub duration: Option<f64>,
+
+    // Type text parameters
+    pub text_to_type: Option<String>,
+    pub clear_first: Option<bool>,
+
+    // Scroll parameters
+    pub direction: Option<String>,
+    pub distance: Option<f64>,
+
+    // Long press parameters
+    pub press_duration: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,6 +63,9 @@ pub enum TargetType {
     Text,
     AccessibilityId,
 }
+
+// Backwards compatibility
+pub type TapCommand = Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResponse {
@@ -112,12 +150,12 @@ impl XCTestUnixBridge {
 
         self.server_handle = Some(handle);
 
-        // Set socket permissions to be accessible
+        // Set socket permissions to be accessible only by owner
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(&self.socket_path)?.permissions();
-            perms.set_mode(0o666); // rw-rw-rw-
+            perms.set_mode(0o600); // rw------- (owner read/write only)
             std::fs::set_permissions(&self.socket_path, perms)?;
         }
 
@@ -137,8 +175,13 @@ impl XCTestUnixBridge {
         Ok(())
     }
 
-    /// Send a tap command and wait for response
+    /// Send a tap command and wait for response (backwards compatibility)
     pub async fn send_tap_command(&self, command: TapCommand) -> Result<CommandResponse> {
+        self.send_command(command).await
+    }
+
+    /// Send a command and wait for response
+    pub async fn send_command(&self, command: Command) -> Result<CommandResponse> {
         let stream = self
             .client_stream
             .as_ref()
@@ -188,41 +231,132 @@ impl XCTestUnixBridge {
     }
 
     /// Create a tap command for coordinates
-    pub fn create_coordinate_tap(x: f64, y: f64) -> TapCommand {
-        TapCommand {
+    pub fn create_coordinate_tap(x: f64, y: f64) -> Command {
+        Command {
             id: Uuid::new_v4().to_string(),
-            target_type: TargetType::Coordinate,
-            x: Some(x),
-            y: Some(y),
-            text: None,
-            accessibility_id: None,
-            timeout: None,
+            command_type: CommandType::Tap,
+            parameters: CommandParameters {
+                target_type: Some(TargetType::Coordinate),
+                x: Some(x),
+                y: Some(y),
+                text: None,
+                accessibility_id: None,
+                timeout: None,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
         }
     }
 
     /// Create a tap command for text
-    pub fn create_text_tap(text: String, timeout: Option<f64>) -> TapCommand {
-        TapCommand {
+    pub fn create_text_tap(text: String, timeout: Option<f64>) -> Command {
+        Command {
             id: Uuid::new_v4().to_string(),
-            target_type: TargetType::Text,
-            x: None,
-            y: None,
-            text: Some(text),
-            accessibility_id: None,
-            timeout,
+            command_type: CommandType::Tap,
+            parameters: CommandParameters {
+                target_type: Some(TargetType::Text),
+                x: None,
+                y: None,
+                text: Some(text),
+                accessibility_id: None,
+                timeout,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
         }
     }
 
     /// Create a tap command for accessibility ID
-    pub fn create_accessibility_tap(accessibility_id: String, timeout: Option<f64>) -> TapCommand {
-        TapCommand {
+    pub fn create_accessibility_tap(accessibility_id: String, timeout: Option<f64>) -> Command {
+        Command {
             id: Uuid::new_v4().to_string(),
-            target_type: TargetType::AccessibilityId,
-            x: None,
-            y: None,
-            text: None,
-            accessibility_id: Some(accessibility_id),
-            timeout,
+            command_type: CommandType::Tap,
+            parameters: CommandParameters {
+                target_type: Some(TargetType::AccessibilityId),
+                x: None,
+                y: None,
+                text: None,
+                accessibility_id: Some(accessibility_id),
+                timeout,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
+        }
+    }
+
+    /// Create a swipe command
+    pub fn create_swipe(x1: f64, y1: f64, x2: f64, y2: f64, duration: Option<f64>) -> Command {
+        Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::Swipe,
+            parameters: CommandParameters {
+                target_type: None,
+                x: None,
+                y: None,
+                text: None,
+                accessibility_id: None,
+                timeout: None,
+                x1: Some(x1),
+                y1: Some(y1),
+                x2: Some(x2),
+                y2: Some(y2),
+                duration: duration.or(Some(0.5)),
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
+        }
+    }
+
+    /// Create a type text command
+    pub fn create_type_text(text: String, clear_first: bool) -> Command {
+        Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::TypeText,
+            parameters: CommandParameters {
+                target_type: None,
+                x: None,
+                y: None,
+                text: None,
+                accessibility_id: None,
+                timeout: None,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: Some(text),
+                clear_first: Some(clear_first),
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
         }
     }
 }
@@ -290,14 +424,17 @@ mod tests {
     #[test]
     fn test_command_creation() {
         let coord_tap = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
-        assert_eq!(coord_tap.x, Some(100.0));
-        assert_eq!(coord_tap.y, Some(200.0));
+        assert_eq!(coord_tap.parameters.x, Some(100.0));
+        assert_eq!(coord_tap.parameters.y, Some(200.0));
 
         let text_tap = XCTestUnixBridge::create_text_tap("Login".to_string(), Some(5.0));
-        assert_eq!(text_tap.text, Some("Login".to_string()));
-        assert_eq!(text_tap.timeout, Some(5.0));
+        assert_eq!(text_tap.parameters.text, Some("Login".to_string()));
+        assert_eq!(text_tap.parameters.timeout, Some(5.0));
 
         let acc_tap = XCTestUnixBridge::create_accessibility_tap("login_button".to_string(), None);
-        assert_eq!(acc_tap.accessibility_id, Some("login_button".to_string()));
+        assert_eq!(
+            acc_tap.parameters.accessibility_id,
+            Some("login_button".to_string())
+        );
     }
 }
