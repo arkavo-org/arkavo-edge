@@ -1,0 +1,447 @@
+import XCTest
+import Foundation
+
+// MARK: - Command Types
+enum CommandType: String, Codable {
+    case tap
+    case swipe
+    case typeText
+    case scroll
+    case longPress
+}
+
+// MARK: - Command Structures
+struct Command: Codable {
+    let id: String
+    let type: CommandType
+    let parameters: CommandParameters
+}
+
+struct CommandParameters: Codable {
+    // Tap parameters
+    let targetType: TargetType?
+    let x: Double?
+    let y: Double?
+    let text: String?
+    let accessibilityId: String?
+    let timeout: TimeInterval?
+    
+    // Swipe parameters
+    let x1: Double?
+    let y1: Double?
+    let x2: Double?
+    let y2: Double?
+    let duration: Double?
+    
+    // Type text parameters
+    let textToType: String?
+    let clearFirst: Bool?
+    
+    // Scroll parameters
+    let direction: String?
+    let distance: Double?
+    
+    // Long press parameters
+    let pressDuration: Double?
+}
+
+enum TargetType: String, Codable {
+    case coordinate
+    case text
+    case accessibilityId
+}
+
+struct CommandResponse: Codable {
+    let id: String
+    let success: Bool
+    let error: String?
+    let result: [String: Any]?
+    
+    enum CodingKeys: String, CodingKey {
+        case id, success, error, result
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(success, forKey: .success)
+        try container.encodeIfPresent(error, forKey: .error)
+        if let result = result {
+            let jsonData = try JSONSerialization.data(withJSONObject: result)
+            if let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                try container.encode(jsonDict, forKey: .result)
+            }
+        }
+    }
+}
+
+// MARK: - Unix Socket Server
+class UnixSocketServer {
+    private let socketPath: String
+    private var socketFD: Int32 = -1
+    private var commandHandler: ((Data) -> Void)?
+    private var clientHandles: [FileHandle] = []
+    
+    init(socketPath: String) {
+        self.socketPath = socketPath
+    }
+    
+    func start(commandHandler: @escaping (Data) -> Void) throws {
+        self.commandHandler = commandHandler
+        
+        // Create Unix socket
+        socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
+            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to create socket"])
+        }
+        
+        // Remove existing socket file
+        unlink(socketPath)
+        
+        // Bind to socket path
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            let pathBytes = socketPath.utf8CString
+            pathBytes.withUnsafeBufferPointer { buffer in
+                ptr.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: addr.sun_path)) { dest in
+                    _ = strcpy(dest, buffer.baseAddress!)
+                }
+            }
+        }
+        
+        let bindResult = withUnsafePointer(to: &addr) { addrPtr in
+            addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                bind(socketFD, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        
+        guard bindResult == 0 else {
+            close(socketFD)
+            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to bind socket"])
+        }
+        
+        // Listen for connections
+        guard listen(socketFD, 5) == 0 else {
+            close(socketFD)
+            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to listen on socket"])
+        }
+        
+        // Accept connections in background
+        DispatchQueue.global(qos: .background).async {
+            while true {
+                let clientFD = accept(self.socketFD, nil, nil)
+                if clientFD >= 0 {
+                    self.handleClient(clientFD)
+                }
+            }
+        }
+    }
+    
+    private func handleClient(_ clientFD: Int32) {
+        let fileHandle = FileHandle(fileDescriptor: clientFD, closeOnDealloc: true)
+        clientHandles.append(fileHandle)
+        
+        DispatchQueue.global(qos: .default).async {
+            while true {
+                autoreleasepool {
+                    do {
+                        if let data = try fileHandle.read(upToCount: 4096), !data.isEmpty {
+                            let lines = data.split(separator: UInt8(ascii: "\n"))
+                            for line in lines {
+                                if !line.isEmpty {
+                                    self.commandHandler?(Data(line))
+                                }
+                            }
+                        } else {
+                            break
+                        }
+                    } catch {
+                        print("Error reading from client: \(error)")
+                        break
+                    }
+                }
+            }
+            
+            // Remove handle when done
+            if let index = self.clientHandles.firstIndex(of: fileHandle) {
+                self.clientHandles.remove(at: index)
+            }
+        }
+    }
+    
+    func sendResponse(_ response: Data) {
+        // Send to all connected clients
+        for handle in clientHandles {
+            do {
+                try handle.write(contentsOf: response)
+                try handle.write(contentsOf: "\n".data(using: .utf8)!)
+            } catch {
+                print("Error sending response: \(error)")
+            }
+        }
+    }
+}
+
+// MARK: - Test Runner
+class ArkavoTestRunner: XCTestCase {
+    static let socketPath = "{{SOCKET_PATH}}"
+    static var socketServer: UnixSocketServer?
+    static var app: XCUIApplication?
+    
+    override class func setUp() {
+        super.setUp()
+        
+        // Start Unix socket server
+        socketServer = UnixSocketServer(socketPath: socketPath)
+        do {
+            try socketServer?.start { commandData in
+                if let runner = self.current {
+                    runner.processCommand(commandData)
+                }
+            }
+            print("ArkavoTestRunner: Unix socket server started at \(socketPath)")
+        } catch {
+            print("ArkavoTestRunner: Failed to start Unix socket server: \(error)")
+        }
+        
+        // Launch the app
+        app = XCUIApplication()
+        app?.launch()
+    }
+    
+    static weak var current: ArkavoTestRunner?
+    
+    override func setUp() {
+        super.setUp()
+        Self.current = self
+    }
+    
+    func testRunCommands() {
+        let timeout: TimeInterval = 3600 // 1 hour
+        let expectation = self.expectation(description: "Command processing")
+        expectation.isInverted = true
+        
+        wait(for: [expectation], timeout: timeout)
+    }
+    
+    private func processCommand(_ commandData: Data) {
+        do {
+            let decoder = JSONDecoder()
+            let command = try decoder.decode(Command.self, from: commandData)
+            
+            var response: CommandResponse
+            
+            switch command.type {
+            case .tap:
+                response = handleTap(command)
+            case .swipe:
+                response = handleSwipe(command)
+            case .typeText:
+                response = handleTypeText(command)
+            case .scroll:
+                response = handleScroll(command)
+            case .longPress:
+                response = handleLongPress(command)
+            }
+            
+            if let responseData = try? JSONEncoder().encode(response) {
+                Self.socketServer?.sendResponse(responseData)
+            }
+            
+        } catch {
+            print("Error processing command: \(error)")
+            let errorResponse = CommandResponse(
+                id: "unknown",
+                success: false,
+                error: error.localizedDescription,
+                result: nil
+            )
+            if let responseData = try? JSONEncoder().encode(errorResponse) {
+                Self.socketServer?.sendResponse(responseData)
+            }
+        }
+    }
+    
+    // MARK: - Command Handlers
+    
+    private func handleTap(_ command: Command) -> CommandResponse {
+        guard let app = Self.app else {
+            return CommandResponse(id: command.id, success: false, error: "App not initialized", result: nil)
+        }
+        
+        let params = command.parameters
+        
+        if let targetType = params.targetType {
+            switch targetType {
+            case .coordinate:
+                guard let x = params.x, let y = params.y else {
+                    return CommandResponse(id: command.id, success: false, error: "Missing coordinates", result: nil)
+                }
+                
+                let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                    .withOffset(CGVector(dx: x, dy: y))
+                coordinate.tap()
+                
+                return CommandResponse(id: command.id, success: true, error: nil, result: ["x": x, "y": y])
+                
+            case .text:
+                guard let text = params.text else {
+                    return CommandResponse(id: command.id, success: false, error: "Missing text", result: nil)
+                }
+                
+                let timeout = params.timeout ?? 5.0
+                let predicate = NSPredicate(format: "label == %@ OR title == %@ OR value == %@", text, text, text)
+                let element = app.descendants(matching: .any).matching(predicate).firstMatch
+                
+                if element.waitForExistence(timeout: timeout) {
+                    element.tap()
+                    return CommandResponse(id: command.id, success: true, error: nil, result: ["text": text])
+                } else {
+                    return CommandResponse(id: command.id, success: false, error: "Element not found", result: nil)
+                }
+                
+            case .accessibilityId:
+                guard let accessibilityId = params.accessibilityId else {
+                    return CommandResponse(id: command.id, success: false, error: "Missing accessibility ID", result: nil)
+                }
+                
+                let timeout = params.timeout ?? 5.0
+                let element = app.descendants(matching: .any).matching(identifier: accessibilityId).firstMatch
+                
+                if element.waitForExistence(timeout: timeout) {
+                    element.tap()
+                    return CommandResponse(id: command.id, success: true, error: nil, result: ["accessibilityId": accessibilityId])
+                } else {
+                    return CommandResponse(id: command.id, success: false, error: "Element not found", result: nil)
+                }
+            }
+        }
+        
+        return CommandResponse(id: command.id, success: false, error: "Invalid tap parameters", result: nil)
+    }
+    
+    private func handleSwipe(_ command: Command) -> CommandResponse {
+        guard let app = Self.app else {
+            return CommandResponse(id: command.id, success: false, error: "App not initialized", result: nil)
+        }
+        
+        let params = command.parameters
+        guard let x1 = params.x1, let y1 = params.y1,
+              let x2 = params.x2, let y2 = params.y2 else {
+            return CommandResponse(id: command.id, success: false, error: "Missing swipe coordinates", result: nil)
+        }
+        
+        let duration = params.duration ?? 0.5
+        
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: x1, dy: y1))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: x2, dy: y2))
+        
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: CGFloat(1.0 / duration)))
+        
+        return CommandResponse(
+            id: command.id,
+            success: true,
+            error: nil,
+            result: ["x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration": duration]
+        )
+    }
+    
+    private func handleTypeText(_ command: Command) -> CommandResponse {
+        guard let app = Self.app else {
+            return CommandResponse(id: command.id, success: false, error: "App not initialized", result: nil)
+        }
+        
+        let params = command.parameters
+        guard let text = params.textToType else {
+            return CommandResponse(id: command.id, success: false, error: "Missing text to type", result: nil)
+        }
+        
+        // Find the first responder (focused element)
+        let keyboards = app.keyboards
+        if keyboards.count > 0 {
+            // Clear existing text if requested
+            if params.clearFirst == true {
+                // Select all and delete
+                if let selectAll = app.menuItems["Select All"].exists ? app.menuItems["Select All"] : nil {
+                    selectAll.tap()
+                    app.keys["delete"].tap()
+                } else {
+                    // Try triple tap to select all
+                    if let element = app.textFields.firstMatch.exists ? app.textFields.firstMatch : app.textViews.firstMatch {
+                        element.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+                        app.keys["delete"].tap()
+                    }
+                }
+            }
+            
+            // Type the text
+            app.typeText(text)
+            
+            return CommandResponse(id: command.id, success: true, error: nil, result: ["text": text])
+        } else {
+            return CommandResponse(id: command.id, success: false, error: "No keyboard found - tap a text field first", result: nil)
+        }
+    }
+    
+    private func handleScroll(_ command: Command) -> CommandResponse {
+        guard let app = Self.app else {
+            return CommandResponse(id: command.id, success: false, error: "App not initialized", result: nil)
+        }
+        
+        let params = command.parameters
+        let direction = params.direction ?? "down"
+        let distance = params.distance ?? 200.0
+        
+        // Find the first scrollable element
+        let scrollViews = app.scrollViews
+        let element = scrollViews.count > 0 ? scrollViews.firstMatch : app
+        
+        switch direction {
+        case "up":
+            element.swipeUp()
+        case "down":
+            element.swipeDown()
+        case "left":
+            element.swipeLeft()
+        case "right":
+            element.swipeRight()
+        default:
+            return CommandResponse(id: command.id, success: false, error: "Invalid scroll direction", result: nil)
+        }
+        
+        return CommandResponse(id: command.id, success: true, error: nil, result: ["direction": direction, "distance": distance])
+    }
+    
+    private func handleLongPress(_ command: Command) -> CommandResponse {
+        guard let app = Self.app else {
+            return CommandResponse(id: command.id, success: false, error: "App not initialized", result: nil)
+        }
+        
+        let params = command.parameters
+        let duration = params.pressDuration ?? 1.0
+        
+        if let targetType = params.targetType {
+            switch targetType {
+            case .coordinate:
+                guard let x = params.x, let y = params.y else {
+                    return CommandResponse(id: command.id, success: false, error: "Missing coordinates", result: nil)
+                }
+                
+                let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                    .withOffset(CGVector(dx: x, dy: y))
+                coordinate.press(forDuration: duration)
+                
+                return CommandResponse(id: command.id, success: true, error: nil, result: ["x": x, "y": y, "duration": duration])
+                
+            default:
+                return CommandResponse(id: command.id, success: false, error: "Long press only supports coordinate targeting", result: nil)
+            }
+        }
+        
+        return CommandResponse(id: command.id, success: false, error: "Invalid long press parameters", result: nil)
+    }
+}
