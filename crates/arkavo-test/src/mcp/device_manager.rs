@@ -35,8 +35,13 @@ impl DeviceManager {
             active_device_id: Arc::new(Mutex::new(None)),
         };
 
-        // Refresh device list on initialization
-        let _ = manager.refresh_devices();
+        // Try to refresh device list on initialization, but don't fail if xcrun is not available
+        match manager.refresh_devices() {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Warning: Failed to refresh devices on initialization: {}", e);
+            }
+        }
         manager
     }
 
