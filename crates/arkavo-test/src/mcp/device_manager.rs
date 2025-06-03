@@ -36,12 +36,7 @@ impl DeviceManager {
         };
 
         // Try to refresh device list on initialization, but don't fail if xcrun is not available
-        match manager.refresh_devices() {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Warning: Failed to refresh devices on initialization: {}", e);
-            }
-        }
+        let _ = manager.refresh_devices();
         manager
     }
 

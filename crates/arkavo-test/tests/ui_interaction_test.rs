@@ -31,7 +31,7 @@ mod ui_interaction_tests {
                 return;
             }
         }
-        
+
         let devices = device_manager.get_booted_devices();
 
         if devices.is_empty() {
@@ -84,7 +84,7 @@ mod ui_interaction_tests {
     async fn test_xctest_tap_functionality() {
         // On non-macOS platforms, just test that we can create the structures
         eprintln!("Running on non-macOS platform, skipping actual device tests");
-        
+
         // Test that we can create commands
         let tap_cmd = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
         assert_eq!(tap_cmd.command_type, CommandType::Tap);
