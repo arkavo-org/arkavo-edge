@@ -64,7 +64,7 @@ mod ui_interaction_tests {
     #[tokio::test]
     async fn test_swipe_command() {
         // Create XCTest bridge directly
-        let mut bridge = XCTestUnixBridge::new();
+        let _bridge = XCTestUnixBridge::new();
 
         // Create swipe command
         let swipe_cmd = XCTestUnixBridge::create_swipe(

@@ -129,17 +129,32 @@ fn test_unix_socket_path_generation() {
 
 #[test]
 fn test_command_structure_compatibility() {
-    use arkavo_test::mcp::xctest_unix_bridge::{TapCommand, TargetType};
+    use arkavo_test::mcp::xctest_unix_bridge::{
+        Command, CommandParameters, CommandType, TargetType,
+    };
 
     // Test that our Rust structures can be serialized to match Swift expectations
-    let tap_cmd = TapCommand {
+    let tap_cmd = Command {
         id: "test-123".to_string(),
-        target_type: TargetType::Text,
-        x: None,
-        y: None,
-        text: Some("Login".to_string()),
-        accessibility_id: None,
-        timeout: Some(5.0),
+        command_type: CommandType::Tap,
+        parameters: CommandParameters {
+            target_type: Some(TargetType::Text),
+            x: None,
+            y: None,
+            text: Some("Login".to_string()),
+            accessibility_id: None,
+            timeout: Some(5.0),
+            x1: None,
+            y1: None,
+            x2: None,
+            y2: None,
+            duration: None,
+            text_to_type: None,
+            clear_first: None,
+            direction: None,
+            distance: None,
+            press_duration: None,
+        },
     };
 
     let json = serde_json::to_string(&tap_cmd).expect("Should serialize");
@@ -147,14 +162,15 @@ fn test_command_structure_compatibility() {
 
     // Verify JSON structure matches Swift expectations
     assert_eq!(parsed["id"], "test-123");
-    assert_eq!(parsed["targetType"], "text");
-    assert_eq!(parsed["text"], "Login");
-    assert_eq!(parsed["timeout"], 5.0);
+    assert_eq!(parsed["type"], "tap");
+    assert_eq!(parsed["parameters"]["targetType"], "text");
+    assert_eq!(parsed["parameters"]["text"], "Login");
+    assert_eq!(parsed["parameters"]["timeout"], 5.0);
 
     // Verify null fields are properly handled
-    assert!(parsed["x"].is_null());
-    assert!(parsed["y"].is_null());
-    assert!(parsed["accessibilityId"].is_null());
+    assert!(parsed["parameters"]["x"].is_null());
+    assert!(parsed["parameters"]["y"].is_null());
+    assert!(parsed["parameters"]["accessibilityId"].is_null());
 }
 
 #[cfg(target_os = "macos")]
