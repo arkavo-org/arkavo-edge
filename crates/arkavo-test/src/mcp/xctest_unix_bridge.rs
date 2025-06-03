@@ -150,12 +150,12 @@ impl XCTestUnixBridge {
 
         self.server_handle = Some(handle);
 
-        // Set socket permissions to be accessible
+        // Set socket permissions to be accessible only by owner
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(&self.socket_path)?.permissions();
-            perms.set_mode(0o666); // rw-rw-rw-
+            perms.set_mode(0o600); // rw------- (owner read/write only)
             std::fs::set_permissions(&self.socket_path, perms)?;
         }
 

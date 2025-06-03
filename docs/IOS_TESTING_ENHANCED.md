@@ -108,9 +108,10 @@ The iOS tools in the MCP server will automatically use XCTest when available:
 
 ### Socket Connection Issues
 
-1. Check socket path permissions
+1. Check socket path permissions (should be 0600 - owner only)
 2. Ensure no firewall is blocking Unix sockets
 3. Verify the socket file exists at `/tmp/arkavo-xctest-*.sock`
+4. Socket is only accessible by the user running the tests
 
 ## Implementation Details
 

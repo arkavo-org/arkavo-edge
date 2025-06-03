@@ -4,7 +4,7 @@ use super::xctest_unix_bridge::{CommandResponse, TapCommand, XCTestUnixBridge, T
 use crate::{Result, TestError};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::process::Command;
+use std::process::{Command, Child};
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +27,7 @@ pub struct XCTestEnhanced {
     bridge: Arc<Mutex<XCTestUnixBridge>>,
     compiler: XCTestCompiler,
     device_manager: Arc<DeviceManager>,
+    test_process: Arc<Mutex<Option<Child>>>,
 }
 
 impl XCTestEnhanced {
@@ -41,6 +42,7 @@ impl XCTestEnhanced {
             bridge: Arc::new(Mutex::new(bridge)),
             compiler,
             device_manager,
+            test_process: Arc::new(Mutex::new(None)),
         })
     }
     
@@ -81,17 +83,28 @@ impl XCTestEnhanced {
     
     /// Run the test bundle on simulator
     async fn run_test_bundle(&self, device_id: &str) -> Result<()> {
-        // Use xcodebuild to run XCTest
-        let output = Command::new("xcodebuild")
+        // Get bundle path and app identifier
+        let bundle_path = self.compiler.get_xctest_bundle()?;
+        let bundle_name = bundle_path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| TestError::Mcp("Invalid bundle path".to_string()))?;
+        
+        // Run using xcrun simctl to launch the test runner
+        let child = Command::new("xcrun")
             .args([
-                "test-without-building",
-                "-xctestrun", "/path/to/test.xctestrun",
-                "-destination", &format!("id={}", device_id),
-                "-only-testing:ArkavoTestRunner/ArkavoTestRunner/testRunCommands",
+                "simctl",
+                "spawn",
+                device_id,
+                "xctest",
+                bundle_path.to_str().unwrap(),
             ])
             .spawn()
             .map_err(|e| TestError::Mcp(format!("Failed to run test bundle: {}", e)))?;
             
+        // Store the process handle for cleanup
+        let mut process_guard = self.test_process.lock().await;
+        *process_guard = Some(child);
+        
         // Let it start up
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         
@@ -123,6 +136,28 @@ impl XCTestEnhanced {
     pub async fn is_available(&self) -> bool {
         let bridge = self.bridge.lock().await;
         bridge.is_connected()
+    }
+    
+    /// Cleanup test process
+    pub async fn cleanup(&self) -> Result<()> {
+        let mut process_guard = self.test_process.lock().await;
+        if let Some(mut child) = process_guard.take() {
+            // Try to terminate gracefully first
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for XCTestEnhanced {
+    fn drop(&mut self) {
+        // Best effort cleanup - can't be async in Drop
+        if let Ok(mut guard) = self.test_process.try_lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
     }
 }
 
