@@ -40,9 +40,11 @@ The release workflow performs these steps for macOS builds:
 2. **Strip**: Removes debug symbols to reduce size
 3. **Codesign**: Signs the binary with Developer ID certificate
 4. **Package**: Creates a ZIP file for notarization submission
-5. **Notarize**: Submits to Apple's notarization service and waits for approval
+5. **Notarize**: Submits to Apple's notarization service and waits for approval (10-minute timeout)
 6. **Staple**: Attaches the notarization ticket to the binary
-7. **Release**: Creates the final tarball with the notarized binary
+7. **Validate**: Verifies the notarization was successful
+8. **Cleanup**: Removes temporary ZIP file
+9. **Release**: Creates the final tarball with the notarized binary
 
 ## Verification
 

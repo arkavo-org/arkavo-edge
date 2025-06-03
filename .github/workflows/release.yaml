@@ -196,12 +196,27 @@ jobs:
             --apple-id ${{ secrets.APPLE_ID }} \
             --password ${{ secrets.APPLE_APP_PASSWORD }} \
             --team-id M8GS7ZT95Y \
-            --wait
+            --wait \
+            --timeout 600 || {
+              echo "Notarization failed. Please check Apple Developer account status and credentials."
+              exit 1
+            }
 
       - name: Staple notarization
         run: |
           cd target/aarch64-apple-darwin/release
           xcrun stapler staple arkavo
+          
+      - name: Validate notarization
+        run: |
+          cd target/aarch64-apple-darwin/release
+          xcrun stapler validate arkavo
+          spctl -a -v arkavo
+          
+      - name: Cleanup temporary files
+        run: |
+          cd target/aarch64-apple-darwin/release
+          rm -f arkavo.zip
 
       - name: Prepare binary
         run: |
