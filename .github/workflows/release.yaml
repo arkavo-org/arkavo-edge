@@ -184,6 +184,25 @@ jobs:
         run: |
           codesign --force --options=runtime --timestamp --sign "Developer ID Application: Arkavo LLC (M8GS7ZT95Y)" target/aarch64-apple-darwin/release/arkavo
 
+      - name: Create ZIP for notarization
+        run: |
+          cd target/aarch64-apple-darwin/release
+          zip arkavo.zip arkavo
+
+      - name: Notarize binary
+        run: |
+          cd target/aarch64-apple-darwin/release
+          xcrun notarytool submit arkavo.zip \
+            --apple-id ${{ secrets.APPLE_ID }} \
+            --password ${{ secrets.APPLE_APP_PASSWORD }} \
+            --team-id M8GS7ZT95Y \
+            --wait
+
+      - name: Staple notarization
+        run: |
+          cd target/aarch64-apple-darwin/release
+          xcrun stapler staple arkavo
+
       - name: Prepare binary
         run: |
           cd target/aarch64-apple-darwin/release
