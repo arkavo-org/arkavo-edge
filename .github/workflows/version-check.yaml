@@ -1,0 +1,80 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  version-check:
+    name: Verify Version Increment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Get PR branch version
+        id: pr_version
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "PR branch version: $VERSION"
+          
+      - name: Get main branch version
+        id: main_version
+        run: |
+          git fetch origin main:main
+          MAIN_VERSION=$(git show main:Cargo.toml | grep '^version =' | head -n 1 | cut -d'"' -f2)
+          echo "version=$MAIN_VERSION" >> $GITHUB_OUTPUT
+          echo "Main branch version: $MAIN_VERSION"
+          
+      - name: Compare versions
+        run: |
+          PR_VERSION="${{ steps.pr_version.outputs.version }}"
+          MAIN_VERSION="${{ steps.main_version.outputs.version }}"
+          
+          echo "Comparing versions:"
+          echo "  Main branch: $MAIN_VERSION"
+          echo "  PR branch:   $PR_VERSION"
+          
+          # Function to compare semantic versions
+          version_gt() {
+            test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
+          }
+          
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "❌ ERROR: Version has not been incremented!"
+            echo "The version in Cargo.toml must be greater than the current version on main branch."
+            echo ""
+            echo "Current version on main: $MAIN_VERSION"
+            echo "Your PR version:        $PR_VERSION"
+            echo ""
+            echo "Please update the version in Cargo.toml to a higher version number."
+            echo "For example, if current is 0.1.0, you could use 0.1.1, 0.2.0, or 1.0.0"
+            exit 1
+          elif version_gt "$MAIN_VERSION" "$PR_VERSION"; then
+            echo "❌ ERROR: PR version is lower than main branch version!"
+            echo "The version in Cargo.toml must be greater than the current version on main branch."
+            echo ""
+            echo "Current version on main: $MAIN_VERSION"
+            echo "Your PR version:        $PR_VERSION"
+            exit 1
+          else
+            echo "✅ Version has been properly incremented from $MAIN_VERSION to $PR_VERSION"
+          fi
+          
+      - name: Check version format
+        run: |
+          VERSION="${{ steps.pr_version.outputs.version }}"
+          
+          # Verify semantic versioning format (X.Y.Z)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ ERROR: Invalid version format!"
+            echo "Version must follow semantic versioning (X.Y.Z)"
+            echo "Current version: $VERSION"
+            exit 1
+          fi
+          
+          echo "✅ Version format is valid: $VERSION"
