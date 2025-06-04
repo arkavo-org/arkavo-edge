@@ -98,6 +98,17 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       
+      - name: Install musl tools and dependencies
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          sudo apt-get install -y libssl-dev pkg-config
+          # Install musl-compatible OpenSSL
+          sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/x86_64-linux-musl/asm
+          sudo ln -s /usr/include/asm-generic /usr/include/x86_64-linux-musl/asm-generic
+          sudo ln -s /usr/include/linux /usr/include/x86_64-linux-musl/linux
+      
       - name: Cache Rust dependencies
         uses: actions/cache@v4
         with:
@@ -181,8 +192,14 @@ jobs:
     name: Smoke Test Linux
     needs: build-test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container:
+          - alpine:latest
+          - ubuntu:latest
+          - ubuntu:22.04
     container:
-      image: alpine:latest
+      image: ${{ matrix.container }}
     steps:
       - name: Download Linux binary
         uses: actions/download-artifact@v4

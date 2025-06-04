@@ -77,6 +77,16 @@ jobs:
           profile: minimal
           override: true
           
+      - name: Install musl tools and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          sudo apt-get install -y libssl-dev pkg-config
+          # Install musl-compatible OpenSSL
+          sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/x86_64-linux-musl/asm
+          sudo ln -s /usr/include/asm-generic /usr/include/x86_64-linux-musl/asm-generic
+          sudo ln -s /usr/include/linux /usr/include/x86_64-linux-musl/linux
+          
       - name: Build
         uses: actions-rs/cargo@v1
         with:
@@ -212,8 +222,13 @@ jobs:
     needs: [release, build-linux-x86_64]
     name: Smoke Test Linux Binary
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container:
+          - ubuntu:latest
+          - ubuntu:22.04
     container:
-      image: ubuntu:22.04
+      image: ${{ matrix.container }}
     steps:
       - name: Install dependencies
         run: |
