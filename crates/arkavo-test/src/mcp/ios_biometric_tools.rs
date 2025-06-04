@@ -442,12 +442,95 @@ impl Tool for SystemDialogKit {
             _ => "OK",
         };
 
-        Ok(serde_json::json!({
-            "success": true,
-            "action": action,
-            "button_tapped": button,
-            "message": format!("System dialog handled: tapped '{}'", button)
-        }))
+        // Try AppleScript to click the button
+        let applescript = format!(
+            r#"
+            tell application "Simulator"
+                activate
+                delay 0.5
+                tell application "System Events"
+                    tell process "Simulator"
+                        tell window 1
+                            if exists button "{}" then
+                                click button "{}"
+                                return "success"
+                            else
+                                -- Try to find any button containing the text
+                                set allButtons to buttons
+                                repeat with aButton in allButtons
+                                    if name of aButton contains "{}" then
+                                        click aButton
+                                        return "success"
+                                    end if
+                                end repeat
+                                return "not_found"
+                            end if
+                        end tell
+                    end tell
+                end tell
+            end tell
+            "#,
+            button, button, button
+        );
+
+        let result = Command::new("osascript")
+            .arg("-e")
+            .arg(&applescript)
+            .output();
+
+        match result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if output.status.success() && stdout == "success" {
+                    Ok(serde_json::json!({
+                        "success": true,
+                        "action": action,
+                        "button_tapped": button,
+                        "message": format!("Successfully tapped '{}' button", button),
+                        "method": "applescript"
+                    }))
+                } else {
+                    // AppleScript failed - return honest failure
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "action": action,
+                        "error": {
+                            "code": "DIALOG_INTERACTION_FAILED",
+                            "message": format!("Unable to find or tap '{}' button", button),
+                            "details": {
+                                "attempted_button": button,
+                                "reason": if stdout == "not_found" {
+                                    "Button not found in current dialog"
+                                } else {
+                                    "AppleScript execution failed"
+                                },
+                                "suggestions": [
+                                    "Ensure a dialog is visible in the Simulator",
+                                    "Check if the button text matches exactly",
+                                    "Try using ui_interaction tool with specific coordinates",
+                                    "For deep link dialogs, the button might be 'Open' instead of 'OK'"
+                                ],
+                                "manual_fallback": "Manually tap the button in the Simulator"
+                            }
+                        }
+                    }))
+                }
+            }
+            Err(e) => {
+                Ok(serde_json::json!({
+                    "success": false,
+                    "action": action,
+                    "error": {
+                        "code": "APPLESCRIPT_FAILED",
+                        "message": format!("Failed to execute AppleScript: {}", e),
+                        "details": {
+                            "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility",
+                            "alternative": "Use ui_interaction tool with known button coordinates"
+                        }
+                    }
+                }))
+            }
+        }
     }
 
     fn schema(&self) -> &ToolSchema {
