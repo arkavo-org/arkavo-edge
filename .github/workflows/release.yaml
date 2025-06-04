@@ -42,7 +42,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Release ${{ steps.version.outputs.tag }}
           draft: false
-          prerelease: false
+          prerelease: true
           generate_release_notes: true
           body: |
             ## Arkavo Edge ${{ steps.version.outputs.tag }}
@@ -55,8 +55,9 @@ jobs:
             
             ### Binaries
             
-            - Linux (x64): arkavo-${{ steps.version.outputs.version }}-x86_64-unknown-linux-gnu
-            - macOS (ARM64): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin
+            - Linux (x64): arkavo-${{ steps.version.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+            - Linux (x64, .deb): arkavo_${{ steps.version.outputs.version }}_amd64.deb
+            - macOS (ARM64): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             
@@ -72,30 +73,59 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: x86_64-unknown-linux-gnu
+          target: x86_64-unknown-linux-musl
           profile: minimal
           override: true
+          
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
           
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target x86_64-unknown-linux-gnu
+          args: --release --target x86_64-unknown-linux-musl
           
       - name: Prepare binary
         run: |
-          cd target/x86_64-unknown-linux-gnu/release
+          cd target/x86_64-unknown-linux-musl/release
           strip arkavo
-          tar -czf arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz arkavo
-          shasum -a 256 arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz > arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+          tar -czf arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz arkavo
+          shasum -a 256 arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz > arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
+          
+      - name: Create .deb package
+        run: |
+          mkdir -p debian/DEBIAN
+          mkdir -p debian/usr/bin
+          cp target/x86_64-unknown-linux-musl/release/arkavo debian/usr/bin/
+          cat > debian/DEBIAN/control << EOF
+          Package: arkavo
+          Version: ${{ needs.release.outputs.version }}
+          Architecture: amd64
+          Maintainer: Arkavo LLC <support@arkavo.com>
+          Description: Arkavo Edge - AI-agent development CLI tool
+           Arkavo Edge is an open-source agentic CLI tool that provides
+           developer-centric capabilities for AI-agent development and
+           framework maintenance.
+          Section: devel
+          Priority: optional
+          Homepage: https://github.com/arkavo/arkavo-edge
+          EOF
+          dpkg-deb --build debian arkavo_${{ needs.release.outputs.version }}_amd64.deb
+          dpkg-deb --info arkavo_${{ needs.release.outputs.version }}_amd64.deb
+          shasum -a 256 arkavo_${{ needs.release.outputs.version }}_amd64.deb > arkavo_${{ needs.release.outputs.version }}_amd64.deb.sha256
       
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.release.outputs.version }}
           files: |
-            ./target/x86_64-unknown-linux-gnu/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
-            ./target/x86_64-unknown-linux-gnu/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+            ./target/x86_64-unknown-linux-musl/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+            ./target/x86_64-unknown-linux-musl/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
+            ./arkavo_${{ needs.release.outputs.version }}_amd64.deb
+            ./arkavo_${{ needs.release.outputs.version }}_amd64.deb.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   
@@ -180,5 +210,63 @@ jobs:
           files: |
             ./target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz
             ./target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  smoke-test-linux:
+    needs: [release, build-linux-x86_64]
+    name: Smoke Test Linux Binary
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        container:
+          - ubuntu:latest
+          - ubuntu:22.04
+    container:
+      image: ${{ matrix.container }}
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl ca-certificates
+          
+      - name: Download and test tar.gz binary
+        run: |
+          curl -L -o arkavo.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf arkavo.tar.gz
+          chmod +x arkavo
+          ./arkavo --version
+          
+      - name: Download and test .deb package
+        run: |
+          curl -L -o arkavo.deb https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo_${{ needs.release.outputs.version }}_amd64.deb
+          apt-get install -y ./arkavo.deb
+          arkavo --version
+  
+  smoke-test-macos:
+    needs: [release, build-macos-arm64]
+    name: Smoke Test macOS Binary
+    runs-on: macos-latest
+    steps:
+      - name: Download and test binary
+        run: |
+          curl -L -o arkavo.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz
+          tar -xzf arkavo.tar.gz
+          chmod +x arkavo
+          ./arkavo --version
+  
+  publish-release:
+    needs: [release, smoke-test-linux, smoke-test-macos]
+    name: Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Update release to published
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
