@@ -155,27 +155,23 @@ impl Tool for BiometricDialogHandler {
                 }
             }
             "accept" => {
-                // Use the biometric match simulation
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to simulate biometric match: {}", e))
-                    })?;
-
-                if output.status.success() {
-                    Ok(json!({
-                        "success": true,
-                        "action": "accept",
-                        "method": "biometric_match",
-                        "device_id": device_id
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string()
-                    }))
-                }
+                // Biometric acceptance cannot be automated
+                Ok(json!({
+                    "success": false,
+                    "action": "accept",
+                    "device_id": device_id,
+                    "error": {
+                        "code": "BIOMETRIC_ACCEPT_NOT_AUTOMATED",
+                        "message": "Cannot programmatically accept biometric authentication",
+                        "details": {
+                            "reason": "iOS Simulator requires manual menu interaction for biometric simulation",
+                            "manual_steps": [
+                                "1. When biometric dialog is visible",
+                                "2. Go to Device > Face ID/Touch ID > Matching Face/Touch"
+                            ]
+                        }
+                    }
+                }))
             }
             "use_passcode" => {
                 // Default passcode for simulators is often "1234" or "123456"

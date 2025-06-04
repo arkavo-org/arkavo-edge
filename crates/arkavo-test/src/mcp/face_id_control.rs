@@ -82,138 +82,178 @@ impl Tool for FaceIdController {
 
         match action {
             "enroll" => {
-                // Enable Face ID enrollment
-                let output = Command::new("xcrun")
-                    .args([
-                        "simctl",
-                        "spawn",
-                        &device_id,
-                        "notifyutil",
-                        "-s",
-                        "com.apple.BiometricKit.enrollmentChanged",
-                        "1",
-                    ])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to set Face ID enrollment: {}", e))
-                    })?;
+                // Try AppleScript automation
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.5
+                        tell application "System Events"
+                            tell process "Simulator"
+                                -- Click to ensure menu item is checked
+                                set enrollMenuItem to menu item "Enrolled" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                if value of attribute "AXMenuItemMarkChar" of enrollMenuItem is not "✓" then
+                                    click enrollMenuItem
+                                end if
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                if output.status.success() {
-                    // Also use the UI command for enrollment
-                    Command::new("xcrun")
-                        .args([
-                            "simctl",
-                            "ui",
-                            &device_id,
-                            "biometric",
-                            "enrollment",
-                            "--enrolled",
-                        ])
-                        .output()
-                        .ok();
+                let result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output();
 
-                    Ok(json!({
-                        "success": true,
-                        "action": "enroll",
-                        "device_id": device_id,
-                        "message": "Face ID enrolled successfully"
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string()
-                    }))
+                match result {
+                    Ok(output) if output.status.success() => {
+                        Ok(json!({
+                            "success": true,
+                            "action": "enroll",
+                            "device_id": device_id,
+                            "message": "Face ID enrollment enabled via AppleScript",
+                            "method": "applescript",
+                            "note": "App may need restart for enrollment to take effect"
+                        }))
+                    }
+                    _ => {
+                        Ok(json!({
+                            "success": false,
+                            "action": "enroll",
+                            "device_id": device_id,
+                            "error": {
+                                "code": "FACE_ID_ENROLLMENT_FAILED",
+                                "message": "Unable to automate Face ID enrollment",
+                                "details": {
+                                    "attempted_method": "AppleScript automation",
+                                    "possible_reasons": [
+                                        "Accessibility permissions not granted",
+                                        "Simulator UI has changed",
+                                        "Running in headless/CI environment"
+                                    ],
+                                    "manual_steps": [
+                                        "1. Focus on the iOS Simulator window",
+                                        "2. In menu bar: Device > Face ID > Enrolled (check it)",
+                                        "3. Enrollment persists until manually unchecked"
+                                    ],
+                                    "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility > Add Terminal/IDE"
+                                }
+                            }
+                        }))
+                    }
                 }
             }
             "unenroll" => {
-                // Disable Face ID enrollment
-                let output = Command::new("xcrun")
-                    .args([
-                        "simctl",
-                        "spawn",
-                        &device_id,
-                        "notifyutil",
-                        "-s",
-                        "com.apple.BiometricKit.enrollmentChanged",
-                        "0",
-                    ])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to clear Face ID enrollment: {}", e))
-                    })?;
-
-                if output.status.success() {
-                    // Also use the UI command for unenrollment
-                    Command::new("xcrun")
-                        .args([
-                            "simctl",
-                            "ui",
-                            &device_id,
-                            "biometric",
-                            "enrollment",
-                            "--cleared",
-                        ])
-                        .output()
-                        .ok();
-
-                    Ok(json!({
-                        "success": true,
-                        "action": "unenroll",
-                        "device_id": device_id,
-                        "message": "Face ID enrollment cleared"
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string()
-                    }))
-                }
+                // Face ID unenrollment cannot be done programmatically
+                Ok(json!({
+                    "success": false,
+                    "action": "unenroll",
+                    "device_id": device_id,
+                    "error": {
+                        "code": "FACE_ID_UNENROLL_NOT_AUTOMATED",
+                        "message": "Face ID unenrollment requires manual interaction",
+                        "details": {
+                            "manual_steps": [
+                                "1. In menu bar: Device > Face ID > Enrolled (uncheck it)"
+                            ]
+                        }
+                    }
+                }))
             }
             "match" => {
-                // Simulate successful Face ID match (Matching Face)
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to simulate Face ID match: {}", e))
-                    })?;
+                // Try AppleScript automation
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                if output.status.success() {
-                    Ok(json!({
-                        "success": true,
-                        "action": "match",
-                        "device_id": device_id,
-                        "message": "Face ID authentication successful (Matching Face)"
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string(),
-                        "suggestion": "Make sure Face ID is enrolled first using 'enroll' action"
-                    }))
+                let result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output();
+
+                match result {
+                    Ok(output) if output.status.success() => {
+                        Ok(json!({
+                            "success": true,
+                            "action": "match",
+                            "device_id": device_id,
+                            "message": "Face ID match triggered via AppleScript",
+                            "method": "applescript",
+                            "timing_critical": "Must be executed while biometric prompt is visible"
+                        }))
+                    }
+                    _ => {
+                        Ok(json!({
+                            "success": false,
+                            "action": "match",
+                            "device_id": device_id,
+                            "error": {
+                                "code": "FACE_ID_MATCH_FAILED",
+                                "message": "Unable to trigger Face ID match",
+                                "details": {
+                                    "manual_steps": [
+                                        "1. Ensure Face ID is enrolled",
+                                        "2. When biometric prompt appears", 
+                                        "3. Go to Device > Face ID > Matching Face"
+                                    ],
+                                    "timing": "Must be done while biometric prompt is active"
+                                }
+                            }
+                        }))
+                    }
                 }
             }
             "no_match" => {
-                // Simulate failed Face ID match (Non-matching Face)
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "nomatch"])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to simulate Face ID no match: {}", e))
-                    })?;
+                // Try AppleScript automation
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                if output.status.success() {
-                    Ok(json!({
-                        "success": true,
-                        "action": "no_match",
-                        "device_id": device_id,
-                        "message": "Face ID authentication failed (Non-matching Face)"
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string()
-                    }))
+                let result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output();
+
+                match result {
+                    Ok(output) if output.status.success() => {
+                        Ok(json!({
+                            "success": true,
+                            "action": "no_match",
+                            "device_id": device_id,
+                            "message": "Face ID non-match triggered via AppleScript",
+                            "method": "applescript"
+                        }))
+                    }
+                    _ => {
+                        Ok(json!({
+                            "success": false,
+                            "action": "no_match",
+                            "device_id": device_id,
+                            "error": {
+                                "code": "FACE_ID_NOMATCH_FAILED",
+                                "message": "Unable to trigger Face ID non-match",
+                                "details": {
+                                    "manual_steps": [
+                                        "1. When biometric prompt appears",
+                                        "2. Go to Device > Face ID > Non-matching Face"
+                                    ]
+                                }
+                            }
+                        }))
+                    }
                 }
             }
             _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),

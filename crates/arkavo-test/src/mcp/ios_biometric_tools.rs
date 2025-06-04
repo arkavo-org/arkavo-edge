@@ -62,39 +62,83 @@ impl BiometricKit {
         }
     }
 
-    fn try_simctl_biometric(&self, device_id: &str, args: &[&str]) -> Result<std::process::Output> {
-        let mut cmd_args = vec!["simctl", "ui", device_id, "biometric"];
-        cmd_args.extend_from_slice(args);
 
-        let output = Command::new("xcrun")
-            .args(&cmd_args)
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute biometric command: {}", e)))?;
+    fn try_applescript_biometric(&self, device_id: &str, action: &str, biometric_type: &str) -> bool {
+        // Get device name for AppleScript
+        let _device = match self.device_manager.get_device(device_id) {
+            Some(d) => d,
+            None => return false,
+        };
 
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("Unknown subcommand") || stderr.contains("unrecognized") {
-            return Err(TestError::Mcp(
-                "Biometric UI commands not supported".to_string(),
-            ));
+        let menu_item = match (biometric_type, action) {
+            ("face_id", "match") => "Matching Face",
+            ("face_id", "nomatch") => "Non-matching Face", 
+            ("touch_id", "match") => "Matching Touch",
+            ("touch_id", "nomatch") => "Non-matching Touch",
+            _ => return false,
+        };
+
+        // AppleScript to click menu item
+        let applescript = format!(
+            r#"
+            tell application "Simulator"
+                activate
+                tell application "System Events"
+                    tell process "Simulator"
+                        click menu item "{}" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                    end tell
+                end tell
+            end tell
+            "#,
+            menu_item
+        );
+
+        // Execute AppleScript
+        let result = Command::new("osascript")
+            .arg("-e")
+            .arg(&applescript)
+            .output();
+
+        match result {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
         }
-
-        Ok(output)
     }
 
-    fn send_notification(&self, device_id: &str, title: &str, body: &str) -> Result<()> {
-        Command::new("xcrun")
-            .args(["simctl", "push", device_id, "com.arkavo.Arkavo", "-"])
-            .env(
-                "SIMCTL_CHILD_NOTIFICATION_PAYLOAD",
-                format!(
-                    r#"{{"aps":{{"alert":{{"title":"{}","body":"{}"}}}}}}"#,
-                    title, body
-                ),
-            )
-            .output()
-            .ok();
-
-        Ok(())
+    fn try_keyboard_shortcut_biometric(&self, _device_id: &str, action: &str) -> bool {
+        // Some biometric dialogs may respond to keyboard shortcuts
+        // This is a placeholder for potential keyboard-based workarounds
+        
+        // For now, we can try common shortcuts like:
+        // Cmd+Shift+M for "Match" (hypothetical)
+        // Cmd+Shift+N for "No Match" (hypothetical)
+        
+        // Note: These are not standard shortcuts and likely won't work,
+        // but we're trying all possible workarounds before failing
+        
+        match action {
+            "match" => {
+                // Try to send a keyboard shortcut (this is speculative)
+                let result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(r#"tell application "Simulator" to activate"#)
+                    .output();
+                
+                if result.is_ok() {
+                    // Give focus time to switch
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    
+                    // Try sending Enter key which might confirm biometric
+                    Command::new("osascript")
+                        .arg("-e")
+                        .arg(r#"tell application "System Events" to keystroke return"#)
+                        .output()
+                        .ok();
+                }
+                false // Keyboard shortcuts for biometric are not standard
+            }
+            _ => false,
+        }
     }
 }
 
@@ -125,149 +169,180 @@ impl Tool for BiometricKit {
 
         match action {
             "enroll" => {
-                // Method 1: Try simctl ui biometric enrollment (Xcode 13+)
-                if let Ok(output) =
-                    self.try_simctl_biometric(&device_id, &["enrollment", "--enrolled"])
-                {
-                    if output.status.success() {
-                        return Ok(serde_json::json!({
+                // Try AppleScript to toggle enrollment
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Enrolled" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
+
+                let result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output();
+
+                match result {
+                    Ok(output) if output.status.success() => {
+                        Ok(serde_json::json!({
                             "success": true,
                             "action": "enroll",
                             "biometric_type": biometric_type,
-                            "message": "Biometric enrollment completed",
-                            "method": "simctl_ui"
-                        }));
+                            "message": "Toggled biometric enrollment via AppleScript",
+                            "method": "applescript",
+                            "warning": "This toggles the enrollment state. Check current state with face_id_status tool.",
+                            "note": "May require app restart to take effect"
+                        }))
+                    }
+                    _ => {
+                        // AppleScript failed, return honest failure
+                        Ok(serde_json::json!({
+                            "success": false,
+                            "action": "enroll",
+                            "biometric_type": biometric_type,
+                            "error": {
+                                "code": "ENROLLMENT_AUTOMATION_FAILED",
+                                "message": "Unable to automate biometric enrollment",
+                                "details": {
+                                    "reason": "AppleScript automation failed - may require accessibility permissions",
+                                    "manual_steps": [
+                                        "1. In the Simulator menu bar, go to Device > Face ID/Touch ID",
+                                        "2. Check the 'Enrolled' option",
+                                        "3. Enrollment persists until manually unchecked"
+                                    ],
+                                    "troubleshooting": [
+                                        "Ensure Terminal/IDE has accessibility permissions",
+                                        "System Preferences > Security & Privacy > Privacy > Accessibility"
+                                    ],
+                                    "alternatives": {
+                                        "appium": "Use Appium's mobile:enrollBiometric command"
+                                    }
+                                }
+                            }
+                        }))
                     }
                 }
-
-                // Method 2: Check if we can use alternate approaches
-                // Privacy grant often fails with "Operation not permitted" on simulators
-                // Instead, provide guidance and workarounds
-
-                // Try to notify about manual enrollment
-                self.send_notification(
-                    &device_id,
-                    "Manual Enrollment Required",
-                    "Please use Simulator menu: Device > Face ID/Touch ID > Enrolled",
-                )
-                .ok();
-
-                // Return success with instructions - the AI can proceed knowing enrollment needs manual action
-                Ok(serde_json::json!({
-                    "success": true,
-                    "action": "enroll",
-                    "biometric_type": biometric_type,
-                    "message": "Biometric enrollment requires manual action on simulator",
-                    "method": "manual_required",
-                    "instructions": {
-                        "step1": "In the Simulator menu bar, go to Device > Face ID/Touch ID",
-                        "step2": "Check the 'Enrolled' option",
-                        "step3": "Use passkey_dialog tool with 'dismiss_enrollment_warning' to close any dialogs",
-                        "step4": "The app may need to be restarted after enrollment"
-                    },
-                    "note": "Simulator biometric enrollment cannot be done programmatically. Manual enrollment is required once per simulator."
-                }))
             }
             "match" => {
-                // Method 1: Try simctl ui biometric match (Xcode 13+)
-                if let Ok(output) = self.try_simctl_biometric(&device_id, &["match"]) {
-                    if output.status.success() {
-                        return Ok(serde_json::json!({
-                            "success": true,
-                            "action": "match",
-                            "biometric_type": biometric_type,
-                            "message": "Biometric authentication successful",
-                            "method": "simctl_ui"
-                        }));
-                    }
-                }
-
-                // Method 2: Send notification about successful match
-                self.send_notification(
-                    &device_id,
-                    "Authentication Success",
-                    "Face ID/Touch ID authentication simulated",
-                )
-                .ok();
-
-                // Method 3: Try to tap on a likely "Continue" or "OK" button
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "tap", "196", "500"])
-                    .output()
-                    .ok();
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "action": "match",
-                    "biometric_type": biometric_type,
-                    "message": "Biometric match simulated",
-                    "method": "fallback_tap",
-                    "note": "Use Simulator menu: Device > Face ID/Touch ID > Matching Face/Touch for manual control"
-                }))
-            }
-            "fail" => {
-                // Method 1: Try simctl ui biometric nomatch (Xcode 13+)
-                if let Ok(output) = self.try_simctl_biometric(&device_id, &["nomatch"]) {
-                    if output.status.success() {
-                        return Ok(serde_json::json!({
-                            "success": true,
-                            "action": "fail",
-                            "biometric_type": biometric_type,
-                            "message": "Biometric authentication failed",
-                            "method": "simctl_ui"
-                        }));
-                    }
-                }
-
-                // Method 2: Send notification about failed match
-                self.send_notification(
-                    &device_id,
-                    "Authentication Failed",
-                    "Face ID/Touch ID authentication failed",
-                )
-                .ok();
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "action": "fail",
-                    "biometric_type": biometric_type,
-                    "message": "Biometric failure simulated",
-                    "method": "notification",
-                    "note": "Use Simulator menu: Device > Face ID/Touch ID > Non-matching Face/Touch for manual control"
-                }))
-            }
-            "cancel" => {
-                // Method 1: Try simctl ui biometric cancel (Xcode 13+)
-                if self.try_simctl_biometric(&device_id, &["cancel"]).is_ok() {
+                // Method 1: Try AppleScript automation (if available)
+                if self.try_applescript_biometric(&device_id, "match", biometric_type) {
                     return Ok(serde_json::json!({
                         "success": true,
-                        "action": "cancel",
+                        "action": "match",
                         "biometric_type": biometric_type,
-                        "message": "Biometric authentication cancelled",
-                        "method": "simctl_ui"
+                        "message": "Biometric authentication triggered via AppleScript",
+                        "method": "applescript",
+                        "warning": "This method may be unreliable in CI/headless environments"
                     }));
                 }
 
-                // Method 2: Send ESC key
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
-                    .output()
-                    .ok();
+                // Method 2: Try keyboard shortcuts (may work in some cases)
+                if self.try_keyboard_shortcut_biometric(&device_id, "match") {
+                    return Ok(serde_json::json!({
+                        "success": true,
+                        "action": "match",
+                        "biometric_type": biometric_type,
+                        "message": "Biometric authentication attempted via keyboard shortcut",
+                        "method": "keyboard_shortcut"
+                    }));
+                }
 
-                // Method 3: Try to tap "Cancel" button (common location)
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "tap", "100", "500"])
-                    .output()
-                    .ok();
-
+                // All methods failed - return honest failure
                 Ok(serde_json::json!({
-                    "success": true,
-                    "action": "cancel",
+                    "success": false,
+                    "action": "match",
                     "biometric_type": biometric_type,
-                    "message": "Biometric cancellation attempted",
-                    "method": "escape_key_and_tap",
-                    "note": "If you see 'Simulator requires enrolled biometrics' dialog, use passkey_dialog tool with 'dismiss_enrollment_warning' instead. That specific dialog needs special handling."
+                    "error": {
+                        "code": "BIOMETRIC_AUTOMATION_FAILED",
+                        "message": "Unable to trigger biometric authentication programmatically",
+                        "attempted_methods": ["applescript", "keyboard_shortcut"],
+                        "details": {
+                            "reason": "iOS Simulator biometric control requires manual interaction or specialized tools",
+                            "manual_steps": [
+                                "1. In Simulator menu, go to Device > Face ID/Touch ID",
+                                "2. Ensure 'Enrolled' is checked",
+                                "3. Select 'Matching Face' or 'Matching Touch' when biometric prompt appears"
+                            ],
+                            "alternatives": {
+                                "appium": "Use Appium with XCUITest driver and mobile:sendBiometricMatch command",
+                                "xcuitest": "Use XCUITest native APIs within test bundles",
+                                "cloud_services": "Consider BrowserStack or Perfecto for automated biometric testing"
+                            }
+                        }
+                    }
                 }))
+            }
+            "fail" => {
+                // Try AppleScript automation first
+                if self.try_applescript_biometric(&device_id, "nomatch", biometric_type) {
+                    return Ok(serde_json::json!({
+                        "success": true,
+                        "action": "fail",
+                        "biometric_type": biometric_type,
+                        "message": "Biometric failure triggered via AppleScript",
+                        "method": "applescript"
+                    }));
+                }
+
+                // Return honest failure
+                Ok(serde_json::json!({
+                    "success": false,
+                    "action": "fail",
+                    "biometric_type": biometric_type,
+                    "error": {
+                        "code": "BIOMETRIC_FAIL_AUTOMATION_FAILED",
+                        "message": "Unable to simulate biometric failure programmatically",
+                        "details": {
+                            "manual_steps": [
+                                "1. When biometric prompt appears",
+                                "2. Go to Device > Face ID/Touch ID > Non-matching Face/Touch"
+                            ],
+                            "alternatives": {
+                                "appium": "Use Appium's mobile:sendBiometricMatch with match:false"
+                            }
+                        }
+                    }
+                }))
+            }
+            "cancel" => {
+                // Try to cancel via ESC key - this may work for some dialogs
+                let esc_result = Command::new("xcrun")
+                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                    .output();
+
+                match esc_result {
+                    Ok(output) if output.status.success() => {
+                        Ok(serde_json::json!({
+                            "success": true,
+                            "action": "cancel",
+                            "biometric_type": biometric_type,
+                            "message": "Sent ESC key to attempt dialog cancellation",
+                            "warning": "This may not work for all biometric dialogs. Manual cancellation may be required.",
+                            "note": "For 'Simulator requires enrolled biometrics' dialogs, use passkey_dialog tool instead."
+                        }))
+                    }
+                    _ => {
+                        Ok(serde_json::json!({
+                            "success": false,
+                            "action": "cancel",
+                            "biometric_type": biometric_type,
+                            "error": {
+                                "code": "CANCEL_FAILED",
+                                "message": "Unable to programmatically cancel biometric dialog",
+                                "details": {
+                                    "manual_steps": [
+                                        "Tap the Cancel button in the biometric dialog",
+                                        "Or press ESC key while Simulator has focus"
+                                    ]
+                                }
+                            }
+                        }))
+                    }
+                }
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }

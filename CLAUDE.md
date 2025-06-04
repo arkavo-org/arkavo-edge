@@ -107,3 +107,7 @@ The project targets:
 ## Development Principles
 
 - Keep required third-party tools to a minimum.  Zero configuration is required for humans.
+
+## Memories
+
+- Faking success is worse than an honest failure
