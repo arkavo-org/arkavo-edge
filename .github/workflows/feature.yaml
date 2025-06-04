@@ -123,12 +123,10 @@ jobs:
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc
             export CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
             export AR_x86_64_unknown_linux_musl=x86_64-linux-musl-ar
-            # Tell openssl-sys to use vendored OpenSSL
-            export OPENSSL_SYS_USE_PKG_CONFIG=0
-            export OPENSSL_STATIC=1
-            export OPENSSL_LIB_DIR=OPENSSL_LIB_DIR_DOESNT_EXIST
-            export OPENSSL_INCLUDE_DIR=OPENSSL_INCLUDE_DIR_DOESNT_EXIST
+            # Force static linking and vendored OpenSSL
+            export OPENSSL_STATIC=true
             export OPENSSL_NO_VENDOR=0
+            # Don't set OPENSSL_DIR/LIB_DIR/INCLUDE_DIR to allow vendored build
           fi
           cargo build --release --target ${{ matrix.target }}
       
