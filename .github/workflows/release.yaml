@@ -13,7 +13,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
@@ -32,20 +32,19 @@ jobs:
         id: version
         run: |
           VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
           draft: false
           prerelease: true
           generate_release_notes: true
           body: |
-            ## Arkavo Edge ${{ steps.version.outputs.tag }}
+            ## Arkavo Edge ${{ steps.version.outputs.version }}
             
             Release of the Arkavo agentic CLI tool.
             
