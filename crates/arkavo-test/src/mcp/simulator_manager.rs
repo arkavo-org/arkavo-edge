@@ -136,14 +136,83 @@ impl SimulatorManager {
     }
 
     pub fn install_app(&self, udid: &str, app_path: &str) -> Result<()> {
+        // Check if device exists and is booted
+        if let Some(device) = self.devices.get(udid) {
+            if device.state != "Booted" {
+                return Err(TestError::Mcp(format!(
+                    "Device {} is not booted (current state: {}). Boot the device first.",
+                    udid, device.state
+                )));
+            }
+        } else {
+            return Err(TestError::Mcp(format!(
+                "Device {} not found. Use 'simulator_control' tool with 'list' action to see available devices.",
+                udid
+            )));
+        }
+        // Resolve wildcards in the path if present
+        let resolved_path = if app_path.contains('*') {
+            // Use glob to resolve the wildcard
+            match ::glob::glob(app_path) {
+                Ok(paths) => {
+                    // Collect all matching paths
+                    let mut matches: Vec<std::path::PathBuf> = paths
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    
+                    if matches.is_empty() {
+                        return Err(TestError::Mcp(format!(
+                            "No app found matching pattern: {}",
+                            app_path
+                        )));
+                    }
+                    
+                    // If multiple matches, use the most recently modified
+                    if matches.len() > 1 {
+                        matches.sort_by_key(|path| {
+                            std::fs::metadata(path)
+                                .and_then(|m| m.modified())
+                                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                        });
+                        matches.reverse(); // Most recent first
+                        
+                        eprintln!(
+                            "Multiple apps found matching '{}', using most recent: {}",
+                            app_path,
+                            matches[0].display()
+                        );
+                    }
+                    
+                    matches[0].to_string_lossy().to_string()
+                }
+                Err(e) => {
+                    return Err(TestError::Mcp(format!(
+                        "Invalid glob pattern '{}': {}",
+                        app_path, e
+                    )));
+                }
+            }
+        } else {
+            app_path.to_string()
+        };
+
+        // Verify the resolved path exists
+        if !std::path::Path::new(&resolved_path).exists() {
+            return Err(TestError::Mcp(format!(
+                "App not found at resolved path: {}",
+                resolved_path
+            )));
+        }
+
         let output = Command::new("xcrun")
-            .args(["simctl", "install", udid, app_path])
+            .args(["simctl", "install", udid, &resolved_path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to install app: {}", e)))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
-                "Failed to install app: {}",
+                "Failed to install app at '{}': {}",
+                resolved_path,
                 String::from_utf8_lossy(&output.stderr)
             )));
         }

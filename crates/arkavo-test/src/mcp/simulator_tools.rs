@@ -227,11 +227,20 @@ impl Tool for AppManagement {
                 match manager.install_app(device_id, app_path) {
                     Ok(_) => Ok(serde_json::json!({
                         "success": true,
-                        "message": format!("App installed successfully on device {}", device_id)
+                        "message": format!("App installed successfully on device {}", device_id),
+                        "app_path": app_path,
+                        "note": "Path wildcards are automatically resolved"
                     })),
                     Err(e) => Ok(serde_json::json!({
                         "success": false,
-                        "error": e.to_string()
+                        "error": e.to_string(),
+                        "app_path": app_path,
+                        "suggestions": [
+                            "Ensure the device is booted",
+                            "Check if the app path exists",
+                            "For DerivedData paths, use full glob pattern like: /Users/*/Library/Developer/Xcode/DerivedData/*/Build/Products/*-iphonesimulator/*.app",
+                            "Or use the exact path without wildcards"
+                        ]
                     })),
                 }
             }
