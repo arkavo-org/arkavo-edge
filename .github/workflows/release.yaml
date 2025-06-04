@@ -77,17 +77,16 @@ jobs:
           profile: minimal
           override: true
           
-      - name: Install musl tools and dependencies
+      - name: Install musl tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
-          sudo apt-get install -y libssl-dev pkg-config
-          # Install musl-compatible OpenSSL
-          sudo ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/x86_64-linux-musl/asm
-          sudo ln -s /usr/include/asm-generic /usr/include/x86_64-linux-musl/asm-generic
-          sudo ln -s /usr/include/linux /usr/include/x86_64-linux-musl/linux
+          sudo apt-get install -y musl-tools
           
       - name: Build
+        env:
+          OPENSSL_STATIC: 1
+          OPENSSL_LIB_DIR: /usr/lib/x86_64-linux-gnu
+          OPENSSL_INCLUDE_DIR: /usr/include
         uses: actions-rs/cargo@v1
         with:
           command: build
