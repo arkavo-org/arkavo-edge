@@ -314,6 +314,12 @@ impl McpTestServer {
                 | "discover_invariants"
                 | "chaos_test"
                 | "explore_edge_cases"
+                | "biometric_dialog_handler"
+                | "accessibility_dialog_handler"
+                | "face_id_control"
+                | "face_id_status"
+                | "biometric_test_scenario"
+                | "smart_biometric_handler"
         )
     }
 
