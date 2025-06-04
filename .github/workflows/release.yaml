@@ -213,7 +213,7 @@ jobs:
     name: Smoke Test Linux Binary
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:22.04
+      image: ubuntu:latest
     steps:
       - name: Install dependencies
         run: |
