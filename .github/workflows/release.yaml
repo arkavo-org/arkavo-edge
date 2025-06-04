@@ -77,16 +77,24 @@ jobs:
           profile: minimal
           override: true
           
-      - name: Install musl tools
+      - name: Install musl tools and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          # Install musl tools and dependencies for building vendored OpenSSL
+          sudo apt-get install -y musl-tools perl make
           
       - name: Build
         env:
+          # Configure for musl target
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-gcc
+          CC_x86_64_unknown_linux_musl: x86_64-linux-musl-gcc
+          AR_x86_64_unknown_linux_musl: x86_64-linux-musl-ar
+          # Tell openssl-sys to use vendored OpenSSL
+          OPENSSL_SYS_USE_PKG_CONFIG: 0
           OPENSSL_STATIC: 1
-          OPENSSL_LIB_DIR: /usr/lib/x86_64-linux-gnu
-          OPENSSL_INCLUDE_DIR: /usr/include
+          OPENSSL_LIB_DIR: OPENSSL_LIB_DIR_DOESNT_EXIST
+          OPENSSL_INCLUDE_DIR: OPENSSL_INCLUDE_DIR_DOESNT_EXIST
+          OPENSSL_NO_VENDOR: 0
         uses: actions-rs/cargo@v1
         with:
           command: build
