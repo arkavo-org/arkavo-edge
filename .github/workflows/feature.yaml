@@ -112,6 +112,13 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
       
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arkavo-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/arkavo
+          retention-days: 1
+      
       - name: Verify binary size
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
@@ -170,10 +177,42 @@ jobs:
           
           echo "Performance check completed"
 
+  smoke-test-linux:
+    name: Smoke Test Linux
+    needs: build-test
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:22.04
+    steps:
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arkavo-x86_64-unknown-linux-gnu
+          
+      - name: Test binary execution
+        run: |
+          chmod +x arkavo
+          ./arkavo --version
+          
+  smoke-test-macos:
+    name: Smoke Test macOS
+    needs: build-test
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arkavo-aarch64-apple-darwin
+          
+      - name: Test binary execution
+        run: |
+          chmod +x arkavo
+          ./arkavo --version
+
   release-readiness:
     name: Release Readiness
     if: github.event_name == 'pull_request'
-    needs: [lint, test, build-test, performance-check]
+    needs: [lint, test, build-test, performance-check, smoke-test-linux, smoke-test-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Pull Request is ready for merge
