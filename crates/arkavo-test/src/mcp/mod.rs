@@ -16,6 +16,7 @@ pub mod schema;
 pub mod server;
 pub mod simulator_manager;
 pub mod simulator_tools;
+pub mod template_diagnostics;
 pub mod tools;
 pub mod usage_guide;
 pub mod xctest_compiler;
