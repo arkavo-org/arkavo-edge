@@ -300,9 +300,19 @@ impl Tool for BiometricKit {
                 }))
             }
             "cancel" => {
-                // Try to cancel via ESC key - this may work for some dialogs
-                let esc_result = Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // Try to cancel via ESC key using AppleScript
+                let esc_script = r#"
+                    tell application "Simulator"
+                        activate
+                    end tell
+                    tell application "System Events"
+                        key code 53 -- ESC key
+                    end tell
+                "#;
+                
+                let esc_result = Command::new("osascript")
+                    .arg("-e")
+                    .arg(esc_script)
                     .output();
 
                 match esc_result {

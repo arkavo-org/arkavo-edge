@@ -66,7 +66,7 @@ impl Tool for PasskeyDialogHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
 
-        let device_id = match self.get_device_id(&params) {
+        let _device_id = match self.get_device_id(&params) {
             Ok(id) => id,
             Err(e) => {
                 return Ok(serde_json::json!({
@@ -83,151 +83,84 @@ impl Tool for PasskeyDialogHandler {
                 // For dialogs that say "Simulator requires enrolled biometrics to use passkeys"
                 // These typically have a "Cancel" button at the bottom
 
-                // Method 1: Try to tap common Cancel button location
-                let cancel_locations = vec![
-                    (196.5, 550.0), // Center bottom for iPhone Pro
-                    (196.5, 500.0), // Slightly higher
-                    (196.5, 600.0), // Slightly lower
-                    (100.0, 550.0), // Left side
-                    (293.0, 550.0), // Right side
-                ];
+                // NOTE: simctl io does NOT support tap commands
+                // Tap coordinates for reference:
+                // Cancel button typically at: (196.5, 550.0) for center bottom
+                // Alternative locations: (196.5, 500.0), (100.0, 550.0), (293.0, 550.0)
 
-                let mut success = false;
-                for (x, y) in &cancel_locations {
-                    let output = Command::new("xcrun")
-                        .args([
-                            "simctl",
-                            "io",
-                            &device_id,
-                            "tap",
-                            &x.to_string(),
-                            &y.to_string(),
-                        ])
-                        .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-
-                    if output.status.success() {
-                        success = true;
-                        break;
-                    }
-                }
-
-                // Method 2: Send ESC key as backup
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // Send ESC key via AppleScript
+                let esc_script = r#"
+                    tell application "Simulator"
+                        activate
+                        tell application "System Events"
+                            key code 53 -- ESC key
+                        end tell
+                    end tell
+                "#;
+                
+                let result = Command::new("osascript")
+                    .args(["-e", esc_script])
                     .output()
-                    .ok();
+                    .map(|output| output.status.success())
+                    .unwrap_or(false);
 
                 Ok(serde_json::json!({
-                    "success": success,
+                    "success": result,
                     "action": "dismiss_enrollment_warning",
-                    "message": "Attempted to dismiss passkey enrollment warning",
-                    "tapped_locations": cancel_locations,
-                    "note": "Also sent ESC key as backup"
+                    "message": "Attempted to dismiss passkey enrollment warning using ESC key",
+                    "note": "For tap interactions, use ui_interaction tool. Cancel button typically at (196.5, 550.0)"
                 }))
             }
             "accept_enrollment" => {
                 // If there's a button to proceed with enrollment
                 // This would typically be in the center of the dialog
 
-                let ok_locations = vec![
-                    (196.5, 450.0), // Center middle
-                    (196.5, 400.0), // Higher center
-                    (196.5, 500.0), // Lower center
-                ];
-
-                let mut success = false;
-                for (x, y) in &ok_locations {
-                    let output = Command::new("xcrun")
-                        .args([
-                            "simctl",
-                            "io",
-                            &device_id,
-                            "tap",
-                            &x.to_string(),
-                            &y.to_string(),
-                        ])
-                        .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-
-                    if output.status.success() {
-                        success = true;
-                        break;
-                    }
-                }
-
-                Ok(serde_json::json!({
-                    "success": success,
-                    "action": "accept_enrollment",
-                    "message": "Attempted to accept passkey enrollment",
-                    "tapped_locations": ok_locations
-                }))
+                // NOTE: simctl io does NOT support tap commands
+                // This functionality requires XCTest bridge or AppleScript
+                return Err(TestError::Mcp(
+                    "Accept enrollment requires UI interaction. Use ui_interaction tool with tap action instead. Suggested coordinates: (196.5, 450.0) for center of dialog".to_string()
+                ));
             }
             "cancel_dialog" => {
                 // Generic cancel for any passkey-related dialog
 
-                // Method 1: Send ESC key
-                let esc_output = Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // NOTE: simctl io does NOT support sendkey command
+                // Method 1: Try using AppleScript to send ESC key
+                let esc_script = r#"
+                    tell application "Simulator"
+                        activate
+                        tell application "System Events"
+                            key code 53 -- ESC key
+                        end tell
+                    end tell
+                "#;
+                
+                let esc_output = Command::new("osascript")
+                    .args(["-e", esc_script])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC via AppleScript: {}", e)))?;
 
-                // Method 2: Try tapping outside the dialog to dismiss
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "tap", "50", "100"])
-                    .output()
-                    .ok();
-
-                // Method 3: Try common Cancel button locations
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "tap", "196", "550"])
-                    .output()
-                    .ok();
+                // NOTE: simctl io does NOT support tap commands
+                // We can only use XCTest bridge or AppleScript for UI interactions
+                // Method 2 & 3 removed as they use invalid simctl commands
 
                 Ok(serde_json::json!({
                     "success": esc_output.status.success(),
                     "action": "cancel_dialog",
                     "message": "Attempted to cancel passkey dialog",
-                    "methods": ["escape_key", "tap_outside", "tap_cancel_button"]
+                    "methods": ["escape_key"],
+                    "note": "Tap commands not available via simctl. Use XCTest bridge or ui_interaction tool instead."
                 }))
             }
             "tap_settings" => {
                 // If the dialog has a "Settings" button to go to biometric settings
                 // This is typically on the right side of the dialog
 
-                let settings_locations = vec![
-                    (293.0, 450.0), // Right middle
-                    (300.0, 500.0), // Right lower
-                    (280.0, 400.0), // Right upper
-                ];
-
-                let mut success = false;
-                for (x, y) in &settings_locations {
-                    let output = Command::new("xcrun")
-                        .args([
-                            "simctl",
-                            "io",
-                            &device_id,
-                            "tap",
-                            &x.to_string(),
-                            &y.to_string(),
-                        ])
-                        .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to tap: {}", e)))?;
-
-                    if output.status.success() {
-                        success = true;
-                        break;
-                    }
-                }
-
-                Ok(serde_json::json!({
-                    "success": success,
-                    "action": "tap_settings",
-                    "message": "Attempted to tap Settings button",
-                    "tapped_locations": settings_locations,
-                    "note": "This may open the Settings app"
-                }))
+                // NOTE: simctl io does NOT support tap commands
+                // This functionality requires XCTest bridge or AppleScript
+                return Err(TestError::Mcp(
+                    "Tap settings requires UI interaction. Use ui_interaction tool with tap action instead. Suggested coordinates: (293.0, 450.0) for right side of dialog".to_string()
+                ));
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }

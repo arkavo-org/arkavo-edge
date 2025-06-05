@@ -46,21 +46,16 @@ impl BiometricTestScenario {
         }
     }
 
-    fn ensure_face_id_enrolled(&self, device_id: &str) -> Result<()> {
-        // First enroll Face ID if not already enrolled
-        Command::new("xcrun")
-            .args([
-                "simctl",
-                "ui",
-                device_id,
-                "biometric",
-                "enrollment",
-                "--enrolled",
-            ])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to enroll Face ID: {}", e)))?;
-
-        Ok(())
+    fn ensure_face_id_enrolled(&self, _device_id: &str) -> Result<()> {
+        // simctl ui biometric is NOT a valid command
+        // Face ID enrollment must be done manually through Simulator menu
+        Err(TestError::Mcp(
+            "Face ID enrollment cannot be automated. \n\
+             Manual steps required:\n\
+             1. In Simulator menu, go to Device > Face ID\n\
+             2. Check 'Enrolled' option\n\
+             3. Use 'Matching Face' when authentication is needed".to_string()
+        ))
     }
 }
 
@@ -335,9 +330,17 @@ impl Tool for SmartBiometricHandler {
             }
 
             "edge_case_test" => {
-                // For edge cases, cancel the dialog
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // For edge cases, cancel the dialog using AppleScript
+                let script = r#"tell application "Simulator"
+                    activate
+                end tell
+                tell application "System Events"
+                    key code 53 -- ESC key
+                end tell"#;
+                
+                Command::new("osascript")
+                    .arg("-e")
+                    .arg(script)
                     .output()
                     .ok();
 
