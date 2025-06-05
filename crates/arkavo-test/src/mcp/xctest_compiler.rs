@@ -14,6 +14,24 @@ pub struct XCTestCompiler {
 
 impl XCTestCompiler {
     pub fn new() -> Result<Self> {
+        // Check if Xcode is available
+        let xcode_check = Command::new("xcrun")
+            .args(["--version"])
+            .output()
+            .map_err(|e| TestError::Mcp(format!(
+                "xcrun not found. Xcode or Xcode Command Line Tools must be installed.\n\
+                Install Xcode from the App Store or run: xcode-select --install\n\
+                Error: {}", e
+            )))?;
+            
+        if !xcode_check.status.success() {
+            return Err(TestError::Mcp(
+                "xcrun failed. Make sure Xcode Command Line Tools are properly configured.\n\
+                Run: sudo xcode-select --switch /Applications/Xcode.app\n\
+                Or: xcode-select --install".to_string()
+            ));
+        }
+        
         // Try multiple methods to find the template directory
         let template_dir = Self::find_template_dir()?;
         
@@ -232,24 +250,46 @@ let package = Package(
         let swift_source = build_dir.join("Sources/ArkavoTestRunner.swift");
         let output_binary = build_dir.join("ArkavoTestRunner");
         
-        // Get iOS SDK path
+        // Dynamically get iOS SDK path using xcrun (works on any machine with Xcode)
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}\nMake sure Xcode is installed and command line tools are configured.\nRun: xcode-select --install", e)))?;
+            
+        if !sdk_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to get iOS SDK path. Make sure Xcode is installed.\nError: {}",
+                String::from_utf8_lossy(&sdk_output.stderr)
+            )));
+        }
             
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
         eprintln!("[XCTestCompiler] Using SDK: {}", sdk_path);
         
-        // Get platform path for frameworks
+        // Dynamically get platform path for frameworks
         let platform_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {}", e)))?;
             
+        if !platform_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to get platform path.\nError: {}",
+                String::from_utf8_lossy(&platform_output.stderr)
+            )));
+        }
+            
         let platform_path = String::from_utf8_lossy(&platform_output.stdout).trim().to_string();
         let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
         eprintln!("[XCTestCompiler] XCTest framework path: {}", xctest_framework_path);
+        
+        // Verify XCTest framework exists
+        if !std::path::Path::new(&format!("{}/XCTest.framework", xctest_framework_path)).exists() {
+            return Err(TestError::Mcp(format!(
+                "XCTest.framework not found at {}. Xcode may not be properly installed.",
+                xctest_framework_path
+            )));
+        }
         
         // Compile as a framework/bundle
         let output = Command::new("xcrun")
