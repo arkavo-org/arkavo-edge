@@ -37,14 +37,26 @@ fn test_xctest_template_compiles() {
     let swift_file = temp_dir.join("ArkavoTestRunner.swift");
     fs::write(&swift_file, swift_content).expect("Failed to write Swift file");
     
+    // Get the SDK path dynamically
+    let sdk_output = Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output()
+        .expect("Failed to get SDK path");
+        
+    let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+    
     // Try to compile the Swift file
     let compile_output = Command::new("xcrun")
         .args([
             "swiftc",
-            "-sdk", "iphonesimulator",
+            "-sdk", &sdk_path,
             "-target", "x86_64-apple-ios15.0-simulator",
-            "-parse",  // Just parse, don't compile fully
+            "-emit-library",
+            "-emit-module", 
+            "-module-name", "ArkavoTestRunner",
             "-F", "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks",
+            "-framework", "XCTest",
+            "-o", temp_dir.join("ArkavoTestRunner.dylib").to_str().unwrap(),
             swift_file.to_str().unwrap(),
         ])
         .output()
@@ -87,7 +99,8 @@ fn test_template_has_required_components() {
     );
     
     // Ensure we're not using unavailable macros
-    assert!(!content.contains("XCTFail("), "Template should not use XCTFail macro (use XCTAssertTrue(false, ...) instead)");
+    assert!(!content.contains("XCTFail("), "Template should not use XCTFail macro");
+    assert!(!content.contains("XCTAssertTrue("), "Template should not use XCTAssertTrue macro");
     
     println!("✓ Template structure validation passed");
 }

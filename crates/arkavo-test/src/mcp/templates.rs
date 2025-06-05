@@ -36,7 +36,9 @@ mod tests {
         
         // Verify XCTest usage
         assert!(!ARKAVO_TEST_RUNNER_SWIFT.contains("XCTFail("), 
-            "Template should not use XCTFail macro - use XCTAssertTrue(false, ...) instead");
+            "Template should not use XCTFail macro");
+        assert!(!ARKAVO_TEST_RUNNER_SWIFT.contains("XCTAssertTrue("), 
+            "Template should not use XCTAssertTrue macro");
     }
     
     #[test]

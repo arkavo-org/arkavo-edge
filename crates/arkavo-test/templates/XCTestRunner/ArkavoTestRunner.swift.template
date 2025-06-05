@@ -227,9 +227,7 @@ class ArkavoTestRunner: XCTestCase {
         do {
             try socketServer?.start { commandData in
                 // Process command in test context
-                if let runner = self.current {
-                    runner.processCommand(commandData)
-                }
+                ArkavoTestRunner.processCommand(commandData)
             }
         } catch {
             print("Failed to start Unix socket server: \(error)")
@@ -256,18 +254,22 @@ class ArkavoTestRunner: XCTestCase {
         // Start the socket server
         do {
             Self.socketServer = UnixSocketServer(socketPath: "{{SOCKET_PATH}}")
-            try Self.socketServer?.start(commandHandler: Self.processCommand)
+            try Self.socketServer?.start(commandHandler: { data in
+                Self.processCommand(data)
+            })
             
             // Keep the test running to process commands
             let expectation = self.expectation(description: "Command processing")
             expectation.isInverted = true // We don't expect this to fulfill
             wait(for: [expectation], timeout: 3600) // 1 hour timeout
         } catch {
-            XCTAssertTrue(false, "Failed to start socket server: \(error)")
+            print("Failed to start socket server: \(error)")
+            // For test failure, we can use fatalError or just return early
+            fatalError("Failed to start socket server: \(error)")
         }
     }
     
-    private func processCommand(_ commandData: Data) {
+    private static func processCommand(_ commandData: Data) {
         do {
             let decoder = JSONDecoder()
             let command = try decoder.decode(TapCommand.self, from: commandData)
@@ -276,11 +278,11 @@ class ArkavoTestRunner: XCTestCase {
             
             switch command.targetType {
             case .coordinate:
-                response = handleCoordinateTap(command)
+                response = Self.handleCoordinateTap(command)
             case .text:
-                response = handleTextTap(command)
+                response = Self.handleTextTap(command)
             case .accessibilityId:
-                response = handleAccessibilityTap(command)
+                response = Self.handleAccessibilityTap(command)
             }
             
             // Send response back
@@ -302,7 +304,7 @@ class ArkavoTestRunner: XCTestCase {
         }
     }
     
-    private func handleCoordinateTap(_ command: TapCommand) -> CommandResponse {
+    private static func handleCoordinateTap(_ command: TapCommand) -> CommandResponse {
         guard let x = command.x, let y = command.y else {
             return CommandResponse(
                 id: command.id,
@@ -335,7 +337,7 @@ class ArkavoTestRunner: XCTestCase {
         )
     }
     
-    private func handleTextTap(_ command: TapCommand) -> CommandResponse {
+    private static func handleTextTap(_ command: TapCommand) -> CommandResponse {
         guard let text = command.text else {
             return CommandResponse(
                 id: command.id,
@@ -391,7 +393,7 @@ class ArkavoTestRunner: XCTestCase {
         }
     }
     
-    private func handleAccessibilityTap(_ command: TapCommand) -> CommandResponse {
+    private static func handleAccessibilityTap(_ command: TapCommand) -> CommandResponse {
         guard let accessibilityId = command.accessibilityId else {
             return CommandResponse(
                 id: command.id,
