@@ -23,7 +23,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. CRITICAL: clear_text, delete_key, etc are SEPARATE ACTIONS! Example: To clear a field use {\"action\":\"clear_text\"} NOT {\"action\":\"type_text\",\"value\":\"clear_text\"}. TEXT INPUT WORKFLOW: 1) {\"action\":\"tap\",\"target\":{\"x\":X,\"y\":Y}} on field, 2) {\"action\":\"clear_text\"} to clear it, 3) {\"action\":\"type_text\",\"value\":\"new text\"}. DELETE: Use {\"action\":\"delete_key\",\"count\":10} to delete 10 chars. NO IDB COMMANDS!".to_string(),
+                description: "Interact with iOS UI elements using XCUITest (when available) or fallback methods. SUPPORTS: 1) TEXT-BASED TAPS: {\"action\":\"tap\",\"target\":{\"text\":\"Login\"}} - finds and taps elements by visible text. 2) ACCESSIBILITY ID: {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"login_button\"}} - taps by accessibility identifier. 3) COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}} - direct coordinate tap. BEST PRACTICE: Use text/accessibility_id when possible as they're more reliable than coordinates. TEXT INPUT: 1) Tap field first, 2) Use clear_text if needed, 3) type_text. XCUITest provides 10-second timeout for finding elements.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -41,8 +41,8 @@ impl UiInteractionKit {
                             "properties": {
                                 "x": {"type": "number"},
                                 "y": {"type": "number"},
-                                "text": {"type": "string"},
-                                "accessibility_id": {"type": "string"}
+                                "text": {"type": "string", "description": "Visible text of element to tap (e.g. button label, link text). XCUITest will search for this text."},
+                                "accessibility_id": {"type": "string", "description": "Accessibility identifier of element. More reliable than text as it doesn't change with localization."}
                             }
                         },
                         "value": {
@@ -274,9 +274,9 @@ impl Tool for UiInteractionKit {
                     "screenshot_path": screenshot_path,
                     "device_id": device_id,
                     "device_type": device_type,
-                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All text fields, buttons, and interactive elements with their center coordinates\n2. Any text labels or placeholders that indicate what each field is for\n3. The current screen/view being displayed\n4. Suggested next actions based on the UI state",
-                    "next_steps": "After reading and analyzing the image, use tap to click on elements, type_text to enter text (after tapping text fields), or swipe to scroll",
-                    "usage_hint": "After analysis, you can use the provided coordinates directly with the tap action"
+                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI",
+                    "next_steps": "After reading the image, PREFER text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- Only use coordinates if no text is visible",
+                    "xcuitest_note": "XCUITest is now available! It can find elements by text with 10-second timeout. Much more reliable than coordinates."
                 }))
             }
             "tap" => {
@@ -1131,7 +1131,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS screen. AI AGENTS: Use this before any UI interaction to see current state. The screenshot will be saved to test_results/<name>.png. You can then read the image file to analyze UI elements and their positions.".to_string(),
+                description: "Capture iOS simulator screen. WORKFLOW FOR AI AGENTS: 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) PREFER using ui_interaction with text/accessibility_id when you can see button labels or UI text (more reliable than coordinates), 4) Only use coordinates as last resort. The screenshot helps you identify text labels for XCUITest to find. Example: If you see a 'Sign In' button, use {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}} rather than coordinates.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
