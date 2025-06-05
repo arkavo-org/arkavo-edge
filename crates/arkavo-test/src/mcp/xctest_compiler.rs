@@ -1,3 +1,4 @@
+use super::templates;
 use crate::{Result, TestError};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,6 @@ use std::sync::OnceLock;
 static XCTEST_BUNDLE_CACHE: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct XCTestCompiler {
-    template_dir: PathBuf,
     build_dir: PathBuf,
     socket_path: PathBuf,
 }
@@ -32,13 +32,9 @@ impl XCTestCompiler {
             ));
         }
         
-        // Try multiple methods to find the template directory
-        let template_dir = Self::find_template_dir()?;
-        
-        eprintln!("[XCTestCompiler] Using template directory: {}", template_dir.display());
-
         let build_dir = std::env::temp_dir().join("arkavo-xctest-build");
         eprintln!("[XCTestCompiler] Build directory: {}", build_dir.display());
+        eprintln!("[XCTestCompiler] Using embedded templates (compiled into binary)");
 
         // Create build directory if it doesn't exist
         fs::create_dir_all(&build_dir)
@@ -50,65 +46,11 @@ impl XCTestCompiler {
         eprintln!("[XCTestCompiler] Socket path: {}", socket_path.display());
 
         Ok(Self {
-            template_dir,
             build_dir,
             socket_path,
         })
     }
     
-    fn find_template_dir() -> Result<PathBuf> {
-        // Method 1: Check if we're in development (templates relative to source)
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let dev_template_dir = manifest_dir.join("templates").join("XCTestRunner");
-        if dev_template_dir.exists() {
-            return Ok(dev_template_dir);
-        }
-        
-        // Method 2: Check relative to executable
-        if let Ok(exe_path) = std::env::current_exe() {
-            // Try ../share/arkavo/templates (installed location)
-            if let Some(exe_dir) = exe_path.parent() {
-                let installed_template_dir = exe_dir
-                    .parent()
-                    .map(|p| p.join("share/arkavo/templates/XCTestRunner"));
-                    
-                if let Some(dir) = installed_template_dir {
-                    if dir.exists() {
-                        return Ok(dir);
-                    }
-                }
-                
-                // Try ../templates (relative to binary)
-                let relative_template_dir = exe_dir.parent()
-                    .and_then(|p| p.parent())
-                    .and_then(|p| p.parent())
-                    .map(|p| p.join("crates/arkavo-test/templates/XCTestRunner"));
-                    
-                if let Some(dir) = relative_template_dir {
-                    if dir.exists() {
-                        return Ok(dir);
-                    }
-                }
-            }
-        }
-        
-        // Method 3: Try current directory structure
-        let cwd = std::env::current_dir()
-            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
-        let cwd_template_dir = cwd.join("crates/arkavo-test/templates/XCTestRunner");
-        if cwd_template_dir.exists() {
-            return Ok(cwd_template_dir);
-        }
-        
-        Err(TestError::Mcp(format!(
-            "Could not find XCTestRunner templates. Searched in:\n\
-             1. {} (development)\n\
-             2. Relative to executable\n\
-             3. {} (current dir)",
-            dev_template_dir.display(),
-            cwd_template_dir.display()
-        )))
-    }
 
     /// Get the socket path for communication
     pub fn socket_path(&self) -> &Path {
@@ -137,7 +79,6 @@ impl XCTestCompiler {
     /// Compile the XCTest bundle from templates
     fn compile_xctest_bundle(&self) -> Result<PathBuf> {
         eprintln!("[XCTestCompiler] Starting XCTest bundle compilation...");
-        eprintln!("[XCTestCompiler] Template dir exists: {}", self.template_dir.exists());
 
         // Step 1: Create temporary source directory
         let source_dir = self.build_dir.join("Sources");
@@ -166,45 +107,16 @@ impl XCTestCompiler {
 
     /// Process templates and write to source directory
     fn process_templates(&self, source_dir: &Path) -> Result<()> {
-        // Process Swift template - try both template files
-        let swift_template_enhanced = self.template_dir.join("ArkavoTestRunnerEnhanced.swift.template");
-        let swift_template_basic = self.template_dir.join("ArkavoTestRunner.swift.template");
+        eprintln!("[XCTestCompiler] Using embedded Swift template from binary");
         
-        let swift_template_path = if swift_template_enhanced.exists() {
-            eprintln!("[XCTestCompiler] Using enhanced Swift template");
-            swift_template_enhanced
-        } else if swift_template_basic.exists() {
-            eprintln!("[XCTestCompiler] Using basic Swift template");
-            swift_template_basic
-        } else {
-            return Err(TestError::Mcp(format!(
-                "No Swift template found. Looked for:\n{:?}\n{:?}",
-                swift_template_enhanced, swift_template_basic
-            )));
-        };
+        // Use the embedded template - always use the basic one that we know works
+        let swift_template = templates::ARKAVO_TEST_RUNNER_SWIFT;
         
-        let swift_template = fs::read_to_string(&swift_template_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to read Swift template at {:?}: {}", swift_template_path, e)))?;
-
-        // Verify this is the updated template
-        if swift_template.contains("let result: [String: Any]?") {
-            return Err(TestError::Mcp(
-                "ERROR: Using outdated Swift template!\n\
-                The template contains 'let result: [String: Any]?' which causes Codable errors.\n\
-                This should be 'let result: JSONValue?' instead.\n\
-                Please rebuild arkavo with the latest source code:\n\
-                  cargo build --release --bin arkavo".to_string()
-            ));
-        }
-        
-        if !swift_template.contains("enum JSONValue: Codable") {
-            return Err(TestError::Mcp(
-                "ERROR: Swift template missing JSONValue enum!\n\
-                The template needs the JSONValue enum to handle arbitrary JSON.\n\
-                Please rebuild arkavo with the latest source code:\n\
-                  cargo build --release --bin arkavo".to_string()
-            ));
-        }
+        // The verification is now done at compile time via tests, but let's double-check
+        debug_assert!(!swift_template.contains("let result: [String: Any]?"), 
+            "Embedded template should not contain [String: Any]");
+        debug_assert!(swift_template.contains("enum JSONValue: Codable"),
+            "Embedded template should contain JSONValue enum");
 
         // Replace template variables
         let swift_source =
@@ -215,10 +127,9 @@ impl XCTestCompiler {
         fs::write(&swift_path, swift_source)
             .map_err(|e| TestError::Mcp(format!("Failed to write Swift source: {}", e)))?;
 
-        // Copy Info.plist template
-        let plist_template_path = self.template_dir.join("Info.plist.template");
-        let plist_content = fs::read_to_string(&plist_template_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to read Info.plist template: {}", e)))?;
+        // Use embedded Info.plist template
+        eprintln!("[XCTestCompiler] Using embedded Info.plist template from binary");
+        let plist_content = templates::INFO_PLIST;
 
         let plist_path = self.build_dir.join("Info.plist");
         fs::write(&plist_path, plist_content)
@@ -391,40 +302,49 @@ let package = Package(
             .map_err(|e| TestError::Mcp(format!("Failed to copy Info.plist: {}", e)))?;
 
         // Find and copy the compiled binary
-        // First try DerivedData location
-        let derived_data = build_dir.join("DerivedData");
-        if derived_data.exists() {
-            // Search for the compiled binary in DerivedData
-            if let Ok(binary_path) = find_compiled_binary(&derived_data, "ArkavoTestRunner") {
-                let binary_dst = bundle_path.join("ArkavoTestRunner");
-                fs::copy(&binary_path, &binary_dst)
-                    .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+        let binary_src = build_dir.join("ArkavoTestRunner");
+        let binary_dst = bundle_path.join("ArkavoTestRunner");
+        
+        if binary_src.exists() {
+            eprintln!("[XCTestCompiler] Copying binary from {} to {}", binary_src.display(), binary_dst.display());
+            fs::copy(&binary_src, &binary_dst)
+                .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
 
-                // Make it executable
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perms = fs::metadata(&binary_dst)?.permissions();
-                    perms.set_mode(0o755);
-                    fs::set_permissions(&binary_dst, perms)?;
-                }
+            // Make it executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&binary_dst)?.permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&binary_dst, perms)?;
             }
+            
+            eprintln!("[XCTestCompiler] Binary copied successfully");
         } else {
-            // Try direct compilation output
-            let binary_src = build_dir.join("ArkavoTestRunner");
-            if binary_src.exists() {
-                let binary_dst = bundle_path.join("ArkavoTestRunner");
-                fs::copy(&binary_src, &binary_dst)
-                    .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+            // Try DerivedData location as fallback
+            let derived_data = build_dir.join("DerivedData");
+            if derived_data.exists() {
+                if let Ok(binary_path) = find_compiled_binary(&derived_data, "ArkavoTestRunner") {
+                    eprintln!("[XCTestCompiler] Found binary in DerivedData at {}", binary_path.display());
+                    fs::copy(&binary_path, &binary_dst)
+                        .map_err(|e| TestError::Mcp(format!("Failed to copy binary from DerivedData: {}", e)))?;
 
-                // Make it executable
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perms = fs::metadata(&binary_dst)?.permissions();
-                    perms.set_mode(0o755);
-                    fs::set_permissions(&binary_dst, perms)?;
+                    // Make it executable
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = fs::metadata(&binary_dst)?.permissions();
+                        perms.set_mode(0o755);
+                        fs::set_permissions(&binary_dst, perms)?;
+                    }
+                } else {
+                    return Err(TestError::Mcp("Compiled binary not found in build directory or DerivedData".to_string()));
                 }
+            } else {
+                return Err(TestError::Mcp(format!(
+                    "Compiled binary not found at {}. Build may have failed.",
+                    binary_src.display()
+                )));
             }
         }
 
@@ -433,57 +353,97 @@ let package = Package(
 
     /// Install the XCTest bundle to a simulator
     pub fn install_to_simulator(&self, device_id: &str, bundle_path: &Path) -> Result<()> {
-        // Use xcrun simctl to install the test bundle
-        let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "install",
-                device_id,
-                bundle_path.to_str().unwrap(),
-            ])
+        eprintln!("[XCTestCompiler] Installing XCTest bundle to simulator {}...", device_id);
+        
+        // For XCTest bundles, we need to copy them to the simulator's app support directory
+        // instead of using simctl install which is for regular apps
+        
+        // Get simulator data path
+        let home = std::env::var("HOME").map_err(|_| TestError::Mcp("HOME not set".to_string()))?;
+        let sim_data_path = PathBuf::from(&home)
+            .join("Library/Developer/CoreSimulator/Devices")
+            .join(device_id)
+            .join("data");
+            
+        if !sim_data_path.exists() {
+            return Err(TestError::Mcp(format!(
+                "Simulator data directory not found: {}. Is the simulator created?",
+                sim_data_path.display()
+            )));
+        }
+        
+        // XCTest bundles go in the Library/Developer/Xcode/DerivedData/TestBundles directory
+        let test_bundles_dir = sim_data_path
+            .join("Library/Developer/Xcode/DerivedData/TestBundles");
+            
+        // Create the directory if it doesn't exist
+        fs::create_dir_all(&test_bundles_dir)
+            .map_err(|e| TestError::Mcp(format!("Failed to create test bundles directory: {}", e)))?;
+            
+        // Copy the bundle
+        let dest_path = test_bundles_dir.join(bundle_path.file_name().unwrap());
+        
+        // Remove existing bundle if present
+        if dest_path.exists() {
+            fs::remove_dir_all(&dest_path)
+                .map_err(|e| TestError::Mcp(format!("Failed to remove existing bundle: {}", e)))?;
+        }
+        
+        eprintln!("[XCTestCompiler] Copying bundle to {}", dest_path.display());
+        
+        // Use cp -R to preserve bundle structure
+        let output = Command::new("cp")
+            .args(["-R", bundle_path.to_str().unwrap(), dest_path.parent().unwrap().to_str().unwrap()])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install test bundle: {}", e)))?;
-
+            .map_err(|e| TestError::Mcp(format!("Failed to copy bundle: {}", e)))?;
+            
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(TestError::Mcp(format!(
-                "Failed to install test bundle: {}",
+                "Failed to copy test bundle: {}",
                 stderr
             )));
         }
-
+        
+        eprintln!("[XCTestCompiler] XCTest bundle installed successfully");
         Ok(())
     }
 
     /// Run the XCTest bundle on a simulator
     pub fn run_tests(&self, device_id: &str, _bundle_id: &str) -> Result<()> {
         eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+        eprintln!("[XCTestCompiler] Socket path: {}", self.socket_path.display());
         
-        // First, we need to find where the test bundle is installed
-        // XCTest bundles are typically installed in the simulator's test bundles directory
-        let test_bundle_name = "ArkavoTestRunner.xctest";
+        // Get the path where we installed the bundle
+        let home = std::env::var("HOME").map_err(|_| TestError::Mcp("HOME not set".to_string()))?;
+        let bundle_path = PathBuf::from(&home)
+            .join("Library/Developer/CoreSimulator/Devices")
+            .join(device_id)
+            .join("data/Library/Developer/Xcode/DerivedData/TestBundles/ArkavoTestRunner.xctest");
+            
+        if !bundle_path.exists() {
+            return Err(TestError::Mcp(format!(
+                "Test bundle not found at {}. Installation may have failed.",
+                bundle_path.display()
+            )));
+        }
         
-        // Method 1: Try to run using xcrun simctl spawn with xctest
-        // This will spawn the xctest process directly in the simulator
-        eprintln!("[XCTestCompiler] Attempting to run XCTest bundle...");
+        // Run XCTest bundle using simctl xctest
+        eprintln!("[XCTestCompiler] Running XCTest bundle using simctl xctest...");
         
-        // We need to spawn a long-running process that will handle our commands
-        // The test runner should already be installed and will connect via Unix socket
-        let spawn_args = vec![
-            "simctl",
-            "spawn",
-            device_id,
-            "xctest",
-            "-XCTest",
-            "All",
-            test_bundle_name,
-        ];
-        
-        eprintln!("[XCTestCompiler] Running: xcrun {}", spawn_args.join(" "));
-        
-        // Start the test runner in the background
+        // Start the test in the background
         let mut child = Command::new("xcrun")
-            .args(&spawn_args)
+            .args([
+                "simctl",
+                "spawn",
+                "-s",  // standalone mode
+                device_id,
+                "xctest",
+                "-XCTest",
+                "ArkavoTestRunner/testRunCommands",
+                bundle_path.to_str().unwrap(),
+            ])
+            .env("ARKAVO_SOCKET_PATH", self.socket_path.to_str().unwrap())
             .spawn()
             .map_err(|e| TestError::Mcp(format!("Failed to spawn xctest: {}", e)))?;
             
@@ -493,68 +453,31 @@ let package = Package(
         // Check if it's still running
         match child.try_wait() {
             Ok(Some(status)) => {
-                eprintln!("[XCTestCompiler] XCTest exited with status: {}", status);
-                if !status.success() {
-                    // Try alternative method: use xcodebuild
-                    eprintln!("[XCTestCompiler] Trying xcodebuild method...");
-                    return self.run_tests_with_xcodebuild(device_id);
+                if status.success() {
+                    eprintln!("[XCTestCompiler] Test completed successfully");
+                } else {
+                    // Try to get output
+                    let output = child.wait_with_output()
+                        .map_err(|e| TestError::Mcp(format!("Failed to get test output: {}", e)))?;
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    
+                    return Err(TestError::Mcp(format!(
+                        "Test runner exited with status: {}. Stdout: {}. Stderr: {}",
+                        status, stdout, stderr
+                    )));
                 }
             }
             Ok(None) => {
-                eprintln!("[XCTestCompiler] XCTest is running in background");
-                // Store the child process handle somewhere if needed
-                // For now, we'll just let it run
+                eprintln!("[XCTestCompiler] Test runner is running in background");
+                // Test is running, which is what we want for the socket server
             }
             Err(e) => {
-                eprintln!("[XCTestCompiler] Error checking XCTest status: {}", e);
+                eprintln!("[XCTestCompiler] Warning: Could not check test status: {}", e);
             }
         }
         
-        Ok(())
-    }
-    
-    fn run_tests_with_xcodebuild(&self, device_id: &str) -> Result<()> {
-        // Create a minimal xctestrun file
-        let xctestrun_content = format!(r#"{{
-            "__xctestrun_metadata__": {{
-                "FormatVersion": 1
-            }},
-            "ArkavoTestRunner": {{
-                "TestBundlePath": "__TESTROOT__/ArkavoTestRunner.xctest",
-                "TestHostPath": "__PLATFORMS__/iPhoneSimulator.platform/Developer/Applications/Simulator.app/Contents/MacOS/Simulator",
-                "UITargetAppPath": "__TESTHOST__/ArkavoTestRunner.app",
-                "EnvironmentVariables": {{
-                    "ARKAVO_SOCKET_PATH": "{}"
-                }},
-                "TestingEnvironmentVariables": {{
-                    "DYLD_FRAMEWORK_PATH": "__TESTROOT__:__PLATFORMS__/iPhoneSimulator.platform/Developer/Library/Frameworks"
-                }},
-                "OnlyTestIdentifiers": [
-                    "ArkavoTestRunner/testRunCommands"
-                ]
-            }}
-        }}"#, self.socket_path.to_string_lossy());
-        
-        let xctestrun_path = self.build_dir.join("ArkavoTestRunner.xctestrun");
-        fs::write(&xctestrun_path, xctestrun_content)
-            .map_err(|e| TestError::Mcp(format!("Failed to write xctestrun file: {}", e)))?;
-            
-        let output = Command::new("xcodebuild")
-            .args([
-                "test-without-building",
-                "-xctestrun", xctestrun_path.to_str().unwrap(),
-                "-destination", &format!("id={}", device_id),
-                "-resultBundlePath", self.build_dir.join("Results.xcresult").to_str().unwrap(),
-            ])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {}", e)))?;
-            
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[XCTestCompiler] xcodebuild failed: {}", stderr);
-            return Err(TestError::Mcp(format!("Failed to run tests with xcodebuild: {}", stderr)));
-        }
-        
+        eprintln!("[XCTestCompiler] Test runner started successfully");
         Ok(())
     }
 }

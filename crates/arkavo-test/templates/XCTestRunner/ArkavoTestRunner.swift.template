@@ -124,7 +124,7 @@ class UnixSocketServer {
         // Create Unix socket
         let socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else {
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to create socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to create socket"])
         }
         
         // Bind to socket path
@@ -134,13 +134,13 @@ class UnixSocketServer {
         // Remove existing socket file
         unlink(socketPath)
         
-        // Copy socket path
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            let pathBytes = socketPath.utf8CString
-            pathBytes.withUnsafeBufferPointer { buffer in
-                ptr.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: addr.sun_path)) { dest in
-                    _ = strcpy(dest, buffer.baseAddress!)
-                }
+        // Copy socket path safely
+        let pathBytes = socketPath.utf8CString
+        pathBytes.withUnsafeBufferPointer { buffer in
+            withUnsafeMutableBytes(of: &addr.sun_path) { rawPtr in
+                let dst = rawPtr.baseAddress!.assumingMemoryBound(to: CChar.self)
+                let size = min(buffer.count, 104) // sun_path is typically 104 bytes
+                memcpy(dst, buffer.baseAddress!, size)
             }
         }
         
@@ -152,13 +152,13 @@ class UnixSocketServer {
         
         guard bindResult == 0 else {
             close(socketFD)
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to bind socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to bind socket"])
         }
         
         // Listen for connections
         guard listen(socketFD, 5) == 0 else {
             close(socketFD)
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to listen on socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to listen on socket"])
         }
         
         // Accept connections in background
@@ -249,12 +249,22 @@ class ArkavoTestRunner: XCTestCase {
     }
     
     func testRunCommands() {
-        // This test runs indefinitely, processing commands
-        let timeout: TimeInterval = 3600 // 1 hour timeout
-        let expectation = self.expectation(description: "Command processing")
-        expectation.isInverted = true // We don't expect this to fulfill
+        // Initialize the app
+        Self.app = XCUIApplication()
+        Self.app?.launch()
         
-        wait(for: [expectation], timeout: timeout)
+        // Start the socket server
+        do {
+            Self.socketServer = UnixSocketServer(socketPath: "{{SOCKET_PATH}}")
+            try Self.socketServer?.start(commandHandler: Self.processCommand)
+            
+            // Keep the test running to process commands
+            let expectation = self.expectation(description: "Command processing")
+            expectation.isInverted = true // We don't expect this to fulfill
+            wait(for: [expectation], timeout: 3600) // 1 hour timeout
+        } catch {
+            XCTAssertTrue(false, "Failed to start socket server: \(error)")
+        }
     }
     
     private func processCommand(_ commandData: Data) {
