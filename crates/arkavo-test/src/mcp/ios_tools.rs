@@ -268,16 +268,27 @@ impl Tool for UiInteractionKit {
                     .map(|d| d.device_type.as_str())
                     .unwrap_or("unknown");
 
-                Ok(serde_json::json!({
+                // Check if XCUITest is actually available
+                let xctest_available = self.get_xctest_bridge().await.is_some();
+                
+                let mut response = serde_json::json!({
                     "action": "analyze_layout",
                     "success": true,
                     "screenshot_path": screenshot_path,
                     "device_id": device_id,
                     "device_type": device_type,
-                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI",
-                    "next_steps": "After reading the image, PREFER text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- Only use coordinates if no text is visible",
-                    "xcuitest_note": "XCUITest is now available! It can find elements by text with 10-second timeout. Much more reliable than coordinates."
-                }))
+                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI"
+                });
+                
+                if xctest_available {
+                    response["next_steps"] = serde_json::json!("After reading the image, use text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- XCUITest will find elements by text with 10-second timeout");
+                    response["xcuitest_status"] = serde_json::json!("XCUITest is available for text-based element finding");
+                } else {
+                    response["next_steps"] = serde_json::json!("After reading the image, you'll need to use coordinates:\n1. Estimate the x,y position of elements from the image\n2. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n3. Text-based tapping requires XCUITest which is not currently available");
+                    response["xcuitest_status"] = serde_json::json!("XCUITest not available - use coordinates from image analysis");
+                }
+                
+                Ok(response)
             }
             "tap" => {
                 // Check iOS availability first
@@ -422,20 +433,25 @@ impl Tool for UiInteractionKit {
                                     "error": {
                                         "code": "XCUITEST_NOT_AVAILABLE",
                                         "message": format!("Cannot tap '{}' - XCUITest not available and no coordinates provided", text_target),
-                                        "suggestion": "Follow this workflow to tap elements by text:",
+                                        "details": "Text-based element finding requires XCUITest which failed to initialize. This is normal in some environments.",
+                                        "suggestion": "Use coordinate-based tapping instead:",
                                         "steps": [
-                                            "1. Use screen_capture to take a screenshot",
-                                            "2. Use the Read tool to view the screenshot image", 
-                                            "3. Visually locate the element you want to tap",
-                                            "4. Estimate its coordinates from the image",
-                                            "5. Use ui_interaction with coordinates: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}",
+                                            "1. If you haven't already, use analyze_layout to capture screenshot",
+                                            "2. Use the Read tool to view the screenshot", 
+                                            "3. Visually locate the element in the image",
+                                            "4. Estimate its x,y coordinates",
+                                            "5. Use ui_interaction with those coordinates"
                                         ],
                                         "example": {
-                                            "screen_capture": {"name": "current_screen", "device_id": params.get("device_id").cloned()},
-                                            "read": {"file_path": "test_results/current_screen.png"},
-                                            "ui_interaction": {"action": "tap", "target": {"x": 200, "y": 300}, "device_id": params.get("device_id").cloned()}
+                                            "analyze_layout": {},
+                                            "read": {"file_path": "test_results/layout_analysis_[timestamp].png"},
+                                            "ui_interaction": {"action": "tap", "target": {"x": 200, "y": 300}}
                                         },
-                                        "note": "XCUITest automatic setup is attempted once per session. To retry setup, restart the MCP server."
+                                        "coordinate_tips": {
+                                            "iPhone_16_Pro_Max": "Screen is 430x932 points",
+                                            "center": {"x": 215, "y": 466},
+                                            "typical_button_height": 44
+                                        }
                                     }
                                 }));
                             }
