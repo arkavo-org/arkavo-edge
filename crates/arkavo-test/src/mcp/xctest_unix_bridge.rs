@@ -101,6 +101,16 @@ impl XCTestUnixBridge {
             client_stream: None,
         }
     }
+    
+    /// Create with a specific socket path
+    pub fn with_socket_path(socket_path: PathBuf) -> Self {
+        Self {
+            socket_path,
+            response_handlers: Arc::new(Mutex::new(HashMap::new())),
+            server_handle: None,
+            client_stream: None,
+        }
+    }
 
     /// Check if the bridge is connected to the XCTest runner
     pub fn is_connected(&self) -> bool {
