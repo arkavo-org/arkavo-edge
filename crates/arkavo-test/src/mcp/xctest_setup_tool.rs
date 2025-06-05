@@ -1,4 +1,5 @@
 use super::device_manager::DeviceManager;
+use super::ios_tools::UiInteractionKit;
 use super::server::{Tool, ToolSchema};
 use super::xctest_compiler::XCTestCompiler;
 use super::xctest_unix_bridge::XCTestUnixBridge;
@@ -6,6 +7,7 @@ use crate::Result;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct XCTestSetupKit {
     schema: ToolSchema,
@@ -66,12 +68,11 @@ impl Tool for XCTestSetupKit {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        // Check if XCUITest is already available (unless force reinstall)
+        // Check if XCUITest is already available in the global bridge
         if !force_reinstall {
-            // Try to create a test connection
-            let test_socket = "/tmp/xctest_check.sock";
-            if let Ok(bridge) = XCTestUnixBridge::with_socket_path(test_socket.into()).start().await {
-                let _ = bridge; // Clean up test bridge
+            let global_bridge = UiInteractionKit::get_global_xctest_bridge();
+            if global_bridge.read().await.is_some() {
+                eprintln!("[XCTestSetupKit] XCUITest already available in global bridge");
                 return Ok(serde_json::json!({
                     "success": true,
                     "status": "already_setup",
@@ -81,7 +82,8 @@ impl Tool for XCTestSetupKit {
                         "Accessibility ID support: {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"element_id\"}}",
                         "10-second element wait timeout",
                         "Automatic retry on element not found"
-                    ]
+                    ],
+                    "note": "Use force_reinstall:true to reinstall XCUITest"
                 }));
             }
         }
@@ -194,6 +196,13 @@ impl Tool for XCTestSetupKit {
         ).await {
             Ok(Ok(())) => {
                 eprintln!("[XCTestSetupKit] XCUITest setup completed successfully!");
+                
+                // Store the bridge in the global storage so ui_interaction can use it
+                let global_bridge = UiInteractionKit::get_global_xctest_bridge();
+                let bridge_arc = Arc::new(Mutex::new(bridge));
+                *global_bridge.write().await = Some(bridge_arc);
+                eprintln!("[XCTestSetupKit] Global XCTest bridge updated");
+                
                 Ok(serde_json::json!({
                     "success": true,
                     "status": "setup_complete",

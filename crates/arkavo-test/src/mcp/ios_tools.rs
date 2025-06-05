@@ -9,9 +9,10 @@ use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{Mutex, RwLock};
+use std::sync::OnceLock;
 
-static XCTEST_BRIDGE: OnceCell<Option<Arc<Mutex<XCTestUnixBridge>>>> = OnceCell::const_new();
+static XCTEST_BRIDGE: OnceLock<Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>> = OnceLock::new();
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
@@ -94,27 +95,47 @@ impl UiInteractionKit {
         bridge.send_tap_command(command).await
     }
 
-    /// Get or initialize the XCTest bridge
+    /// Get the XCTest bridge
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
-        XCTEST_BRIDGE
-            .get_or_init(|| async {
-                // Try to compile and set up XCTest runner
-                match self.setup_xctest_runner().await {
-                    Ok(bridge) => {
-                        eprintln!("XCTest runner initialized successfully");
-                        Some(Arc::new(Mutex::new(bridge)))
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to initialize XCTest runner: {}. Falling back to AppleScript.",
-                            e
-                        );
-                        None
-                    }
-                }
-            })
-            .await
-            .clone()
+        let bridge_holder = XCTEST_BRIDGE.get_or_init(|| {
+            Arc::new(RwLock::new(None))
+        });
+        
+        // Try to get existing bridge
+        let existing = bridge_holder.read().await.clone();
+        if existing.is_some() {
+            return existing;
+        }
+        
+        // No bridge exists, try to initialize one
+        let mut write_guard = bridge_holder.write().await;
+        
+        // Double-check in case another task initialized while we were waiting
+        if write_guard.is_some() {
+            return write_guard.clone();
+        }
+        
+        // Try to set up XCTest runner
+        match self.setup_xctest_runner().await {
+            Ok(bridge) => {
+                eprintln!("[UiInteractionKit] XCTest runner initialized successfully");
+                let bridge_arc = Arc::new(Mutex::new(bridge));
+                *write_guard = Some(bridge_arc.clone());
+                Some(bridge_arc)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[UiInteractionKit] Failed to initialize XCTest runner: {}. Text-based tapping unavailable.",
+                    e
+                );
+                None
+            }
+        }
+    }
+    
+    /// Get the global XCTest bridge storage
+    pub fn get_global_xctest_bridge() -> &'static Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>> {
+        XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)))
     }
 
     /// Set up the XCTest runner
