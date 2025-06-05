@@ -292,7 +292,7 @@ impl Tool for AccessibilityDialogHandler {
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
 
         // Get device ID
-        let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+        let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
         } else {
             match self.device_manager.get_active_device() {

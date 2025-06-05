@@ -241,6 +241,16 @@ let package = Package(
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
         eprintln!("[XCTestCompiler] Using SDK: {}", sdk_path);
         
+        // Get platform path for frameworks
+        let platform_output = Command::new("xcrun")
+            .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {}", e)))?;
+            
+        let platform_path = String::from_utf8_lossy(&platform_output.stdout).trim().to_string();
+        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        eprintln!("[XCTestCompiler] XCTest framework path: {}", xctest_framework_path);
+        
         // Compile as a framework/bundle
         let output = Command::new("xcrun")
             .args([
@@ -255,6 +265,7 @@ let package = Package(
                 "-Xlinker", "@executable_path/Frameworks",
                 "-Xlinker", "-rpath",
                 "-Xlinker", "@loader_path/Frameworks",
+                "-F", &xctest_framework_path,
                 "-F", &sdk_path,
                 "-framework", "XCTest",
                 "-o", output_binary.to_str().unwrap(),
@@ -281,6 +292,7 @@ let package = Package(
                     "-emit-module",
                     "-module-name", "ArkavoTestRunner",
                     "-Xlinker", "-bundle",
+                    "-F", &xctest_framework_path,
                     "-F", &sdk_path,
                     "-framework", "XCTest",
                     "-o", output_binary.to_str().unwrap(),
