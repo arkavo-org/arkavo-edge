@@ -429,28 +429,58 @@ impl Tool for UiInteractionKit {
                             if target.get("x").is_none() || target.get("y").is_none() {
                                 // Can't proceed without coordinates - provide helpful guidance
                                 let text_target = target.get("text").and_then(|v| v.as_str()).unwrap_or("element");
+                                // Get device info for better coordinate guidance
+                                let device_id = params.get("device_id").and_then(|v| v.as_str()).unwrap_or("");
+                                let device_info = self.device_manager.get_device(device_id);
+                                let device_type = device_info
+                                    .as_ref()
+                                    .map(|d| d.device_type.as_str())
+                                    .unwrap_or("unknown");
+                                
+                                // Provide device-specific coordinate tips
+                                let (width, height) = match device_type {
+                                    s if s.contains("iPhone-16-Pro-Max") => (430, 932),
+                                    s if s.contains("iPhone-16-Pro") || s.contains("iPhone-15-Pro") => (393, 852),
+                                    s if s.contains("iPhone-16-Plus") || s.contains("iPhone-15-Plus") => (428, 926),
+                                    s if s.contains("iPhone-16") || s.contains("iPhone-15") => (390, 844),
+                                    s if s.contains("iPhone-SE") => (375, 667),
+                                    s if s.contains("iPad") => (820, 1180),
+                                    _ => (393, 852), // Default to iPhone Pro size
+                                };
+                                
                                 return Ok(serde_json::json!({
                                     "error": {
-                                        "code": "XCUITEST_NOT_AVAILABLE",
-                                        "message": format!("Cannot tap '{}' - XCUITest not available and no coordinates provided", text_target),
-                                        "details": "Text-based element finding requires XCUITest which failed to initialize. This is normal in some environments.",
-                                        "suggestion": "Use coordinate-based tapping instead:",
-                                        "steps": [
-                                            "1. If you haven't already, use analyze_layout to capture screenshot",
-                                            "2. Use the Read tool to view the screenshot", 
-                                            "3. Visually locate the element in the image",
-                                            "4. Estimate its x,y coordinates",
-                                            "5. Use ui_interaction with those coordinates"
-                                        ],
-                                        "example": {
-                                            "analyze_layout": {},
-                                            "read": {"file_path": "test_results/layout_analysis_[timestamp].png"},
-                                            "ui_interaction": {"action": "tap", "target": {"x": 200, "y": 300}}
+                                        "code": "XCUITEST_NOT_AVAILABLE", 
+                                        "message": format!("Cannot tap '{}' by text - coordinate required", text_target),
+                                        "action_required": format!("You must provide coordinates to tap '{}'. Follow these steps:", text_target),
+                                        "immediate_action": {
+                                            "1_check_screenshot": "Look at your recent screenshot (analyze_layout or screen_capture)",
+                                            "2_find_element": format!("Visually locate the '{}' button/link in the image", text_target),
+                                            "3_estimate_position": "Estimate where it is on the screen",
+                                            "4_retry_with_coordinates": {
+                                                "action": "tap",
+                                                "target": {
+                                                    "x": width / 2,
+                                                    "y": height / 2,
+                                                    "_comment": format!("Replace with actual coordinates of '{}'", text_target)
+                                                }
+                                            }
                                         },
-                                        "coordinate_tips": {
-                                            "iPhone_16_Pro_Max": "Screen is 430x932 points",
-                                            "center": {"x": 215, "y": 466},
-                                            "typical_button_height": 44
+                                        "device_info": {
+                                            "type": device_type,
+                                            "screen_size": format!("{}x{} points", width, height),
+                                            "coordinate_hints": {
+                                                "top_area": format!("y: 0-{}", height / 4),
+                                                "middle_area": format!("y: {}-{}", height / 4, height * 3 / 4),
+                                                "bottom_area": format!("y: {}-{}", height * 3 / 4, height),
+                                                "center": {"x": width / 2, "y": height / 2},
+                                                "typical_button": {"width": 200, "height": 44}
+                                            }
+                                        },
+                                        "example_for_get_started": {
+                                            "_note": "If 'Get Started' is a centered button in the middle of screen:",
+                                            "action": "tap",
+                                            "target": {"x": width / 2, "y": height / 2}
                                         }
                                     }
                                 }));
