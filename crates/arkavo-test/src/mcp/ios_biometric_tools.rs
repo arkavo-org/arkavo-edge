@@ -85,7 +85,7 @@ impl BiometricKit {
                 activate
                 tell application "System Events"
                     tell process "Simulator"
-                        click menu item "{}" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                        click menu item "{}" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                     end tell
                 end tell
             end tell
@@ -175,7 +175,7 @@ impl Tool for BiometricKit {
                         activate
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Enrolled" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Enrolled" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -201,9 +201,6 @@ impl Tool for BiometricKit {
                     _ => {
                         // AppleScript failed, return honest failure
                         Ok(serde_json::json!({
-                            "success": false,
-                            "action": "enroll",
-                            "biometric_type": biometric_type,
                             "error": {
                                 "code": "ENROLLMENT_AUTOMATION_FAILED",
                                 "message": "Unable to automate biometric enrollment",
@@ -251,11 +248,8 @@ impl Tool for BiometricKit {
                     }));
                 }
 
-                // All methods failed - return honest failure
+                // All methods failed - return MCP error response
                 Ok(serde_json::json!({
-                    "success": false,
-                    "action": "match",
-                    "biometric_type": biometric_type,
                     "error": {
                         "code": "BIOMETRIC_AUTOMATION_FAILED",
                         "message": "Unable to trigger biometric authentication programmatically",
@@ -288,11 +282,8 @@ impl Tool for BiometricKit {
                     }));
                 }
 
-                // Return honest failure
+                // Return MCP error response
                 Ok(serde_json::json!({
-                    "success": false,
-                    "action": "fail",
-                    "biometric_type": biometric_type,
                     "error": {
                         "code": "BIOMETRIC_FAIL_AUTOMATION_FAILED",
                         "message": "Unable to simulate biometric failure programmatically",
@@ -327,9 +318,6 @@ impl Tool for BiometricKit {
                     }
                     _ => {
                         Ok(serde_json::json!({
-                            "success": false,
-                            "action": "cancel",
-                            "biometric_type": biometric_type,
                             "error": {
                                 "code": "CANCEL_FAILED",
                                 "message": "Unable to programmatically cancel biometric dialog",
@@ -490,10 +478,8 @@ impl Tool for SystemDialogKit {
                         "method": "applescript"
                     }))
                 } else {
-                    // AppleScript failed - return honest failure
+                    // AppleScript failed - return MCP error
                     Ok(serde_json::json!({
-                        "success": false,
-                        "action": action,
                         "error": {
                             "code": "DIALOG_INTERACTION_FAILED",
                             "message": format!("Unable to find or tap '{}' button", button),
@@ -518,8 +504,6 @@ impl Tool for SystemDialogKit {
             }
             Err(e) => {
                 Ok(serde_json::json!({
-                    "success": false,
-                    "action": action,
                     "error": {
                         "code": "APPLESCRIPT_FAILED",
                         "message": format!("Failed to execute AppleScript: {}", e),
