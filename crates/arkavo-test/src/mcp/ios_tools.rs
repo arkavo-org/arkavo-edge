@@ -119,31 +119,60 @@ impl UiInteractionKit {
 
     /// Set up the XCTest runner
     async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
+        eprintln!("[UiInteractionKit] Setting up XCTest runner...");
+        
         // Compile XCTest bundle if needed
         let compiler = XCTestCompiler::new()?;
+        let socket_path = compiler.socket_path().to_path_buf();
+        eprintln!("[UiInteractionKit] Socket path: {}", socket_path.display());
+        
         let bundle_path = compiler.get_xctest_bundle()?;
+        eprintln!("[UiInteractionKit] Bundle compiled at: {}", bundle_path.display());
 
         // Get active device
         let device = self
             .device_manager
             .get_active_device()
             .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
+        eprintln!("[UiInteractionKit] Active device: {} ({})", device.name, device.id);
 
         // Install to simulator
+        eprintln!("[UiInteractionKit] Installing bundle to simulator...");
         compiler.install_to_simulator(&device.id, &bundle_path)?;
 
-        // Start Unix socket bridge
-        let mut bridge = XCTestUnixBridge::new();
+        // Create Unix socket bridge with the same socket path
+        let mut bridge = XCTestUnixBridge::with_socket_path(socket_path);
+        
+        // Start the bridge server BEFORE running tests
+        eprintln!("[UiInteractionKit] Starting Unix socket bridge...");
         bridge.start().await?;
+        
+        // Give the bridge a moment to start listening
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // Run the test bundle
-        // Note: This is simplified - in reality we'd need to handle the test execution properly
+        // Run the test bundle - this will connect to our socket
+        eprintln!("[UiInteractionKit] Running test bundle...");
         compiler.run_tests(&device.id, "com.arkavo.testrunner")?;
 
-        // Connect to the runner
-        bridge.connect_to_runner().await?;
-
-        Ok(bridge)
+        // Wait for the runner to connect
+        eprintln!("[UiInteractionKit] Waiting for test runner to connect...");
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            bridge.wait_for_connection()
+        ).await {
+            Ok(Ok(())) => {
+                eprintln!("[UiInteractionKit] Test runner connected successfully");
+                Ok(bridge)
+            }
+            Ok(Err(e)) => {
+                eprintln!("[UiInteractionKit] Connection error: {}", e);
+                Err(e)
+            }
+            Err(_) => {
+                eprintln!("[UiInteractionKit] Timeout waiting for test runner connection");
+                Err(TestError::Mcp("Timeout waiting for XCTest runner to connect".to_string()))
+            }
+        }
     }
 }
 

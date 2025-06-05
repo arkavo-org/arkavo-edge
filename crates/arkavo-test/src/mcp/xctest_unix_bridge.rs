@@ -161,6 +161,22 @@ impl XCTestUnixBridge {
 
         Ok(())
     }
+    
+    /// Wait for a client to connect
+    pub async fn wait_for_connection(&self) -> Result<()> {
+        // Poll until we have a client connection
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(30);
+        
+        while start.elapsed() < timeout {
+            if self.is_connected() {
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+        
+        Err(TestError::Mcp("No client connected within timeout".to_string()))
+    }
 
     /// Connect to the XCTest runner (for sending commands)
     pub async fn connect_to_runner(&mut self) -> Result<()> {

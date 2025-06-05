@@ -14,11 +14,13 @@ pub struct XCTestCompiler {
 
 impl XCTestCompiler {
     pub fn new() -> Result<Self> {
-        let template_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("templates")
-            .join("XCTestRunner");
+        // Try multiple methods to find the template directory
+        let template_dir = Self::find_template_dir()?;
+        
+        eprintln!("[XCTestCompiler] Using template directory: {}", template_dir.display());
 
         let build_dir = std::env::temp_dir().join("arkavo-xctest-build");
+        eprintln!("[XCTestCompiler] Build directory: {}", build_dir.display());
 
         // Create build directory if it doesn't exist
         fs::create_dir_all(&build_dir)
@@ -27,12 +29,67 @@ impl XCTestCompiler {
         // Generate socket path
         let socket_path =
             std::env::temp_dir().join(format!("arkavo-xctest-{}.sock", std::process::id()));
+        eprintln!("[XCTestCompiler] Socket path: {}", socket_path.display());
 
         Ok(Self {
             template_dir,
             build_dir,
             socket_path,
         })
+    }
+    
+    fn find_template_dir() -> Result<PathBuf> {
+        // Method 1: Check if we're in development (templates relative to source)
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let dev_template_dir = manifest_dir.join("templates").join("XCTestRunner");
+        if dev_template_dir.exists() {
+            return Ok(dev_template_dir);
+        }
+        
+        // Method 2: Check relative to executable
+        if let Ok(exe_path) = std::env::current_exe() {
+            // Try ../share/arkavo/templates (installed location)
+            if let Some(exe_dir) = exe_path.parent() {
+                let installed_template_dir = exe_dir
+                    .parent()
+                    .map(|p| p.join("share/arkavo/templates/XCTestRunner"));
+                    
+                if let Some(dir) = installed_template_dir {
+                    if dir.exists() {
+                        return Ok(dir);
+                    }
+                }
+                
+                // Try ../templates (relative to binary)
+                let relative_template_dir = exe_dir.parent()
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join("crates/arkavo-test/templates/XCTestRunner"));
+                    
+                if let Some(dir) = relative_template_dir {
+                    if dir.exists() {
+                        return Ok(dir);
+                    }
+                }
+            }
+        }
+        
+        // Method 3: Try current directory structure
+        let cwd = std::env::current_dir()
+            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+        let cwd_template_dir = cwd.join("crates/arkavo-test/templates/XCTestRunner");
+        if cwd_template_dir.exists() {
+            return Ok(cwd_template_dir);
+        }
+        
+        Err(TestError::Mcp(format!(
+            "Could not find XCTestRunner templates. Searched in:\n\
+             1. {} (development)\n\
+             2. Relative to executable\n\
+             3. {} (current dir)",
+            dev_template_dir.display(),
+            cwd_template_dir.display()
+        )))
     }
 
     /// Get the socket path for communication
@@ -61,7 +118,8 @@ impl XCTestCompiler {
 
     /// Compile the XCTest bundle from templates
     fn compile_xctest_bundle(&self) -> Result<PathBuf> {
-        eprintln!("Compiling XCTest bundle...");
+        eprintln!("[XCTestCompiler] Starting XCTest bundle compilation...");
+        eprintln!("[XCTestCompiler] Template dir exists: {}", self.template_dir.exists());
 
         // Step 1: Create temporary source directory
         let source_dir = self.build_dir.join("Sources");
@@ -90,10 +148,25 @@ impl XCTestCompiler {
 
     /// Process templates and write to source directory
     fn process_templates(&self, source_dir: &Path) -> Result<()> {
-        // Process Swift template
-        let swift_template_path = self.template_dir.join("ArkavoTestRunner.swift.template");
+        // Process Swift template - try both template files
+        let swift_template_enhanced = self.template_dir.join("ArkavoTestRunnerEnhanced.swift.template");
+        let swift_template_basic = self.template_dir.join("ArkavoTestRunner.swift.template");
+        
+        let swift_template_path = if swift_template_enhanced.exists() {
+            eprintln!("[XCTestCompiler] Using enhanced Swift template");
+            swift_template_enhanced
+        } else if swift_template_basic.exists() {
+            eprintln!("[XCTestCompiler] Using basic Swift template");
+            swift_template_basic
+        } else {
+            return Err(TestError::Mcp(format!(
+                "No Swift template found. Looked for:\n{:?}\n{:?}",
+                swift_template_enhanced, swift_template_basic
+            )));
+        };
+        
         let swift_template = fs::read_to_string(&swift_template_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to read Swift template: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read Swift template at {:?}: {}", swift_template_path, e)))?;
 
         // Replace template variables
         let swift_source =
@@ -152,59 +225,75 @@ let package = Package(
 
     /// Compile the Swift package
     fn compile_swift_package(&self, build_dir: &Path) -> Result<()> {
-        // Use xcodebuild to compile for iOS Simulator
-        let output = Command::new("xcodebuild")
-            .args([
-                "build",
-                "-scheme",
-                "ArkavoTestRunner",
-                "-destination",
-                "generic/platform=iOS Simulator",
-                "-derivedDataPath",
-                build_dir.join("DerivedData").to_str().unwrap(),
-                "-configuration",
-                "Debug",
-                "CODE_SIGNING_ALLOWED=NO",
-                "CODE_SIGN_IDENTITY=-",
-            ])
-            .current_dir(build_dir)
+        eprintln!("[XCTestCompiler] Compiling Swift package...");
+        
+        // For XCTest bundles on simulator, we don't need code signing
+        // Use direct swift compilation instead of xcodebuild
+        let swift_source = build_dir.join("Sources/ArkavoTestRunner.swift");
+        let output_binary = build_dir.join("ArkavoTestRunner");
+        
+        // Get iOS SDK path
+        let sdk_output = Command::new("xcrun")
+            .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}", e)))?;
+            
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+        eprintln!("[XCTestCompiler] Using SDK: {}", sdk_path);
+        
+        // Compile as a framework/bundle
+        let output = Command::new("xcrun")
+            .args([
+                "swiftc",
+                "-sdk", &sdk_path,
+                "-target", "x86_64-apple-ios15.0-simulator",
+                "-emit-library",
+                "-emit-module",
+                "-module-name", "ArkavoTestRunner",
+                "-Xlinker", "-bundle",
+                "-Xlinker", "-rpath",
+                "-Xlinker", "@executable_path/Frameworks",
+                "-Xlinker", "-rpath",
+                "-Xlinker", "@loader_path/Frameworks",
+                "-F", &sdk_path,
+                "-framework", "XCTest",
+                "-o", output_binary.to_str().unwrap(),
+                swift_source.to_str().unwrap(),
+            ])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-
-            // Fallback: Try using swift directly to compile
-            eprintln!("xcodebuild failed, trying direct swift compilation...");
-
-            let swift_output = Command::new("xcrun")
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprintln!("[XCTestCompiler] Compilation failed");
+            eprintln!("[XCTestCompiler] STDOUT: {}", stdout);
+            eprintln!("[XCTestCompiler] STDERR: {}", stderr);
+            
+            // Try arm64 target if x86_64 failed
+            eprintln!("[XCTestCompiler] Trying arm64 target...");
+            let output_arm = Command::new("xcrun")
                 .args([
                     "swiftc",
-                    "-sdk",
-                    "iphonesimulator",
-                    "-target",
-                    "x86_64-apple-ios15.0-simulator",
+                    "-sdk", &sdk_path,
+                    "-target", "arm64-apple-ios15.0-simulator",
                     "-emit-library",
                     "-emit-module",
-                    "-module-name",
-                    "ArkavoTestRunner",
-                    "-Xlinker",
-                    "-bundle",
-                    "-o",
-                    build_dir.join("ArkavoTestRunner").to_str().unwrap(),
-                    build_dir
-                        .join("Sources/ArkavoTestRunner.swift")
-                        .to_str()
-                        .unwrap(),
+                    "-module-name", "ArkavoTestRunner",
+                    "-Xlinker", "-bundle",
+                    "-F", &sdk_path,
+                    "-framework", "XCTest",
+                    "-o", output_binary.to_str().unwrap(),
+                    swift_source.to_str().unwrap(),
                 ])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {}", e)))?;
-
-            if !swift_output.status.success() {
-                let swift_stderr = String::from_utf8_lossy(&swift_output.stderr);
+                .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler (arm64): {}", e)))?;
+                
+            if !output_arm.status.success() {
+                let arm_stderr = String::from_utf8_lossy(&output_arm.stderr);
                 return Err(TestError::Mcp(format!(
-                    "Compilation failed. xcodebuild error: {}\nswift error: {}",
-                    stderr, swift_stderr
+                    "Compilation failed for both architectures.\nx86_64 error: {}\narm64 error: {}",
+                    stderr, arm_stderr
                 )));
             }
         }
@@ -216,6 +305,8 @@ let package = Package(
     fn create_xctest_bundle(&self, build_dir: &Path) -> Result<PathBuf> {
         let bundle_name = "ArkavoTestRunner.xctest";
         let bundle_path = build_dir.join(bundle_name);
+
+        eprintln!("[XCTestCompiler] Creating bundle at: {}", bundle_path.display());
 
         // Create bundle directory structure
         fs::create_dir_all(&bundle_path)
@@ -293,41 +384,105 @@ let package = Package(
     }
 
     /// Run the XCTest bundle on a simulator
-    pub fn run_tests(&self, device_id: &str, bundle_id: &str) -> Result<()> {
-        // Use xcodebuild to run the tests
+    pub fn run_tests(&self, device_id: &str, _bundle_id: &str) -> Result<()> {
+        eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+        
+        // First, we need to find where the test bundle is installed
+        // XCTest bundles are typically installed in the simulator's test bundles directory
+        let test_bundle_name = "ArkavoTestRunner.xctest";
+        
+        // Method 1: Try to run using xcrun simctl spawn with xctest
+        // This will spawn the xctest process directly in the simulator
+        eprintln!("[XCTestCompiler] Attempting to run XCTest bundle...");
+        
+        // We need to spawn a long-running process that will handle our commands
+        // The test runner should already be installed and will connect via Unix socket
+        let spawn_args = vec![
+            "simctl",
+            "spawn",
+            device_id,
+            "xctest",
+            "-XCTest",
+            "All",
+            test_bundle_name,
+        ];
+        
+        eprintln!("[XCTestCompiler] Running: xcrun {}", spawn_args.join(" "));
+        
+        // Start the test runner in the background
+        let mut child = Command::new("xcrun")
+            .args(&spawn_args)
+            .spawn()
+            .map_err(|e| TestError::Mcp(format!("Failed to spawn xctest: {}", e)))?;
+            
+        // Give it a moment to start
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        
+        // Check if it's still running
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                eprintln!("[XCTestCompiler] XCTest exited with status: {}", status);
+                if !status.success() {
+                    // Try alternative method: use xcodebuild
+                    eprintln!("[XCTestCompiler] Trying xcodebuild method...");
+                    return self.run_tests_with_xcodebuild(device_id);
+                }
+            }
+            Ok(None) => {
+                eprintln!("[XCTestCompiler] XCTest is running in background");
+                // Store the child process handle somewhere if needed
+                // For now, we'll just let it run
+            }
+            Err(e) => {
+                eprintln!("[XCTestCompiler] Error checking XCTest status: {}", e);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn run_tests_with_xcodebuild(&self, device_id: &str) -> Result<()> {
+        // Create a minimal xctestrun file
+        let xctestrun_content = format!(r#"{{
+            "__xctestrun_metadata__": {{
+                "FormatVersion": 1
+            }},
+            "ArkavoTestRunner": {{
+                "TestBundlePath": "__TESTROOT__/ArkavoTestRunner.xctest",
+                "TestHostPath": "__PLATFORMS__/iPhoneSimulator.platform/Developer/Applications/Simulator.app/Contents/MacOS/Simulator",
+                "UITargetAppPath": "__TESTHOST__/ArkavoTestRunner.app",
+                "EnvironmentVariables": {{
+                    "ARKAVO_SOCKET_PATH": "{}"
+                }},
+                "TestingEnvironmentVariables": {{
+                    "DYLD_FRAMEWORK_PATH": "__TESTROOT__:__PLATFORMS__/iPhoneSimulator.platform/Developer/Library/Frameworks"
+                }},
+                "OnlyTestIdentifiers": [
+                    "ArkavoTestRunner/testRunCommands"
+                ]
+            }}
+        }}"#, self.socket_path.to_string_lossy());
+        
+        let xctestrun_path = self.build_dir.join("ArkavoTestRunner.xctestrun");
+        fs::write(&xctestrun_path, xctestrun_content)
+            .map_err(|e| TestError::Mcp(format!("Failed to write xctestrun file: {}", e)))?;
+            
         let output = Command::new("xcodebuild")
             .args([
                 "test-without-building",
-                "-xctestrun", // This would need a proper test run file
-                "-destination",
-                &format!("id={}", device_id),
-                "-only-testing",
-                &format!("{}/ArkavoTestRunner/testRunCommands", bundle_id),
+                "-xctestrun", xctestrun_path.to_str().unwrap(),
+                "-destination", &format!("id={}", device_id),
+                "-resultBundlePath", self.build_dir.join("Results.xcresult").to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run tests: {}", e)))?;
-
+            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {}", e)))?;
+            
         if !output.status.success() {
-            // Fallback: Use xcrun simctl xctest
-            let xctest_output = Command::new("xcrun")
-                .args([
-                    "simctl",
-                    "spawn",
-                    device_id,
-                    "xctest",
-                    "-XCTest",
-                    "ArkavoTestRunner/testRunCommands",
-                    "/path/to/ArkavoTestRunner.xctest", // This needs the installed path
-                ])
-                .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to run xctest: {}", e)))?;
-
-            if !xctest_output.status.success() {
-                let stderr = String::from_utf8_lossy(&xctest_output.stderr);
-                return Err(TestError::Mcp(format!("Failed to run tests: {}", stderr)));
-            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[XCTestCompiler] xcodebuild failed: {}", stderr);
+            return Err(TestError::Mcp(format!("Failed to run tests with xcodebuild: {}", stderr)));
         }
-
+        
         Ok(())
     }
 }
