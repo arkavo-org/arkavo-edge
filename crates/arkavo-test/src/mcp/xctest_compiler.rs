@@ -186,6 +186,26 @@ impl XCTestCompiler {
         let swift_template = fs::read_to_string(&swift_template_path)
             .map_err(|e| TestError::Mcp(format!("Failed to read Swift template at {:?}: {}", swift_template_path, e)))?;
 
+        // Verify this is the updated template
+        if swift_template.contains("let result: [String: Any]?") {
+            return Err(TestError::Mcp(
+                "ERROR: Using outdated Swift template!\n\
+                The template contains 'let result: [String: Any]?' which causes Codable errors.\n\
+                This should be 'let result: JSONValue?' instead.\n\
+                Please rebuild arkavo with the latest source code:\n\
+                  cargo build --release --bin arkavo".to_string()
+            ));
+        }
+        
+        if !swift_template.contains("enum JSONValue: Codable") {
+            return Err(TestError::Mcp(
+                "ERROR: Swift template missing JSONValue enum!\n\
+                The template needs the JSONValue enum to handle arbitrary JSON.\n\
+                Please rebuild arkavo with the latest source code:\n\
+                  cargo build --release --bin arkavo".to_string()
+            ));
+        }
+
         // Replace template variables
         let swift_source =
             swift_template.replace("{{SOCKET_PATH}}", &self.socket_path.to_string_lossy());
