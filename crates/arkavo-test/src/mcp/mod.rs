@@ -17,6 +17,7 @@ pub mod server;
 pub mod simulator_manager;
 pub mod simulator_tools;
 pub mod tools;
+pub mod usage_guide;
 pub mod xctest_compiler;
 pub mod xctest_enhanced;
 pub mod xctest_unix_bridge;

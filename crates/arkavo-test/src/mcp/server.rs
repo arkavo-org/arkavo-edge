@@ -14,6 +14,7 @@ use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
+use super::usage_guide::UsageGuideKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -109,6 +110,10 @@ impl McpTestServer {
         tools.insert(
             "ui_query".to_string(),
             Arc::new(UiQueryKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "usage_guide".to_string(),
+            Arc::new(UsageGuideKit::new()),
         );
         tools.insert(
             "biometric_auth".to_string(),
@@ -301,6 +306,7 @@ impl McpTestServer {
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"
+                | "usage_guide"
                 | "biometric_auth"
                 | "system_dialog"
                 | "passkey_dialog"
