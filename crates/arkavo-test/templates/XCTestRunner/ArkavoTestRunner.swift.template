@@ -22,21 +22,88 @@ struct CommandResponse: Codable {
     let id: String
     let success: Bool
     let error: String?
-    let result: [String: Any]?
+    let result: JSONValue?
     
-    enum CodingKeys: String, CodingKey {
-        case id, success, error, result
+    init(id: String, success: Bool, error: String? = nil, result: [String: Any]? = nil) {
+        self.id = id
+        self.success = success
+        self.error = error
+        self.result = result.map { JSONValue(from: $0) }
+    }
+}
+
+// Helper to handle arbitrary JSON
+enum JSONValue: Codable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+    
+    init(from any: Any) {
+        switch any {
+        case let str as String:
+            self = .string(str)
+        case let num as Double:
+            self = .number(num)
+        case let num as Int:
+            self = .number(Double(num))
+        case let bool as Bool:
+            self = .bool(bool)
+        case let dict as [String: Any]:
+            var result: [String: JSONValue] = [:]
+            for (key, value) in dict {
+                result[key] = JSONValue(from: value)
+            }
+            self = .object(result)
+        case let array as [Any]:
+            self = .array(array.map { JSONValue(from: $0) })
+        case is NSNull:
+            self = .null
+        default:
+            self = .null
+        }
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        
+        if container.decodeNil() {
+            self = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let int = try? container.decode(Int.self) {
+            self = .number(Double(int))
+        } else if let double = try? container.decode(Double.self) {
+            self = .number(double)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unable to decode JSONValue")
+        }
     }
     
     func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(success, forKey: .success)
-        try container.encodeIfPresent(error, forKey: .error)
-        if let result = result {
-            let jsonData = try JSONSerialization.data(withJSONObject: result)
-            let jsonDict = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
-            try container.encode(jsonDict, forKey: .result)
+        var container = encoder.singleValueContainer()
+        
+        switch self {
+        case .string(let str):
+            try container.encode(str)
+        case .number(let num):
+            try container.encode(num)
+        case .bool(let bool):
+            try container.encode(bool)
+        case .object(let dict):
+            try container.encode(dict)
+        case .array(let array):
+            try container.encode(array)
+        case .null:
+            try container.encodeNil()
         }
     }
 }
