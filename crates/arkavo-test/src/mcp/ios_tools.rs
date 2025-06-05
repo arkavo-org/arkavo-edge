@@ -416,12 +416,26 @@ impl Tool for UiInteractionKit {
                         } else {
                             // No XCUITest bridge available
                             if target.get("x").is_none() || target.get("y").is_none() {
-                                // Can't proceed without coordinates
+                                // Can't proceed without coordinates - provide helpful guidance
+                                let text_target = target.get("text").and_then(|v| v.as_str()).unwrap_or("element");
                                 return Ok(serde_json::json!({
                                     "error": {
                                         "code": "XCUITEST_NOT_AVAILABLE",
-                                        "message": "XCUITest not available and no coordinates provided",
-                                        "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                        "message": format!("Cannot tap '{}' - XCUITest not available and no coordinates provided", text_target),
+                                        "suggestion": "Follow this workflow to tap elements by text:",
+                                        "steps": [
+                                            "1. Use screen_capture to take a screenshot",
+                                            "2. Use the Read tool to view the screenshot image", 
+                                            "3. Visually locate the element you want to tap",
+                                            "4. Estimate its coordinates from the image",
+                                            "5. Use ui_interaction with coordinates: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}",
+                                        ],
+                                        "example": {
+                                            "screen_capture": {"name": "current_screen", "device_id": params.get("device_id").cloned()},
+                                            "read": {"file_path": "test_results/current_screen.png"},
+                                            "ui_interaction": {"action": "tap", "target": {"x": 200, "y": 300}, "device_id": params.get("device_id").cloned()}
+                                        },
+                                        "note": "XCUITest automatic setup is attempted once per session. To retry setup, restart the MCP server."
                                     }
                                 }));
                             }
