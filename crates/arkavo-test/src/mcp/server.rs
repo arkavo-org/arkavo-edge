@@ -272,6 +272,10 @@ impl McpTestServer {
         Ok(schemas)
     }
 
+    pub fn get_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
+        self.get_all_tools()
+    }
+
     pub async fn call_tool(&self, request: ToolRequest) -> Result<ToolResponse> {
         if !self.is_allowed(&request.tool_name, &request.params) {
             return Err(TestError::Mcp("Tool not allowed".to_string()));

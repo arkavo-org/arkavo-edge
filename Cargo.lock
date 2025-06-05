@@ -75,7 +75,7 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "arkavo"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arkavo-cli",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -98,27 +98,27 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "arkavo-git"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "arkavo-repo"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "arkavo-test"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arkavo-protocol",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.4.2"
+version = "0.5.0"
 
 [[package]]
 name = "async-trait"
