@@ -15,6 +15,7 @@ use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use super::usage_guide::UsageGuideKit;
+use super::xctest_setup_tool::XCTestSetupKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -114,6 +115,10 @@ impl McpTestServer {
         tools.insert(
             "usage_guide".to_string(),
             Arc::new(UsageGuideKit::new()),
+        );
+        tools.insert(
+            "setup_xcuitest".to_string(),
+            Arc::new(XCTestSetupKit::new(device_manager.clone())),
         );
         tools.insert(
             "biometric_auth".to_string(),
@@ -311,6 +316,7 @@ impl McpTestServer {
                 | "screen_capture"
                 | "ui_query"
                 | "usage_guide"
+                | "setup_xcuitest"
                 | "biometric_auth"
                 | "system_dialog"
                 | "passkey_dialog"

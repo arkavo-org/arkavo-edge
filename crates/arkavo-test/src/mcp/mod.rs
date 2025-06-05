@@ -20,4 +20,5 @@ pub mod tools;
 pub mod usage_guide;
 pub mod xctest_compiler;
 pub mod xctest_enhanced;
+pub mod xctest_setup_tool;
 pub mod xctest_unix_bridge;

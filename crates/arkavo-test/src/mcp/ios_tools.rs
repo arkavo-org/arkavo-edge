@@ -451,36 +451,46 @@ impl Tool for UiInteractionKit {
                                 return Ok(serde_json::json!({
                                     "error": {
                                         "code": "XCUITEST_NOT_AVAILABLE", 
-                                        "message": format!("Cannot tap '{}' by text - coordinate required", text_target),
-                                        "action_required": format!("You must provide coordinates to tap '{}'. Follow these steps:", text_target),
+                                        "message": format!("Cannot tap '{}' by text - XCUITest is not initialized", text_target),
+                                        "solution": "Use the setup_xcuitest tool to initialize XCUITest",
                                         "immediate_action": {
-                                            "1_check_screenshot": "Look at your recent screenshot (analyze_layout or screen_capture)",
-                                            "2_find_element": format!("Visually locate the '{}' button/link in the image", text_target),
-                                            "3_estimate_position": "Estimate where it is on the screen",
-                                            "4_retry_with_coordinates": {
+                                            "tool": "setup_xcuitest",
+                                            "parameters": {},
+                                            "description": "This will compile and install XCUITest to enable text-based element finding"
+                                        },
+                                        "after_setup": {
+                                            "description": "Once setup_xcuitest succeeds, you can tap elements by text:",
+                                            "example": {
+                                                "action": "tap",
+                                                "target": {"text": text_target}
+                                            },
+                                            "benefits": [
+                                                "Find elements by their visible text",
+                                                "10-second automatic wait for elements",
+                                                "Works across different screen sizes"
+                                            ]
+                                        },
+                                        "fallback_coordinate_method": {
+                                            "description": "Use coordinates instead of text (immediate workaround)",
+                                            "device_info": {
+                                                "type": device_type,
+                                                "screen_size": format!("{}x{} points", width, height),
+                                                "center": {"x": width / 2, "y": height / 2}
+                                            },
+                                            "steps": [
+                                                "1. Look at your screenshot from analyze_layout",
+                                                format!("2. Find '{}' visually in the image", text_target),
+                                                "3. Estimate its position",
+                                                "4. Use tap with coordinates"
+                                            ],
+                                            "example": {
                                                 "action": "tap",
                                                 "target": {
                                                     "x": width / 2,
                                                     "y": height / 2,
-                                                    "_comment": format!("Replace with actual coordinates of '{}'", text_target)
+                                                    "_comment": format!("Replace with actual position of '{}'", text_target)
                                                 }
                                             }
-                                        },
-                                        "device_info": {
-                                            "type": device_type,
-                                            "screen_size": format!("{}x{} points", width, height),
-                                            "coordinate_hints": {
-                                                "top_area": format!("y: 0-{}", height / 4),
-                                                "middle_area": format!("y: {}-{}", height / 4, height * 3 / 4),
-                                                "bottom_area": format!("y: {}-{}", height * 3 / 4, height),
-                                                "center": {"x": width / 2, "y": height / 2},
-                                                "typical_button": {"width": 200, "height": 44}
-                                            }
-                                        },
-                                        "example_for_get_started": {
-                                            "_note": "If 'Get Started' is a centered button in the middle of screen:",
-                                            "action": "tap",
-                                            "target": {"x": width / 2, "y": height / 2}
                                         }
                                     }
                                 }));
