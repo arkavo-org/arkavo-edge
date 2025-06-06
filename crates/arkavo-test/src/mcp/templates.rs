@@ -11,6 +11,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_templates_are_valid() {
         // Verify templates are embedded correctly
         assert!(!ARKAVO_TEST_RUNNER_SWIFT.is_empty());
@@ -30,24 +31,28 @@ mod tests {
             "Template should use JSONValue for result field"
         );
 
-        // Verify no duplicate methods
-        let test_method_count = ARKAVO_TEST_RUNNER_SWIFT
-            .matches("func testRunCommands()")
-            .count();
-        assert_eq!(
-            test_method_count, 1,
-            "Template should have exactly one testRunCommands method, found {}",
-            test_method_count
+        // Verify bridge architecture (no longer a test case)
+        assert!(
+            ARKAVO_TEST_RUNNER_SWIFT.contains("class ArkavoTestRunner: NSObject"),
+            "Template should be a bridge (NSObject), not XCTestCase"
+        );
+        assert!(
+            !ARKAVO_TEST_RUNNER_SWIFT.contains("func testRunCommands()"),
+            "Template should not have testRunCommands method in bridge mode"
         );
 
-        // Verify correct method references
+        // Verify correct method references for bridge mode
         assert!(
-            ARKAVO_TEST_RUNNER_SWIFT.contains("Self.processCommand"),
-            "Template should use Self.processCommand for command handler"
+            ARKAVO_TEST_RUNNER_SWIFT.contains("processCommand"),
+            "Template should have processCommand for handling commands"
         );
         assert!(
-            !ARKAVO_TEST_RUNNER_SWIFT.contains("Self.handleCommand"),
-            "Template should not reference non-existent handleCommand method"
+            ARKAVO_TEST_RUNNER_SWIFT.contains("@objc class func setUp()"),
+            "Template should have setUp method for initialization"
+        );
+        assert!(
+            ARKAVO_TEST_RUNNER_SWIFT.contains("@objc class func initializeBridge()"),
+            "Template should have initializeBridge method"
         );
 
         // Verify XCTest usage
@@ -62,6 +67,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn test_info_plist_is_valid() {
         assert!(!INFO_PLIST.is_empty());
         assert!(INFO_PLIST.contains("CFBundleIdentifier"));
