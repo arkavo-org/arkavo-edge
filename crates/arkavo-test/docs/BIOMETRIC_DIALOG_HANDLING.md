@@ -8,7 +8,6 @@ When testing iOS apps that use biometric authentication (Face ID/Touch ID), dial
 
 1. **biometric_dialog_handler** - Uses built-in simulator commands (no external dependencies)
 2. **accessibility_dialog_handler** - Alternative approach using accessibility features
-3. **idb_ui** - More accurate but requires IDB installation (optional)
 
 ## Using biometric_dialog_handler
 
@@ -89,4 +88,4 @@ If you know the button positions, you can use direct taps:
 
 ## No External Dependencies
 
-Unlike IDB-based solutions, these handlers work with just Xcode installed, making them accessible to all users without additional setup.
+These handlers work with just Xcode installed, making them accessible to all users without additional setup.
