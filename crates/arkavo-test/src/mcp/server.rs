@@ -1,3 +1,4 @@
+use super::app_diagnostic_tool::AppDiagnosticTool;
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
@@ -13,7 +14,12 @@ use super::intelligent_tools::{
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
+use super::template_diagnostics::TemplateDiagnosticsKit;
+use super::usage_guide::UsageGuideKit;
+use super::xctest_setup_tool::XCTestSetupKit;
+use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -110,6 +116,23 @@ impl McpTestServer {
             "ui_query".to_string(),
             Arc::new(UiQueryKit::new(device_manager.clone())),
         );
+        tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
+        tools.insert(
+            "app_diagnostic".to_string(),
+            Arc::new(AppDiagnosticTool::new()),
+        );
+        tools.insert(
+            "setup_xcuitest".to_string(),
+            Arc::new(XCTestSetupKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "xctest_status".to_string(),
+            Arc::new(XCTestStatusKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "template_diagnostics".to_string(),
+            Arc::new(TemplateDiagnosticsKit::new()),
+        );
         tools.insert(
             "biometric_auth".to_string(),
             Arc::new(BiometricKit::new(device_manager.clone())),
@@ -132,6 +155,10 @@ impl McpTestServer {
         tools.insert(
             "file_operations".to_string(),
             Arc::new(FileOperations::new()),
+        );
+        tools.insert(
+            "simulator_advanced".to_string(),
+            Arc::new(SimulatorAdvancedKit::new(device_manager.clone())),
         );
 
         // Add biometric dialog handlers (no external dependencies)
@@ -267,6 +294,10 @@ impl McpTestServer {
         Ok(schemas)
     }
 
+    pub fn get_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
+        self.get_all_tools()
+    }
+
     pub async fn call_tool(&self, request: ToolRequest) -> Result<ToolResponse> {
         if !self.is_allowed(&request.tool_name, &request.params) {
             return Err(TestError::Mcp("Tool not allowed".to_string()));
@@ -301,10 +332,15 @@ impl McpTestServer {
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"
+                | "usage_guide"
+                | "setup_xcuitest"
+                | "xctest_status"
+                | "template_diagnostics"
                 | "biometric_auth"
                 | "system_dialog"
                 | "passkey_dialog"
                 | "simulator_control"
+                | "simulator_advanced"
                 | "app_management"
                 | "file_operations"
                 | "find_bugs"
@@ -314,6 +350,12 @@ impl McpTestServer {
                 | "discover_invariants"
                 | "chaos_test"
                 | "explore_edge_cases"
+                | "biometric_dialog_handler"
+                | "accessibility_dialog_handler"
+                | "face_id_control"
+                | "face_id_status"
+                | "biometric_test_scenario"
+                | "smart_biometric_handler"
         )
     }
 

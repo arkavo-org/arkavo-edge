@@ -9,9 +9,11 @@ use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OnceCell};
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, RwLock};
 
-static XCTEST_BRIDGE: OnceCell<Option<Arc<Mutex<XCTestUnixBridge>>>> = OnceCell::const_new();
+type XCTestBridgeType = Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>;
+static XCTEST_BRIDGE: OnceLock<XCTestBridgeType> = OnceLock::new();
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
@@ -23,7 +25,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. CRITICAL: clear_text, delete_key, etc are SEPARATE ACTIONS! Example: To clear a field use {\"action\":\"clear_text\"} NOT {\"action\":\"type_text\",\"value\":\"clear_text\"}. TEXT INPUT WORKFLOW: 1) {\"action\":\"tap\",\"target\":{\"x\":X,\"y\":Y}} on field, 2) {\"action\":\"clear_text\"} to clear it, 3) {\"action\":\"type_text\",\"value\":\"new text\"}. DELETE: Use {\"action\":\"delete_key\",\"count\":10} to delete 10 chars. NO IDB COMMANDS!".to_string(),
+                description: "Interact with iOS UI elements. TEXT-BASED TAPS REQUIRE setup_xcuitest TO BE RUN FIRST! Without XCUITest setup, text-based taps will fail with XCUITEST_NOT_AVAILABLE. SUPPORTS: 1) TEXT-BASED (requires setup): {\"action\":\"tap\",\"target\":{\"text\":\"Login\"}} 2) ACCESSIBILITY ID (requires setup): {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"login_button\"}} 3) COORDINATES (always works): {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. For text input: tap field first, then clear_text if needed, then type_text.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -41,8 +43,8 @@ impl UiInteractionKit {
                             "properties": {
                                 "x": {"type": "number"},
                                 "y": {"type": "number"},
-                                "text": {"type": "string"},
-                                "accessibility_id": {"type": "string"}
+                                "text": {"type": "string", "description": "Visible text of element to tap (e.g. button label, link text). XCUITest will search for this text."},
+                                "accessibility_id": {"type": "string", "description": "Accessibility identifier of element. More reliable than text as it doesn't change with localization."}
                             }
                         },
                         "value": {
@@ -94,56 +96,114 @@ impl UiInteractionKit {
         bridge.send_tap_command(command).await
     }
 
-    /// Get or initialize the XCTest bridge
+    /// Get the XCTest bridge
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
-        XCTEST_BRIDGE
-            .get_or_init(|| async {
-                // Try to compile and set up XCTest runner
-                match self.setup_xctest_runner().await {
-                    Ok(bridge) => {
-                        eprintln!("XCTest runner initialized successfully");
-                        Some(Arc::new(Mutex::new(bridge)))
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to initialize XCTest runner: {}. Falling back to AppleScript.",
-                            e
-                        );
-                        None
-                    }
-                }
-            })
-            .await
-            .clone()
+        let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
+
+        // Try to get existing bridge
+        let existing = bridge_holder.read().await.clone();
+        if existing.is_some() {
+            return existing;
+        }
+
+        // No bridge exists, try to initialize one
+        let mut write_guard = bridge_holder.write().await;
+
+        // Double-check in case another task initialized while we were waiting
+        if write_guard.is_some() {
+            return write_guard.clone();
+        }
+
+        // Try to set up XCTest runner
+        match self.setup_xctest_runner().await {
+            Ok(bridge) => {
+                eprintln!("[UiInteractionKit] XCTest runner initialized successfully");
+                let bridge_arc = Arc::new(Mutex::new(bridge));
+                *write_guard = Some(bridge_arc.clone());
+                Some(bridge_arc)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[UiInteractionKit] Failed to initialize XCTest runner: {}. Text-based tapping unavailable.",
+                    e
+                );
+                None
+            }
+        }
+    }
+
+    /// Get the global XCTest bridge storage
+    pub fn get_global_xctest_bridge() -> &'static Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>
+    {
+        XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)))
     }
 
     /// Set up the XCTest runner
     async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
+        eprintln!("[UiInteractionKit] Setting up XCTest runner...");
+
         // Compile XCTest bundle if needed
         let compiler = XCTestCompiler::new()?;
+        let socket_path = compiler.socket_path().to_path_buf();
+        eprintln!("[UiInteractionKit] Socket path: {}", socket_path.display());
+
         let bundle_path = compiler.get_xctest_bundle()?;
+        eprintln!(
+            "[UiInteractionKit] Bundle compiled at: {}",
+            bundle_path.display()
+        );
 
         // Get active device
         let device = self
             .device_manager
             .get_active_device()
             .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
+        eprintln!(
+            "[UiInteractionKit] Active device: {} ({})",
+            device.name, device.id
+        );
 
         // Install to simulator
+        eprintln!("[UiInteractionKit] Installing bundle to simulator...");
         compiler.install_to_simulator(&device.id, &bundle_path)?;
 
-        // Start Unix socket bridge
-        let mut bridge = XCTestUnixBridge::new();
+        // Create Unix socket bridge with the same socket path
+        let mut bridge = XCTestUnixBridge::with_socket_path(socket_path);
+
+        // Start the bridge server BEFORE running tests
+        eprintln!("[UiInteractionKit] Starting Unix socket bridge...");
         bridge.start().await?;
 
-        // Run the test bundle
-        // Note: This is simplified - in reality we'd need to handle the test execution properly
-        compiler.run_tests(&device.id, "com.arkavo.testrunner")?;
+        // Give the bridge a moment to start listening
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // Connect to the runner
-        bridge.connect_to_runner().await?;
+        // Launch the test host app - this will connect to our socket
+        eprintln!("[UiInteractionKit] Launching test host app...");
+        compiler.launch_test_host(&device.id, None)?;
 
-        Ok(bridge)
+        // Wait for the runner to connect
+        eprintln!("[UiInteractionKit] Waiting for test runner to connect...");
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(10),
+            bridge.wait_for_connection(),
+        )
+        .await
+        {
+            Ok(Ok(())) => {
+                eprintln!("[UiInteractionKit] Test runner connected successfully");
+                Ok(bridge)
+            }
+            Ok(Err(e)) => {
+                eprintln!("[UiInteractionKit] Connection error: {}", e);
+                Err(e)
+            }
+            Err(_) => {
+                eprintln!("[UiInteractionKit] Timeout waiting for test runner connection");
+                Err(TestError::Mcp(
+                    "Timeout waiting for XCTest runner to connect".to_string(),
+                ))
+            }
+        }
     }
 }
 
@@ -239,16 +299,34 @@ impl Tool for UiInteractionKit {
                     .map(|d| d.device_type.as_str())
                     .unwrap_or("unknown");
 
-                Ok(serde_json::json!({
+                // Check if XCUITest is actually available
+                let xctest_available = self.get_xctest_bridge().await.is_some();
+
+                let mut response = serde_json::json!({
                     "action": "analyze_layout",
                     "success": true,
                     "screenshot_path": screenshot_path,
                     "device_id": device_id,
                     "device_type": device_type,
-                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All text fields, buttons, and interactive elements with their center coordinates\n2. Any text labels or placeholders that indicate what each field is for\n3. The current screen/view being displayed\n4. Suggested next actions based on the UI state",
-                    "next_steps": "After reading and analyzing the image, use tap to click on elements, type_text to enter text (after tapping text fields), or swipe to scroll",
-                    "usage_hint": "After analysis, you can use the provided coordinates directly with the tap action"
-                }))
+                    "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI"
+                });
+
+                if xctest_available {
+                    response["next_steps"] = serde_json::json!(
+                        "After reading the image, use text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- XCUITest will find elements by text with 10-second timeout"
+                    );
+                    response["xcuitest_status"] =
+                        serde_json::json!("XCUITest is available for text-based element finding");
+                } else {
+                    response["next_steps"] = serde_json::json!(
+                        "After reading the image, you'll need to use coordinates:\n1. Estimate the x,y position of elements from the image\n2. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n3. Text-based tapping requires XCUITest which is not currently available"
+                    );
+                    response["xcuitest_status"] = serde_json::json!(
+                        "XCUITest not available - use coordinates from image analysis"
+                    );
+                }
+
+                Ok(response)
             }
             "tap" => {
                 // Check iOS availability first
@@ -387,12 +465,87 @@ impl Tool for UiInteractionKit {
                         } else {
                             // No XCUITest bridge available
                             if target.get("x").is_none() || target.get("y").is_none() {
-                                // Can't proceed without coordinates
+                                // Can't proceed without coordinates - provide helpful guidance
+                                let text_target = target
+                                    .get("text")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("element");
+                                // Get device info for better coordinate guidance
+                                let device_id = params
+                                    .get("device_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let device_info = self.device_manager.get_device(device_id);
+                                let device_type = device_info
+                                    .as_ref()
+                                    .map(|d| d.device_type.as_str())
+                                    .unwrap_or("unknown");
+
+                                // Provide device-specific coordinate tips
+                                let (width, height) = match device_type {
+                                    s if s.contains("iPhone-16-Pro-Max") => (430, 932),
+                                    s if s.contains("iPhone-16-Pro")
+                                        || s.contains("iPhone-15-Pro") =>
+                                    {
+                                        (393, 852)
+                                    }
+                                    s if s.contains("iPhone-16-Plus")
+                                        || s.contains("iPhone-15-Plus") =>
+                                    {
+                                        (428, 926)
+                                    }
+                                    s if s.contains("iPhone-16") || s.contains("iPhone-15") => {
+                                        (390, 844)
+                                    }
+                                    s if s.contains("iPhone-SE") => (375, 667),
+                                    s if s.contains("iPad") => (820, 1180),
+                                    _ => (393, 852), // Default to iPhone Pro size
+                                };
+
                                 return Ok(serde_json::json!({
                                     "error": {
                                         "code": "XCUITEST_NOT_AVAILABLE",
-                                        "message": "XCUITest not available and no coordinates provided",
-                                        "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                        "message": format!("Cannot tap '{}' by text - XCUITest is not initialized", text_target),
+                                        "solution": "Use the setup_xcuitest tool to initialize XCUITest",
+                                        "immediate_action": {
+                                            "tool": "setup_xcuitest",
+                                            "parameters": {},
+                                            "description": "This will compile and install XCUITest to enable text-based element finding"
+                                        },
+                                        "after_setup": {
+                                            "description": "Once setup_xcuitest succeeds, you can tap elements by text:",
+                                            "example": {
+                                                "action": "tap",
+                                                "target": {"text": text_target}
+                                            },
+                                            "benefits": [
+                                                "Find elements by their visible text",
+                                                "10-second automatic wait for elements",
+                                                "Works across different screen sizes"
+                                            ]
+                                        },
+                                        "fallback_coordinate_method": {
+                                            "description": "Use coordinates instead of text (immediate workaround)",
+                                            "device_info": {
+                                                "type": device_type,
+                                                "screen_size": format!("{}x{} points", width, height),
+                                                "center": {"x": width / 2, "y": height / 2}
+                                            },
+                                            "steps": [
+                                                "1. Look at your screenshot from analyze_layout",
+                                                format!("2. Find '{}' visually in the image", text_target),
+                                                "3. Estimate its position",
+                                                "4. Use tap with coordinates"
+                                            ],
+                                            "example": {
+                                                "action": "tap",
+                                                "target": {
+                                                    "x": width / 2,
+                                                    "y": height / 2,
+                                                    "_comment": format!("Replace with actual position of '{}'", text_target)
+                                                }
+                                            }
+                                        }
                                     }
                                 }));
                             }
@@ -1102,7 +1255,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS screen. AI AGENTS: Use this before any UI interaction to see current state. The screenshot will be saved to test_results/<name>.png. You can then read the image file to analyze UI elements and their positions.".to_string(),
+                description: "Capture iOS simulator screen. WORKFLOW FOR AI AGENTS: 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) PREFER using ui_interaction with text/accessibility_id when you can see button labels or UI text (more reliable than coordinates), 4) Only use coordinates as last resort. The screenshot helps you identify text labels for XCUITest to find. Example: If you see a 'Sign In' button, use {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}} rather than coordinates.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {

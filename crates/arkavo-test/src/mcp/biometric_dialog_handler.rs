@@ -38,9 +38,29 @@ impl BiometricDialogHandler {
         }
     }
 
-    fn send_key_event(&self, device_id: &str, keycode: &str) -> Result<()> {
-        let output = Command::new("xcrun")
-            .args(["simctl", "io", device_id, "sendkey", keycode])
+    fn send_key_event(&self, _device_id: &str, keycode: &str) -> Result<()> {
+        // simctl io sendkey is NOT a valid command
+        // Use AppleScript instead
+        let key_code = match keycode {
+            "escape" => "53",
+            "return" => "36",
+            "home" => "115", // Home key
+            _ => return Err(TestError::Mcp(format!("Unknown keycode: {}", keycode))),
+        };
+
+        let script = format!(
+            r#"tell application "Simulator"
+                activate
+            end tell
+            tell application "System Events"
+                key code {}
+            end tell"#,
+            key_code
+        );
+
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to send key event: {}", e)))?;
 
@@ -66,17 +86,28 @@ impl BiometricDialogHandler {
         Ok(())
     }
 
-    fn simulate_passcode_entry(&self, device_id: &str, passcode: &str) -> Result<()> {
-        // Type each digit of the passcode
-        for digit in passcode.chars() {
-            Command::new("xcrun")
-                .args(["simctl", "io", device_id, "type", &digit.to_string()])
-                .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to type passcode digit: {}", e)))?;
+    fn simulate_passcode_entry(&self, _device_id: &str, passcode: &str) -> Result<()> {
+        // simctl io type is NOT a valid command
+        // Use AppleScript to type the passcode
+        let script = format!(
+            r#"tell application "Simulator"
+                activate
+            end tell
+            tell application "System Events"
+                tell process "Simulator"
+                    set frontmost to true
+                    keystroke "{}"
+                end tell
+            end tell"#,
+            passcode
+        );
 
-            // Small delay between digits
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
+        Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {}", e)))?;
+
         Ok(())
     }
 }
@@ -148,34 +179,30 @@ impl Tool for BiometricDialogHandler {
                         "device_id": device_id
                     })),
                     Err(e) => Ok(json!({
-                        "success": false,
-                        "error": e.to_string(),
-                        "suggestion": "Try using the biometric_auth tool with 'cancel' action"
+                        "error": {
+                            "code": "CANCEL_FAILED",
+                            "message": e.to_string(),
+                            "suggestion": "Try using the biometric_auth tool with 'cancel' action"
+                        }
                     })),
                 }
             }
             "accept" => {
-                // Use the biometric match simulation
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
-                    .output()
-                    .map_err(|e| {
-                        TestError::Mcp(format!("Failed to simulate biometric match: {}", e))
-                    })?;
-
-                if output.status.success() {
-                    Ok(json!({
-                        "success": true,
-                        "action": "accept",
-                        "method": "biometric_match",
-                        "device_id": device_id
-                    }))
-                } else {
-                    Ok(json!({
-                        "success": false,
-                        "error": String::from_utf8_lossy(&output.stderr).trim().to_string()
-                    }))
-                }
+                // Biometric acceptance cannot be automated
+                Ok(json!({
+                    "error": {
+                        "code": "BIOMETRIC_ACCEPT_NOT_AUTOMATED",
+                        "message": "Cannot programmatically accept biometric authentication",
+                        "device_id": device_id,
+                        "details": {
+                            "reason": "iOS Simulator requires manual menu interaction for biometric simulation",
+                            "manual_steps": [
+                                "1. When biometric dialog is visible",
+                                "2. Go to Device > Face ID/Touch ID > Matching Face/Touch"
+                            ]
+                        }
+                    }
+                }))
             }
             "use_passcode" => {
                 // Default passcode for simulators is often "1234" or "123456"
@@ -197,8 +224,10 @@ impl Tool for BiometricDialogHandler {
                         }))
                     }
                     Err(e) => Ok(json!({
-                        "success": false,
-                        "error": e.to_string()
+                        "error": {
+                            "code": "PASSCODE_ENTRY_FAILED",
+                            "message": e.to_string()
+                        }
                     })),
                 }
             }
@@ -263,7 +292,7 @@ impl Tool for AccessibilityDialogHandler {
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
 
         // Get device ID
-        let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+        let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
         } else {
             match self.device_manager.get_active_device() {
@@ -281,9 +310,17 @@ impl Tool for AccessibilityDialogHandler {
 
         match (dialog_type, action) {
             ("biometric", "press_cancel") => {
-                // Use keyboard shortcut to cancel
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // Use AppleScript to send ESC key
+                let script = r#"tell application "Simulator"
+                    activate
+                end tell
+                tell application "System Events"
+                    key code 53 -- ESC key
+                end tell"#;
+
+                Command::new("osascript")
+                    .arg("-e")
+                    .arg(script)
                     .output()
                     .ok();
 

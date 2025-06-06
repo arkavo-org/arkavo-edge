@@ -26,8 +26,8 @@ fn test_swift_template_exists() {
     );
 
     assert!(
-        content.contains("class ArkavoTestRunner: XCTestCase"),
-        "Template should contain test runner class"
+        content.contains("class ArkavoTestRunner: NSObject"),
+        "Template should contain bridge class (NSObject, not XCTestCase)"
     );
 
     assert!(

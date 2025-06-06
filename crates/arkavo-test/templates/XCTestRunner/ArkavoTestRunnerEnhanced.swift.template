@@ -92,7 +92,7 @@ class UnixSocketServer {
         // Create Unix socket
         socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else {
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to create socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to create socket"])
         }
         
         // Remove existing socket file
@@ -102,12 +102,13 @@ class UnixSocketServer {
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            let pathBytes = socketPath.utf8CString
-            pathBytes.withUnsafeBufferPointer { buffer in
-                ptr.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: addr.sun_path)) { dest in
-                    _ = strcpy(dest, buffer.baseAddress!)
-                }
+        // Copy socket path safely
+        let pathBytes = socketPath.utf8CString
+        pathBytes.withUnsafeBufferPointer { buffer in
+            withUnsafeMutableBytes(of: &addr.sun_path) { rawPtr in
+                let dst = rawPtr.baseAddress!.assumingMemoryBound(to: CChar.self)
+                let size = min(buffer.count, 104) // sun_path is typically 104 bytes
+                memcpy(dst, buffer.baseAddress!, size)
             }
         }
         
@@ -119,13 +120,13 @@ class UnixSocketServer {
         
         guard bindResult == 0 else {
             close(socketFD)
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to bind socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to bind socket"])
         }
         
         // Listen for connections
         guard listen(socketFD, 5) == 0 else {
             close(socketFD)
-            throw NSError(domain: "UnixSocket", code: errno, userInfo: [NSLocalizedDescriptionKey: "Failed to listen on socket"])
+            throw NSError(domain: "UnixSocket", code: Int(errno), userInfo: [NSLocalizedDescriptionKey: "Failed to listen on socket"])
         }
         
         // Accept connections in background
