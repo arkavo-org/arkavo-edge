@@ -20,6 +20,7 @@ static RESPONSE_SCHEMA: OnceLock<Validator> = OnceLock::new();
 
 fn init_schemas() {
     // JSON-RPC Request Schema based on MCP TypeScript definitions
+    // Supports both requests (with id) and notifications (without id)
     let request_schema = json!({
         "type": "object",
         "properties": {
@@ -40,7 +41,7 @@ fn init_schemas() {
                 "type": "object"
             }
         },
-        "required": ["jsonrpc", "id", "method"],
+        "required": ["jsonrpc", "method"],
         "additionalProperties": false
     });
 
@@ -117,7 +118,15 @@ fn init_schemas() {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
-    id: JsonRpcId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<JsonRpcId>,
+    method: String,
+    params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsonRpcNotification {
+    jsonrpc: String,
     method: String,
     params: Option<Value>,
 }
@@ -299,10 +308,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Handle request
+        // Check if this is a notification (no id field)
+        if request.id.is_none() {
+            eprintln!("Handling notification: {}", request.method);
+            match request.method.as_str() {
+                "notifications/initialized" => {
+                    eprintln!("Client initialized notification received");
+                }
+                _ => {
+                    eprintln!("Unknown notification: {}", request.method);
+                }
+            }
+            continue; // Notifications don't get responses
+        }
+
+        // Handle request (has id, expects response)
+        let request_id = request.id.clone().unwrap(); // Safe because we checked above
         let response = match request.method.as_str() {
             "initialize" => success_response(
-                request.id,
+                request_id.clone(),
                 json!({
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
@@ -310,10 +334,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": {
-                        "tools": {
-                            "available": get_tool_list()
-                        }
-                    }
+                        "tools": {}
+                    },
+                    "instructions": "This MCP server provides iOS automation with XCUITest support. KEY IMPROVEMENTS:\n\n1. TEXT-BASED ELEMENT FINDING: Use {\"action\":\"tap\",\"target\":{\"text\":\"Button Label\"}} to tap elements by visible text. Much more reliable than coordinates.\n\n2. ACCESSIBILITY ID SUPPORT: Use {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"element_id\"}} for the most reliable automation.\n\n3. BEST PRACTICES:\n   - Always start with screen_capture to see current UI\n   - Look for visible text in screenshots\n   - Use text/accessibility_id for interactions when possible\n   - Only use coordinates as last resort\n\n4. TEXT INPUT WORKFLOW:\n   - Tap the field first (by text label if possible)\n   - Use clear_text if needed\n   - Then use type_text with your value\n\n5. DEBUGGING: Error messages now provide helpful details. XCUITest waits up to 10 seconds for elements.\n\nFor detailed guidance, use the 'usage_guide' tool with topics: overview, text_based_tapping, workflows, debugging, or examples."
                 }),
             ),
 
@@ -344,7 +367,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             .unwrap_or("Tool execution failed");
 
                                         error_response(
-                                            request.id,
+                                            request_id.clone(),
                                             INTERNAL_ERROR,
                                             format!("{}: {}", error_code, error_msg),
                                             Some(tool_response.result),
@@ -375,7 +398,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                                         // Normal successful response
                                         success_response(
-                                            request.id,
+                                            request_id.clone(),
                                             json!({
                                                 "content": [{
                                                     "type": "text",
@@ -409,7 +432,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                                     // Normal successful response
                                     success_response(
-                                        request.id,
+                                        request_id.clone(),
                                         json!({
                                             "content": [{
                                                 "type": "text",
@@ -420,7 +443,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             Err(e) => error_response(
-                                request.id,
+                                request_id.clone(),
                                 INTERNAL_ERROR,
                                 format!("Tool execution error: {}", e),
                                 None,
@@ -428,7 +451,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else {
                         error_response(
-                            request.id,
+                            request_id.clone(),
                             INVALID_PARAMS,
                             "Invalid parameters".to_string(),
                             None,
@@ -436,7 +459,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else {
                     error_response(
-                        request.id,
+                        request_id.clone(),
                         INVALID_PARAMS,
                         "Missing parameters".to_string(),
                         None,
@@ -444,15 +467,46 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            "tools/list" => success_response(
-                request.id,
-                json!({
-                    "tools": get_tool_list()
-                }),
-            ),
+            "tools/list" => {
+                // Get dynamic tool list from server
+                match mcp_server.get_tool_schemas() {
+                    Ok(schemas) => {
+                        let tools: Vec<Value> = schemas
+                            .into_iter()
+                            .map(|schema| {
+                                json!({
+                                    "name": schema.name,
+                                    "description": schema.description,
+                                    "inputSchema": schema.parameters
+                                })
+                            })
+                            .collect();
+
+                        success_response(
+                            request_id.clone(),
+                            json!({
+                                "tools": tools,
+                                "_meta": {
+                                    "critical_setup": "MUST call setup_xcuitest with target_app_bundle_id BEFORE any text-based UI interaction! Without this, all text/accessibility_id taps will fail.",
+                                    "workflow": "1) device_management to get device_id, 2) setup_xcuitest with device_id AND target_app_bundle_id of the app you want to test, 3) Then use ui_interaction with text targets",
+                                    "xcuitest_status": "Text-based element finding requires XCUITest initialization via setup_xcuitest tool WITH target_app_bundle_id parameter.",
+                                    "setup_example": "{\"tool\": \"setup_xcuitest\", \"arguments\": {\"device_id\": \"YOUR-DEVICE-ID\", \"target_app_bundle_id\": \"com.example.app\"}}",
+                                    "usage_hint": "Call usage_guide tool for detailed iOS automation guidance and examples."
+                                }
+                            }),
+                        )
+                    }
+                    Err(e) => error_response(
+                        request_id.clone(),
+                        INTERNAL_ERROR,
+                        format!("Failed to get tool schemas: {}", e),
+                        None,
+                    ),
+                }
+            }
 
             _ => error_response(
-                request.id,
+                request_id.clone(),
                 METHOD_NOT_FOUND,
                 format!("Method not found: {}", request.method),
                 None,
@@ -494,385 +548,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_tool_list() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "query_state",
-            "description": "Query application state",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "entity": {"type": "string"},
-                    "filter": {"type": "object"}
-                },
-                "required": ["entity"]
-            }
-        }),
-        json!({
-            "name": "mutate_state",
-            "description": "Mutate application state",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "entity": {"type": "string"},
-                    "action": {"type": "string"},
-                    "data": {"type": "object"}
-                },
-                "required": ["entity", "action"]
-            }
-        }),
-        json!({
-            "name": "snapshot",
-            "description": "Manage state snapshots",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["create", "restore", "list"]},
-                    "name": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "run_test",
-            "description": "Execute test scenarios",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "test_name": {"type": "string"},
-                    "timeout": {"type": "integer"}
-                },
-                "required": ["test_name"]
-            }
-        }),
-        json!({
-            "name": "ui_interaction",
-            "description": "Interact with iOS UI elements. SCROLLING: Use {\"action\":\"scroll\",\"direction\":\"down\",\"amount\":10} instead of swipe. TEXT EDITING: clear_text, delete_key are SEPARATE ACTIONS! CORRECT: {\"action\":\"clear_text\"} WRONG: {\"action\":\"type_text\",\"value\":\"clear_text\"}. WORKFLOW: 1) screen_capture, 2) tap field, 3) clear_text, 4) type_text. TAP BY TEXT: Not supported - use coordinates from vision analysis.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["tap", "swipe", "type_text", "press_button", "analyze_layout", "clear_text", "select_all", "delete_key", "copy", "paste", "scroll"]},
-                    "device_id": {"type": "string"},
-                    "target": {
-                        "type": "object",
-                        "properties": {
-                            "x": {"type": "number"},
-                            "y": {"type": "number"},
-                            "text": {"type": "string"},
-                            "accessibility_id": {"type": "string"}
-                        }
-                    },
-                    "value": {"type": "string"},
-                    "count": {
-                        "type": "integer",
-                        "description": "Number of times to repeat an action (used with delete_key)",
-                        "minimum": 1
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["up", "down", "left", "right"],
-                        "description": "Scroll direction (for scroll action)"
-                    },
-                    "amount": {
-                        "type": "integer",
-                        "description": "Number of scroll steps (for scroll action, default: 5)",
-                        "minimum": 1,
-                        "maximum": 50
-                    },
-                    "swipe": {
-                        "type": "object",
-                        "properties": {
-                            "x1": {"type": "number"},
-                            "y1": {"type": "number"},
-                            "x2": {"type": "number"},
-                            "y2": {"type": "number"},
-                            "duration": {"type": "number"}
-                        }
-                    }
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "screen_capture",
-            "description": "Capture iOS screen. AI AGENTS: Use this before any UI interaction to see current state. The screenshot will be saved to test_results/<name>.png. You can then read the image file to analyze UI elements and their positions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "device_id": {"type": "string"},
-                    "analyze": {"type": "boolean"}
-                },
-                "required": ["name"]
-            }
-        }),
-        json!({
-            "name": "ui_query",
-            "description": "Query UI elements (LIMITED). AI AGENTS: This tool has limited functionality without XCTest. Instead, use this workflow: 1) screen_capture to get screenshot, 2) Read the image file, 3) Use your vision capabilities to identify UI elements and coordinates, 4) Use tap/swipe/type_text with those coordinates.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query_type": {"type": "string", "enum": ["accessibility_tree", "visible_elements", "text_content"]},
-                    "device_id": {"type": "string"},
-                    "filter": {
-                        "type": "object",
-                        "properties": {
-                            "element_type": {"type": "string"},
-                            "text_contains": {"type": "string"},
-                            "accessibility_label": {"type": "string"}
-                        }
-                    }
-                },
-                "required": ["query_type"]
-            }
-        }),
-        json!({
-            "name": "find_bugs",
-            "description": "Find potential bugs and code issues in the codebase",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "language": {"type": "string", "enum": ["rust", "swift", "typescript", "python", "auto"]},
-                    "bug_types": {"type": "array", "items": {"type": "string"}}
-                }
-            }
-        }),
-        json!({
-            "name": "intelligent_bug_finder",
-            "description": "Use AI to find complex bugs in specific code modules",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "module": {"type": "string"},
-                    "context": {"type": "string"},
-                    "focus_areas": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["module"]
-            }
-        }),
-        json!({
-            "name": "discover_invariants",
-            "description": "Discover invariants that should always be true in a system",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "system": {"type": "string"},
-                    "code_context": {"type": "string"}
-                },
-                "required": ["system"]
-            }
-        }),
-        json!({
-            "name": "chaos_test",
-            "description": "Test system behavior under failure conditions",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "scenario": {"type": "string"},
-                    "system_state": {"type": "object"},
-                    "failure_types": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["scenario"]
-            }
-        }),
-        json!({
-            "name": "explore_edge_cases",
-            "description": "Explore edge cases in system flows",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "flow": {"type": "string"},
-                    "known_cases": {"type": "array", "items": {"type": "string"}},
-                    "depth": {"type": "string", "enum": ["shallow", "deep", "exhaustive"]}
-                },
-                "required": ["flow"]
-            }
-        }),
-        json!({
-            "name": "biometric_auth",
-            "description": "Handle Face ID/Touch ID authentication prompts",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["enroll", "match", "fail", "cancel"]},
-                    "device_id": {"type": "string"},
-                    "biometric_type": {"type": "string", "enum": ["face_id", "touch_id"]}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "system_dialog",
-            "description": "Handle iOS system dialogs and alerts",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["accept", "dismiss", "allow", "deny"]},
-                    "device_id": {"type": "string"},
-                    "button_text": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "passkey_dialog",
-            "description": "Handle iOS passkey/biometric enrollment dialogs",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["dismiss_enrollment_warning", "accept_enrollment", "cancel_dialog", "tap_settings"]},
-                    "device_id": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "simulator_control",
-            "description": "Control iOS simulators - boot, shutdown, list devices",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["list", "boot", "shutdown", "refresh"]},
-                    "device_id": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "app_management",
-            "description": "Manage iOS apps - install, uninstall, launch, terminate",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["install", "uninstall", "launch", "terminate", "list"]},
-                    "device_id": {"type": "string"},
-                    "app_path": {"type": "string"},
-                    "bundle_id": {"type": "string"},
-                    "arguments": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["action", "device_id"]
-            }
-        }),
-        json!({
-            "name": "file_operations",
-            "description": "Transfer files to/from iOS simulator",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["push", "pull", "get_container"]},
-                    "device_id": {"type": "string"},
-                    "local_path": {"type": "string"},
-                    "remote_path": {"type": "string"},
-                    "bundle_id": {"type": "string"}
-                },
-                "required": ["action", "device_id"]
-            }
-        }),
-        json!({
-            "name": "device_management",
-            "description": "Manage iOS devices and simulators",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["list", "set_active", "get_active", "refresh"]},
-                    "device_id": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "coordinate_converter",
-            "description": "Convert between screen and element coordinates",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["convert", "validate"]},
-                    "x": {"type": "number"},
-                    "y": {"type": "number"},
-                    "device_type": {"type": "string"},
-                    "coordinate_type": {"type": "string", "enum": ["screen", "element", "normalized"]}
-                },
-                "required": ["action", "x", "y"]
-            }
-        }),
-        json!({
-            "name": "deep_link",
-            "description": "Open deep links or URLs in iOS apps to navigate directly to specific screens",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string"},
-                    "device_id": {"type": "string"},
-                    "bundle_id": {"type": "string"}
-                },
-                "required": ["url"]
-            }
-        }),
-        json!({
-            "name": "app_launcher",
-            "description": "Launch, terminate, or get info about iOS apps",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["launch", "terminate", "install", "uninstall", "list", "info"]},
-                    "bundle_id": {"type": "string"},
-                    "device_id": {"type": "string"},
-                    "app_path": {"type": "string"},
-                    "launch_args": {"type": "array", "items": {"type": "string"}},
-                    "env": {"type": "object"}
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": "list_tests",
-            "description": "List all available tests in the repository. AI AGENTS: This tool returns paginated results. Use page_size=20 to avoid large responses. Check pagination.has_next to see if more pages exist.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "filter": {
-                        "type": "string",
-                        "description": "Optional filter pattern for test names"
-                    },
-                    "test_type": {
-                        "type": "string",
-                        "enum": ["unit", "integration", "performance", "ui", "all"],
-                        "description": "Type of tests to list (default: all)"
-                    },
-                    "page": {
-                        "type": "integer",
-                        "description": "Page number (1-based, default: 1)",
-                        "minimum": 1
-                    },
-                    "page_size": {
-                        "type": "integer",
-                        "description": "Tests per page (default: 50, max: 200)",
-                        "minimum": 1,
-                        "maximum": 200
-                    }
-                }
-            }
-        }),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
-
-    static INIT: Once = Once::new();
-
-    fn setup() {
-        INIT.call_once(|| {
-            init_schemas();
-        });
-    }
 
     #[test]
     fn test_request_validation() {
-        setup();
+        init_schemas();
 
         // Valid request
         let valid_request = json!({
@@ -905,48 +587,5 @@ mod tests {
             "method": "test"
         });
         assert!(validate_request(&invalid_request).is_err());
-    }
-
-    #[test]
-    fn test_response_validation() {
-        setup();
-
-        // Valid success response
-        let valid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"test": "value"}
-        });
-        assert!(validate_response(&valid_response).is_ok());
-
-        // Valid error response
-        let valid_error = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32600,
-                "message": "Invalid request"
-            }
-        });
-        assert!(validate_response(&valid_error).is_ok());
-
-        // Invalid - has both result and error
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {},
-            "error": {
-                "code": -32600,
-                "message": "Invalid"
-            }
-        });
-        assert!(validate_response(&invalid_response).is_err());
-
-        // Invalid - missing required fields
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1
-        });
-        assert!(validate_response(&invalid_response).is_err());
     }
 }

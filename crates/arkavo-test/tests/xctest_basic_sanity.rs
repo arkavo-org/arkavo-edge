@@ -52,8 +52,8 @@ fn test_swift_template_content() {
         "Template should import Foundation"
     );
     assert!(
-        content.contains("class ArkavoTestRunner: XCTestCase"),
-        "Template should have test runner class"
+        content.contains("class ArkavoTestRunner: NSObject"),
+        "Template should have bridge class (NSObject, not XCTestCase)"
     );
     assert!(
         content.contains("UnixSocketServer"),
@@ -64,8 +64,8 @@ fn test_swift_template_content() {
         "Template should have socket path placeholder"
     );
     assert!(
-        content.contains("TapCommand"),
-        "Template should define TapCommand struct"
+        content.contains("Command") && content.contains("CommandType"),
+        "Template should define Command structs"
     );
     assert!(
         content.contains("handleTextTap"),
@@ -74,6 +74,14 @@ fn test_swift_template_content() {
     assert!(
         content.contains("handleAccessibilityTap"),
         "Template should handle accessibility ID taps"
+    );
+    assert!(
+        content.contains("@objc class func setUp()"),
+        "Template should have setUp method"
+    );
+    assert!(
+        content.contains("@objc class func initializeBridge()"),
+        "Template should have initializeBridge method"
     );
 
     println!("✅ Swift template content validated");

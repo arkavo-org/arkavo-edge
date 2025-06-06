@@ -11,7 +11,7 @@
 .project
 .settings/
 .DS_Store
-/test_results/
+**/test_results/
 
 # Test/demo scripts
 test_*.sh

@@ -1,3 +1,17 @@
+//! Enhanced XCTest integration for iOS testing
+//!
+//! Note: simctl does NOT support touch/tap/swipe commands
+//! The only valid simctl io operations are:
+//! - enumerate: Lists IO ports
+//! - poll: Polls IO ports for events  
+//! - recordVideo: Records screen to video
+//! - screenshot: Captures screenshot
+//!
+//! For UI interactions, we must use either:
+//! 1. XCTest framework (via XCTestUnixBridge)
+//! 2. AppleScript with Accessibility API
+//! 3. Third-party tools like idb
+
 use super::device_manager::DeviceManager;
 use super::xctest_compiler::XCTestCompiler;
 use super::xctest_unix_bridge::{CommandResponse, XCTestUnixBridge};
@@ -168,66 +182,5 @@ impl Drop for XCTestEnhanced {
                 let _ = child.kill();
             }
         }
-    }
-}
-
-/// Alternative implementation using simctl for basic interactions
-pub struct SimctlInteraction;
-
-impl SimctlInteraction {
-    /// Send touch event using simctl (iOS 14+)
-    pub fn send_touch(device_id: &str, x: f64, y: f64) -> Result<()> {
-        // Try using simctl io for touch events (available in newer Xcode versions)
-        let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "io",
-                device_id,
-                "touch",
-                &format!("{},{}", x as i32, y as i32),
-            ])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send touch: {}", e)))?;
-
-        if !output.status.success() {
-            // Fallback to using Accessibility
-            return Err(TestError::Mcp(
-                "simctl touch not available, XCTest required".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Send swipe using simctl
-    pub fn send_swipe(
-        device_id: &str,
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-        duration: f64,
-    ) -> Result<()> {
-        // Try using simctl io for swipe events
-        let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "io",
-                device_id,
-                "swipe",
-                &format!("{},{}", x1 as i32, y1 as i32),
-                &format!("{},{}", x2 as i32, y2 as i32),
-                &format!("{}", duration),
-            ])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send swipe: {}", e)))?;
-
-        if !output.status.success() {
-            return Err(TestError::Mcp(
-                "simctl swipe not available, XCTest required".to_string(),
-            ));
-        }
-
-        Ok(())
     }
 }
