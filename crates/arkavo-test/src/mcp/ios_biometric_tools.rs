@@ -74,27 +74,28 @@ impl BiometricKit {
             None => return false,
         };
 
-        let menu_item = match (biometric_type, action) {
-            ("face_id", "match") => "Matching Face",
-            ("face_id", "nomatch") => "Non-matching Face",
-            ("touch_id", "match") => "Matching Touch",
-            ("touch_id", "nomatch") => "Non-matching Touch",
+        let (menu_name, menu_item) = match (biometric_type, action) {
+            ("face_id", "match") => ("Face ID", "Matching Face"),
+            ("face_id", "nomatch") => ("Face ID", "Non-matching Face"),
+            ("touch_id", "match") => ("Touch ID", "Matching Touch"),
+            ("touch_id", "nomatch") => ("Touch ID", "Non-matching Touch"),
             _ => return false,
         };
 
-        // AppleScript to click menu item
+        // AppleScript to click menu item - correct menu path is Device > Face ID/Touch ID > Action
         let applescript = format!(
             r#"
             tell application "Simulator"
                 activate
+                delay 0.2
                 tell application "System Events"
                     tell process "Simulator"
-                        click menu item "{}" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
+                        click menu item "{}" of menu "{}" of menu item "{}" of menu "Device" of menu bar 1
                     end tell
                 end tell
             end tell
             "#,
-            menu_item
+            menu_item, menu_name, menu_name
         );
 
         // Execute AppleScript
@@ -104,7 +105,16 @@ impl BiometricKit {
             .output();
 
         match result {
-            Ok(output) => output.status.success(),
+            Ok(output) => {
+                if output.status.success() {
+                    true
+                } else {
+                    // Log error for debugging
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("AppleScript error: {}", stderr);
+                    false
+                }
+            }
             Err(_) => false,
         }
     }
@@ -173,33 +183,60 @@ impl Tool for BiometricKit {
 
         match action {
             "enroll" => {
+                // Determine menu name based on biometric type
+                let menu_name = if biometric_type == "touch_id" { "Touch ID" } else { "Face ID" };
+                
                 // Try AppleScript to toggle enrollment
-                let applescript = r#"
+                let applescript = format!(
+                    r#"
                     tell application "Simulator"
                         activate
+                        delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Enrolled" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
+                                -- Click to ensure menu item is checked
+                                set enrollMenuItem to menu item "Enrolled" of menu "{}" of menu item "{}" of menu "Device" of menu bar 1
+                                if exists enrollMenuItem then
+                                    -- Check if not already enrolled
+                                    if value of attribute "AXMenuItemMarkChar" of enrollMenuItem is not "✓" then
+                                        click enrollMenuItem
+                                        return "enrolled"
+                                    else
+                                        return "already_enrolled"
+                                    end if
+                                else
+                                    return "menu_not_found"
+                                end if
                             end tell
                         end tell
                     end tell
-                "#;
+                    "#,
+                    menu_name, menu_name
+                );
 
                 let result = Command::new("osascript")
                     .arg("-e")
-                    .arg(applescript)
+                    .arg(&applescript)
                     .output();
 
                 match result {
-                    Ok(output) if output.status.success() => Ok(serde_json::json!({
-                        "success": true,
-                        "action": "enroll",
-                        "biometric_type": biometric_type,
-                        "message": "Toggled biometric enrollment via AppleScript",
-                        "method": "applescript",
-                        "warning": "This toggles the enrollment state. Check current state with face_id_status tool.",
-                        "note": "May require app restart to take effect"
-                    })),
+                    Ok(output) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        let message = match stdout.as_str() {
+                            "enrolled" => format!("{} enrollment enabled", menu_name),
+                            "already_enrolled" => format!("{} was already enrolled", menu_name),
+                            _ => format!("{} enrollment toggled", menu_name),
+                        };
+                        
+                        Ok(serde_json::json!({
+                            "success": true,
+                            "action": "enroll",
+                            "biometric_type": biometric_type,
+                            "message": message,
+                            "method": "applescript",
+                            "note": "App may need restart for enrollment to take effect"
+                        }))
+                    }
                     _ => {
                         // AppleScript failed, return honest failure
                         Ok(serde_json::json!({
@@ -209,16 +246,17 @@ impl Tool for BiometricKit {
                                 "details": {
                                     "reason": "AppleScript automation failed - may require accessibility permissions",
                                     "manual_steps": [
-                                        "1. In the Simulator menu bar, go to Device > Face ID/Touch ID",
+                                        format!("1. In the Simulator menu bar, go to Device > {}", menu_name),
                                         "2. Check the 'Enrolled' option",
                                         "3. Enrollment persists until manually unchecked"
                                     ],
                                     "troubleshooting": [
                                         "Ensure Terminal/IDE has accessibility permissions",
-                                        "System Preferences > Security & Privacy > Privacy > Accessibility"
+                                        "System Settings > Privacy & Security > Accessibility"
                                     ],
                                     "alternatives": {
-                                        "appium": "Use Appium's mobile:enrollBiometric command"
+                                        "xcuitest": "Use XCUITest with biometric simulation APIs",
+                                        "manual": "Manually enable before running tests"
                                     }
                                 }
                             }

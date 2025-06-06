@@ -46,17 +46,22 @@ impl BiometricTestScenario {
         }
     }
 
-    fn ensure_face_id_enrolled(&self, _device_id: &str) -> Result<()> {
-        // simctl ui biometric is NOT a valid command
-        // Face ID enrollment must be done manually through Simulator menu
-        Err(TestError::Mcp(
-            "Face ID enrollment cannot be automated. \n\
-             Manual steps required:\n\
-             1. In Simulator menu, go to Device > Face ID\n\
-             2. Check 'Enrolled' option\n\
-             3. Use 'Matching Face' when authentication is needed"
-                .to_string(),
-        ))
+    fn ensure_face_id_enrolled(&self, device_id: &str) -> Result<bool> {
+        // Check enrollment status using notifyutil
+        let output = Command::new("xcrun")
+            .args([
+                "simctl",
+                "spawn",
+                device_id,
+                "notifyutil",
+                "-g",
+                "com.apple.BiometricKit.enrollmentChanged",
+            ])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to check enrollment: {}", e)))?;
+
+        let status = String::from_utf8_lossy(&output.stdout);
+        Ok(status.contains("1"))
     }
 }
 
@@ -95,109 +100,212 @@ impl Tool for BiometricTestScenario {
 
         match scenario {
             "success_path" => {
-                // Ensure Face ID is enrolled
-                self.ensure_face_id_enrolled(&device_id)?;
+                // Check if Face ID is enrolled
+                let is_enrolled = self.ensure_face_id_enrolled(&device_id)?;
+                
+                if !is_enrolled {
+                    return Ok(json!({
+                        "error": {
+                            "code": "FACE_ID_NOT_ENROLLED",
+                            "message": "Face ID is not enrolled on this device",
+                            "details": {
+                                "manual_steps": [
+                                    "1. In Simulator menu, go to Device > Face ID",
+                                    "2. Check 'Enrolled' option",
+                                    "3. Retry this scenario"
+                                ]
+                            }
+                        }
+                    }));
+                }
 
-                // Provide matching face
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
+                // Try AppleScript to trigger matching face
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.2
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
+
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to match face: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
 
-                Ok(json!({
-                    "success": output.status.success(),
-                    "scenario": "success_path",
-                    "actions_taken": [
-                        "Ensured Face ID is enrolled",
-                        "Provided matching face for authentication"
-                    ],
-                    "expected_result": "User successfully authenticated with Face ID",
-                    "test_purpose": "Verify app handles successful biometric authentication"
-                }))
+                if output.status.success() {
+                    Ok(json!({
+                        "success": true,
+                        "scenario": "success_path",
+                        "actions_taken": [
+                            "Verified Face ID is enrolled",
+                            "Triggered matching face via AppleScript"
+                        ],
+                        "expected_result": "User successfully authenticated with Face ID",
+                        "test_purpose": "Verify app handles successful biometric authentication"
+                    }))
+                } else {
+                    Ok(json!({
+                        "error": {
+                            "code": "AUTOMATION_FAILED",
+                            "message": "Unable to trigger Face ID match",
+                            "details": {
+                                "manual_steps": [
+                                    "When biometric prompt appears:",
+                                    "Device > Face ID > Matching Face"
+                                ]
+                            }
+                        }
+                    }))
+                }
             }
 
             "user_cancels" => {
-                // Send ESC key to cancel the dialog
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "escape"])
+                // Try AppleScript to send ESC key
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                    end tell
+                    delay 0.1
+                    tell application "System Events"
+                        key code 53 -- ESC key
+                    end tell
+                "#;
+
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
                     .output()
-                    .ok();
+                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC: {}", e)))?;
 
                 Ok(json!({
-                    "success": true,
+                    "success": output.status.success(),
                     "scenario": "user_cancels",
-                    "actions_taken": ["Sent ESC key to dismiss biometric dialog"],
+                    "actions_taken": ["Sent ESC key via AppleScript to dismiss biometric dialog"],
                     "expected_result": "Authentication cancelled by user",
-                    "test_purpose": "Verify app handles user cancellation gracefully"
+                    "test_purpose": "Verify app handles user cancellation gracefully",
+                    "note": "ESC key may not work for all dialogs"
                 }))
             }
 
             "face_not_recognized" => {
-                self.ensure_face_id_enrolled(&device_id)?;
+                // Check if Face ID is enrolled
+                let is_enrolled = self.ensure_face_id_enrolled(&device_id)?;
+                
+                if !is_enrolled {
+                    return Ok(json!({
+                        "error": {
+                            "code": "FACE_ID_NOT_ENROLLED",
+                            "message": "Face ID is not enrolled on this device"
+                        }
+                    }));
+                }
 
-                // Simulate non-matching face
-                let output = Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "nomatch"])
+                // Try AppleScript for non-matching face
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.2
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
+
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to simulate no match: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
 
-                Ok(json!({
-                    "success": output.status.success(),
-                    "scenario": "face_not_recognized",
-                    "actions_taken": [
-                        "Ensured Face ID is enrolled",
-                        "Provided non-matching face"
-                    ],
-                    "expected_result": "Face ID authentication failed",
-                    "test_purpose": "Verify app handles failed biometric attempts"
-                }))
+                if output.status.success() {
+                    Ok(json!({
+                        "success": true,
+                        "scenario": "face_not_recognized",
+                        "actions_taken": [
+                            "Verified Face ID is enrolled",
+                            "Triggered non-matching face via AppleScript"
+                        ],
+                        "expected_result": "Face ID authentication failed",
+                        "test_purpose": "Verify app handles failed biometric attempts"
+                    }))
+                } else {
+                    Ok(json!({
+                        "error": {
+                            "code": "AUTOMATION_FAILED",
+                            "message": "Unable to trigger Face ID non-match",
+                            "details": {
+                                "manual_steps": [
+                                    "When biometric prompt appears:",
+                                    "Device > Face ID > Non-matching Face"
+                                ]
+                            }
+                        }
+                    }))
+                }
             }
 
             "biometric_lockout" => {
-                // Simulate multiple failed attempts
-                for _ in 0..5 {
-                    Command::new("xcrun")
-                        .args(["simctl", "ui", &device_id, "biometric", "nomatch"])
-                        .output()
-                        .ok();
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-
-                Ok(json!({
-                    "success": true,
-                    "scenario": "biometric_lockout",
-                    "actions_taken": ["Simulated 5 failed Face ID attempts"],
-                    "expected_result": "Biometric authentication locked out",
-                    "test_purpose": "Verify app handles biometric lockout and offers alternatives"
-                }))
-            }
-
-            "fallback_to_passcode" => {
-                // Type a passcode (default simulator passcode)
-                let passcode = "1234";
-                for digit in passcode.chars() {
-                    Command::new("xcrun")
-                        .args(["simctl", "io", &device_id, "type", &digit.to_string()])
-                        .output()
-                        .ok();
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-
-                // Press return
-                Command::new("xcrun")
-                    .args(["simctl", "io", &device_id, "sendkey", "return"])
+                // Note: Simulating biometric lockout requires multiple failed attempts
+                // This cannot be easily automated without proper biometric dialog interaction
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                    end tell
+                "#;
+                
+                Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
                     .output()
                     .ok();
 
                 Ok(json!({
-                    "success": true,
+                    "success": false,
+                    "scenario": "biometric_lockout",
+                    "error": {
+                        "code": "LOCKOUT_SIMULATION_NOT_AVAILABLE",
+                        "message": "Biometric lockout simulation requires manual interaction",
+                        "details": {
+                            "reason": "Cannot programmatically trigger multiple biometric failures in sequence",
+                            "manual_steps": [
+                                "1. Trigger biometric prompt in app",
+                                "2. Go to Device > Face ID > Non-matching Face",
+                                "3. Repeat 5 times to trigger lockout",
+                                "4. Verify app handles lockout appropriately"
+                            ]
+                        }
+                    }
+                }))
+            }
+
+            "fallback_to_passcode" => {
+                // Note: simctl io sendkey/type commands don't exist
+                // Passcode entry would need to be done via UI interaction coordinates
+                // or XCUITest automation
+
+                Ok(json!({
+                    "success": false,
                     "scenario": "fallback_to_passcode",
-                    "actions_taken": [
-                        "Typed passcode digits",
-                        "Pressed return key"
-                    ],
-                    "expected_result": "Authentication via passcode",
-                    "test_purpose": "Verify passcode fallback works correctly"
+                    "error": {
+                        "code": "PASSCODE_ENTRY_NOT_AUTOMATED",
+                        "message": "Passcode entry requires UI interaction",
+                        "details": {
+                            "reason": "simctl does not support keyboard input commands",
+                            "alternatives": [
+                                "Use ui_interaction tool with passcode button coordinates",
+                                "Use XCUITest for passcode entry automation",
+                                "Manual testing for passcode scenarios"
+                            ]
+                        }
+                    }
                 }))
             }
 
@@ -269,7 +377,7 @@ impl Tool for SmartBiometricHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing test_type parameter".to_string()))?;
 
-        let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+        let _device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
         } else {
             match self.device_manager.get_active_device() {
@@ -288,46 +396,80 @@ impl Tool for SmartBiometricHandler {
         match test_type {
             "login_flow" => {
                 // For login tests, we want to succeed
-                Command::new("xcrun")
-                    .args([
-                        "simctl",
-                        "ui",
-                        &device_id,
-                        "biometric",
-                        "enrollment",
-                        "--enrolled",
-                    ])
-                    .output()
-                    .ok();
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.2
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
                     .output()
-                    .ok();
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
 
-                Ok(json!({
-                    "success": true,
-                    "test_type": "login_flow",
-                    "action_taken": "Provided matching face for successful authentication",
-                    "reasoning": "Login flow tests should proceed through the happy path",
-                    "next_steps": "Continue with post-login verification"
-                }))
+                if output.status.success() {
+                    Ok(json!({
+                        "success": true,
+                        "test_type": "login_flow",
+                        "action_taken": "Provided matching face for successful authentication",
+                        "reasoning": "Login flow tests should proceed through the happy path",
+                        "next_steps": "Continue with post-login verification"
+                    }))
+                } else {
+                    Ok(json!({
+                        "error": {
+                            "code": "AUTOMATION_FAILED",
+                            "message": "Unable to trigger Face ID match",
+                            "manual_steps": ["Device > Face ID > Matching Face"]
+                        }
+                    }))
+                }
             }
 
             "security_test" => {
-                // For security tests, try to break things
-                Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "nomatch"])
-                    .output()
-                    .ok();
+                // For security tests, try non-matching face
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.2
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                Ok(json!({
-                    "success": true,
-                    "test_type": "security_test",
-                    "action_taken": "Provided non-matching face",
-                    "reasoning": "Security tests should verify failure handling",
-                    "next_steps": "Verify app shows appropriate error message"
-                }))
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
+
+                if output.status.success() {
+                    Ok(json!({
+                        "success": true,
+                        "test_type": "security_test",
+                        "action_taken": "Provided non-matching face",
+                        "reasoning": "Security tests should verify failure handling",
+                        "next_steps": "Verify app shows appropriate error message"
+                    }))
+                } else {
+                    Ok(json!({
+                        "error": {
+                            "code": "AUTOMATION_FAILED",
+                            "message": "Unable to trigger Face ID non-match",
+                            "manual_steps": ["Device > Face ID > Non-matching Face"]
+                        }
+                    }))
+                }
             }
 
             "edge_case_test" => {
@@ -356,18 +498,41 @@ impl Tool for SmartBiometricHandler {
 
             "ui_test" => {
                 // For UI tests, we just want to get past the dialog
-                Command::new("xcrun")
-                    .args(["simctl", "ui", &device_id, "biometric", "match"])
-                    .output()
-                    .ok();
+                let applescript = r#"
+                    tell application "Simulator"
+                        activate
+                        delay 0.2
+                        tell application "System Events"
+                            tell process "Simulator"
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                            end tell
+                        end tell
+                    end tell
+                "#;
 
-                Ok(json!({
-                    "success": true,
-                    "test_type": "ui_test",
-                    "action_taken": "Quickly authenticated to proceed with UI test",
-                    "reasoning": "UI tests need to get past authentication to test other features",
-                    "next_steps": "Continue with UI element verification"
-                }))
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(applescript)
+                    .output()
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
+
+                if output.status.success() {
+                    Ok(json!({
+                        "success": true,
+                        "test_type": "ui_test",
+                        "action_taken": "Quickly authenticated to proceed with UI test",
+                        "reasoning": "UI tests need to get past authentication to test other features",
+                        "next_steps": "Continue with UI element verification"
+                    }))
+                } else {
+                    Ok(json!({
+                        "error": {
+                            "code": "AUTOMATION_FAILED",
+                            "message": "Unable to trigger Face ID match",
+                            "manual_steps": ["Device > Face ID > Matching Face"]
+                        }
+                    }))
+                }
             }
 
             _ => Err(TestError::Mcp(format!("Unknown test type: {}", test_type))),
