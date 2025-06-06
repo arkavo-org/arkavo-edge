@@ -6,7 +6,7 @@ async fn test_ollama_client_creation() {
     unsafe {
         env::set_var("LLM_PROVIDER", "ollama");
         env::set_var("OLLAMA_BASE_URL", "http://localhost:11434");
-        env::set_var("OLLAMA_MODEL", "llama3.2");
+        env::set_var("OLLAMA_MODEL", "devstral");
     }
 
     let client = LlmClient::from_env().expect("Failed to create client");

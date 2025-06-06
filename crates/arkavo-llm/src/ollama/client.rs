@@ -18,7 +18,7 @@ impl OllamaClient {
         Self {
             client: Client::new(),
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
-            model: model.unwrap_or_else(|| "llama3.2".to_string()),
+            model: model.unwrap_or_else(|| "devstral".to_string()),
         }
     }
 
