@@ -1,3 +1,4 @@
+use super::app_diagnostic_tool::AppDiagnosticTool;
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
@@ -19,7 +20,6 @@ use super::template_diagnostics::TemplateDiagnosticsKit;
 use super::usage_guide::UsageGuideKit;
 use super::xctest_setup_tool::XCTestSetupKit;
 use super::xctest_status_tool::XCTestStatusKit;
-use super::app_diagnostic_tool::AppDiagnosticTool;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -116,10 +116,7 @@ impl McpTestServer {
             "ui_query".to_string(),
             Arc::new(UiQueryKit::new(device_manager.clone())),
         );
-        tools.insert(
-            "usage_guide".to_string(),
-            Arc::new(UsageGuideKit::new()),
-        );
+        tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
         tools.insert(
             "app_diagnostic".to_string(),
             Arc::new(AppDiagnosticTool::new()),

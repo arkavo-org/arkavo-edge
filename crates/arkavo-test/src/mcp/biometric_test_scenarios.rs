@@ -54,7 +54,8 @@ impl BiometricTestScenario {
              Manual steps required:\n\
              1. In Simulator menu, go to Device > Face ID\n\
              2. Check 'Enrolled' option\n\
-             3. Use 'Matching Face' when authentication is needed".to_string()
+             3. Use 'Matching Face' when authentication is needed"
+                .to_string(),
         ))
     }
 }
@@ -337,7 +338,7 @@ impl Tool for SmartBiometricHandler {
                 tell application "System Events"
                     key code 53 -- ESC key
                 end tell"#;
-                
+
                 Command::new("osascript")
                     .arg("-e")
                     .arg(script)

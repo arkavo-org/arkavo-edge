@@ -19,7 +19,7 @@ impl DeviceXCTestStatusManager {
     ) -> Result<Vec<DeviceWithXCTestStatus>> {
         let devices = device_manager.refresh_devices()?;
         let mut devices_with_status = Vec::new();
-        
+
         for device in devices {
             let xctest_status = if device.state == DeviceState::Booted {
                 // Only check XCTest status for booted devices
@@ -33,31 +33,31 @@ impl DeviceXCTestStatusManager {
             } else {
                 None
             };
-            
+
             devices_with_status.push(DeviceWithXCTestStatus {
                 device,
                 xctest_status,
             });
         }
-        
+
         Ok(devices_with_status)
     }
-    
+
     /// Find the best device for XCTest operations
     pub async fn find_best_xctest_device(
         device_manager: Arc<DeviceManager>,
     ) -> Result<Option<DeviceWithXCTestStatus>> {
         let devices = Self::get_all_devices_with_status(device_manager).await?;
-        
+
         // Priority order:
         // 1. Booted device with functional XCTest
         // 2. Booted device with XCTest installed but not functional
         // 3. Booted device without XCTest
         // 4. Shutdown device (would need to be booted first)
-        
+
         let mut best_device: Option<DeviceWithXCTestStatus> = None;
         let mut best_score = 0;
-        
+
         for device in devices {
             let score = match (&device.device.state, &device.xctest_status) {
                 (DeviceState::Booted, Some(status)) if status.is_functional => 100,
@@ -67,13 +67,13 @@ impl DeviceXCTestStatusManager {
                 (DeviceState::Shutdown, _) => 10,
                 _ => 0,
             };
-            
+
             if score > best_score {
                 best_score = score;
                 best_device = Some(device);
             }
         }
-        
+
         Ok(best_device)
     }
 }
@@ -81,11 +81,11 @@ impl DeviceXCTestStatusManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_device_with_xctest_status_serialization() {
         use std::time::Duration;
-        
+
         let device_status = DeviceWithXCTestStatus {
             device: IOSDevice {
                 id: "device-123".to_string(),
@@ -104,10 +104,10 @@ mod tests {
                 error_details: None,
             }),
         };
-        
+
         let json = serde_json::to_string_pretty(&device_status).unwrap();
         println!("Device with XCTest status JSON:\n{}", json);
-        
+
         let parsed: DeviceWithXCTestStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.device.id, "device-123");
         assert!(parsed.xctest_status.is_some());

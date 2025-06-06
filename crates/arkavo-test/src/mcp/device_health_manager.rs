@@ -43,7 +43,7 @@ impl DeviceHealthManager {
             .map_err(|e| TestError::Mcp(format!("Failed to parse runtime list: {}", e)))?;
 
         let mut runtimes = Vec::new();
-        
+
         if let Some(runtime_list) = data.get("runtimes").and_then(|r| r.as_array()) {
             for runtime in runtime_list {
                 if let (Some(identifier), Some(version)) = (
@@ -54,7 +54,7 @@ impl DeviceHealthManager {
                         .get("isAvailable")
                         .and_then(|a| a.as_bool())
                         .unwrap_or(false);
-                    
+
                     let build_version = runtime
                         .get("buildversion")
                         .and_then(|b| b.as_str())
@@ -104,21 +104,23 @@ impl DeviceHealthManager {
                             device.get("name").and_then(|n| n.as_str()),
                         ) {
                             let mut issues = Vec::new();
-                            
+
                             // Check if runtime is available
                             let runtime_available = available_runtime_ids.contains(runtime_id);
                             if !runtime_available {
                                 issues.push(format!("Runtime {} is not available", runtime_id));
                             }
-                            
+
                             // Check if device is available
                             let is_available = device
                                 .get("isAvailable")
                                 .and_then(|a| a.as_bool())
                                 .unwrap_or(true); // Default to true for backwards compatibility
-                            
+
                             if !is_available {
-                                if let Some(error) = device.get("availabilityError").and_then(|e| e.as_str()) {
+                                if let Some(error) =
+                                    device.get("availabilityError").and_then(|e| e.as_str())
+                                {
                                     issues.push(format!("Device unavailable: {}", error));
                                 } else {
                                     issues.push("Device is marked as unavailable".to_string());
@@ -162,7 +164,7 @@ impl DeviceHealthManager {
                         "Deleting unhealthy device: {} ({}) - Issues: {:?}",
                         report.device_name, report.device_id, report.issues
                     );
-                    
+
                     let output = Command::new("xcrun")
                         .args(["simctl", "delete", &report.device_id])
                         .output()
@@ -187,7 +189,7 @@ impl DeviceHealthManager {
     /// Delete all unavailable devices (simctl's built-in command)
     pub fn delete_unavailable_devices() -> Result<()> {
         eprintln!("Deleting all unavailable devices...");
-        
+
         let output = Command::new("xcrun")
             .args(["simctl", "delete", "unavailable"])
             .output()

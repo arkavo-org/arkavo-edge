@@ -79,11 +79,7 @@ impl XCTestVerifier {
     /// Check if XCTest bundle is installed on device
     async fn check_bundle_installed(device_id: &str) -> Result<bool> {
         let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "listapps",
-                device_id,
-            ])
+            .args(["simctl", "listapps", device_id])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
 
@@ -104,15 +100,15 @@ impl XCTestVerifier {
         use super::xctest_unix_bridge::XCTestUnixBridge;
 
         let start = Instant::now();
-        
+
         // Create a temporary bridge for testing
-        let socket_path = std::env::temp_dir()
-            .join(format!("arkavo-xctest-verify-{}.sock", std::process::id()));
+        let socket_path =
+            std::env::temp_dir().join(format!("arkavo-xctest-verify-{}.sock", std::process::id()));
         let mut bridge = XCTestUnixBridge::with_socket_path(socket_path.clone());
-        
+
         // Start the bridge server
         bridge.start().await?;
-        
+
         // Try simpler xctest invocation first
         let test_output = Command::new("xcrun")
             .args([
@@ -128,14 +124,16 @@ impl XCTestVerifier {
             Ok(mut child) => {
                 // Give it a moment to start
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                
+
                 // For now, just check if the process started successfully
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         if status.success() {
                             Ok(start.elapsed())
                         } else {
-                            Err(TestError::Mcp("XCTest runner exited with error".to_string()))
+                            Err(TestError::Mcp(
+                                "XCTest runner exited with error".to_string(),
+                            ))
                         }
                     }
                     Ok(None) => {
@@ -145,31 +143,31 @@ impl XCTestVerifier {
                     }
                     Err(e) => {
                         let _ = child.kill();
-                        Err(TestError::Mcp(format!("Failed to check process status: {}", e)))
+                        Err(TestError::Mcp(format!(
+                            "Failed to check process status: {}",
+                            e
+                        )))
                     }
                 }
             }
             Err(e) => {
                 // If the standard approach fails, just check if we can run any xctest
-                eprintln!("Standard XCTest launch failed: {}, trying minimal verification", e);
-                
+                eprintln!(
+                    "Standard XCTest launch failed: {}, trying minimal verification",
+                    e
+                );
+
                 // Check if device can run tests at all
                 let verify_output = Command::new("xcrun")
-                    .args([
-                        "simctl",
-                        "spawn",
-                        device_id,
-                        "uname",
-                        "-a",
-                    ])
+                    .args(["simctl", "spawn", device_id, "uname", "-a"])
                     .output();
-                    
+
                 match verify_output {
                     Ok(output) if output.status.success() => {
                         // Device can at least run commands
                         Ok(Duration::from_millis(100))
                     }
-                    _ => Err(TestError::Mcp("Device cannot execute commands".to_string()))
+                    _ => Err(TestError::Mcp("Device cannot execute commands".to_string())),
                 }
             }
         }
@@ -198,7 +196,8 @@ impl XCTestVerifier {
                     for device in devices_array {
                         if let Some(state) = device.get("state").and_then(|s| s.as_str()) {
                             if state == "Booted" {
-                                if let Some(device_id) = device.get("udid").and_then(|u| u.as_str()) {
+                                if let Some(device_id) = device.get("udid").and_then(|u| u.as_str())
+                                {
                                     let status = Self::verify_device(device_id).await?;
                                     return Ok(status.is_functional);
                                 }
@@ -230,7 +229,7 @@ mod tests {
 
         let json = serde_json::to_string(&status).unwrap();
         let parsed: XCTestStatus = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.device_id, "test-device");
         assert!(parsed.is_functional);
     }

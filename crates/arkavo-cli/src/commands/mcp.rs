@@ -471,14 +471,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Get dynamic tool list from server
                 match mcp_server.get_tool_schemas() {
                     Ok(schemas) => {
-                        let tools: Vec<Value> = schemas.into_iter().map(|schema| {
-                            json!({
-                                "name": schema.name,
-                                "description": schema.description,
-                                "inputSchema": schema.parameters
+                        let tools: Vec<Value> = schemas
+                            .into_iter()
+                            .map(|schema| {
+                                json!({
+                                    "name": schema.name,
+                                    "description": schema.description,
+                                    "inputSchema": schema.parameters
+                                })
                             })
-                        }).collect();
-                        
+                            .collect();
+
                         success_response(
                             request_id.clone(),
                             json!({
@@ -498,7 +501,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         INTERNAL_ERROR,
                         format!("Failed to get tool schemas: {}", e),
                         None,
-                    )
+                    ),
                 }
             }
 
@@ -551,6 +554,8 @@ mod tests {
 
     #[test]
     fn test_request_validation() {
+        init_schemas();
+
         // Valid request
         let valid_request = json!({
             "jsonrpc": "2.0",

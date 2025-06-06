@@ -54,7 +54,7 @@ impl Tool for TemplateDiagnosticsKit {
                 "has_bundle_id": templates::INFO_PLIST.contains("CFBundleIdentifier"),
             }
         });
-        
+
         let diagnostics = serde_json::json!({
             "status": "Templates are now embedded in the binary at compile time",
             "binary_info": {
@@ -68,10 +68,10 @@ impl Tool for TemplateDiagnosticsKit {
                 "reason": "Ensures template consistency and eliminates runtime filesystem dependencies"
             }
         });
-        
+
         Ok(diagnostics)
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }

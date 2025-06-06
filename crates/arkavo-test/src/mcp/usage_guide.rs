@@ -43,7 +43,8 @@ impl Tool for UsageGuideKit {
             .unwrap_or("overview");
 
         let content = match topic {
-            "overview" => r#"
+            "overview" => {
+                r#"
 # iOS Automation with XCUITest
 
 This MCP server provides iOS UI automation through XCUITest. 
@@ -101,8 +102,10 @@ is MUCH better than:
 ```json
 {"action": "tap", "target": {"x": 200, "y": 400}}
 ```
-"#,
-            "text_based_tapping" => r#"
+"#
+            }
+            "text_based_tapping" => {
+                r#"
 # Text-Based Tapping with XCUITest
 
 ## Prerequisites
@@ -145,8 +148,10 @@ When XCUITest is set up, you can find elements by their visible text:
 ```
 
 XCUITest will search for elements matching your text/ID for up to 10 seconds.
-"#,
-            "workflows" => r#"
+"#
+            }
+            "workflows" => {
+                r#"
 # Common Automation Workflows
 
 ## CRITICAL: Initial Setup Workflow
@@ -186,8 +191,10 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
 - Screenshot to see all fields
 - For each field: tap by label → clear → type
 - Submit using button text
-"#,
-            "debugging" => r#"
+"#
+            }
+            "debugging" => {
+                r#"
 # Debugging Tips
 
 ## If Text-Based Tap Fails
@@ -219,8 +226,10 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
 - Verify UI state before interacting
 - Read error messages - they're helpful!
 - Use text/accessibility_id over coordinates
-"#,
-            "examples" => r#"
+"#
+            }
+            "examples" => {
+                r#"
 # Complete Examples
 
 ## IMPORTANT: Setup XCUITest First!
@@ -272,8 +281,11 @@ tool("screen_capture", {"name": "after_scroll"})
 # Now try tapping
 tool("ui_interaction", {"action": "tap", "target": {"text": "Advanced Settings"}})
 ```
-"#,
-            _ => "Unknown topic. Available topics: overview, text_based_tapping, workflows, debugging, examples"
+"#
+            }
+            _ => {
+                "Unknown topic. Available topics: overview, text_based_tapping, workflows, debugging, examples"
+            }
         };
 
         Ok(serde_json::json!({

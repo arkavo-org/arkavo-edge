@@ -62,8 +62,12 @@ impl BiometricKit {
         }
     }
 
-
-    fn try_applescript_biometric(&self, device_id: &str, action: &str, biometric_type: &str) -> bool {
+    fn try_applescript_biometric(
+        &self,
+        device_id: &str,
+        action: &str,
+        biometric_type: &str,
+    ) -> bool {
         // Get device name for AppleScript
         let _device = match self.device_manager.get_device(device_id) {
             Some(d) => d,
@@ -72,7 +76,7 @@ impl BiometricKit {
 
         let menu_item = match (biometric_type, action) {
             ("face_id", "match") => "Matching Face",
-            ("face_id", "nomatch") => "Non-matching Face", 
+            ("face_id", "nomatch") => "Non-matching Face",
             ("touch_id", "match") => "Matching Touch",
             ("touch_id", "nomatch") => "Non-matching Touch",
             _ => return false,
@@ -108,14 +112,14 @@ impl BiometricKit {
     fn try_keyboard_shortcut_biometric(&self, _device_id: &str, action: &str) -> bool {
         // Some biometric dialogs may respond to keyboard shortcuts
         // This is a placeholder for potential keyboard-based workarounds
-        
+
         // For now, we can try common shortcuts like:
         // Cmd+Shift+M for "Match" (hypothetical)
         // Cmd+Shift+N for "No Match" (hypothetical)
-        
+
         // Note: These are not standard shortcuts and likely won't work,
         // but we're trying all possible workarounds before failing
-        
+
         match action {
             "match" => {
                 // Try to send a keyboard shortcut (this is speculative)
@@ -123,11 +127,11 @@ impl BiometricKit {
                     .arg("-e")
                     .arg(r#"tell application "Simulator" to activate"#)
                     .output();
-                
+
                 if result.is_ok() {
                     // Give focus time to switch
                     std::thread::sleep(std::time::Duration::from_millis(100));
-                    
+
                     // Try sending Enter key which might confirm biometric
                     Command::new("osascript")
                         .arg("-e")
@@ -187,17 +191,15 @@ impl Tool for BiometricKit {
                     .output();
 
                 match result {
-                    Ok(output) if output.status.success() => {
-                        Ok(serde_json::json!({
-                            "success": true,
-                            "action": "enroll",
-                            "biometric_type": biometric_type,
-                            "message": "Toggled biometric enrollment via AppleScript",
-                            "method": "applescript",
-                            "warning": "This toggles the enrollment state. Check current state with face_id_status tool.",
-                            "note": "May require app restart to take effect"
-                        }))
-                    }
+                    Ok(output) if output.status.success() => Ok(serde_json::json!({
+                        "success": true,
+                        "action": "enroll",
+                        "biometric_type": biometric_type,
+                        "message": "Toggled biometric enrollment via AppleScript",
+                        "method": "applescript",
+                        "warning": "This toggles the enrollment state. Check current state with face_id_status tool.",
+                        "note": "May require app restart to take effect"
+                    })),
                     _ => {
                         // AppleScript failed, return honest failure
                         Ok(serde_json::json!({
@@ -309,37 +311,30 @@ impl Tool for BiometricKit {
                         key code 53 -- ESC key
                     end tell
                 "#;
-                
-                let esc_result = Command::new("osascript")
-                    .arg("-e")
-                    .arg(esc_script)
-                    .output();
+
+                let esc_result = Command::new("osascript").arg("-e").arg(esc_script).output();
 
                 match esc_result {
-                    Ok(output) if output.status.success() => {
-                        Ok(serde_json::json!({
-                            "success": true,
-                            "action": "cancel",
-                            "biometric_type": biometric_type,
-                            "message": "Sent ESC key to attempt dialog cancellation",
-                            "warning": "This may not work for all biometric dialogs. Manual cancellation may be required.",
-                            "note": "For 'Simulator requires enrolled biometrics' dialogs, use passkey_dialog tool instead."
-                        }))
-                    }
-                    _ => {
-                        Ok(serde_json::json!({
-                            "error": {
-                                "code": "CANCEL_FAILED",
-                                "message": "Unable to programmatically cancel biometric dialog",
-                                "details": {
-                                    "manual_steps": [
-                                        "Tap the Cancel button in the biometric dialog",
-                                        "Or press ESC key while Simulator has focus"
-                                    ]
-                                }
+                    Ok(output) if output.status.success() => Ok(serde_json::json!({
+                        "success": true,
+                        "action": "cancel",
+                        "biometric_type": biometric_type,
+                        "message": "Sent ESC key to attempt dialog cancellation",
+                        "warning": "This may not work for all biometric dialogs. Manual cancellation may be required.",
+                        "note": "For 'Simulator requires enrolled biometrics' dialogs, use passkey_dialog tool instead."
+                    })),
+                    _ => Ok(serde_json::json!({
+                        "error": {
+                            "code": "CANCEL_FAILED",
+                            "message": "Unable to programmatically cancel biometric dialog",
+                            "details": {
+                                "manual_steps": [
+                                    "Tap the Cancel button in the biometric dialog",
+                                    "Or press ESC key while Simulator has focus"
+                                ]
                             }
-                        }))
-                    }
+                        }
+                    })),
                 }
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
@@ -512,18 +507,16 @@ impl Tool for SystemDialogKit {
                     }))
                 }
             }
-            Err(e) => {
-                Ok(serde_json::json!({
-                    "error": {
-                        "code": "APPLESCRIPT_FAILED",
-                        "message": format!("Failed to execute AppleScript: {}", e),
-                        "details": {
-                            "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility",
-                            "alternative": "Use ui_interaction tool with known button coordinates"
-                        }
+            Err(e) => Ok(serde_json::json!({
+                "error": {
+                    "code": "APPLESCRIPT_FAILED",
+                    "message": format!("Failed to execute AppleScript: {}", e),
+                    "details": {
+                        "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility",
+                        "alternative": "Use ui_interaction tool with known button coordinates"
                     }
-                }))
-            }
+                }
+            })),
         }
     }
 

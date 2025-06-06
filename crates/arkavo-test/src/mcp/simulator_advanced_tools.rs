@@ -79,7 +79,11 @@ impl SimulatorAdvancedKit {
             .map_err(|e| TestError::Mcp(format!("Failed to get device paths: {}", e)))?;
 
         let data_path = if path_output.status.success() {
-            Some(String::from_utf8_lossy(&path_output.stdout).trim().to_string())
+            Some(
+                String::from_utf8_lossy(&path_output.stdout)
+                    .trim()
+                    .to_string(),
+            )
         } else {
             None
         };
@@ -179,7 +183,7 @@ impl Tool for SimulatorAdvancedKit {
                     .ok_or_else(|| TestError::Mcp("Missing device_id parameter".to_string()))?;
 
                 let diagnostics = self.get_diagnostics(device_id).await?;
-                
+
                 Ok(json!({
                     "success": true,
                     "diagnostics": diagnostics
@@ -193,7 +197,7 @@ impl Tool for SimulatorAdvancedKit {
                     .ok_or_else(|| TestError::Mcp("Missing device_id parameter".to_string()))?;
 
                 let processes = self.list_device_processes(device_id).await?;
-                
+
                 Ok(json!({
                     "success": true,
                     "device_id": device_id,
@@ -270,10 +274,10 @@ impl Tool for SimulatorAdvancedKit {
 
                 if output.status.success() {
                     let new_device_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    
+
                     // Refresh devices to include the clone
                     self.device_manager.refresh_devices()?;
-                    
+
                     Ok(json!({
                         "success": true,
                         "original_device_id": device_id,

@@ -49,7 +49,7 @@ impl XCTestSetupKit {
 impl Tool for XCTestSetupKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         eprintln!("[XCTestSetupKit] Starting XCUITest setup...");
-        
+
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
@@ -72,7 +72,7 @@ impl Tool for XCTestSetupKit {
             .get("force_reinstall")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-            
+
         let target_app_bundle_id = params
             .get("target_app_bundle_id")
             .and_then(|v| v.as_str())
@@ -80,9 +80,12 @@ impl Tool for XCTestSetupKit {
 
         // Check if XCUITest is already available and functional
         if !force_reinstall {
-            eprintln!("[XCTestSetupKit] Checking XCTest status for device {}...", device_id);
+            eprintln!(
+                "[XCTestSetupKit] Checking XCTest status for device {}...",
+                device_id
+            );
             let verification_status = XCTestVerifier::verify_device(&device_id).await?;
-            
+
             if verification_status.is_functional {
                 let global_bridge = UiInteractionKit::get_global_xctest_bridge();
                 if global_bridge.read().await.is_some() {
@@ -149,10 +152,16 @@ impl Tool for XCTestSetupKit {
             }
         };
 
-        eprintln!("[XCTestSetupKit] Bundle compiled at: {}", bundle_path.display());
+        eprintln!(
+            "[XCTestSetupKit] Bundle compiled at: {}",
+            bundle_path.display()
+        );
 
         // Install to simulator
-        eprintln!("[XCTestSetupKit] Installing bundle to simulator {}...", device_id);
+        eprintln!(
+            "[XCTestSetupKit] Installing bundle to simulator {}...",
+            device_id
+        );
         if let Err(e) = compiler.install_to_simulator(&device_id, &bundle_path) {
             return Ok(serde_json::json!({
                 "success": false,
@@ -178,7 +187,7 @@ impl Tool for XCTestSetupKit {
         eprintln!("[XCTestSetupKit] Testing XCUITest connection...");
         let socket_path = compiler.socket_path().to_path_buf();
         let mut bridge = XCTestUnixBridge::with_socket_path(socket_path.clone());
-        
+
         // Start the bridge
         if let Err(e) = bridge.start().await {
             return Ok(serde_json::json!({
@@ -193,21 +202,24 @@ impl Tool for XCTestSetupKit {
 
         // Launch the target app first if specified
         if let Some(ref app_id) = target_app_bundle_id {
-            eprintln!("[XCTestSetupKit] Checking if target app is installed: {}", app_id);
-            
+            eprintln!(
+                "[XCTestSetupKit] Checking if target app is installed: {}",
+                app_id
+            );
+
             // First check if app is installed
             let list_apps_result = std::process::Command::new("xcrun")
                 .args(["simctl", "listapps", &device_id])
                 .output();
-                
+
             let app_installed = match list_apps_result {
                 Ok(output) => {
                     let apps_str = String::from_utf8_lossy(&output.stdout);
                     apps_str.contains(app_id)
                 }
-                Err(_) => false
+                Err(_) => false,
             };
-            
+
             if !app_installed {
                 return Ok(serde_json::json!({
                     "success": false,
@@ -219,20 +231,23 @@ impl Tool for XCTestSetupKit {
                     }
                 }));
             }
-            
+
             eprintln!("[XCTestSetupKit] Launching target app: {}", app_id);
             let launch_result = std::process::Command::new("xcrun")
                 .args(["simctl", "launch", &device_id, app_id])
                 .output();
-                
+
             match launch_result {
                 Ok(output) => {
                     if output.status.success() {
                         eprintln!("[XCTestSetupKit] Target app launched successfully");
                     } else {
                         let error_msg = String::from_utf8_lossy(&output.stderr);
-                        eprintln!("[XCTestSetupKit] Failed to launch target app: {}", error_msg);
-                        
+                        eprintln!(
+                            "[XCTestSetupKit] Failed to launch target app: {}",
+                            error_msg
+                        );
+
                         return Ok(serde_json::json!({
                             "success": false,
                             "error": {
@@ -256,18 +271,20 @@ impl Tool for XCTestSetupKit {
                     }));
                 }
             }
-            
+
             // Give app time to start and come to foreground
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
-        
+
         // Launch the test host app
         eprintln!("[XCTestSetupKit] Launching test host app...");
         if let Err(e) = compiler.launch_test_host(&device_id, target_app_bundle_id.as_deref()) {
             let error_str = e.to_string();
-            
+
             // Check if the error is due to app not being installed
-            if error_str.contains("failed to launch") || error_str.contains("FBSOpenApplicationServiceErrorDomain") {
+            if error_str.contains("failed to launch")
+                || error_str.contains("FBSOpenApplicationServiceErrorDomain")
+            {
                 return Ok(serde_json::json!({
                     "success": false,
                     "error": {
@@ -279,7 +296,7 @@ impl Tool for XCTestSetupKit {
                     }
                 }));
             }
-            
+
             return Ok(serde_json::json!({
                 "success": false,
                 "error": {
@@ -292,18 +309,23 @@ impl Tool for XCTestSetupKit {
 
         // Connect to the test runner (as a client)
         eprintln!("[XCTestSetupKit] Connecting to test runner...");
-        eprintln!("[XCTestSetupKit] Socket path: {}", compiler.socket_path().display());
-        
+        eprintln!(
+            "[XCTestSetupKit] Socket path: {}",
+            compiler.socket_path().display()
+        );
+
         // Give the Swift side time to start up and bind to the socket
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        
+
         match tokio::time::timeout(
             tokio::time::Duration::from_secs(30), // Increased timeout
-            bridge.connect_to_runner()
-        ).await {
+            bridge.connect_to_runner(),
+        )
+        .await
+        {
             Ok(Ok(())) => {
                 eprintln!("[XCTestSetupKit] Successfully connected to test runner!");
-                
+
                 // Test the connection with a ping
                 let test_result = bridge.send_ping().await;
                 if let Err(e) = test_result {
@@ -318,18 +340,18 @@ impl Tool for XCTestSetupKit {
                         }
                     }));
                 }
-                
+
                 eprintln!("[XCTestSetupKit] Connection test passed");
-                
+
                 // Store the bridge in the global storage so ui_interaction can use it
                 let global_bridge = UiInteractionKit::get_global_xctest_bridge();
                 let bridge_arc = Arc::new(Mutex::new(bridge));
                 *global_bridge.write().await = Some(bridge_arc);
                 eprintln!("[XCTestSetupKit] Global XCTest bridge updated");
-                
+
                 // Don't run the verifier - it's checking for things that don't apply to our bridge approach
                 // let final_status = XCTestVerifier::verify_device(&device_id).await?;
-                
+
                 Ok(serde_json::json!({
                     "success": true,
                     "status": "setup_complete",

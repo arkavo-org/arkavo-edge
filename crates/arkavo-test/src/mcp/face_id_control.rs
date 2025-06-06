@@ -105,41 +105,37 @@ impl Tool for FaceIdController {
                     .output();
 
                 match result {
-                    Ok(output) if output.status.success() => {
-                        Ok(json!({
-                            "success": true,
-                            "action": "enroll",
-                            "device_id": device_id,
-                            "message": "Face ID enrollment enabled via AppleScript",
-                            "method": "applescript",
-                            "note": "App may need restart for enrollment to take effect"
-                        }))
-                    }
-                    _ => {
-                        Ok(json!({
-                            "success": false,
-                            "action": "enroll",
-                            "device_id": device_id,
-                            "error": {
-                                "code": "FACE_ID_ENROLLMENT_FAILED",
-                                "message": "Unable to automate Face ID enrollment",
-                                "details": {
-                                    "attempted_method": "AppleScript automation",
-                                    "possible_reasons": [
-                                        "Accessibility permissions not granted",
-                                        "Simulator UI has changed",
-                                        "Running in headless/CI environment"
-                                    ],
-                                    "manual_steps": [
-                                        "1. Focus on the iOS Simulator window",
-                                        "2. In menu bar: Device > Face ID > Enrolled (check it)",
-                                        "3. Enrollment persists until manually unchecked"
-                                    ],
-                                    "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility > Add Terminal/IDE"
-                                }
+                    Ok(output) if output.status.success() => Ok(json!({
+                        "success": true,
+                        "action": "enroll",
+                        "device_id": device_id,
+                        "message": "Face ID enrollment enabled via AppleScript",
+                        "method": "applescript",
+                        "note": "App may need restart for enrollment to take effect"
+                    })),
+                    _ => Ok(json!({
+                        "success": false,
+                        "action": "enroll",
+                        "device_id": device_id,
+                        "error": {
+                            "code": "FACE_ID_ENROLLMENT_FAILED",
+                            "message": "Unable to automate Face ID enrollment",
+                            "details": {
+                                "attempted_method": "AppleScript automation",
+                                "possible_reasons": [
+                                    "Accessibility permissions not granted",
+                                    "Simulator UI has changed",
+                                    "Running in headless/CI environment"
+                                ],
+                                "manual_steps": [
+                                    "1. Focus on the iOS Simulator window",
+                                    "2. In menu bar: Device > Face ID > Enrolled (check it)",
+                                    "3. Enrollment persists until manually unchecked"
+                                ],
+                                "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility > Add Terminal/IDE"
                             }
-                        }))
-                    }
+                        }
+                    })),
                 }
             }
             "unenroll" => {
@@ -178,35 +174,31 @@ impl Tool for FaceIdController {
                     .output();
 
                 match result {
-                    Ok(output) if output.status.success() => {
-                        Ok(json!({
-                            "success": true,
-                            "action": "match",
-                            "device_id": device_id,
-                            "message": "Face ID match triggered via AppleScript",
-                            "method": "applescript",
-                            "timing_critical": "Must be executed while biometric prompt is visible"
-                        }))
-                    }
-                    _ => {
-                        Ok(json!({
-                            "success": false,
-                            "action": "match",
-                            "device_id": device_id,
-                            "error": {
-                                "code": "FACE_ID_MATCH_FAILED",
-                                "message": "Unable to trigger Face ID match",
-                                "details": {
-                                    "manual_steps": [
-                                        "1. Ensure Face ID is enrolled",
-                                        "2. When biometric prompt appears", 
-                                        "3. Go to Device > Face ID > Matching Face"
-                                    ],
-                                    "timing": "Must be done while biometric prompt is active"
-                                }
+                    Ok(output) if output.status.success() => Ok(json!({
+                        "success": true,
+                        "action": "match",
+                        "device_id": device_id,
+                        "message": "Face ID match triggered via AppleScript",
+                        "method": "applescript",
+                        "timing_critical": "Must be executed while biometric prompt is visible"
+                    })),
+                    _ => Ok(json!({
+                        "success": false,
+                        "action": "match",
+                        "device_id": device_id,
+                        "error": {
+                            "code": "FACE_ID_MATCH_FAILED",
+                            "message": "Unable to trigger Face ID match",
+                            "details": {
+                                "manual_steps": [
+                                    "1. Ensure Face ID is enrolled",
+                                    "2. When biometric prompt appears",
+                                    "3. Go to Device > Face ID > Matching Face"
+                                ],
+                                "timing": "Must be done while biometric prompt is active"
                             }
-                        }))
-                    }
+                        }
+                    })),
                 }
             }
             "no_match" => {
@@ -228,32 +220,28 @@ impl Tool for FaceIdController {
                     .output();
 
                 match result {
-                    Ok(output) if output.status.success() => {
-                        Ok(json!({
-                            "success": true,
-                            "action": "no_match",
-                            "device_id": device_id,
-                            "message": "Face ID non-match triggered via AppleScript",
-                            "method": "applescript"
-                        }))
-                    }
-                    _ => {
-                        Ok(json!({
-                            "success": false,
-                            "action": "no_match",
-                            "device_id": device_id,
-                            "error": {
-                                "code": "FACE_ID_NOMATCH_FAILED",
-                                "message": "Unable to trigger Face ID non-match",
-                                "details": {
-                                    "manual_steps": [
-                                        "1. When biometric prompt appears",
-                                        "2. Go to Device > Face ID > Non-matching Face"
-                                    ]
-                                }
+                    Ok(output) if output.status.success() => Ok(json!({
+                        "success": true,
+                        "action": "no_match",
+                        "device_id": device_id,
+                        "message": "Face ID non-match triggered via AppleScript",
+                        "method": "applescript"
+                    })),
+                    _ => Ok(json!({
+                        "success": false,
+                        "action": "no_match",
+                        "device_id": device_id,
+                        "error": {
+                            "code": "FACE_ID_NOMATCH_FAILED",
+                            "message": "Unable to trigger Face ID non-match",
+                            "details": {
+                                "manual_steps": [
+                                    "1. When biometric prompt appears",
+                                    "2. Go to Device > Face ID > Non-matching Face"
+                                ]
                             }
-                        }))
-                    }
+                        }
+                    })),
                 }
             }
             _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),

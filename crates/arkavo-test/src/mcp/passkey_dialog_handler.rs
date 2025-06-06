@@ -97,7 +97,7 @@ impl Tool for PasskeyDialogHandler {
                         end tell
                     end tell
                 "#;
-                
+
                 let result = Command::new("osascript")
                     .args(["-e", esc_script])
                     .output()
@@ -134,11 +134,13 @@ impl Tool for PasskeyDialogHandler {
                         end tell
                     end tell
                 "#;
-                
+
                 let esc_output = Command::new("osascript")
                     .args(["-e", esc_script])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC via AppleScript: {}", e)))?;
+                    .map_err(|e| {
+                        TestError::Mcp(format!("Failed to send ESC via AppleScript: {}", e))
+                    })?;
 
                 // NOTE: simctl io does NOT support tap commands
                 // We can only use XCTest bridge or AppleScript for UI interactions

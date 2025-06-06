@@ -13,25 +13,30 @@ impl XCTestDirectRunner {
     pub fn new() -> Result<Self> {
         let build_dir = std::env::temp_dir().join("arkavo-direct-xctest");
         fs::create_dir_all(&build_dir)?;
-        
-        let socket_path = std::env::temp_dir().join(format!("arkavo-xctest-{}.sock", std::process::id()));
-        
+
+        let socket_path =
+            std::env::temp_dir().join(format!("arkavo-xctest-{}.sock", std::process::id()));
+
         Ok(Self {
             build_dir,
             socket_path,
         })
     }
-    
+
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }
-    
+
     /// Compile and run XCTest code directly
     pub fn run_on_simulator(&self, device_id: &str) -> Result<()> {
-        eprintln!("[DirectRunner] Creating XCTest executable for device {}", device_id);
-        
+        eprintln!(
+            "[DirectRunner] Creating XCTest executable for device {}",
+            device_id
+        );
+
         // Create Swift code that uses XCTest but runs as a regular executable
-        let swift_source = format!(r#"
+        let swift_source = format!(
+            r#"
 import Foundation
 import XCTest
 
@@ -174,67 +179,77 @@ do {{
     print("[Swift] Failed to start server: \(error)")
     exit(1)
 }}
-"#, self.socket_path.display());
+"#,
+            self.socket_path.display()
+        );
 
         // Write source
         let source_path = self.build_dir.join("xctest_direct.swift");
         fs::write(&source_path, swift_source)?;
-        
+
         // Compile with XCTest framework
         let binary_path = self.build_dir.join("xctest_direct");
-        
+
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()?;
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
-        
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
+
         let platform_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
             .output()?;
-        let platform_path = String::from_utf8_lossy(&platform_output.stdout).trim().to_string();
+        let platform_path = String::from_utf8_lossy(&platform_output.stdout)
+            .trim()
+            .to_string();
         let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
-        
+
         eprintln!("[DirectRunner] Compiling with XCTest framework...");
-        
+
         let compile_output = Command::new("xcrun")
             .args([
                 "swiftc",
-                "-sdk", &sdk_path,
-                "-target", "arm64-apple-ios15.0-simulator",
-                "-F", &xctest_framework_path,
-                "-framework", "XCTest",
-                "-framework", "UIKit", 
-                "-framework", "Foundation",
-                "-Xlinker", "-rpath",
-                "-Xlinker", &xctest_framework_path,
-                "-o", binary_path.to_str().unwrap(),
+                "-sdk",
+                &sdk_path,
+                "-target",
+                "arm64-apple-ios15.0-simulator",
+                "-F",
+                &xctest_framework_path,
+                "-framework",
+                "XCTest",
+                "-framework",
+                "UIKit",
+                "-framework",
+                "Foundation",
+                "-Xlinker",
+                "-rpath",
+                "-Xlinker",
+                &xctest_framework_path,
+                "-o",
+                binary_path.to_str().unwrap(),
                 source_path.to_str().unwrap(),
             ])
             .output()?;
-            
+
         if !compile_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to compile: {}",
                 String::from_utf8_lossy(&compile_output.stderr)
             )));
         }
-        
+
         eprintln!("[DirectRunner] Compiled successfully, spawning on simulator...");
-        
+
         // Run on simulator
         let mut child = Command::new("xcrun")
-            .args([
-                "simctl",
-                "spawn",
-                device_id,
-                binary_path.to_str().unwrap()
-            ])
+            .args(["simctl", "spawn", device_id, binary_path.to_str().unwrap()])
             .spawn()
             .map_err(|e| TestError::Mcp(format!("Failed to spawn: {}", e)))?;
-            
+
         // Give it time to start
         std::thread::sleep(std::time::Duration::from_secs(2));
-        
+
         // Check if running
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -255,7 +270,7 @@ do {{
                 eprintln!("[DirectRunner] Warning: Could not check status: {}", e);
             }
         }
-        
+
         Ok(())
     }
 }

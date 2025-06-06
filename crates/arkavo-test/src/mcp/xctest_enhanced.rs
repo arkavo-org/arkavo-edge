@@ -1,5 +1,5 @@
 //! Enhanced XCTest integration for iOS testing
-//! 
+//!
 //! Note: simctl does NOT support touch/tap/swipe commands
 //! The only valid simctl io operations are:
 //! - enumerate: Lists IO ports
@@ -184,4 +184,3 @@ impl Drop for XCTestEnhanced {
         }
     }
 }
-

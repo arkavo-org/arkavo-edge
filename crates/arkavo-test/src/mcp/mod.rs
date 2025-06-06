@@ -1,3 +1,4 @@
+pub mod app_diagnostic_tool;
 pub mod biometric_dialog_handler;
 pub mod biometric_test_scenarios;
 pub mod code_analysis_tools;
@@ -25,7 +26,6 @@ pub mod templates;
 pub mod test_target_app;
 pub mod tools;
 pub mod usage_guide;
-pub mod app_diagnostic_tool;
 pub mod xctest_app_runner;
 pub mod xctest_compiler;
 pub mod xctest_direct_runner;

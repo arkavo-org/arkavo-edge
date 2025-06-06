@@ -9,10 +9,11 @@ use serde_json::Value;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
 use std::sync::OnceLock;
+use tokio::sync::{Mutex, RwLock};
 
-static XCTEST_BRIDGE: OnceLock<Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>> = OnceLock::new();
+type XCTestBridgeType = Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>;
+static XCTEST_BRIDGE: OnceLock<XCTestBridgeType> = OnceLock::new();
 
 pub struct UiInteractionKit {
     schema: ToolSchema,
@@ -97,24 +98,22 @@ impl UiInteractionKit {
 
     /// Get the XCTest bridge
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
-        let bridge_holder = XCTEST_BRIDGE.get_or_init(|| {
-            Arc::new(RwLock::new(None))
-        });
-        
+        let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
+
         // Try to get existing bridge
         let existing = bridge_holder.read().await.clone();
         if existing.is_some() {
             return existing;
         }
-        
+
         // No bridge exists, try to initialize one
         let mut write_guard = bridge_holder.write().await;
-        
+
         // Double-check in case another task initialized while we were waiting
         if write_guard.is_some() {
             return write_guard.clone();
         }
-        
+
         // Try to set up XCTest runner
         match self.setup_xctest_runner().await {
             Ok(bridge) => {
@@ -132,30 +131,37 @@ impl UiInteractionKit {
             }
         }
     }
-    
+
     /// Get the global XCTest bridge storage
-    pub fn get_global_xctest_bridge() -> &'static Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>> {
+    pub fn get_global_xctest_bridge() -> &'static Arc<RwLock<Option<Arc<Mutex<XCTestUnixBridge>>>>>
+    {
         XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)))
     }
 
     /// Set up the XCTest runner
     async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
         eprintln!("[UiInteractionKit] Setting up XCTest runner...");
-        
+
         // Compile XCTest bundle if needed
         let compiler = XCTestCompiler::new()?;
         let socket_path = compiler.socket_path().to_path_buf();
         eprintln!("[UiInteractionKit] Socket path: {}", socket_path.display());
-        
+
         let bundle_path = compiler.get_xctest_bundle()?;
-        eprintln!("[UiInteractionKit] Bundle compiled at: {}", bundle_path.display());
+        eprintln!(
+            "[UiInteractionKit] Bundle compiled at: {}",
+            bundle_path.display()
+        );
 
         // Get active device
         let device = self
             .device_manager
             .get_active_device()
             .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
-        eprintln!("[UiInteractionKit] Active device: {} ({})", device.name, device.id);
+        eprintln!(
+            "[UiInteractionKit] Active device: {} ({})",
+            device.name, device.id
+        );
 
         // Install to simulator
         eprintln!("[UiInteractionKit] Installing bundle to simulator...");
@@ -163,11 +169,11 @@ impl UiInteractionKit {
 
         // Create Unix socket bridge with the same socket path
         let mut bridge = XCTestUnixBridge::with_socket_path(socket_path);
-        
+
         // Start the bridge server BEFORE running tests
         eprintln!("[UiInteractionKit] Starting Unix socket bridge...");
         bridge.start().await?;
-        
+
         // Give the bridge a moment to start listening
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
@@ -179,8 +185,10 @@ impl UiInteractionKit {
         eprintln!("[UiInteractionKit] Waiting for test runner to connect...");
         match tokio::time::timeout(
             tokio::time::Duration::from_secs(10),
-            bridge.wait_for_connection()
-        ).await {
+            bridge.wait_for_connection(),
+        )
+        .await
+        {
             Ok(Ok(())) => {
                 eprintln!("[UiInteractionKit] Test runner connected successfully");
                 Ok(bridge)
@@ -191,7 +199,9 @@ impl UiInteractionKit {
             }
             Err(_) => {
                 eprintln!("[UiInteractionKit] Timeout waiting for test runner connection");
-                Err(TestError::Mcp("Timeout waiting for XCTest runner to connect".to_string()))
+                Err(TestError::Mcp(
+                    "Timeout waiting for XCTest runner to connect".to_string(),
+                ))
             }
         }
     }
@@ -291,7 +301,7 @@ impl Tool for UiInteractionKit {
 
                 // Check if XCUITest is actually available
                 let xctest_available = self.get_xctest_bridge().await.is_some();
-                
+
                 let mut response = serde_json::json!({
                     "action": "analyze_layout",
                     "success": true,
@@ -300,15 +310,22 @@ impl Tool for UiInteractionKit {
                     "device_type": device_type,
                     "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI"
                 });
-                
+
                 if xctest_available {
-                    response["next_steps"] = serde_json::json!("After reading the image, use text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- XCUITest will find elements by text with 10-second timeout");
-                    response["xcuitest_status"] = serde_json::json!("XCUITest is available for text-based element finding");
+                    response["next_steps"] = serde_json::json!(
+                        "After reading the image, use text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- XCUITest will find elements by text with 10-second timeout"
+                    );
+                    response["xcuitest_status"] =
+                        serde_json::json!("XCUITest is available for text-based element finding");
                 } else {
-                    response["next_steps"] = serde_json::json!("After reading the image, you'll need to use coordinates:\n1. Estimate the x,y position of elements from the image\n2. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n3. Text-based tapping requires XCUITest which is not currently available");
-                    response["xcuitest_status"] = serde_json::json!("XCUITest not available - use coordinates from image analysis");
+                    response["next_steps"] = serde_json::json!(
+                        "After reading the image, you'll need to use coordinates:\n1. Estimate the x,y position of elements from the image\n2. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n3. Text-based tapping requires XCUITest which is not currently available"
+                    );
+                    response["xcuitest_status"] = serde_json::json!(
+                        "XCUITest not available - use coordinates from image analysis"
+                    );
                 }
-                
+
                 Ok(response)
             }
             "tap" => {
@@ -449,29 +466,45 @@ impl Tool for UiInteractionKit {
                             // No XCUITest bridge available
                             if target.get("x").is_none() || target.get("y").is_none() {
                                 // Can't proceed without coordinates - provide helpful guidance
-                                let text_target = target.get("text").and_then(|v| v.as_str()).unwrap_or("element");
+                                let text_target = target
+                                    .get("text")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("element");
                                 // Get device info for better coordinate guidance
-                                let device_id = params.get("device_id").and_then(|v| v.as_str()).unwrap_or("");
+                                let device_id = params
+                                    .get("device_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
                                 let device_info = self.device_manager.get_device(device_id);
                                 let device_type = device_info
                                     .as_ref()
                                     .map(|d| d.device_type.as_str())
                                     .unwrap_or("unknown");
-                                
+
                                 // Provide device-specific coordinate tips
                                 let (width, height) = match device_type {
                                     s if s.contains("iPhone-16-Pro-Max") => (430, 932),
-                                    s if s.contains("iPhone-16-Pro") || s.contains("iPhone-15-Pro") => (393, 852),
-                                    s if s.contains("iPhone-16-Plus") || s.contains("iPhone-15-Plus") => (428, 926),
-                                    s if s.contains("iPhone-16") || s.contains("iPhone-15") => (390, 844),
+                                    s if s.contains("iPhone-16-Pro")
+                                        || s.contains("iPhone-15-Pro") =>
+                                    {
+                                        (393, 852)
+                                    }
+                                    s if s.contains("iPhone-16-Plus")
+                                        || s.contains("iPhone-15-Plus") =>
+                                    {
+                                        (428, 926)
+                                    }
+                                    s if s.contains("iPhone-16") || s.contains("iPhone-15") => {
+                                        (390, 844)
+                                    }
                                     s if s.contains("iPhone-SE") => (375, 667),
                                     s if s.contains("iPad") => (820, 1180),
                                     _ => (393, 852), // Default to iPhone Pro size
                                 };
-                                
+
                                 return Ok(serde_json::json!({
                                     "error": {
-                                        "code": "XCUITEST_NOT_AVAILABLE", 
+                                        "code": "XCUITEST_NOT_AVAILABLE",
                                         "message": format!("Cannot tap '{}' by text - XCUITest is not initialized", text_target),
                                         "solution": "Use the setup_xcuitest tool to initialize XCUITest",
                                         "immediate_action": {

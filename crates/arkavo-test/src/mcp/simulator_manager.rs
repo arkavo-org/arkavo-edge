@@ -156,17 +156,16 @@ impl SimulatorManager {
             match ::glob::glob(app_path) {
                 Ok(paths) => {
                     // Collect all matching paths
-                    let mut matches: Vec<std::path::PathBuf> = paths
-                        .filter_map(|r| r.ok())
-                        .collect();
-                    
+                    let mut matches: Vec<std::path::PathBuf> =
+                        paths.filter_map(|r| r.ok()).collect();
+
                     if matches.is_empty() {
                         return Err(TestError::Mcp(format!(
                             "No app found matching pattern: {}",
                             app_path
                         )));
                     }
-                    
+
                     // If multiple matches, use the most recently modified
                     if matches.len() > 1 {
                         matches.sort_by_key(|path| {
@@ -175,14 +174,14 @@ impl SimulatorManager {
                                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
                         });
                         matches.reverse(); // Most recent first
-                        
+
                         eprintln!(
                             "Multiple apps found matching '{}', using most recent: {}",
                             app_path,
                             matches[0].display()
                         );
                     }
-                    
+
                     matches[0].to_string_lossy().to_string()
                 }
                 Err(e) => {

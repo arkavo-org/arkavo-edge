@@ -47,7 +47,7 @@ impl BiometricDialogHandler {
             "home" => "115", // Home key
             _ => return Err(TestError::Mcp(format!("Unknown keycode: {}", keycode))),
         };
-        
+
         let script = format!(
             r#"tell application "Simulator"
                 activate
@@ -57,7 +57,7 @@ impl BiometricDialogHandler {
             end tell"#,
             key_code
         );
-        
+
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
@@ -101,13 +101,13 @@ impl BiometricDialogHandler {
             end tell"#,
             passcode
         );
-        
+
         Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {}", e)))?;
-            
+
         Ok(())
     }
 }
@@ -317,7 +317,7 @@ impl Tool for AccessibilityDialogHandler {
                 tell application "System Events"
                     key code 53 -- ESC key
                 end tell"#;
-                
+
                 Command::new("osascript")
                     .arg("-e")
                     .arg(script)

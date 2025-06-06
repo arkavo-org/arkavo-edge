@@ -13,30 +13,31 @@ impl TestTargetApp {
     pub fn new() -> Result<Self> {
         let build_dir = std::env::temp_dir().join("arkavo-test-target-app");
         fs::create_dir_all(&build_dir)?;
-        
+
         Ok(Self {
             build_dir,
             app_name: "ArkavoTestTarget".to_string(),
         })
     }
-    
+
     pub fn app_bundle_id(&self) -> String {
         "com.arkavo.testtarget".to_string()
     }
-    
+
     pub fn app_path(&self) -> PathBuf {
         self.build_dir.join(format!("{}.app", self.app_name))
     }
-    
+
     /// Build and install a simple test app with buttons and text fields
     pub fn build_and_install(&self, device_id: &str) -> Result<()> {
         eprintln!("[TestTargetApp] Building test target app...");
-        
+
         let app_dir = self.app_path();
         fs::create_dir_all(&app_dir)?;
-        
+
         // Create Info.plist
-        let info_plist = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+        let info_plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -66,10 +67,14 @@ impl TestTargetApp {
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
 </dict>
-</plist>"#, self.app_name, self.app_bundle_id(), self.app_name);
-        
+</plist>"#,
+            self.app_name,
+            self.app_bundle_id(),
+            self.app_name
+        );
+
         fs::write(app_dir.join("Info.plist"), info_plist)?;
-        
+
         // Create Swift source with a simple UI
         let swift_source = r#"
 import UIKit
@@ -168,65 +173,62 @@ UIApplicationMain(
     NSStringFromClass(AppDelegate.self)
 )
 "#;
-        
+
         // Write source
         let source_path = self.build_dir.join("main.swift");
         fs::write(&source_path, swift_source)?;
-        
+
         // Compile
         let binary_path = app_dir.join(&self.app_name);
-        
+
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()?;
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
-        
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
+
         let compile_output = Command::new("xcrun")
             .args([
                 "swiftc",
-                "-sdk", &sdk_path,
-                "-target", "arm64-apple-ios15.0-simulator",
-                "-framework", "UIKit",
-                "-o", binary_path.to_str().unwrap(),
+                "-sdk",
+                &sdk_path,
+                "-target",
+                "arm64-apple-ios15.0-simulator",
+                "-framework",
+                "UIKit",
+                "-o",
+                binary_path.to_str().unwrap(),
                 source_path.to_str().unwrap(),
             ])
             .output()?;
-            
+
         if !compile_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to compile test app: {}",
                 String::from_utf8_lossy(&compile_output.stderr)
             )));
         }
-        
+
         // Sign
         let _ = Command::new("codesign")
-            .args([
-                "--force",
-                "--sign", "-",
-                app_dir.to_str().unwrap()
-            ])
+            .args(["--force", "--sign", "-", app_dir.to_str().unwrap()])
             .output();
-        
+
         // Install
         eprintln!("[TestTargetApp] Installing test target app...");
-        
+
         let install_output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "install",
-                device_id,
-                app_dir.to_str().unwrap()
-            ])
+            .args(["simctl", "install", device_id, app_dir.to_str().unwrap()])
             .output()?;
-            
+
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to install test app: {}",
                 String::from_utf8_lossy(&install_output.stderr)
             )));
         }
-        
+
         eprintln!("[TestTargetApp] Test target app installed successfully");
         Ok(())
     }

@@ -13,30 +13,32 @@ impl XCTestAppRunner {
     pub fn new() -> Result<Self> {
         let build_dir = std::env::temp_dir().join("arkavo-test-app");
         fs::create_dir_all(&build_dir)?;
-        
-        let socket_path = std::env::temp_dir().join(format!("arkavo-test-{}.sock", std::process::id()));
-        
+
+        let socket_path =
+            std::env::temp_dir().join(format!("arkavo-test-{}.sock", std::process::id()));
+
         Ok(Self {
             build_dir,
             socket_path,
         })
     }
-    
+
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }
-    
+
     /// Create and install a minimal iOS app
     pub fn install_and_run(&self, device_id: &str) -> Result<()> {
         eprintln!("[AppRunner] Creating iOS app for device {}", device_id);
-        
+
         // Create app bundle structure
         let app_name = "ArkavoTestApp";
         let app_dir = self.build_dir.join(format!("{}.app", app_name));
         fs::create_dir_all(&app_dir)?;
-        
+
         // Create Info.plist
-        let info_plist = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+        let info_plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -64,12 +66,15 @@ impl XCTestAppRunner {
         <false/>
     </dict>
 </dict>
-</plist>"#, app_name, app_name);
-        
+</plist>"#,
+            app_name, app_name
+        );
+
         fs::write(app_dir.join("Info.plist"), info_plist)?;
-        
+
         // Create Swift source with UI automation using private APIs
-        let swift_source = format!(r#"
+        let swift_source = format!(
+            r#"
 import UIKit
 import Foundation
 
@@ -239,88 +244,83 @@ UIApplicationMain(
     nil,
     NSStringFromClass(AppDelegate.self)
 )
-"#, self.socket_path.display());
-        
+"#,
+            self.socket_path.display()
+        );
+
         // Write source
         let source_path = self.build_dir.join("main.swift");
         fs::write(&source_path, swift_source)?;
-        
+
         // Compile the app
         let binary_path = app_dir.join(app_name);
-        
+
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()?;
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
-        
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
+
         eprintln!("[AppRunner] Compiling app...");
-        
+
         let compile_output = Command::new("xcrun")
             .args([
                 "swiftc",
-                "-sdk", &sdk_path,
-                "-target", "arm64-apple-ios15.0-simulator",
-                "-framework", "UIKit",
-                "-framework", "Foundation",
-                "-o", binary_path.to_str().unwrap(),
+                "-sdk",
+                &sdk_path,
+                "-target",
+                "arm64-apple-ios15.0-simulator",
+                "-framework",
+                "UIKit",
+                "-framework",
+                "Foundation",
+                "-o",
+                binary_path.to_str().unwrap(),
                 source_path.to_str().unwrap(),
             ])
             .output()?;
-            
+
         if !compile_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to compile app: {}",
                 String::from_utf8_lossy(&compile_output.stderr)
             )));
         }
-        
+
         // Sign the app
         let _ = Command::new("codesign")
-            .args([
-                "--force",
-                "--sign", "-",
-                app_dir.to_str().unwrap()
-            ])
+            .args(["--force", "--sign", "-", app_dir.to_str().unwrap()])
             .output();
-        
+
         // Install the app
         eprintln!("[AppRunner] Installing app...");
-        
+
         let install_output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "install",
-                device_id,
-                app_dir.to_str().unwrap()
-            ])
+            .args(["simctl", "install", device_id, app_dir.to_str().unwrap()])
             .output()?;
-            
+
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to install app: {}",
                 String::from_utf8_lossy(&install_output.stderr)
             )));
         }
-        
+
         // Launch the app
         eprintln!("[AppRunner] Launching app...");
-        
+
         let launch_output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "launch",
-                device_id,
-                "com.arkavo.testapp"
-            ])
+            .args(["simctl", "launch", device_id, "com.arkavo.testapp"])
             .output()?;
-            
+
         if !launch_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to launch app: {}",
                 String::from_utf8_lossy(&launch_output.stderr)
             )));
         }
-        
+
         eprintln!("[AppRunner] App launched successfully");
         Ok(())
     }

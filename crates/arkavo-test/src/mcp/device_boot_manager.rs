@@ -28,10 +28,7 @@ pub struct DeviceBootManager;
 
 impl DeviceBootManager {
     /// Boot a device and wait for it to be fully ready
-    pub async fn boot_device_with_wait(
-        device_id: &str,
-        timeout: Duration,
-    ) -> Result<BootStatus> {
+    pub async fn boot_device_with_wait(device_id: &str, timeout: Duration) -> Result<BootStatus> {
         let started_at = Instant::now();
         let mut status = BootStatus {
             device_id: device_id.to_string(),
@@ -64,7 +61,7 @@ impl DeviceBootManager {
 
         // Wait for device to be ready
         let deadline = Instant::now() + timeout;
-        
+
         // Phase 1: Wait for basic boot
         status.current_state = BootState::WaitingForServices;
         while std::time::Instant::now() < deadline {
@@ -93,12 +90,15 @@ impl DeviceBootManager {
 
         if !status.ui_ready {
             // UI might still be loading, but basic services are ready
-            eprintln!("Warning: UI services may not be fully ready on device {}", device_id);
+            eprintln!(
+                "Warning: UI services may not be fully ready on device {}",
+                device_id
+            );
         }
 
         status.current_state = BootState::Ready;
         status.boot_duration_seconds = Some(started_at.elapsed().as_secs_f64());
-        
+
         Ok(status)
     }
 
@@ -141,7 +141,7 @@ impl DeviceBootManager {
                 device_id,
                 "launchctl",
                 "print",
-                "system/com.apple.SpringBoard"
+                "system/com.apple.SpringBoard",
             ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to check SpringBoard: {}", e)))?;
@@ -153,15 +153,17 @@ impl DeviceBootManager {
     /// Get current boot progress for a device
     pub async fn get_boot_progress(device_id: &str) -> Result<String> {
         let output = Command::new("xcrun")
-            .args(["simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "1m"])
+            .args([
+                "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "1m",
+            ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to get device logs: {}", e)))?;
 
         let logs = String::from_utf8_lossy(&output.stdout);
-        
+
         // Look for key boot milestones in logs
         let mut progress = Vec::new();
-        
+
         if logs.contains("Boot begun") {
             progress.push("Boot initiated");
         }
@@ -188,7 +190,7 @@ impl DeviceBootManager {
             .args(["simctl", "terminate", device_id, "all"])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to terminate apps: {}", e)))?;
-            
+
         Ok(())
     }
 }

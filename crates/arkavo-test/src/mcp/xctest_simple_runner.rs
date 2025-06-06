@@ -13,25 +13,30 @@ impl XCTestSimpleRunner {
     pub fn new() -> Result<Self> {
         let build_dir = std::env::temp_dir().join("arkavo-simple-runner");
         fs::create_dir_all(&build_dir)?;
-        
-        let socket_path = std::env::temp_dir().join(format!("arkavo-test-{}.sock", std::process::id()));
-        
+
+        let socket_path =
+            std::env::temp_dir().join(format!("arkavo-test-{}.sock", std::process::id()));
+
         Ok(Self {
             build_dir,
             socket_path,
         })
     }
-    
+
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }
-    
+
     /// Create and run a simple Swift executable on the simulator
     pub fn run_on_simulator(&self, device_id: &str) -> Result<()> {
-        eprintln!("[SimpleRunner] Creating Swift executable for device {}", device_id);
-        
+        eprintln!(
+            "[SimpleRunner] Creating Swift executable for device {}",
+            device_id
+        );
+
         // Create a Swift program with UI automation capabilities
-        let swift_source = format!(r#"
+        let swift_source = format!(
+            r#"
 import Foundation
 import UIKit
 
@@ -156,56 +161,58 @@ class SimpleSocketServer {{
 let socketPath = "{}"
 let server = SimpleSocketServer(socketPath: socketPath)
 server.start()
-"#, self.socket_path.display());
+"#,
+            self.socket_path.display()
+        );
 
         // Write source file
         let source_path = self.build_dir.join("simple_runner.swift");
         fs::write(&source_path, swift_source)?;
-        
+
         // Compile for simulator
         let binary_path = self.build_dir.join("simple_runner");
-        
+
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()?;
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
-        
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
+
         let compile_output = Command::new("xcrun")
             .args([
                 "swiftc",
-                "-sdk", &sdk_path,
-                "-target", "arm64-apple-ios15.0-simulator",
-                "-o", binary_path.to_str().unwrap(),
+                "-sdk",
+                &sdk_path,
+                "-target",
+                "arm64-apple-ios15.0-simulator",
+                "-o",
+                binary_path.to_str().unwrap(),
                 source_path.to_str().unwrap(),
             ])
             .output()?;
-            
+
         if !compile_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to compile Swift: {}",
                 String::from_utf8_lossy(&compile_output.stderr)
             )));
         }
-        
+
         eprintln!("[SimpleRunner] Compiled successfully, spawning on simulator...");
-        
+
         // Run on simulator
         let spawn_output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "spawn",
-                device_id,
-                binary_path.to_str().unwrap()
-            ])
+            .args(["simctl", "spawn", device_id, binary_path.to_str().unwrap()])
             .output()?;
-            
+
         if !spawn_output.status.success() {
             return Err(TestError::Mcp(format!(
                 "Failed to spawn on simulator: {}",
                 String::from_utf8_lossy(&spawn_output.stderr)
             )));
         }
-        
+
         eprintln!("[SimpleRunner] Server started successfully");
         Ok(())
     }
