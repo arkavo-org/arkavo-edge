@@ -1,4 +1,6 @@
+use crate::mcp_client::McpClient;
 use arkavo_llm::{LlmClient, Message};
+use serde_json::json;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -25,15 +27,46 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("Repository context: {}", get_current_directory());
     println!("LLM Provider: {}", client.provider_name());
     println!("Type 'exit' or 'quit' to end the session.");
-    println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>");
+    println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools");
     println!();
+
+    // Initialize MCP client if enabled
+    let mcp_client = if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() == "true" {
+        let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
+        match McpClient::new(mcp_url) {
+            Ok(client) => {
+                eprintln!("MCP client initialized successfully");
+                Some(client)
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to initialize MCP client: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Initialize conversation with system message including repository context
     let repo_context = get_repository_context();
-    let mcp_info = if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() == "true" {
-        "\n\nMCP Integration: Enabled\nYou can run tests and interact with iOS simulators through MCP tools."
+    let mcp_info = if mcp_client.is_some() {
+        // List available tools
+        if let Some(ref client) = mcp_client {
+            match client.list_tools() {
+                Ok(tools) => {
+                    let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+                    format!("\n\nMCP Integration: Enabled\nAvailable MCP tools: {}\nYou can run tests and interact with iOS simulators through MCP tools.", tool_names.join(", "))
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to list MCP tools: {}", e);
+                    "\n\nMCP Integration: Enabled (tool listing failed)\nYou can run tests and interact with iOS simulators through MCP tools.".to_string()
+                }
+            }
+        } else {
+            "\n\nMCP Integration: Enabled\nYou can run tests and interact with iOS simulators through MCP tools.".to_string()
+        }
     } else {
-        "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true"
+        "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true".to_string()
     };
 
     let system_prompt = format!(
@@ -81,7 +114,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Check for file operation commands
-        if let Some(command_response) = handle_command(input) {
+        if let Some(command_response) = handle_command(input, &mcp_client, &client.provider_name()) {
             println!("Assistant: {}", command_response);
             println!();
             continue;
@@ -224,7 +257,7 @@ fn get_repository_context() -> String {
     context
 }
 
-fn handle_command(input: &str) -> Option<String> {
+fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &str) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {
         return None;
@@ -236,7 +269,29 @@ fn handle_command(input: &str) -> Option<String> {
                 return Some("Usage: read <file_path>".to_string());
             }
             let file_path = parts[1..].join(" ");
-            read_file(&file_path)
+            
+            // Use MCP if available
+            if let Some(client) = mcp_client {
+                match client.call_tool(
+                    "read_file",
+                    json!({ "path": file_path }),
+                    llm_provider,
+                ) {
+                    Ok(result) => {
+                        if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
+                            Some(format!("Content of {} (via MCP):\n\n{}", file_path, text))
+                        } else {
+                            Some(format!("MCP read result: {}", result))
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("MCP read failed, falling back to local: {}", e);
+                        read_file(&file_path)
+                    }
+                }
+            } else {
+                read_file(&file_path)
+            }
         }
         "list" | "ls" => {
             let path = if parts.len() > 1 {
@@ -244,7 +299,29 @@ fn handle_command(input: &str) -> Option<String> {
             } else {
                 ".".to_string()
             };
-            list_files(&path)
+            
+            // Use MCP if available
+            if let Some(client) = mcp_client {
+                match client.call_tool(
+                    "list_directory",
+                    json!({ "path": path }),
+                    llm_provider,
+                ) {
+                    Ok(result) => {
+                        if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
+                            Some(format!("Contents of {} (via MCP):\n\n{}", path, text))
+                        } else {
+                            Some(format!("MCP list result: {}", result))
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("MCP list failed, falling back to local: {}", e);
+                        list_files(&path)
+                    }
+                }
+            } else {
+                list_files(&path)
+            }
         }
         "explain" => {
             if parts.len() < 2 {
@@ -254,21 +331,72 @@ fn handle_command(input: &str) -> Option<String> {
             None
         }
         "test" => {
-            if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() != "true" {
+            if mcp_client.is_none() {
                 return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
             }
-            // Let the LLM handle test requests through MCP
-            None
+            
+            if let Some(client) = mcp_client {
+                match client.call_tool(
+                    "list_tests",
+                    json!({}),
+                    llm_provider,
+                ) {
+                    Ok(result) => {
+                        if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
+                            Some(format!("Available tests (via MCP):\n\n{}", text))
+                        } else {
+                            Some(format!("MCP test list result: {}", result))
+                        }
+                    }
+                    Err(e) => Some(format!("Failed to list tests: {}", e)),
+                }
+            } else {
+                None
+            }
         }
         "run" => {
             if parts.len() < 2 {
                 return Some("Usage: run <test_name>".to_string());
             }
-            if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() != "true" {
+            if mcp_client.is_none() {
                 return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
             }
-            // Let the LLM handle test execution through MCP
-            None
+            
+            let test_name = parts[1..].join(" ");
+            if let Some(client) = mcp_client {
+                match client.call_tool(
+                    "run_test",
+                    json!({ "test_name": test_name }),
+                    llm_provider,
+                ) {
+                    Ok(result) => {
+                        if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
+                            Some(format!("Test execution result (via MCP):\n\n{}", text))
+                        } else {
+                            Some(format!("MCP test result: {}", result))
+                        }
+                    }
+                    Err(e) => Some(format!("Failed to run test: {}", e)),
+                }
+            } else {
+                None
+            }
+        }
+        "tools" => {
+            if let Some(client) = mcp_client {
+                match client.list_tools() {
+                    Ok(tools) => {
+                        let mut output = "Available MCP tools:\n\n".to_string();
+                        for tool in tools {
+                            output.push_str(&format!("  {} - {}\n", tool.name, tool.description));
+                        }
+                        Some(output)
+                    }
+                    Err(e) => Some(format!("Failed to list MCP tools: {}", e)),
+                }
+            } else {
+                Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable MCP tools.".to_string())
+            }
         }
         _ => None,
     }
