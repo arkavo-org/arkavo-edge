@@ -35,7 +35,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true"
     };
-    
+
     let system_prompt = format!(
         "You are Arkavo, an AI assistant helping with software development tasks. \
          You have access to the current repository context and can help with code, \
@@ -44,8 +44,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 \
          Repository context:
 {}{}",
-        repo_context,
-        mcp_info
+        repo_context, mcp_info
     );
     let mut messages = vec![Message::system(&system_prompt)];
 
@@ -168,14 +167,14 @@ fn get_current_directory() -> String {
 fn get_repository_context() -> String {
     let current_dir = env::current_dir().unwrap_or_default();
     let mut context = String::new();
-    
+
     // Get basic repository info
     context.push_str(&format!("Working directory: {}\n", current_dir.display()));
-    
+
     // Check if it's a git repository
     if Path::new(".git").exists() {
         context.push_str("Git repository: Yes\n");
-        
+
         // Get current branch
         if let Ok(output) = std::process::Command::new("git")
             .args(["branch", "--show-current"])
@@ -189,7 +188,7 @@ fn get_repository_context() -> String {
     } else {
         context.push_str("Git repository: No\n");
     }
-    
+
     // List key project files
     context.push_str("\nProject structure:\n");
     if let Ok(entries) = fs::read_dir(&current_dir) {
@@ -198,25 +197,30 @@ fn get_repository_context() -> String {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         files.sort();
-        
+
         for file in files.iter().take(20) {
             context.push_str(&format!("  - {}\n", file));
         }
-        
+
         if files.len() > 20 {
             context.push_str(&format!("  ... and {} more files\n", files.len() - 20));
         }
     }
-    
+
     // Check for common project files
-    let project_files = vec!["Cargo.toml", "package.json", "README.md", "requirements.txt"];
+    let project_files = vec![
+        "Cargo.toml",
+        "package.json",
+        "README.md",
+        "requirements.txt",
+    ];
     for file in project_files {
         if Path::new(file).exists() {
             context.push_str(&format!("\nDetected project type: {}\n", file));
             break;
         }
     }
-    
+
     context
 }
 
@@ -225,7 +229,7 @@ fn handle_command(input: &str) -> Option<String> {
     if parts.is_empty() {
         return None;
     }
-    
+
     match parts[0] {
         "read" | "cat" => {
             if parts.len() < 2 {
@@ -291,12 +295,12 @@ fn read_file(file_path: &str) -> Option<String> {
 
 fn list_files(path: &str) -> Option<String> {
     let path = Path::new(path);
-    
+
     match fs::read_dir(path) {
         Ok(entries) => {
             let mut files = Vec::new();
             let mut dirs = Vec::new();
-            
+
             for entry in entries.filter_map(|e| e.ok()) {
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
@@ -305,26 +309,30 @@ fn list_files(path: &str) -> Option<String> {
                     files.push(file_name);
                 }
             }
-            
+
             dirs.sort();
             files.sort();
-            
+
             let mut result = format!("Contents of {}:\n\n", path.display());
-            
+
             for dir in &dirs {
                 result.push_str(&format!("  {}\n", dir));
             }
-            
+
             for file in &files {
                 result.push_str(&format!("  {}\n", file));
             }
-            
+
             if dirs.is_empty() && files.is_empty() {
                 result.push_str("  (empty directory)");
             }
-            
+
             Some(result)
         }
-        Err(e) => Some(format!("Error listing directory '{}': {}", path.display(), e)),
+        Err(e) => Some(format!(
+            "Error listing directory '{}': {}",
+            path.display(),
+            e
+        )),
     }
 }
