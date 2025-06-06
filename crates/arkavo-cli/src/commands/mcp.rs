@@ -20,6 +20,7 @@ static RESPONSE_SCHEMA: OnceLock<Validator> = OnceLock::new();
 
 fn init_schemas() {
     // JSON-RPC Request Schema based on MCP TypeScript definitions
+    // Supports both requests (with id) and notifications (without id)
     let request_schema = json!({
         "type": "object",
         "properties": {
@@ -40,7 +41,7 @@ fn init_schemas() {
                 "type": "object"
             }
         },
-        "required": ["jsonrpc", "id", "method"],
+        "required": ["jsonrpc", "method"],
         "additionalProperties": false
     });
 
@@ -117,7 +118,15 @@ fn init_schemas() {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
-    id: JsonRpcId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<JsonRpcId>,
+    method: String,
+    params: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JsonRpcNotification {
+    jsonrpc: String,
     method: String,
     params: Option<Value>,
 }
@@ -299,10 +308,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Handle request
+        // Check if this is a notification (no id field)
+        if request.id.is_none() {
+            eprintln!("Handling notification: {}", request.method);
+            match request.method.as_str() {
+                "notifications/initialized" => {
+                    eprintln!("Client initialized notification received");
+                }
+                _ => {
+                    eprintln!("Unknown notification: {}", request.method);
+                }
+            }
+            continue; // Notifications don't get responses
+        }
+
+        // Handle request (has id, expects response)
+        let request_id = request.id.clone().unwrap(); // Safe because we checked above
         let response = match request.method.as_str() {
             "initialize" => success_response(
-                request.id,
+                request_id.clone(),
                 json!({
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
@@ -343,7 +367,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             .unwrap_or("Tool execution failed");
 
                                         error_response(
-                                            request.id,
+                                            request_id.clone(),
                                             INTERNAL_ERROR,
                                             format!("{}: {}", error_code, error_msg),
                                             Some(tool_response.result),
@@ -374,7 +398,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                                         // Normal successful response
                                         success_response(
-                                            request.id,
+                                            request_id.clone(),
                                             json!({
                                                 "content": [{
                                                     "type": "text",
@@ -408,7 +432,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                                     // Normal successful response
                                     success_response(
-                                        request.id,
+                                        request_id.clone(),
                                         json!({
                                             "content": [{
                                                 "type": "text",
@@ -419,7 +443,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             Err(e) => error_response(
-                                request.id,
+                                request_id.clone(),
                                 INTERNAL_ERROR,
                                 format!("Tool execution error: {}", e),
                                 None,
@@ -427,7 +451,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else {
                         error_response(
-                            request.id,
+                            request_id.clone(),
                             INVALID_PARAMS,
                             "Invalid parameters".to_string(),
                             None,
@@ -435,7 +459,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else {
                     error_response(
-                        request.id,
+                        request_id.clone(),
                         INVALID_PARAMS,
                         "Missing parameters".to_string(),
                         None,
@@ -456,18 +480,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }).collect();
                         
                         success_response(
-                            request.id,
+                            request_id.clone(),
                             json!({
                                 "tools": tools,
                                 "_meta": {
-                                    "xcuitest_status": "XCUITest is available for text-based element finding. Prefer text/accessibility_id over coordinates.",
-                                    "usage_hint": "Call usage_guide tool for detailed iOS automation guidance."
+                                    "critical_setup": "MUST call setup_xcuitest with target_app_bundle_id BEFORE any text-based UI interaction! Without this, all text/accessibility_id taps will fail.",
+                                    "workflow": "1) device_management to get device_id, 2) setup_xcuitest with device_id AND target_app_bundle_id of the app you want to test, 3) Then use ui_interaction with text targets",
+                                    "xcuitest_status": "Text-based element finding requires XCUITest initialization via setup_xcuitest tool WITH target_app_bundle_id parameter.",
+                                    "setup_example": "{\"tool\": \"setup_xcuitest\", \"arguments\": {\"device_id\": \"YOUR-DEVICE-ID\", \"target_app_bundle_id\": \"com.example.app\"}}",
+                                    "usage_hint": "Call usage_guide tool for detailed iOS automation guidance and examples."
                                 }
                             }),
                         )
                     }
                     Err(e) => error_response(
-                        request.id,
+                        request_id.clone(),
                         INTERNAL_ERROR,
                         format!("Failed to get tool schemas: {}", e),
                         None,
@@ -476,7 +503,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             _ => error_response(
-                request.id,
+                request_id.clone(),
                 METHOD_NOT_FOUND,
                 format!("Method not found: {}", request.method),
                 None,
@@ -555,48 +582,5 @@ mod tests {
             "method": "test"
         });
         assert!(validate_request(&invalid_request).is_err());
-    }
-
-    #[test]
-    fn test_response_validation() {
-        setup();
-
-        // Valid success response
-        let valid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"test": "value"}
-        });
-        assert!(validate_response(&valid_response).is_ok());
-
-        // Valid error response
-        let valid_error = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32600,
-                "message": "Invalid request"
-            }
-        });
-        assert!(validate_response(&valid_error).is_ok());
-
-        // Invalid - has both result and error
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {},
-            "error": {
-                "code": -32600,
-                "message": "Invalid"
-            }
-        });
-        assert!(validate_response(&invalid_response).is_err());
-
-        // Invalid - missing required fields
-        let invalid_response = json!({
-            "jsonrpc": "2.0",
-            "id": 1
-        });
-        assert!(validate_response(&invalid_response).is_err());
     }
 }

@@ -24,7 +24,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements using XCUITest (when available) or fallback methods. SUPPORTS: 1) TEXT-BASED TAPS: {\"action\":\"tap\",\"target\":{\"text\":\"Login\"}} - finds and taps elements by visible text. 2) ACCESSIBILITY ID: {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"login_button\"}} - taps by accessibility identifier. 3) COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}} - direct coordinate tap. BEST PRACTICE: Use text/accessibility_id when possible as they're more reliable than coordinates. TEXT INPUT: 1) Tap field first, 2) Use clear_text if needed, 3) type_text. XCUITest provides 10-second timeout for finding elements.".to_string(),
+                description: "Interact with iOS UI elements. TEXT-BASED TAPS REQUIRE setup_xcuitest TO BE RUN FIRST! Without XCUITest setup, text-based taps will fail with XCUITEST_NOT_AVAILABLE. SUPPORTS: 1) TEXT-BASED (requires setup): {\"action\":\"tap\",\"target\":{\"text\":\"Login\"}} 2) ACCESSIBILITY ID (requires setup): {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"login_button\"}} 3) COORDINATES (always works): {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. For text input: tap field first, then clear_text if needed, then type_text.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -171,9 +171,9 @@ impl UiInteractionKit {
         // Give the bridge a moment to start listening
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // Run the test bundle - this will connect to our socket
-        eprintln!("[UiInteractionKit] Running test bundle...");
-        compiler.run_tests(&device.id, "com.arkavo.testrunner")?;
+        // Launch the test host app - this will connect to our socket
+        eprintln!("[UiInteractionKit] Launching test host app...");
+        compiler.launch_test_host(&device.id, None)?;
 
         // Wait for the runner to connect
         eprintln!("[UiInteractionKit] Waiting for test runner to connect...");

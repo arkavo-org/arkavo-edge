@@ -100,6 +100,15 @@ The project targets:
 - macOS (arm64)
 - Linux (x64/aarch64)
 
+All implementations must work across:
+- ✅ On simulators
+- ✅ On real devices (with proper signing)
+- ✅ Across different user home directories
+- ✅ On different platforms (iOS, tvOS, etc.)
+- ✅ In CI/CD environments
+
+Avoid hardcoded paths, platform-specific assumptions, or environment-dependent configurations. Use relative paths, dynamic discovery, and embedded resources where possible.
+
 ## AI Collaboration Guidance
 
 - This tool is for a superintelligent AI - all work should be done directly with the tool with supervision from the superintelligent AI, a human will do very high level guidance

@@ -13,10 +13,13 @@ use super::intelligent_tools::{
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use super::template_diagnostics::TemplateDiagnosticsKit;
 use super::usage_guide::UsageGuideKit;
 use super::xctest_setup_tool::XCTestSetupKit;
+use super::xctest_status_tool::XCTestStatusKit;
+use super::app_diagnostic_tool::AppDiagnosticTool;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
@@ -118,8 +121,16 @@ impl McpTestServer {
             Arc::new(UsageGuideKit::new()),
         );
         tools.insert(
+            "app_diagnostic".to_string(),
+            Arc::new(AppDiagnosticTool::new()),
+        );
+        tools.insert(
             "setup_xcuitest".to_string(),
             Arc::new(XCTestSetupKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "xctest_status".to_string(),
+            Arc::new(XCTestStatusKit::new(device_manager.clone())),
         );
         tools.insert(
             "template_diagnostics".to_string(),
@@ -147,6 +158,10 @@ impl McpTestServer {
         tools.insert(
             "file_operations".to_string(),
             Arc::new(FileOperations::new()),
+        );
+        tools.insert(
+            "simulator_advanced".to_string(),
+            Arc::new(SimulatorAdvancedKit::new(device_manager.clone())),
         );
 
         // Add biometric dialog handlers (no external dependencies)
@@ -322,11 +337,13 @@ impl McpTestServer {
                 | "ui_query"
                 | "usage_guide"
                 | "setup_xcuitest"
+                | "xctest_status"
                 | "template_diagnostics"
                 | "biometric_auth"
                 | "system_dialog"
                 | "passkey_dialog"
                 | "simulator_control"
+                | "simulator_advanced"
                 | "app_management"
                 | "file_operations"
                 | "find_bugs"

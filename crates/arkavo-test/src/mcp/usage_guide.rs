@@ -46,7 +46,41 @@ impl Tool for UsageGuideKit {
             "overview" => r#"
 # iOS Automation with XCUITest
 
-This MCP server now uses XCUITest for reliable UI automation. Key improvements:
+This MCP server provides iOS UI automation through XCUITest. 
+
+## IMPORTANT: Setup Required
+
+Before using text-based UI interactions, you MUST initialize XCUITest:
+
+1. **Call setup_xcuitest first**:
+   ```json
+   {
+     "tool": "setup_xcuitest",
+     "arguments": {
+       "device_id": "YOUR-DEVICE-ID"
+     }
+   }
+   ```
+
+2. **Wait for successful completion** - The setup will:
+   - Compile the XCTest runner
+   - Install it to the simulator
+   - Start the automation bridge
+   - Return success when ready
+
+3. **Then use text-based tapping**:
+   ```json
+   {
+     "tool": "ui_interaction",
+     "arguments": {
+       "action": "tap",
+       "target": {"text": "Get Started"},
+       "device_id": "YOUR-DEVICE-ID"
+     }
+   }
+   ```
+
+## Key Features After Setup:
 
 - **Text-based element finding** - Find buttons/fields by their visible text
 - **Accessibility ID support** - Most reliable for test automation  
@@ -71,7 +105,11 @@ is MUCH better than:
             "text_based_tapping" => r#"
 # Text-Based Tapping with XCUITest
 
-When you can see text in the UI, use it for reliable interaction:
+## Prerequisites
+⚠️ **MUST run setup_xcuitest first!** Text-based tapping will NOT work without XCUITest initialization.
+
+## How It Works
+When XCUITest is set up, you can find elements by their visible text:
 
 ## Button Tapping
 ```json
@@ -111,8 +149,22 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
             "workflows" => r#"
 # Common Automation Workflows
 
-## Login Flow
-1. screen_capture {"name": "login_screen"}
+## CRITICAL: Initial Setup Workflow
+
+1. **Get device ID**: 
+   ```json
+   {"tool": "device_management", "arguments": {"action": "list"}}
+   ```
+
+2. **Initialize XCUITest** (REQUIRED for text-based interaction):
+   ```json
+   {"tool": "setup_xcuitest", "arguments": {"device_id": "YOUR-DEVICE-ID"}}
+   ```
+   
+3. **Wait for success response** before proceeding!
+
+## Login Flow (After Setup)
+1. screen_capture {"name": "login_screen"}  
 2. Read the image to see UI elements
 3. Tap email field: {"action": "tap", "target": {"text": "Email"}}
 4. Clear and type: {"action": "clear_text"}, then {"action": "type_text", "value": "user@example.com"}
@@ -171,13 +223,21 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
             "examples" => r#"
 # Complete Examples
 
-## Login Test
+## IMPORTANT: Setup XCUITest First!
+
+```python
+# REQUIRED: Initialize XCUITest before ANY text-based interaction
+tool("setup_xcuitest", {"device_id": "YOUR-DEVICE-ID"})
+# Wait for success response!
+```
+
+## Login Test (After XCUITest Setup)
 ```python
 # 1. See what's on screen
 tool("screen_capture", {"name": "login"})
 tool("read", {"file_path": "test_results/login.png"})
 
-# 2. Fill email (you saw "Email" label)
+# 2. Fill email (you saw "Email" label) - THIS REQUIRES XCUITEST!
 tool("ui_interaction", {"action": "tap", "target": {"text": "Email"}})
 tool("ui_interaction", {"action": "clear_text"})
 tool("ui_interaction", {"action": "type_text", "value": "test@example.com"})

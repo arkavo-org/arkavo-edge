@@ -10,6 +10,8 @@
     <string>ArkavoTestRunner</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
+    <key>NSPrincipalClass</key>
+    <string>ArkavoTestRunner</string>
     <key>XCTestBundleIdentifier</key>
     <string>com.arkavo.testrunner</string>
     <key>CFBundleShortVersionString</key>

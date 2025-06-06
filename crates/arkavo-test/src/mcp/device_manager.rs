@@ -41,6 +41,15 @@ impl DeviceManager {
     }
 
     pub fn refresh_devices(&self) -> Result<Vec<IOSDevice>> {
+        self.refresh_devices_internal(true)
+    }
+    
+    /// Refresh devices including unhealthy ones
+    pub fn refresh_devices_all(&self) -> Result<Vec<IOSDevice>> {
+        self.refresh_devices_internal(false)
+    }
+    
+    fn refresh_devices_internal(&self, filter_healthy: bool) -> Result<Vec<IOSDevice>> {
         // Get simulators from simctl
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
@@ -60,6 +69,21 @@ impl DeviceManager {
             for (runtime, device_list) in device_obj {
                 if let Some(devices_array) = device_list.as_array() {
                     for device_json in devices_array {
+                        // Check availability if filtering is enabled
+                        if filter_healthy {
+                            let is_available = device_json
+                                .get("isAvailable")
+                                .and_then(|a| a.as_bool())
+                                .unwrap_or(true);
+                            
+                            if !is_available {
+                                if let Some(name) = device_json.get("name").and_then(|n| n.as_str()) {
+                                    eprintln!("Filtering out unavailable device: {}", name);
+                                }
+                                continue;
+                            }
+                        }
+                        
                         if let Some(device) = self.parse_device(device_json, runtime, false) {
                             device_map.insert(device.id.clone(), device.clone());
                             devices.push(device);

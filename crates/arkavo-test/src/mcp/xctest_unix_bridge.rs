@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::{UnixListener, UnixStream, unix::OwnedWriteHalf};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ pub struct Command {
     pub parameters: CommandParameters,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandParameters {
     // Tap parameters
@@ -79,7 +79,7 @@ pub struct XCTestUnixBridge {
     socket_path: PathBuf,
     response_handlers: Arc<Mutex<HashMap<String, oneshot::Sender<CommandResponse>>>>,
     server_handle: Option<tokio::task::JoinHandle<()>>,
-    client_stream: Option<Arc<Mutex<UnixStream>>>,
+    client_stream: Option<Arc<Mutex<OwnedWriteHalf>>>,
 }
 
 impl Default for XCTestUnixBridge {
@@ -160,14 +160,8 @@ impl XCTestUnixBridge {
 
         self.server_handle = Some(handle);
 
-        // Set socket permissions to be accessible only by owner
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&self.socket_path)?.permissions();
-            perms.set_mode(0o600); // rw------- (owner read/write only)
-            std::fs::set_permissions(&self.socket_path, perms)?;
-        }
+        // Note: We don't set permissions on the socket as it might not exist yet
+        // and setting permissions could interfere with the connection
 
         Ok(())
     }
@@ -196,9 +190,124 @@ impl XCTestUnixBridge {
         let stream = UnixStream::connect(&self.socket_path)
             .await
             .map_err(|e| TestError::Mcp(format!("Failed to connect to XCTest runner: {}", e)))?;
+            
+        eprintln!("[XCTestUnixBridge] Connected to socket");
 
-        self.client_stream = Some(Arc::new(Mutex::new(stream)));
+        // Split the stream into read and write halves
+        let (read_half, write_half) = stream.into_split();
+        
+        // Store write half wrapped for thread safety
+        self.client_stream = Some(Arc::new(Mutex::new(write_half)));
+        
+        // Spawn a task to read responses
+        let handlers = self.response_handlers.clone();
+        
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+            
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => {
+                        eprintln!("[XCTestUnixBridge] Connection closed");
+                        break;
+                    }
+                    Ok(_) => {
+                        let trimmed = line.trim();
+                        eprintln!("[XCTestUnixBridge] Received: {}", trimmed);
+                        
+                        // Check for ready signal
+                        if trimmed == "[TestBridgeReady]" {
+                            eprintln!("[XCTestUnixBridge] Test runner is ready!");
+                            continue;
+                        }
+                        
+                        // Parse response
+                        if let Ok(response) = serde_json::from_str::<CommandResponse>(&line) {
+                            // Find and notify the waiting handler
+                            let handler = {
+                                let mut handlers_lock = handlers.lock().await;
+                                handlers_lock.remove(&response.id)
+                            };
+                            
+                            if let Some(tx) = handler {
+                                eprintln!("[XCTestUnixBridge] Notifying handler for command {}", response.id);
+                                let _ = tx.send(response);
+                            } else {
+                                eprintln!("[XCTestUnixBridge] No handler found for command {}", response.id);
+                            }
+                        } else {
+                            eprintln!("[XCTestUnixBridge] Not a JSON response: {}", trimmed);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[XCTestUnixBridge] Error reading response: {}", e);
+                        break;
+                    }
+                }
+            }
+            eprintln!("[XCTestUnixBridge] Response reader task exiting");
+        });
+        
+        // Give the reader task time to start
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        
+        // Wait for ready signal from Swift side
+        eprintln!("[XCTestUnixBridge] Waiting for ready signal from test runner...");
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        
+        while start.elapsed() < timeout {
+            // The reader task will handle the ready signal, we just need to wait a bit
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // In a real implementation, we'd check a flag set by the reader task
+            // For now, we'll just wait a reasonable amount of time
+        }
+        
+        // Give an extra moment for everything to stabilize
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        
+        eprintln!("[XCTestUnixBridge] Connection setup complete");
+        
         Ok(())
+    }
+    
+    /// Send a ping command to test the connection
+    pub async fn send_ping(&self) -> Result<()> {
+        // Create a simple tap command at 0,0 as a ping
+        let ping_command = Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::Tap,
+            parameters: CommandParameters {
+                target_type: Some(TargetType::Coordinate),
+                x: Some(0.0),
+                y: Some(0.0),
+                text: None,
+                accessibility_id: None,
+                timeout: Some(1.0), // Short timeout for ping
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
+        };
+        
+        // Try to send and get response
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            self.send_command(ping_command)
+        ).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(TestError::Mcp("Ping timeout - no response from test runner".to_string()))
+        }
     }
 
     /// Send a tap command and wait for response (backwards compatibility)
@@ -228,6 +337,7 @@ impl XCTestUnixBridge {
 
         {
             let mut stream = stream.lock().await;
+            eprintln!("[XCTestUnixBridge] Sending command {}: {}", command.id, command_json);
             stream
                 .write_all(command_json.as_bytes())
                 .await
@@ -240,6 +350,7 @@ impl XCTestUnixBridge {
                 .flush()
                 .await
                 .map_err(|e| TestError::Mcp(format!("Failed to flush stream: {}", e)))?;
+            eprintln!("[XCTestUnixBridge] Command sent successfully");
         }
 
         // Wait for response with timeout

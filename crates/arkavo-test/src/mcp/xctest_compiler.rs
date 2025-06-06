@@ -3,9 +3,9 @@ use crate::{Result, TestError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
 
-static XCTEST_BUNDLE_CACHE: OnceLock<PathBuf> = OnceLock::new();
+// Disabled caching due to architecture issues
+// static XCTEST_BUNDLE_CACHE: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct XCTestCompiler {
     build_dir: PathBuf,
@@ -59,20 +59,9 @@ impl XCTestCompiler {
 
     /// Get or compile the XCTest bundle
     pub fn get_xctest_bundle(&self) -> Result<PathBuf> {
-        // Check cache first
-        if let Some(cached_path) = XCTEST_BUNDLE_CACHE.get() {
-            if cached_path.exists() {
-                eprintln!("Using cached XCTest bundle at: {}", cached_path.display());
-                return Ok(cached_path.clone());
-            }
-        }
-
-        // Compile new bundle
+        // Always compile fresh to avoid architecture mismatches
+        eprintln!("[XCTestCompiler] Compiling fresh XCTest bundle (caching disabled)");
         let bundle_path = self.compile_xctest_bundle()?;
-
-        // Cache the result
-        let _ = XCTEST_BUNDLE_CACHE.set(bundle_path.clone());
-
         Ok(bundle_path)
     }
 
@@ -172,7 +161,7 @@ let package = Package(
         Ok(())
     }
 
-    /// Compile the Swift package
+    /// Compile the Swift package as an executable instead of a bundle
     fn compile_swift_package(&self, build_dir: &Path) -> Result<()> {
         eprintln!("[XCTestCompiler] Compiling Swift package...");
         
@@ -222,12 +211,16 @@ let package = Package(
             )));
         }
         
+        // Only support ARM64 simulators
+        let target = "arm64-apple-ios15.0-simulator";
+        eprintln!("[XCTestCompiler] Compiling for architecture: {}", target);
+        
         // Compile as a framework/bundle
         let output = Command::new("xcrun")
             .args([
                 "swiftc",
                 "-sdk", &sdk_path,
-                "-target", "x86_64-apple-ios15.0-simulator",
+                "-target", target,
                 "-emit-library",
                 "-emit-module",
                 "-module-name", "ArkavoTestRunner",
@@ -252,33 +245,10 @@ let package = Package(
             eprintln!("[XCTestCompiler] STDOUT: {}", stdout);
             eprintln!("[XCTestCompiler] STDERR: {}", stderr);
             
-            // Try arm64 target if x86_64 failed
-            eprintln!("[XCTestCompiler] Trying arm64 target...");
-            let output_arm = Command::new("xcrun")
-                .args([
-                    "swiftc",
-                    "-sdk", &sdk_path,
-                    "-target", "arm64-apple-ios15.0-simulator",
-                    "-emit-library",
-                    "-emit-module",
-                    "-module-name", "ArkavoTestRunner",
-                    "-Xlinker", "-bundle",
-                    "-F", &xctest_framework_path,
-                    "-F", &sdk_path,
-                    "-framework", "XCTest",
-                    "-o", output_binary.to_str().unwrap(),
-                    swift_source.to_str().unwrap(),
-                ])
-                .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler (arm64): {}", e)))?;
-                
-            if !output_arm.status.success() {
-                let arm_stderr = String::from_utf8_lossy(&output_arm.stderr);
-                return Err(TestError::Mcp(format!(
-                    "Compilation failed for both architectures.\nx86_64 error: {}\narm64 error: {}",
-                    stderr, arm_stderr
-                )));
-            }
+            return Err(TestError::Mcp(format!(
+                "Swift compilation failed for ARM64.\nError: {}\n\nNote: Only ARM64 simulators are supported.",
+                stderr
+            )));
         }
 
         Ok(())
@@ -408,72 +378,476 @@ let package = Package(
         eprintln!("[XCTestCompiler] XCTest bundle installed successfully");
         Ok(())
     }
+    
+    /// Create a minimal host app that can load and run our XCTest bundle
+    fn create_test_host_app(&self) -> Result<PathBuf> {
+        let app_dir = self.build_dir.join("ArkavoTestHost.app");
+        fs::create_dir_all(&app_dir)?;
+        
+        // Create Info.plist
+        let info_plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>ArkavoTestHost</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.arkavo.testhost</string>
+    <key>CFBundleName</key>
+    <string>ArkavoTestHost</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    <key>UIStatusBarHidden</key>
+    <true/>
+</dict>
+</plist>"#;
+        
+        fs::write(app_dir.join("Info.plist"), info_plist)?;
+        
+        // Create a minimal executable that loads and runs our test
+        let main_m = r#"
+#import <UIKit/UIKit.h>
+#import <XCTest/XCTest.h>
+#import <dlfcn.h>
+
+@interface TestBridge : NSObject
++ (void)setupBridge;
+@end
+
+@implementation TestBridge
+
++ (void)setupBridge {
+    // Check for both direct and SIMCTL_CHILD_ prefixed environment variables
+    NSString *socketPath = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_SOCKET_PATH"];
+    if (!socketPath) {
+        socketPath = [[[NSProcessInfo processInfo] environment] objectForKey:@"SIMCTL_CHILD_ARKAVO_SOCKET_PATH"];
+    }
+    
+    NSString *bundlePath = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_TEST_BUNDLE"];
+    if (!bundlePath) {
+        bundlePath = [[[NSProcessInfo processInfo] environment] objectForKey:@"SIMCTL_CHILD_ARKAVO_TEST_BUNDLE"];
+    }
+    
+    NSString *targetAppId = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_TARGET_APP_ID"];
+    if (!targetAppId) {
+        targetAppId = [[[NSProcessInfo processInfo] environment] objectForKey:@"SIMCTL_CHILD_ARKAVO_TARGET_APP_ID"];
+    }
+    
+    NSLog(@"[TestBridge] Setting up bridge...");
+    NSLog(@"[TestBridge] Socket path: %@", socketPath ?: @"not set");
+    NSLog(@"[TestBridge] Bundle path: %@", bundlePath ?: @"not set");
+    NSLog(@"[TestBridge] Target app: %@", targetAppId ?: @"not set");
+    
+    if (!bundlePath) {
+        NSLog(@"[TestBridge] ERROR: ARKAVO_TEST_BUNDLE not set");
+        return;
+    }
+    
+    // Resolve relative path if needed
+    NSString *resolvedPath = bundlePath;
+    if (![bundlePath hasPrefix:@"/"]) {
+        NSBundle *mainBundle = [NSBundle mainBundle];
+        resolvedPath = [[mainBundle bundlePath] stringByAppendingPathComponent:bundlePath];
+        NSLog(@"[TestBridge] Resolved relative path to: %@", resolvedPath);
+    }
+    
+    // Check if bundle exists
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:resolvedPath]) {
+        NSLog(@"[TestBridge] ERROR: Test bundle not found at: %@", resolvedPath);
+        return;
+    }
+    
+    // Load the test bundle
+    NSBundle *testBundle = [NSBundle bundleWithPath:resolvedPath];
+    if (!testBundle) {
+        NSLog(@"[TestBridge] ERROR: Failed to create bundle from path");
+        return;
+    }
+    
+    NSError *error = nil;
+    if (![testBundle loadAndReturnError:&error]) {
+        NSLog(@"[TestBridge] ERROR: Failed to load bundle: %@", error);
+        return;
+    }
+    
+    NSLog(@"[TestBridge] Test bundle loaded successfully");
+    
+    // Get the principal class (should be ArkavoTestRunner)
+    Class testClass = [testBundle principalClass];
+    if (!testClass) {
+        testClass = [testBundle classNamed:@"ArkavoTestRunner"];
+    }
+    
+    if (testClass) {
+        NSLog(@"[TestBridge] Found test class: %@", NSStringFromClass(testClass));
+        
+        // Call setUp to initialize the socket server
+        if ([testClass respondsToSelector:@selector(setUp)]) {
+            NSLog(@"[TestBridge] Calling test class setUp...");
+            [testClass performSelector:@selector(setUp)];
+        }
+        
+        // Call initializeBridge to launch target app if needed
+        if ([testClass respondsToSelector:@selector(initializeBridge)]) {
+            NSLog(@"[TestBridge] Calling test class initializeBridge...");
+            [testClass performSelector:@selector(initializeBridge)];
+        }
+        
+        NSLog(@"[TestBridge] Bridge setup complete - test infrastructure ready");
+    } else {
+        NSLog(@"[TestBridge] ERROR: Could not find test class in bundle");
+    }
+}
+
+@end
+
+// Minimal app delegate that doesn't create any UI
+@interface TestHostAppDelegate : UIResponder <UIApplicationDelegate>
+@end
+
+@implementation TestHostAppDelegate
+
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    NSLog(@"[TestHost] App launched - setting up test bridge immediately...");
+    
+    // Set up the bridge immediately to ensure socket is ready when Rust connects
+    [TestBridge setupBridge];
+    
+    // Log target app if specified
+    NSString *targetAppId = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_TARGET_APP_ID"];
+    if (!targetAppId) {
+        targetAppId = [[[NSProcessInfo processInfo] environment] objectForKey:@"SIMCTL_CHILD_ARKAVO_TARGET_APP_ID"];
+    }
+    
+    if (targetAppId) {
+        NSLog(@"[TestHost] Target app specified: %@", targetAppId);
+        // The test host will remain in the background naturally since the target app is in foreground
+    }
+    
+    // Don't create any windows or UI - this is just a bridge
+    return YES;
+}
+
+@end
+
+int main(int argc, char * argv[]) {
+    @autoreleasepool {
+        return UIApplicationMain(argc, argv, nil, NSStringFromClass([TestHostAppDelegate class]));
+    }
+}
+"#;
+        
+        let main_path = self.build_dir.join("main.m");
+        fs::write(&main_path, main_m)?;
+        
+        // Compile the host app
+        let sdk_output = Command::new("xcrun")
+            .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+            .output()?;
+            
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+        
+        // Get platform path for frameworks
+        let platform_output = Command::new("xcrun")
+            .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
+            .output()?;
+            
+        let platform_path = String::from_utf8_lossy(&platform_output.stdout).trim().to_string();
+        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        
+        let compile_output = Command::new("xcrun")
+            .args([
+                "clang",
+                "-fobjc-arc",
+                "-framework", "UIKit",
+                "-framework", "XCTest",
+                "-isysroot", &sdk_path,
+                "-F", &xctest_framework_path,
+                "-Xlinker", "-rpath",
+                "-Xlinker", &xctest_framework_path,
+                "-Xlinker", "-rpath", 
+                "-Xlinker", "@executable_path/Frameworks",
+                "-Xlinker", "-rpath",
+                "-Xlinker", "@loader_path/Frameworks",
+                "-target", "arm64-apple-ios15.0-simulator",
+                "-o", app_dir.join("ArkavoTestHost").to_str().unwrap(),
+                main_path.to_str().unwrap()
+            ])
+            .output()?;
+            
+        if !compile_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to compile test host app: {}",
+                String::from_utf8_lossy(&compile_output.stderr)
+            )));
+        }
+        
+        // Sign the app
+        let _ = Command::new("codesign")
+            .args([
+                "--force",
+                "--sign", "-",
+                app_dir.to_str().unwrap()
+            ])
+            .output();
+            
+        Ok(app_dir)
+    }
 
     /// Run the XCTest bundle on a simulator
-    pub fn run_tests(&self, device_id: &str, _bundle_id: &str) -> Result<()> {
-        eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+    /// 
+    /// # Arguments
+    /// Launch the test host app (not as a test, but as a regular app)
+    pub fn launch_test_host(&self, device_id: &str, target_app_bundle_id: Option<&str>) -> Result<()> {
+        eprintln!("[XCTestCompiler] Launching test host app on device: {}", device_id);
         eprintln!("[XCTestCompiler] Socket path: {}", self.socket_path.display());
         
-        // Get the path where we installed the bundle
-        let home = std::env::var("HOME").map_err(|_| TestError::Mcp("HOME not set".to_string()))?;
-        let bundle_path = PathBuf::from(&home)
-            .join("Library/Developer/CoreSimulator/Devices")
-            .join(device_id)
-            .join("data/Library/Developer/Xcode/DerivedData/TestBundles/ArkavoTestRunner.xctest");
-            
+        // Get the compiled bundle path
+        let bundle_path = self.build_dir.join("ArkavoTestRunner.xctest");
         if !bundle_path.exists() {
             return Err(TestError::Mcp(format!(
-                "Test bundle not found at {}. Installation may have failed.",
+                "Test bundle not found at {}. Compilation may have failed.",
                 bundle_path.display()
             )));
         }
         
-        // Run XCTest bundle using simctl xctest
-        eprintln!("[XCTestCompiler] Running XCTest bundle using simctl xctest...");
+        // Create and install the host app
+        eprintln!("[XCTestCompiler] Creating test host app...");
+        let host_app_path = self.create_test_host_app()?;
         
-        // Start the test in the background
-        let mut child = Command::new("xcrun")
+        // Copy the test bundle into the host app
+        let host_app_bundle_path = host_app_path.join("ArkavoTestRunner.xctest");
+        eprintln!("[XCTestCompiler] Embedding test bundle into host app...");
+        let copy_result = Command::new("cp")
+            .args(["-R", bundle_path.to_str().unwrap(), host_app_bundle_path.to_str().unwrap()])
+            .output()?;
+            
+        if !copy_result.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to copy test bundle into host app: {}",
+                String::from_utf8_lossy(&copy_result.stderr)
+            )));
+        }
+        
+        // Install the host app
+        eprintln!("[XCTestCompiler] Installing host app...");
+        let install_output = Command::new("xcrun")
             .args([
                 "simctl",
-                "spawn",
-                "-s",  // standalone mode
+                "install",
                 device_id,
-                "xctest",
-                "-XCTest",
-                "ArkavoTestRunner/testRunCommands",
-                bundle_path.to_str().unwrap(),
+                host_app_path.to_str().unwrap()
             ])
-            .env("ARKAVO_SOCKET_PATH", self.socket_path.to_str().unwrap())
-            .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to spawn xctest: {}", e)))?;
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
             
-        // Give it a moment to start
+        if !install_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to install test host app: {}",
+                String::from_utf8_lossy(&install_output.stderr)
+            )));
+        }
+        
+        // Launch the host app as a regular app with environment variables
+        eprintln!("[XCTestCompiler] Launching test host app...");
+        
+        // Set up environment variables for the child process
+        let mut cmd = Command::new("xcrun");
+        cmd.args(&[
+            "simctl",
+            "launch",
+            device_id,
+            "com.arkavo.testhost",
+        ]);
+        
+        // Environment variables must be set with SIMCTL_CHILD_ prefix
+        cmd.env("SIMCTL_CHILD_ARKAVO_SOCKET_PATH", self.socket_path.display().to_string());
+        cmd.env("SIMCTL_CHILD_ARKAVO_TEST_BUNDLE", self.build_dir.join("ArkavoTestRunner.xctest").display().to_string());
+        
+        if let Some(app_id) = target_app_bundle_id {
+            cmd.env("SIMCTL_CHILD_ARKAVO_TARGET_APP_ID", app_id);
+        }
+        
+        let launch_output = cmd.output()
+            .map_err(|e| TestError::Mcp(format!("Failed to launch host app: {}", e)))?;
+            
+        if !launch_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to launch test host app: {}",
+                String::from_utf8_lossy(&launch_output.stderr)
+            )));
+        }
+        
+        eprintln!("[XCTestCompiler] Test host app launched successfully");
+        eprintln!("[XCTestCompiler] Host app PID: {}", String::from_utf8_lossy(&launch_output.stdout).trim());
+        
+        Ok(())
+    }
+    
+    /// * `device_id` - The simulator device ID
+    /// * `target_app_bundle_id` - Optional bundle ID of the app to test
+    #[deprecated(note = "Use launch_test_host instead to avoid paradigm mixing")]
+    pub fn run_tests(&self, device_id: &str, target_app_bundle_id: Option<&str>) -> Result<()> {
+        eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+        eprintln!("[XCTestCompiler] Socket path: {}", self.socket_path.display());
+        
+        if let Some(app_id) = target_app_bundle_id {
+            eprintln!("[XCTestCompiler] Target app bundle ID: {}", app_id);
+            
+            // First, launch the target app
+            eprintln!("[XCTestCompiler] Launching target app: {}", app_id);
+            let launch_output = Command::new("xcrun")
+                .args([
+                    "simctl",
+                    "launch",
+                    device_id,
+                    app_id
+                ])
+                .output()
+                .map_err(|e| TestError::Mcp(format!("Failed to launch target app: {}", e)))?;
+                
+            if !launch_output.status.success() {
+                eprintln!("[XCTestCompiler] Warning: Failed to launch target app: {}", 
+                    String::from_utf8_lossy(&launch_output.stderr));
+                // Continue anyway - the app might already be running
+            }
+            
+            // Give the app time to start
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        
+        // Get the compiled bundle path
+        let bundle_path = self.build_dir.join("ArkavoTestRunner.xctest");
+        if !bundle_path.exists() {
+            return Err(TestError::Mcp(format!(
+                "Test bundle not found at {}. Compilation may have failed.",
+                bundle_path.display()
+            )));
+        }
+        
+        // Back to the test host app approach, but we'll make it minimally invasive
+        eprintln!("[XCTestCompiler] Creating test host app...");
+        let host_app_path = self.create_test_host_app()?;
+        
+        // Install the host app
+        let install_output = Command::new("xcrun")
+            .args([
+                "simctl",
+                "install",
+                device_id,
+                host_app_path.to_str().unwrap()
+            ])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
+            
+        if !install_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to install test host app: {}",
+                String::from_utf8_lossy(&install_output.stderr)
+            )));
+        }
+        
+        // Instead of hardcoding paths, let's copy the test bundle into the host app's bundle
+        // This makes it portable across different environments
+        let host_app_bundle_path = host_app_path.join("ArkavoTestRunner.xctest");
+        
+        // Copy the test bundle into the host app
+        eprintln!("[XCTestCompiler] Copying test bundle into host app...");
+        let copy_result = Command::new("cp")
+            .args(["-R", bundle_path.to_str().unwrap(), host_app_bundle_path.to_str().unwrap()])
+            .output()?;
+            
+        if !copy_result.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to copy test bundle into host app: {}",
+                String::from_utf8_lossy(&copy_result.stderr)
+            )));
+        }
+        
+        // Now reinstall the host app with the embedded test bundle
+        eprintln!("[XCTestCompiler] Reinstalling host app with embedded test bundle...");
+        let reinstall_output = Command::new("xcrun")
+            .args([
+                "simctl",
+                "install",
+                device_id,
+                host_app_path.to_str().unwrap()
+            ])
+            .output()?;
+            
+        if !reinstall_output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to reinstall host app: {}",
+                String::from_utf8_lossy(&reinstall_output.stderr)
+            )));
+        }
+        
+        // The test bundle is now at a predictable location relative to the app
+        let relative_bundle_path = "ArkavoTestRunner.xctest";
+        
+        eprintln!("[XCTestCompiler] Launching test host app...");
+        
+        // Launch with environment variables and console output
+        eprintln!("[XCTestCompiler] Launching with environment:");
+        eprintln!("  ARKAVO_SOCKET_PATH={}", self.socket_path.display());
+        eprintln!("  ARKAVO_TEST_BUNDLE={}", relative_bundle_path);
+        if let Some(app_id) = target_app_bundle_id {
+            eprintln!("  ARKAVO_TARGET_APP_ID={}", app_id);
+        }
+        
+        let mut launch_cmd = Command::new("xcrun");
+        launch_cmd.args([
+            "simctl",
+            "launch",
+            "--console-pty",
+            "--terminate-running-process",
+            device_id,
+            "com.arkavo.testhost"
+        ])
+        .env("SIMCTL_CHILD_ARKAVO_SOCKET_PATH", self.socket_path.to_str().unwrap())
+        .env("SIMCTL_CHILD_ARKAVO_TEST_BUNDLE", relative_bundle_path);
+        
+        // Add target app bundle ID if provided
+        if let Some(app_id) = target_app_bundle_id {
+            launch_cmd.env("SIMCTL_CHILD_ARKAVO_TARGET_APP_ID", app_id);
+        }
+        
+        let mut child = launch_cmd.spawn()
+            .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {}", e)))?;
+            
+        // Give it time to start
         std::thread::sleep(std::time::Duration::from_secs(2));
         
-        // Check if it's still running
+        // Check status
         match child.try_wait() {
             Ok(Some(status)) => {
-                if status.success() {
-                    eprintln!("[XCTestCompiler] Test completed successfully");
-                } else {
-                    // Try to get output
-                    let output = child.wait_with_output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to get test output: {}", e)))?;
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    
+                if !status.success() {
+                    let output = child.wait_with_output()?;
                     return Err(TestError::Mcp(format!(
-                        "Test runner exited with status: {}. Stdout: {}. Stderr: {}",
-                        status, stdout, stderr
+                        "Test runner exited with: {}. Output: {}",
+                        status,
+                        String::from_utf8_lossy(&output.stderr)
                     )));
                 }
             }
             Ok(None) => {
-                eprintln!("[XCTestCompiler] Test runner is running in background");
-                // Test is running, which is what we want for the socket server
+                eprintln!("[XCTestCompiler] Test runner is running");
             }
             Err(e) => {
-                eprintln!("[XCTestCompiler] Warning: Could not check test status: {}", e);
+                eprintln!("[XCTestCompiler] Warning: Could not check status: {}", e);
             }
         }
         
