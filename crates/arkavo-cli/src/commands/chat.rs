@@ -118,7 +118,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Check for file operation commands
-        if let Some(command_response) = handle_command(input, &mcp_client, &client.provider_name())
+        if let Some(command_response) = handle_command(input, &mcp_client, client.provider_name())
         {
             println!("Assistant: {}", command_response);
             println!();

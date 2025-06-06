@@ -21,7 +21,9 @@ struct JsonRpcRequest {
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcResponse {
+    #[allow(dead_code)]
     jsonrpc: String,
+    #[allow(dead_code)]
     id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
@@ -31,8 +33,10 @@ struct JsonRpcResponse {
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcError {
+    #[allow(dead_code)]
     code: i32,
     message: String,
+    #[allow(dead_code)]
     data: Option<Value>,
 }
 
