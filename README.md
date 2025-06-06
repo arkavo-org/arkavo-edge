@@ -2,16 +2,6 @@
 
 AI-powered developer toolkit for secure, intelligent code transformation and testing.
 
-## Quick Start
-
-```bash
-# Start interactive agent
-arkavo chat
-
-# Run intelligent tests
-arkavo test --explore
-```
-
 ## Key Features
 
 ### 🤖 AI Code Agent
@@ -32,7 +22,12 @@ arkavo test --explore
 
 ## MCP Server for Claude Code
 
-Configure in Claude Code settings:
+When downloaded to the project folder:
+```bash
+claude mcp add arkavo ./arkavo serve
+```
+
+Or configure manually in Claude Code settings:
 ```json
 {
   "mcpServers": {
@@ -52,10 +47,6 @@ Then ask the AI to:
 
 ## Commands
 
-- `arkavo chat` - Interactive AI agent
-- `arkavo test` - Run intelligent tests
-- `arkavo plan` - Preview changes
-- `arkavo apply` - Execute changes
 - `arkavo serve` - MCP server mode
 
 ## License
