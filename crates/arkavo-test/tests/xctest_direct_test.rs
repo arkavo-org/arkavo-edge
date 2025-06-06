@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn test_xctest_direct_compilation_and_connection() {
     println!("\n=== Direct XCTest Compilation Test ===\n");
 

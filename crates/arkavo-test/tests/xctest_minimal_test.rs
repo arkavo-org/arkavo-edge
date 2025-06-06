@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 #[test]
+#[cfg(target_os = "macos")]
 fn test_basic_unix_socket() {
     println!("\n=== Basic Unix Socket Test ===\n");
 

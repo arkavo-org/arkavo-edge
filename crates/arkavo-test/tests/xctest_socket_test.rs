@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use arkavo_test::mcp::device_manager::DeviceManager;
     use std::time::Duration;
