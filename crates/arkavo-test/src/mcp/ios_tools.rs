@@ -1488,34 +1488,6 @@ impl Tool for UiQueryKit {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_xctest_tap_command_creation() {
-        // Test that we can create tap commands
-        let coord_tap = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
-        assert_eq!(coord_tap.parameters.x, Some(100.0));
-        assert_eq!(coord_tap.parameters.y, Some(200.0));
-        assert!(coord_tap.parameters.text.is_none());
-        assert!(coord_tap.parameters.accessibility_id.is_none());
-
-        let text_tap = XCTestUnixBridge::create_text_tap("Login".to_string(), Some(5.0));
-        assert_eq!(text_tap.parameters.text, Some("Login".to_string()));
-        assert_eq!(text_tap.parameters.timeout, Some(5.0));
-        assert!(text_tap.parameters.x.is_none());
-        assert!(text_tap.parameters.y.is_none());
-
-        let acc_tap = XCTestUnixBridge::create_accessibility_tap("login_button".to_string(), None);
-        assert_eq!(
-            acc_tap.parameters.accessibility_id,
-            Some("login_button".to_string())
-        );
-        assert!(acc_tap.parameters.timeout.is_none());
-    }
-}
-
 #[allow(dead_code)]
 fn get_active_device_id() -> Result<String> {
     let output = Command::new("xcrun")
@@ -1561,4 +1533,32 @@ fn get_active_device_id() -> Result<String> {
     // Ultimate fallback: return a placeholder ID
     // This helps avoid errors in mock scenarios
     Ok("MOCK-DEVICE-ID".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_xctest_tap_command_creation() {
+        // Test that we can create tap commands
+        let coord_tap = XCTestUnixBridge::create_coordinate_tap(100.0, 200.0);
+        assert_eq!(coord_tap.parameters.x, Some(100.0));
+        assert_eq!(coord_tap.parameters.y, Some(200.0));
+        assert!(coord_tap.parameters.text.is_none());
+        assert!(coord_tap.parameters.accessibility_id.is_none());
+
+        let text_tap = XCTestUnixBridge::create_text_tap("Login".to_string(), Some(5.0));
+        assert_eq!(text_tap.parameters.text, Some("Login".to_string()));
+        assert_eq!(text_tap.parameters.timeout, Some(5.0));
+        assert!(text_tap.parameters.x.is_none());
+        assert!(text_tap.parameters.y.is_none());
+
+        let acc_tap = XCTestUnixBridge::create_accessibility_tap("login_button".to_string(), None);
+        assert_eq!(
+            acc_tap.parameters.accessibility_id,
+            Some("login_button".to_string())
+        );
+        assert!(acc_tap.parameters.timeout.is_none());
+    }
 }
