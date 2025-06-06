@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use arkavo_test::mcp::xctest_simple_runner::XCTestSimpleRunner;
     use std::time::Duration;
