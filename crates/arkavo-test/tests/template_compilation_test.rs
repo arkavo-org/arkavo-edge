@@ -5,7 +5,6 @@ use std::process::Command;
 #[test]
 #[cfg(target_os = "macos")]
 fn test_xctest_template_compiles() {
-
     // Check if Xcode is available
     let xcode_check = Command::new("xcrun").args(["--version"]).output();
 
@@ -56,14 +55,20 @@ fn test_xctest_template_compiles() {
     let compile_output = Command::new("xcrun")
         .args([
             "swiftc",
-            "-sdk", &sdk_path,
-            "-target", "arm64-apple-ios15.0-simulator",
+            "-sdk",
+            &sdk_path,
+            "-target",
+            "arm64-apple-ios15.0-simulator",
             "-emit-library",
-            "-emit-module", 
-            "-module-name", "ArkavoTestRunner",
-            "-F", &xctest_framework_path,
-            "-framework", "XCTest",
-            "-o", temp_dir.join("ArkavoTestRunner.dylib").to_str().unwrap(),
+            "-emit-module",
+            "-module-name",
+            "ArkavoTestRunner",
+            "-F",
+            &xctest_framework_path,
+            "-framework",
+            "XCTest",
+            "-o",
+            temp_dir.join("ArkavoTestRunner.dylib").to_str().unwrap(),
             swift_file.to_str().unwrap(),
         ])
         .output()
