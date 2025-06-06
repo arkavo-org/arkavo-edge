@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -111,7 +111,7 @@ impl McpClient {
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         let response = self.send_request("tools/list", None)?;
-        
+
         if let Some(result) = response.result {
             if let Some(tools_value) = result.get("tools") {
                 let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
@@ -183,7 +183,7 @@ impl McpClient {
         params: Option<Value>,
     ) -> Result<JsonRpcResponse, Box<dyn std::error::Error>> {
         let mut process = self.process.lock().unwrap();
-        
+
         // Get next request ID
         let request_id = {
             let mut id = self.request_id.lock().unwrap();
@@ -210,14 +210,14 @@ impl McpClient {
         // Read response line by line
         let mut line = String::new();
         use std::io::BufRead;
-        
+
         if let Some(stdout) = process.stdout.as_mut() {
             let mut reader = BufReader::new(stdout);
             reader.read_line(&mut line)?;
         } else {
             return Err("Failed to get stdout".into());
         }
-        
+
         if !line.is_empty() {
             let response: JsonRpcResponse = serde_json::from_str(&line)?;
             Ok(response)

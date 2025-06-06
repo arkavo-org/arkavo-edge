@@ -55,7 +55,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             match client.list_tools() {
                 Ok(tools) => {
                     let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-                    format!("\n\nMCP Integration: Enabled\nAvailable MCP tools: {}\nYou can run tests and interact with iOS simulators through MCP tools.", tool_names.join(", "))
+                    format!(
+                        "\n\nMCP Integration: Enabled\nAvailable MCP tools: {}\nYou can run tests and interact with iOS simulators through MCP tools.",
+                        tool_names.join(", ")
+                    )
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to list MCP tools: {}", e);
@@ -66,7 +69,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "\n\nMCP Integration: Enabled\nYou can run tests and interact with iOS simulators through MCP tools.".to_string()
         }
     } else {
-        "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true".to_string()
+        "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true"
+            .to_string()
     };
 
     let system_prompt = format!(
@@ -114,7 +118,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Check for file operation commands
-        if let Some(command_response) = handle_command(input, &mcp_client, &client.provider_name()) {
+        if let Some(command_response) = handle_command(input, &mcp_client, &client.provider_name())
+        {
             println!("Assistant: {}", command_response);
             println!();
             continue;
@@ -257,7 +262,11 @@ fn get_repository_context() -> String {
     context
 }
 
-fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &str) -> Option<String> {
+fn handle_command(
+    input: &str,
+    mcp_client: &Option<McpClient>,
+    llm_provider: &str,
+) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {
         return None;
@@ -269,14 +278,10 @@ fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &st
                 return Some("Usage: read <file_path>".to_string());
             }
             let file_path = parts[1..].join(" ");
-            
+
             // Use MCP if available
             if let Some(client) = mcp_client {
-                match client.call_tool(
-                    "read_file",
-                    json!({ "path": file_path }),
-                    llm_provider,
-                ) {
+                match client.call_tool("read_file", json!({ "path": file_path }), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
                             Some(format!("Content of {} (via MCP):\n\n{}", file_path, text))
@@ -299,14 +304,10 @@ fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &st
             } else {
                 ".".to_string()
             };
-            
+
             // Use MCP if available
             if let Some(client) = mcp_client {
-                match client.call_tool(
-                    "list_directory",
-                    json!({ "path": path }),
-                    llm_provider,
-                ) {
+                match client.call_tool("list_directory", json!({ "path": path }), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
                             Some(format!("Contents of {} (via MCP):\n\n{}", path, text))
@@ -334,13 +335,9 @@ fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &st
             if mcp_client.is_none() {
                 return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
             }
-            
+
             if let Some(client) = mcp_client {
-                match client.call_tool(
-                    "list_tests",
-                    json!({}),
-                    llm_provider,
-                ) {
+                match client.call_tool("list_tests", json!({}), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
                             Some(format!("Available tests (via MCP):\n\n{}", text))
@@ -361,14 +358,11 @@ fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &st
             if mcp_client.is_none() {
                 return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
             }
-            
+
             let test_name = parts[1..].join(" ");
             if let Some(client) = mcp_client {
-                match client.call_tool(
-                    "run_test",
-                    json!({ "test_name": test_name }),
-                    llm_provider,
-                ) {
+                match client.call_tool("run_test", json!({ "test_name": test_name }), llm_provider)
+                {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
                             Some(format!("Test execution result (via MCP):\n\n{}", text))
@@ -395,7 +389,10 @@ fn handle_command(input: &str, mcp_client: &Option<McpClient>, llm_provider: &st
                     Err(e) => Some(format!("Failed to list MCP tools: {}", e)),
                 }
             } else {
-                Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable MCP tools.".to_string())
+                Some(
+                    "MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable MCP tools."
+                        .to_string(),
+                )
             }
         }
         _ => None,
