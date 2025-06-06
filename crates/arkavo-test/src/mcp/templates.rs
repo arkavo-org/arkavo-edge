@@ -14,7 +14,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn test_templates_are_valid() {
         // Verify templates are embedded correctly
-        assert!(!ARKAVO_TEST_RUNNER_SWIFT.is_empty());
+        // Note: include_str! constants are never empty at compile time
         assert!(ARKAVO_TEST_RUNNER_SWIFT.contains("struct CommandResponse"));
 
         // Verify it's the updated version with JSONValue
@@ -69,7 +69,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn test_info_plist_is_valid() {
-        assert!(!INFO_PLIST.is_empty());
+        // Note: include_str! constants are never empty at compile time
         assert!(INFO_PLIST.contains("CFBundleIdentifier"));
         assert!(INFO_PLIST.contains("CFBundleExecutable"));
         assert!(

@@ -75,7 +75,7 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "arkavo"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arkavo-cli",
@@ -83,10 +83,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
+ "arkavo-llm",
  "arkavo-repo",
  "arkavo-terminal",
  "arkavo-test",
@@ -94,31 +95,48 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "arkavo-git"
-version = "0.5.1"
+version = "0.6.0"
+
+[[package]]
+name = "arkavo-llm"
+version = "0.6.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "arkavo-repo"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "arkavo-test"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arkavo-protocol",
@@ -148,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "async-trait"
@@ -1995,12 +2013,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
  "webpki-roots",
 ]
@@ -2449,6 +2469,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-stream"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-tungstenite"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2878,6 +2909,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

@@ -47,7 +47,23 @@ Then ask the AI to:
 
 ## Commands
 
-- `arkavo serve` - MCP server mode
+### Chat
+```bash
+# Interactive mode
+arkavo chat
+
+# Single query
+arkavo chat --prompt "Explain this codebase"
+```
+
+AI-powered conversational interface with streaming responses and repository context. Uses Ollama with `devstral` model by default.
+
+### Serve
+```bash
+arkavo serve
+```
+
+Run as MCP server for Claude Code integration.
 
 ## License
 
