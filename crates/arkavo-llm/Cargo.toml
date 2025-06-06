@@ -1,0 +1,20 @@
+[package]
+name = "arkavo-llm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LLM integration for Arkavo Edge"
+
+[dependencies]
+tokio = { version = "1.42", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures = "0.3"
+thiserror = "2.0"
+tracing = "0.1"
+async-trait = "0.1"
+tokio-stream = "0.1"
+bytes = "1.5"
