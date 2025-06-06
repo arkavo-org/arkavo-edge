@@ -9,7 +9,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let prompt = args
         .windows(2)
         .find(|w| w[0] == "--prompt")
-        .and_then(|w| Some(w[1].clone()));
+        .map(|w| w[1].clone());
 
     // Create runtime for async operations
     let runtime = Runtime::new()?;
