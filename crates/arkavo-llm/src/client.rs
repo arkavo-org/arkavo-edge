@@ -1,5 +1,5 @@
-use crate::{Error, Message, Provider, Result, StreamResponse};
 use crate::ollama::OllamaClient;
+use crate::{Error, Message, Provider, Result, StreamResponse};
 use tokio_stream::Stream;
 
 pub struct LlmClient {
@@ -19,7 +19,12 @@ impl LlmClient {
 
         let provider: Box<dyn Provider> = match provider_name.as_str() {
             "ollama" => Box::new(OllamaClient::from_env()?),
-            _ => return Err(Error::Config(format!("Unknown provider: {}", provider_name))),
+            _ => {
+                return Err(Error::Config(format!(
+                    "Unknown provider: {}",
+                    provider_name
+                )));
+            }
         };
 
         Ok(Self::new(provider))

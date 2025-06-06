@@ -4,8 +4,8 @@ use reqwest::Client;
 use tokio_stream::Stream;
 use tracing::debug;
 
-use crate::{Error, Message, Provider, Result, StreamResponse};
 use super::types::{ChatRequest, ChatResponse};
+use crate::{Error, Message, Provider, Result, StreamResponse};
 
 pub struct OllamaClient {
     client: Client,
@@ -39,7 +39,8 @@ impl Provider for OllamaClient {
         };
 
         debug!("Sending chat request to Ollama");
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/api/chat", self.base_url))
             .json(&request)
             .send()
@@ -48,7 +49,10 @@ impl Provider for OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(Error::Provider(format!("Ollama API error: {} - {}", status, text)));
+            return Err(Error::Provider(format!(
+                "Ollama API error: {} - {}",
+                status, text
+            )));
         }
 
         let chat_response: ChatResponse = response.json().await?;
@@ -66,7 +70,8 @@ impl Provider for OllamaClient {
         };
 
         debug!("Sending streaming chat request to Ollama");
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/api/chat", self.base_url))
             .json(&request)
             .send()
@@ -75,22 +80,26 @@ impl Provider for OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(Error::Provider(format!("Ollama API error: {} - {}", status, text)));
+            return Err(Error::Provider(format!(
+                "Ollama API error: {} - {}",
+                status, text
+            )));
         }
 
-        let stream = response.bytes_stream()
+        let stream = response
+            .bytes_stream()
             .map(move |chunk| {
                 match chunk {
                     Ok(bytes) => {
                         let text = String::from_utf8_lossy(&bytes);
-                        
+
                         // Parse JSON lines
                         let mut responses = Vec::new();
                         for line in text.lines() {
                             if line.trim().is_empty() {
                                 continue;
                             }
-                            
+
                             match serde_json::from_str::<ChatResponse>(line) {
                                 Ok(resp) => {
                                     responses.push(Ok(StreamResponse {
@@ -103,7 +112,7 @@ impl Provider for OllamaClient {
                                 }
                             }
                         }
-                        
+
                         stream::iter(responses)
                     }
                     Err(e) => stream::iter(vec![Err(Error::Request(e))]),

@@ -90,11 +90,11 @@ mod tests {
         let msg = Message::system("test");
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""role":"system"#));
-        
+
         let msg = Message::user("test");
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""role":"user"#));
-        
+
         let msg = Message::assistant("test");
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""role":"assistant"#));

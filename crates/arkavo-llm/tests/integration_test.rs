@@ -22,7 +22,7 @@ mod tests {
         // Test that client can be created without panicking
         let result = LlmClient::from_env();
         assert!(result.is_ok());
-        
+
         let client = result.unwrap();
         assert_eq!(client.provider_name(), "ollama");
     }

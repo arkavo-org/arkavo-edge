@@ -30,7 +30,10 @@ mod tests {
     #[test]
     fn test_error_display() {
         let err = Error::Config("Invalid configuration".to_string());
-        assert_eq!(err.to_string(), "Configuration error: Invalid configuration");
+        assert_eq!(
+            err.to_string(),
+            "Configuration error: Invalid configuration"
+        );
 
         let err = Error::Stream("Connection lost".to_string());
         assert_eq!(err.to_string(), "Stream error: Connection lost");

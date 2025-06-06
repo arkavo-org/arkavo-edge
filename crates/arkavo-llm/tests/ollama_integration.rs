@@ -17,7 +17,7 @@ async fn test_ollama_client_creation() {
 #[ignore = "requires Ollama server running"]
 async fn test_ollama_completion() {
     let client = LlmClient::from_env().expect("Failed to create client");
-    
+
     let messages = vec![
         Message::system("You are a helpful assistant. Reply with exactly: 'Hello!'"),
         Message::user("Say hello"),
@@ -38,9 +38,9 @@ async fn test_ollama_completion() {
 #[ignore = "requires Ollama server running"]
 async fn test_ollama_streaming() {
     use tokio_stream::StreamExt;
-    
+
     let client = LlmClient::from_env().expect("Failed to create client");
-    
+
     let messages = vec![
         Message::system("You are a helpful assistant"),
         Message::user("Count from 1 to 5"),
@@ -76,18 +76,19 @@ async fn test_ollama_streaming() {
 async fn test_ollama_error_handling() {
     // Test with invalid URL
     unsafe {
-        env::set_var("OLLAMA_BASE_URL", "http://invalid-url-that-does-not-exist:11434");
+        env::set_var(
+            "OLLAMA_BASE_URL",
+            "http://invalid-url-that-does-not-exist:11434",
+        );
     }
-    
+
     let client = LlmClient::from_env().expect("Failed to create client");
-    
-    let messages = vec![
-        Message::user("Hello"),
-    ];
+
+    let messages = vec![Message::user("Hello")];
 
     let result = client.complete(messages).await;
     assert!(result.is_err());
-    
+
     if let Err(e) = result {
         println!("Expected error: {}", e);
     }
@@ -101,10 +102,10 @@ async fn test_environment_configuration() {
         env::remove_var("OLLAMA_BASE_URL");
         env::remove_var("OLLAMA_MODEL");
     }
-    
+
     let client = LlmClient::from_env().expect("Failed to create client");
     assert_eq!(client.provider_name(), "ollama");
-    
+
     // Test custom provider error
     unsafe {
         env::set_var("LLM_PROVIDER", "unknown_provider");
