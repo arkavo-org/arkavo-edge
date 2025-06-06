@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[cfg(target_os = "macos")]
 mod ios_bridge_tests {
     use arkavo_test::mcp::device_manager::DeviceManager;
     use arkavo_test::mcp::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};

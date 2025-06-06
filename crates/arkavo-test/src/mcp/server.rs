@@ -7,7 +7,6 @@ use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
 use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
-use super::idb_ui_tools::IdbUiKit;
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
@@ -140,10 +139,6 @@ impl McpTestServer {
         tools.insert(
             "system_dialog".to_string(),
             Arc::new(SystemDialogKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "idb_ui".to_string(),
-            Arc::new(IdbUiKit::new(device_manager.clone())),
         );
 
         // Add simulator management tools (IDB functionality in Rust)
@@ -333,6 +328,7 @@ impl McpTestServer {
                 | "screen_capture"
                 | "ui_query"
                 | "usage_guide"
+                | "app_diagnostic"
                 | "setup_xcuitest"
                 | "xctest_status"
                 | "template_diagnostics"

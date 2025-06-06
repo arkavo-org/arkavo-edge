@@ -10,7 +10,6 @@ pub mod device_manager;
 pub mod device_tools;
 pub mod device_xctest_status;
 pub mod face_id_control;
-pub mod idb_ui_tools;
 pub mod intelligent_tools;
 pub mod ios_biometric_tools;
 pub mod ios_errors;
