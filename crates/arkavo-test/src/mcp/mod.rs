@@ -3,6 +3,7 @@ pub mod biometric_dialog_handler;
 pub mod biometric_test_scenarios;
 pub mod code_analysis_tools;
 pub mod coordinate_tools;
+pub mod coordinate_validator;
 pub mod deeplink_tools;
 pub mod device_boot_manager;
 pub mod device_health_manager;
