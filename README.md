@@ -45,6 +45,21 @@ Then ask the AI to:
 - "Test what happens when the network fails during checkout"
 - "Explore edge cases in the authentication flow"
 
+## iOS Testing Requirements (macOS only)
+
+For iOS simulator testing capabilities, you'll need:
+
+### idb_companion
+The iOS Debug Bridge companion tool from Meta is required for reliable simulator UI automation:
+
+```bash
+# Install via Homebrew
+brew tap facebook/fb
+brew install idb-companion
+```
+
+**Note:** The macOS build can optionally embed idb_companion for distribution. See THIRD-PARTY-LICENSES.md for license information.
+
 ## Commands
 
 ### Chat

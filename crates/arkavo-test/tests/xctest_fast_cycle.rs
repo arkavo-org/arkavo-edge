@@ -146,7 +146,7 @@ async fn test_xctest_setup_and_verify() {
             let setup_kit = XCTestSetupKit::new(device_manager.clone());
             let params = json!({
                 "device_id": device.id,
-                "force_reinstall": false
+                "force_reinstall": true  // Force reinstall to avoid issues
             });
 
             match setup_kit.execute(params).await {

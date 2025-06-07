@@ -120,3 +120,4 @@ Avoid hardcoded paths, platform-specific assumptions, or environment-dependent c
 ## Memories
 
 - Faking success is worse than an honest failure
+- do not use conventional commits

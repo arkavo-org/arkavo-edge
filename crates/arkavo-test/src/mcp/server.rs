@@ -6,6 +6,7 @@ use super::coordinate_tools::CoordinateConverterKit;
 use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
+use super::enrollment_dialog_handler::EnrollmentDialogHandler;
 use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
@@ -170,6 +171,12 @@ impl McpTestServer {
         tools.insert(
             "passkey_dialog".to_string(),
             Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add enrollment dialog handler for precise Cancel button coordinates
+        tools.insert(
+            "enrollment_dialog".to_string(),
+            Arc::new(EnrollmentDialogHandler::new(device_manager.clone())),
         );
 
         // Add Face ID control tools

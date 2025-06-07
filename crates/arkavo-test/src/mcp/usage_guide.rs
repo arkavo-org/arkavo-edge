@@ -45,62 +45,75 @@ impl Tool for UsageGuideKit {
         let content = match topic {
             "overview" => {
                 r#"
-# iOS Automation with XCUITest
+# iOS Automation with Coordinate-Based Tapping
 
-This MCP server provides iOS UI automation through XCUITest. 
+This MCP server provides iOS UI automation with COORDINATE-BASED TAPPING as the PRIMARY method.
 
-## IMPORTANT: Setup Required
+## 🎯 RECOMMENDED APPROACH: Coordinate Tapping
 
-Before using text-based UI interactions, you MUST initialize XCUITest:
+**NO SETUP REQUIRED!** Just use coordinates from screenshots:
 
-1. **Call setup_xcuitest first**:
+1. **Take a screenshot**:
    ```json
    {
-     "tool": "setup_xcuitest",
+     "tool": "screen_capture",
      "arguments": {
-       "device_id": "YOUR-DEVICE-ID"
+       "name": "current_screen"
      }
    }
    ```
 
-2. **Wait for successful completion** - The setup will:
-   - Compile the XCTest runner
-   - Install it to the simulator
-   - Start the automation bridge
-   - Return success when ready
+2. **Read the image to see UI elements**:
+   ```json
+   {
+     "tool": "Read",
+     "arguments": {
+       "file_path": "test_results/current_screen.png"
+     }
+   }
+   ```
 
-3. **Then use text-based tapping**:
+3. **Tap using coordinates**:
    ```json
    {
      "tool": "ui_interaction",
      "arguments": {
        "action": "tap",
-       "target": {"text": "Get Started"},
-       "device_id": "YOUR-DEVICE-ID"
+       "target": {"x": 200, "y": 400}
      }
    }
    ```
 
-## Key Features After Setup:
+## ✅ Why Coordinates Are Better:
 
-- **Text-based element finding** - Find buttons/fields by their visible text
-- **Accessibility ID support** - Most reliable for test automation  
-- **10-second timeout** - Automatically waits for elements to appear
-- **Honest error messages** - Know exactly why something failed
+- **Works immediately** - No setup or initialization needed
+- **More reliable** - No connection timeouts or setup failures
+- **Faster execution** - Direct tapping via embedded idb_companion
+- **Always available** - Works with any UI element
+
+## ⚠️ Avoid Text-Based Tapping:
+
+Text-based tapping requires setup_xcuitest which:
+- Often fails with timeouts
+- Requires complex initialization
+- Is slower and less reliable
+- Should only be used as absolute last resort
 
 ## Quick Start
 
-1. Always start with screen_capture to see the UI
-2. Use text-based taps when you see button/link text
-3. Only use coordinates as a last resort
+1. Use device_management to get device_id
+2. Use screen_capture to see the UI
+3. Read the screenshot image
+4. Identify element positions
+5. Use ui_interaction with coordinates
 
 Example:
 ```json
-{"action": "tap", "target": {"text": "Sign In"}}
+{"action": "tap", "target": {"x": 200, "y": 400}}
 ```
 is MUCH better than:
 ```json
-{"action": "tap", "target": {"x": 200, "y": 400}}
+{"action": "tap", "target": {"text": "Sign In"}}
 ```
 "#
             }
@@ -154,43 +167,48 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
                 r#"
 # Common Automation Workflows
 
-## CRITICAL: Initial Setup Workflow
+## 🎯 RECOMMENDED: Coordinate-Based Workflow
 
 1. **Get device ID**: 
    ```json
    {"tool": "device_management", "arguments": {"action": "list"}}
    ```
 
-2. **Initialize XCUITest** (REQUIRED for text-based interaction):
+2. **Start tapping immediately** (NO SETUP NEEDED!):
    ```json
-   {"tool": "setup_xcuitest", "arguments": {"device_id": "YOUR-DEVICE-ID"}}
+   {"tool": "screen_capture", "arguments": {"name": "screen"}}
+   {"tool": "Read", "arguments": {"file_path": "test_results/screen.png"}}
+   {"tool": "ui_interaction", "arguments": {"action": "tap", "target": {"x": 200, "y": 400}}}
    ```
-   
-3. **Wait for success response** before proceeding!
 
-## Login Flow (After Setup)
+## Login Flow (Using Coordinates)
 1. screen_capture {"name": "login_screen"}  
-2. Read the image to see UI elements
-3. Tap email field: {"action": "tap", "target": {"text": "Email"}}
+2. Read the image to identify element positions
+3. Tap email field: {"action": "tap", "target": {"x": 200, "y": 300}}
 4. Clear and type: {"action": "clear_text"}, then {"action": "type_text", "value": "user@example.com"}
-5. Tap password field: {"action": "tap", "target": {"text": "Password"}}  
+5. Tap password field: {"action": "tap", "target": {"x": 200, "y": 400}}  
 6. Clear and type: {"action": "clear_text"}, then {"action": "type_text", "value": "password123"}
-7. Submit: {"action": "tap", "target": {"text": "Sign In"}}
+7. Submit: {"action": "tap", "target": {"x": 200, "y": 500}}
 
 ## Text Input Rules
-- ALWAYS tap the field first
+- ALWAYS tap the field first (using coordinates)
 - Use clear_text to remove existing content
 - Then use type_text with your new value
 
 ## Navigation
 - Take screenshot first
-- Look for tab labels, menu items, or navigation links
-- Tap using the visible text
+- Identify button/link positions visually
+- Tap using coordinates
 
 ## Form Filling
 - Screenshot to see all fields
-- For each field: tap by label → clear → type
-- Submit using button text
+- For each field: tap by coordinates → clear → type
+- Submit using button coordinates
+
+## ⚠️ AVOID setup_xcuitest
+- It often fails with timeouts
+- Coordinates work immediately without any setup
+- Only use text-based tapping as absolute last resort
 "#
             }
             "debugging" => {
@@ -232,32 +250,28 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
                 r#"
 # Complete Examples
 
-## IMPORTANT: Setup XCUITest First!
+## 🎯 RECOMMENDED: Coordinate-Based Testing
 
 ```python
-# REQUIRED: Initialize XCUITest before ANY text-based interaction
-tool("setup_xcuitest", {"device_id": "YOUR-DEVICE-ID"})
-# Wait for success response!
-```
+# NO SETUP NEEDED! Start testing immediately!
 
-## Login Test (After XCUITest Setup)
-```python
+## Login Test (Using Coordinates)
 # 1. See what's on screen
 tool("screen_capture", {"name": "login"})
-tool("read", {"file_path": "test_results/login.png"})
+tool("Read", {"file_path": "test_results/login.png"})
 
-# 2. Fill email (you saw "Email" label) - THIS REQUIRES XCUITEST!
-tool("ui_interaction", {"action": "tap", "target": {"text": "Email"}})
+# 2. Fill email (you see field at position 200,300)
+tool("ui_interaction", {"action": "tap", "target": {"x": 200, "y": 300}})
 tool("ui_interaction", {"action": "clear_text"})
 tool("ui_interaction", {"action": "type_text", "value": "test@example.com"})
 
-# 3. Fill password  
-tool("ui_interaction", {"action": "tap", "target": {"text": "Password"}})
+# 3. Fill password (you see field at position 200,400)
+tool("ui_interaction", {"action": "tap", "target": {"x": 200, "y": 400}})
 tool("ui_interaction", {"action": "clear_text"})
 tool("ui_interaction", {"action": "type_text", "value": "secret123"})
 
-# 4. Submit
-tool("ui_interaction", {"action": "tap", "target": {"text": "Sign In"}})
+# 4. Submit (you see button at position 200,500)
+tool("ui_interaction", {"action": "tap", "target": {"x": 200, "y": 500}})
 
 # 5. Verify success
 tool("screen_capture", {"name": "after_login"})
@@ -265,12 +279,11 @@ tool("screen_capture", {"name": "after_login"})
 
 ## Settings Navigation
 ```python
-# Find settings
+# Find settings button position
 tool("screen_capture", {"name": "main_screen"})
-tool("ui_interaction", {"action": "tap", "target": {"text": "Settings"}})
-
-# Or use tab bar
-tool("ui_interaction", {"action": "tap", "target": {"text": "Profile"}})
+tool("Read", {"file_path": "test_results/main_screen.png"})
+# You see Settings at position (350, 800)
+tool("ui_interaction", {"action": "tap", "target": {"x": 350, "y": 800}})
 ```
 
 ## Scrolling to Find Elements
@@ -278,9 +291,18 @@ tool("ui_interaction", {"action": "tap", "target": {"text": "Profile"}})
 # If element not visible
 tool("ui_interaction", {"action": "scroll", "direction": "down", "amount": 5})
 tool("screen_capture", {"name": "after_scroll"})
-# Now try tapping
-tool("ui_interaction", {"action": "tap", "target": {"text": "Advanced Settings"}})
+tool("Read", {"file_path": "test_results/after_scroll.png"})
+# Now tap element at its coordinates
+tool("ui_interaction", {"action": "tap", "target": {"x": 200, "y": 600}})
 ```
+
+## ⚠️ Why NOT to use text-based tapping:
+- Requires setup_xcuitest which often fails
+- Has connection timeouts
+- Slower than coordinates
+- Less reliable
+
+ALWAYS use coordinates from screenshots instead!
 "#
             }
             _ => {
@@ -292,10 +314,11 @@ tool("ui_interaction", {"action": "tap", "target": {"text": "Advanced Settings"}
             "topic": topic,
             "content": content,
             "tips": [
-                "Always prefer text-based taps over coordinates",
-                "Take screenshots to see current UI state",
-                "Read error messages - they contain helpful info",
-                "XCUITest waits 10 seconds for elements automatically"
+                "🎯 ALWAYS use coordinate-based taps - they work immediately!",
+                "📸 Take screenshots and read them to identify element positions",
+                "⚠️ AVOID setup_xcuitest - it often fails with timeouts",
+                "✅ Coordinates are more reliable than text-based tapping",
+                "💡 No setup needed - just screenshot → read → tap coordinates"
             ]
         }))
     }

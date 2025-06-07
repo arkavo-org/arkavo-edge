@@ -9,6 +9,7 @@ use tokio::time::sleep;
 
 #[tokio::test]
 #[cfg(target_os = "macos")]
+#[ignore] // Run with: cargo test test_xctest_direct_compilation_and_connection -- --ignored (requires booted simulator)
 async fn test_xctest_direct_compilation_and_connection() {
     println!("\n=== Direct XCTest Compilation Test ===\n");
 
