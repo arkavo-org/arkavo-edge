@@ -1,5 +1,50 @@
 # Handling Biometric Dialogs in iOS Simulator
 
+## Enrollment Dialog Handling
+
+When encountering the "Simulator requires enrolled biometrics to use passkeys" dialog:
+
+### Quick Solution
+```json
+{
+  "tool": "enrollment_dialog",
+  "arguments": {
+    "action": "handle_automatically"
+  }
+}
+```
+
+This will:
+1. First try to dismiss the dialog using ESC key
+2. If that fails, provide coordinates for manual tap
+
+### Alternative Actions
+```json
+// Wait for dialog to appear
+{
+  "tool": "enrollment_dialog",
+  "arguments": {
+    "action": "wait_for_dialog"
+  }
+}
+
+// Dismiss using keyboard
+{
+  "tool": "enrollment_dialog",
+  "arguments": {
+    "action": "dismiss"
+  }
+}
+
+// Get cancel button coordinates
+{
+  "tool": "enrollment_dialog",
+  "arguments": {
+    "action": "get_cancel_coordinates"
+  }
+}
+```
+
 ## Quick Solution
 
 When a biometric dialog appears and blocks your test, use:
