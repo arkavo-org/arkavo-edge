@@ -7,6 +7,7 @@ use super::deeplink_tools::{AppLauncherKit, DeepLinkKit};
 use super::device_manager::DeviceManager;
 use super::device_tools::DeviceManagementKit;
 use super::enrollment_dialog_handler::EnrollmentDialogHandler;
+use super::enrollment_flow_handler::EnrollmentFlowHandler;
 use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
@@ -177,6 +178,12 @@ impl McpTestServer {
         tools.insert(
             "enrollment_dialog".to_string(),
             Arc::new(EnrollmentDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add enrollment flow handler for complete enrollment workflow
+        tools.insert(
+            "enrollment_flow".to_string(),
+            Arc::new(EnrollmentFlowHandler::new(device_manager.clone())),
         );
 
         // Add Face ID control tools
@@ -360,6 +367,7 @@ impl McpTestServer {
                 | "biometric_test_scenario"
                 | "smart_biometric_handler"
                 | "enrollment_dialog"
+                | "enrollment_flow"
         )
     }
 

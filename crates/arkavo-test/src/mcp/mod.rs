@@ -10,6 +10,7 @@ pub mod device_manager;
 pub mod device_tools;
 pub mod device_xctest_status;
 pub mod enrollment_dialog_handler;
+pub mod enrollment_flow_handler;
 pub mod face_id_control;
 #[cfg(target_os = "macos")]
 pub mod idb_wrapper;
