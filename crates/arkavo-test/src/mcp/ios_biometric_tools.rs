@@ -184,8 +184,12 @@ impl Tool for BiometricKit {
         match action {
             "enroll" => {
                 // Determine menu name based on biometric type
-                let menu_name = if biometric_type == "touch_id" { "Touch ID" } else { "Face ID" };
-                
+                let menu_name = if biometric_type == "touch_id" {
+                    "Touch ID"
+                } else {
+                    "Face ID"
+                };
+
                 // Try AppleScript to toggle enrollment
                 let applescript = format!(
                     r#"
@@ -227,7 +231,7 @@ impl Tool for BiometricKit {
                             "already_enrolled" => format!("{} was already enrolled", menu_name),
                             _ => format!("{} enrollment toggled", menu_name),
                         };
-                        
+
                         Ok(serde_json::json!({
                             "success": true,
                             "action": "enroll",

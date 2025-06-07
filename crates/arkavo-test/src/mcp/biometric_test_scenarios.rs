@@ -102,7 +102,7 @@ impl Tool for BiometricTestScenario {
             "success_path" => {
                 // Check if Face ID is enrolled
                 let is_enrolled = self.ensure_face_id_enrolled(&device_id)?;
-                
+
                 if !is_enrolled {
                     return Ok(json!({
                         "error": {
@@ -196,7 +196,7 @@ impl Tool for BiometricTestScenario {
             "face_not_recognized" => {
                 // Check if Face ID is enrolled
                 let is_enrolled = self.ensure_face_id_enrolled(&device_id)?;
-                
+
                 if !is_enrolled {
                     return Ok(json!({
                         "error": {
@@ -260,7 +260,7 @@ impl Tool for BiometricTestScenario {
                         activate
                     end tell
                 "#;
-                
+
                 Command::new("osascript")
                     .arg("-e")
                     .arg(applescript)
