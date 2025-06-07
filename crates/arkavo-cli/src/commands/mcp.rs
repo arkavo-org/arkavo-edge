@@ -336,7 +336,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "capabilities": {
                         "tools": {}
                     },
-                    "instructions": "This MCP server provides iOS automation with XCUITest support. KEY IMPROVEMENTS:\n\n1. TEXT-BASED ELEMENT FINDING: Use {\"action\":\"tap\",\"target\":{\"text\":\"Button Label\"}} to tap elements by visible text. Much more reliable than coordinates.\n\n2. ACCESSIBILITY ID SUPPORT: Use {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"element_id\"}} for the most reliable automation.\n\n3. BEST PRACTICES:\n   - Always start with screen_capture to see current UI\n   - Look for visible text in screenshots\n   - Use text/accessibility_id for interactions when possible\n   - Only use coordinates as last resort\n\n4. TEXT INPUT WORKFLOW:\n   - Tap the field first (by text label if possible)\n   - Use clear_text if needed\n   - Then use type_text with your value\n\n5. DEBUGGING: Error messages now provide helpful details. XCUITest waits up to 10 seconds for elements.\n\nFor detailed guidance, use the 'usage_guide' tool with topics: overview, text_based_tapping, workflows, debugging, or examples."
+                    "instructions": "This MCP server provides iOS automation with direct device control. ALWAYS USE COORDINATE-BASED TAPPING!\n\n🎯 PRIMARY METHOD - COORDINATE TAPPING (RECOMMENDED):\n- Use {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}} - Works immediately!\n- No setup required - just use coordinates from screenshots\n- Most reliable method with embedded idb_companion\n\n📱 WORKFLOW:\n1. device_management to get device_id\n2. screen_capture to see the UI\n3. Identify element positions in the screenshot\n4. ui_interaction with {\"target\":{\"x\":X,\"y\":Y}}\n\n📏 DEVICE SIZES (logical points):\n- iPhone 15/16 Pro: 393×852\n- iPhone 16 Pro Max: 430×932\n- iPhone 15/16: 390×844\n\n⚠️ AVOID TEXT-BASED TAPPING:\n- Text tapping requires setup_xcuitest which often fails/timeouts\n- Even when it works, it's slower than coordinates\n- Only use as absolute last resort\n\n✅ ALWAYS prefer coordinates from screenshots over text-based element finding!"
                 }),
             ),
 
@@ -487,11 +487,28 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             json!({
                                 "tools": tools,
                                 "_meta": {
-                                    "critical_setup": "MUST call setup_xcuitest with target_app_bundle_id BEFORE any text-based UI interaction! Without this, all text/accessibility_id taps will fail.",
-                                    "workflow": "1) device_management to get device_id, 2) setup_xcuitest with device_id AND target_app_bundle_id of the app you want to test, 3) Then use ui_interaction with text targets",
-                                    "xcuitest_status": "Text-based element finding requires XCUITest initialization via setup_xcuitest tool WITH target_app_bundle_id parameter.",
-                                    "setup_example": "{\"tool\": \"setup_xcuitest\", \"arguments\": {\"device_id\": \"YOUR-DEVICE-ID\", \"target_app_bundle_id\": \"com.example.app\"}}",
-                                    "usage_hint": "Call usage_guide tool for detailed iOS automation guidance and examples."
+                                    "🎯 ALWAYS_USE_COORDINATES": "Coordinate tapping {\"x\":200,\"y\":400} is the PRIMARY method. Works instantly!",
+                                    "🚫 AVOID_TEXT_TAPPING": "Text-based tapping requires setup_xcuitest which OFTEN FAILS with timeouts. DO NOT USE unless absolutely necessary!",
+                                    "✅ CORRECT_WORKFLOW": [
+                                        "1. device_management → get device_id",
+                                        "2. screen_capture → see UI visually",
+                                        "3. Read the screenshot image",
+                                        "4. ui_interaction with {\"target\":{\"x\":X,\"y\":Y}}"
+                                    ],
+                                    "📏 SCREEN_SIZES": {
+                                        "iPhone_15_16_Pro": "393×852 points",
+                                        "iPhone_16_Pro_Max": "430×932 points",
+                                        "iPhone_15_16": "390×844 points"
+                                    },
+                                    "💡 EXAMPLE": {
+                                        "tool": "ui_interaction",
+                                        "arguments": {
+                                            "action": "tap",
+                                            "target": {"x": 196, "y": 426},
+                                            "device_id": "YOUR-DEVICE-ID"
+                                        }
+                                    },
+                                    "⚠️ LAST_RESORT_ONLY": "setup_xcuitest is unreliable and should be avoided. Coordinates work better!"
                                 }
                             }),
                         )

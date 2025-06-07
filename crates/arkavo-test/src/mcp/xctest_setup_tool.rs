@@ -7,6 +7,7 @@ use super::xctest_verifier::XCTestVerifier;
 use crate::Result;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -20,7 +21,7 @@ impl XCTestSetupKit {
         Self {
             schema: ToolSchema {
                 name: "setup_xcuitest".to_string(),
-                description: "REQUIRED BEFORE TEXT-BASED UI INTERACTION: Initialize XCUITest to enable finding and tapping UI elements by their visible text. MUST provide target_app_bundle_id parameter with the bundle ID of the app you want to test (e.g. 'com.example.app'). Without running this first, all text-based taps will fail with XCUITEST_NOT_AVAILABLE. Call this once per device before any ui_interaction with text targets.".to_string(),
+                description: "⚠️ NOT RECOMMENDED - Often fails with timeouts! Coordinate-based tapping works better and requires NO setup. Only use this if absolutely necessary for text-based element finding, but coordinates are the PRIMARY method. Most agents should NEVER need this tool - just use coordinates from screenshots instead!".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -30,7 +31,7 @@ impl XCTestSetupKit {
                         },
                         "target_app_bundle_id": {
                             "type": "string",
-                            "description": "Bundle ID of the app to test (e.g. com.example.app). Required for text-based UI interaction."
+                            "description": "DEPRECATED: Do not use. Specifying a target app causes security restrictions. XCUITest will work with any app on the simulator without this parameter."
                         },
                         "force_reinstall": {
                             "type": "boolean",
@@ -73,10 +74,18 @@ impl Tool for XCTestSetupKit {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let target_app_bundle_id = params
-            .get("target_app_bundle_id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        // Ignore target_app_bundle_id even if provided - it causes security restrictions
+        let _target_app_bundle_id: Option<String> = None;
+
+        // Log warning if target_app_bundle_id was provided
+        if params.get("target_app_bundle_id").is_some() {
+            eprintln!(
+                "[XCTestSetupKit] WARNING: target_app_bundle_id parameter is deprecated and will be ignored"
+            );
+            eprintln!(
+                "[XCTestSetupKit] XCUITest will work with any app on the simulator without specifying a target"
+            );
+        }
 
         // Check if XCUITest is already available and functional
         if !force_reinstall {
@@ -200,98 +209,24 @@ impl Tool for XCTestSetupKit {
             }));
         }
 
-        // Launch the target app first if specified
-        if let Some(ref app_id) = target_app_bundle_id {
-            eprintln!(
-                "[XCTestSetupKit] Checking if target app is installed: {}",
-                app_id
-            );
+        // No longer launching target app - it causes security restrictions
 
-            // First check if app is installed
-            let list_apps_result = std::process::Command::new("xcrun")
-                .args(["simctl", "listapps", &device_id])
-                .output();
-
-            let app_installed = match list_apps_result {
-                Ok(output) => {
-                    let apps_str = String::from_utf8_lossy(&output.stdout);
-                    apps_str.contains(app_id)
-                }
-                Err(_) => false,
-            };
-
-            if !app_installed {
-                return Ok(serde_json::json!({
-                    "success": false,
-                    "error": {
-                        "code": "APP_NOT_INSTALLED",
-                        "message": format!("Target app '{}' is not installed on the simulator", app_id),
-                        "details": "Install the app first using 'app_management' tool with action 'install', then run setup_xcuitest again.",
-                        "hint": "Use app_diagnostic tool to check which apps are installed."
-                    }
-                }));
-            }
-
-            eprintln!("[XCTestSetupKit] Launching target app: {}", app_id);
-            let launch_result = std::process::Command::new("xcrun")
-                .args(["simctl", "launch", &device_id, app_id])
-                .output();
-
-            match launch_result {
-                Ok(output) => {
-                    if output.status.success() {
-                        eprintln!("[XCTestSetupKit] Target app launched successfully");
-                    } else {
-                        let error_msg = String::from_utf8_lossy(&output.stderr);
-                        eprintln!(
-                            "[XCTestSetupKit] Failed to launch target app: {}",
-                            error_msg
-                        );
-
-                        return Ok(serde_json::json!({
-                            "success": false,
-                            "error": {
-                                "code": "APP_LAUNCH_FAILED",
-                                "message": format!("Failed to launch target app '{}'", app_id),
-                                "details": format!("Launch error: {}", error_msg),
-                                "hint": "Make sure the app is properly installed and not corrupted."
-                            }
-                        }));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[XCTestSetupKit] Could not launch target app: {}", e);
-                    return Ok(serde_json::json!({
-                        "success": false,
-                        "error": {
-                            "code": "APP_LAUNCH_ERROR",
-                            "message": format!("Could not launch target app '{}'", app_id),
-                            "details": format!("System error: {}", e)
-                        }
-                    }));
-                }
-            }
-
-            // Give app time to start and come to foreground
-            std::thread::sleep(std::time::Duration::from_secs(3));
-        }
-
-        // Launch the test host app
+        // Launch the test host app without target app
         eprintln!("[XCTestSetupKit] Launching test host app...");
-        if let Err(e) = compiler.launch_test_host(&device_id, target_app_bundle_id.as_deref()) {
+        if let Err(e) = compiler.launch_test_host(&device_id, None) {
             let error_str = e.to_string();
 
-            // Check if the error is due to app not being installed
+            // Check if the error is due to test host issues
             if error_str.contains("failed to launch")
                 || error_str.contains("FBSOpenApplicationServiceErrorDomain")
             {
                 return Ok(serde_json::json!({
                     "success": false,
                     "error": {
-                        "code": "APP_NOT_INSTALLED",
-                        "message": format!("The app '{}' is not installed on the simulator", target_app_bundle_id.as_deref().unwrap_or("unknown")),
-                        "details": "Install the app first using 'app_management' tool with action 'install', then run setup_xcuitest again.",
-                        "hint": "Use app_diagnostic tool to check which apps are installed.",
+                        "code": "TEST_HOST_LAUNCH_FAILED",
+                        "message": "Failed to launch XCTest host app",
+                        "details": "The test host app could not be launched. This might be due to a previous crash or installation issue.",
+                        "hint": "Try running with force_reinstall: true, or manually uninstall com.arkavo.testhost from the simulator.",
                         "raw_error": error_str
                     }
                 }));
@@ -352,23 +287,35 @@ impl Tool for XCTestSetupKit {
                 // Don't run the verifier - it's checking for things that don't apply to our bridge approach
                 // let final_status = XCTestVerifier::verify_device(&device_id).await?;
 
+                // Return to the previous app if there was one
+                eprintln!("[XCTestSetupKit] Setup complete, returning to previous app...");
+
+                // Launch the previous app or home screen to hide the test host
+                let _ = Command::new("xcrun")
+                    .args(["simctl", "launch", &device_id, "com.apple.springboard"])
+                    .output();
+
                 Ok(serde_json::json!({
                     "success": true,
                     "status": "setup_complete",
-                    "message": "XCUITest is now available for text-based UI interaction",
+                    "message": "XCUITest is now available for UI automation on any app",
                     "device_id": device_id,
-                    "target_app_bundle_id": target_app_bundle_id,
+                    "important_note": "The ArkavoTestHost app briefly appeared with a black screen but has been moved to background. This is normal and expected.",
                     "capabilities": {
-                        "text_based_tap": "Use {\"action\":\"tap\",\"target\":{\"text\":\"Button Label\"}}",
-                        "accessibility_id": "Use {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"element_id\"}}",
+                        "coordinate_tap": "Improved coordinate-based tapping through XCUITest",
+                        "text_based_tap": "Find and tap elements by visible text (when XCUITest can access the app)",
+                        "accessibility_id": "Find elements by accessibility identifier",
                         "element_wait": "Automatically waits up to 10 seconds for elements",
-                        "supported_actions": ["tap", "type_text", "clear_text", "swipe"]
+                        "supported_actions": ["tap", "type_text", "clear_text", "swipe"],
+                        "works_with": "Any app running on the simulator"
                     },
                     "next_steps": [
-                        "You can now use ui_interaction with text-based targets",
-                        "Example: {\"action\":\"tap\",\"target\":{\"text\":\"Get Started\"}}",
-                        "The system will find and tap elements by their visible text"
-                    ]
+                        "Launch any app you want to test using app_launcher",
+                        "Use ui_interaction with coordinate-based targets for reliable interaction",
+                        "Example: {\"action\":\"tap\",\"target\":{\"x\":196,\"y\":680}}",
+                        "Text-based targets may work depending on app accessibility"
+                    ],
+                    "background_info": "ArkavoTestHost runs invisibly in the background to provide UI automation capabilities"
                 }))
             }
             Ok(Err(e)) => {
