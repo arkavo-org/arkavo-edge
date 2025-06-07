@@ -30,6 +30,7 @@ pub mod template_diagnostics;
 pub mod templates;
 pub mod test_target_app;
 pub mod tools;
+pub mod ui_element_handler;
 pub mod usage_guide;
 pub mod xctest_app_runner;
 pub mod xctest_compiler;
