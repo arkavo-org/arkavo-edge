@@ -359,6 +359,7 @@ impl McpTestServer {
                 | "face_id_status"
                 | "biometric_test_scenario"
                 | "smart_biometric_handler"
+                | "enrollment_dialog"
         )
     }
 

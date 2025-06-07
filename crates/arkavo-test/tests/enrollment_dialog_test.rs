@@ -75,3 +75,64 @@ async fn test_enrollment_dialog_tap_cancel() {
     assert!(result["next_step"].is_object());
     assert_eq!(result["next_step"]["tool"], "ui_interaction");
 }
+
+#[tokio::test]
+async fn test_enrollment_dialog_dismiss() {
+    // Create device manager
+    let device_manager = Arc::new(DeviceManager::new());
+
+    // Create enrollment dialog handler
+    let handler = EnrollmentDialogHandler::new(device_manager);
+
+    // Test dismiss action
+    let params = json!({
+        "action": "dismiss"
+    });
+
+    let result = handler.execute(params).await.unwrap();
+
+    // Check if we got an error (no device available in test environment)
+    if result.get("error").is_some() {
+        // This is expected in test environment without real devices
+        assert!(result["error"]["code"].is_string());
+        return;
+    }
+
+    // Verify the response structure
+    assert!(result["success"].as_bool().unwrap_or(false));
+    assert_eq!(result["action"], "dismiss");
+    assert_eq!(result["method"], "keyboard_shortcut");
+}
+
+#[tokio::test]
+async fn test_enrollment_dialog_handle_automatically() {
+    // Create device manager
+    let device_manager = Arc::new(DeviceManager::new());
+
+    // Create enrollment dialog handler
+    let handler = EnrollmentDialogHandler::new(device_manager);
+
+    // Test handle_automatically action
+    let params = json!({
+        "action": "handle_automatically"
+    });
+
+    let result = handler.execute(params).await.unwrap();
+
+    // Check if we got an error (no device available in test environment)
+    if result.get("error").is_some() {
+        // This is expected in test environment without real devices
+        assert!(result["error"]["code"].is_string());
+        return;
+    }
+
+    // Should have either success or fallback
+    if result["success"].as_bool().unwrap_or(false) {
+        assert_eq!(result["action"], "handle_automatically");
+        assert_eq!(result["method"], "keyboard_dismissal");
+    } else {
+        assert!(result["fallback"].is_object());
+        assert!(result["fallback"]["coordinates"].is_object());
+        assert!(result["fallback"]["next_step"].is_object());
+    }
+}
