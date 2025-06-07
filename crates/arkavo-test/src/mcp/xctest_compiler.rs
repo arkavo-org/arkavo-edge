@@ -527,10 +527,15 @@ let package = Package(
     NSError *error = nil;
     if (![testBundle loadAndReturnError:&error]) {
         NSLog(@"[TestBridge] ERROR: Failed to load bundle: %@", error);
+        NSLog(@"[TestBridge] Bundle path exists: %d", [fm fileExistsAtPath:resolvedPath]);
+        NSLog(@"[TestBridge] Bundle executable: %@", [testBundle executablePath]);
+        NSLog(@"[TestBridge] Bundle loaded: %d", [testBundle isLoaded]);
         return;
     }
     
     NSLog(@"[TestBridge] Test bundle loaded successfully");
+    NSLog(@"[TestBridge] Bundle executable: %@", [testBundle executablePath]);
+    NSLog(@"[TestBridge] Bundle principal class: %@", NSStringFromClass([testBundle principalClass]));
     
     // Get the principal class (should be ArkavoTestRunner)
     Class testClass = [testBundle principalClass];
@@ -585,6 +590,15 @@ let package = Package(
     }
     
     // Don't create any windows or UI - this is just a bridge
+    
+    // Important: Move the app to background immediately after setup
+    // This prevents the black screen from confusing testing agents
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSLog(@"[TestHost] Moving to background to avoid confusion...");
+        // Suspend the app to move it to background
+        [[UIApplication sharedApplication] performSelector:@selector(suspend)];
+    });
+    
     return YES;
 }
 
@@ -658,7 +672,7 @@ int main(int argc, char * argv[]) {
             )));
         }
 
-        // Sign the app
+        // Sign the app with ad-hoc signature (no special entitlements)
         let _ = Command::new("codesign")
             .args(["--force", "--sign", "-", app_dir.to_str().unwrap()])
             .output();
@@ -898,7 +912,6 @@ int main(int argc, char * argv[]) {
             .args([
                 "simctl",
                 "launch",
-                "--console-pty",
                 "--terminate-running-process",
                 device_id,
                 "com.arkavo.testhost",
@@ -914,31 +927,41 @@ int main(int argc, char * argv[]) {
             launch_cmd.env("SIMCTL_CHILD_ARKAVO_TARGET_APP_ID", app_id);
         }
 
-        let mut child = launch_cmd
-            .spawn()
+        eprintln!("[XCTestCompiler] Executing launch command...");
+        let output = launch_cmd
+            .output()
             .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {}", e)))?;
 
-        // Give it time to start
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        eprintln!("[XCTestCompiler] Launch command completed with status: {}", output.status);
+        if !output.stdout.is_empty() {
+            eprintln!("[XCTestCompiler] stdout: {}", String::from_utf8_lossy(&output.stdout));
+        }
+        if !output.stderr.is_empty() {
+            eprintln!("[XCTestCompiler] stderr: {}", String::from_utf8_lossy(&output.stderr));
+        }
 
-        // Check status
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    let output = child.wait_with_output()?;
-                    return Err(TestError::Mcp(format!(
-                        "Test runner exited with: {}. Output: {}",
-                        status,
-                        String::from_utf8_lossy(&output.stderr)
-                    )));
-                }
-            }
-            Ok(None) => {
-                eprintln!("[XCTestCompiler] Test runner is running");
-            }
-            Err(e) => {
-                eprintln!("[XCTestCompiler] Warning: Could not check status: {}", e);
-            }
+        if !output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Test host launch failed with status: {}. stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        // Verify the app is running
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        
+        // Check if test host is running
+        let check_cmd = Command::new("xcrun")
+            .args(["simctl", "listapps", device_id])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            
+        let apps_output = String::from_utf8_lossy(&check_cmd.stdout);
+        if !apps_output.contains("com.arkavo.testhost") {
+            eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");
+        } else {
+            eprintln!("[XCTestCompiler] Test host app confirmed in apps list");
         }
 
         eprintln!("[XCTestCompiler] Test runner started successfully");

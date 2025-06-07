@@ -102,6 +102,11 @@ jobs:
         with:
           shared-key: "macos-arm64"
       
+      - name: Install idb-companion
+        run: |
+          brew tap facebook/fb
+          brew install idb-companion
+      
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin
       

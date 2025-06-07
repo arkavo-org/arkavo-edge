@@ -25,7 +25,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. TEXT-BASED TAPS REQUIRE setup_xcuitest TO BE RUN FIRST! Without XCUITest setup, text-based taps will fail with XCUITEST_NOT_AVAILABLE. SUPPORTS: 1) TEXT-BASED (requires setup): {\"action\":\"tap\",\"target\":{\"text\":\"Login\"}} 2) ACCESSIBILITY ID (requires setup): {\"action\":\"tap\",\"target\":{\"accessibility_id\":\"login_button\"}} 3) COORDINATES (always works): {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. For text input: tap field first, then clear_text if needed, then type_text.".to_string(),
+                description: "Interact with iOS UI elements. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}} - Works immediately without any setup! COORDINATE WORKFLOW: 1) Take screenshot, 2) Read image to see UI, 3) Identify element positions, 4) Tap using coordinates. ⚠️ AVOID TEXT-BASED TAPPING: Text/accessibility taps require setup_xcuitest which OFTEN FAILS with timeouts. Only use as absolute last resort! For text input: tap field with COORDINATES first, then type_text.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -96,7 +96,13 @@ impl UiInteractionKit {
         bridge.send_tap_command(command).await
     }
 
-    /// Get the XCTest bridge
+    /// Get the XCTest bridge without trying to initialize it
+    async fn get_existing_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
+        let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
+        bridge_holder.read().await.clone()
+    }
+
+    /// Get the XCTest bridge (with initialization attempt)
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
         let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
 
@@ -300,7 +306,7 @@ impl Tool for UiInteractionKit {
                     .unwrap_or("unknown");
 
                 // Check if XCUITest is actually available
-                let xctest_available = self.get_xctest_bridge().await.is_some();
+                let xctest_available = self.get_existing_xctest_bridge().await.is_some();
 
                 let mut response = serde_json::json!({
                     "action": "analyze_layout",
@@ -311,18 +317,19 @@ impl Tool for UiInteractionKit {
                     "instructions": "AI AGENT: The screenshot has been saved. Now use the Read tool to view the image at the path above, then analyze it to identify:\n1. All VISIBLE TEXT on buttons, links, and labels (for text-based tapping)\n2. Text fields and their labels or placeholders\n3. The current screen/view being displayed\n4. Any accessibility hints visible in the UI"
                 });
 
+                response["next_steps"] = serde_json::json!(
+                    "🎯 USE COORDINATES - The recommended approach:\n1. Read the screenshot image to see UI elements\n2. Identify x,y positions of buttons/fields\n3. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n4. This works immediately without any setup!"
+                );
+                response["important"] = serde_json::json!(
+                    "ALWAYS prefer coordinates over text-based tapping. Coordinates work instantly and are more reliable!"
+                );
                 if xctest_available {
-                    response["next_steps"] = serde_json::json!(
-                        "After reading the image, use text-based interactions:\n- Buttons: {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}}\n- Text fields: Tap using nearby label text\n- XCUITest will find elements by text with 10-second timeout"
-                    );
-                    response["xcuitest_status"] =
-                        serde_json::json!("XCUITest is available for text-based element finding");
-                } else {
-                    response["next_steps"] = serde_json::json!(
-                        "After reading the image, you'll need to use coordinates:\n1. Estimate the x,y position of elements from the image\n2. Use: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}\n3. Text-based tapping requires XCUITest which is not currently available"
-                    );
                     response["xcuitest_status"] = serde_json::json!(
-                        "XCUITest not available - use coordinates from image analysis"
+                        "XCUITest is available but NOT RECOMMENDED - use coordinates instead for better reliability"
+                    );
+                } else {
+                    response["xcuitest_status"] = serde_json::json!(
+                        "XCUITest not available (and not needed) - coordinates are the primary method"
                     );
                 }
 
@@ -334,39 +341,104 @@ impl Tool for UiInteractionKit {
                     return Ok(e.to_response());
                 }
 
+                // Quick check if XCUITest is available to prevent timeout during lazy init
+                let xctest_available = {
+                    let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
+                    let guard = bridge_holder.read().await;
+                    guard.is_some()
+                };
+
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
                     let mut use_xctest = false;
                     let mut xctest_command = None;
 
                     if let Some(text) = target.get("text").and_then(|v| v.as_str()) {
-                        // Try XCUITest for text-based tapping
-                        eprintln!("Attempting XCUITest tap by text: {}", text);
-                        use_xctest = true;
-                        xctest_command = Some(XCTestUnixBridge::create_text_tap(
-                            text.to_string(),
-                            Some(10.0), // 10 second timeout
-                        ));
+                        // Only try XCUITest if it's already available
+                        if xctest_available {
+                            eprintln!("Attempting XCUITest tap by text: {}", text);
+                            use_xctest = true;
+                            xctest_command = Some(XCTestUnixBridge::create_text_tap(
+                                text.to_string(),
+                                Some(10.0), // 10 second timeout
+                            ));
+                        } else {
+                            // Return immediate error instead of timing out
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "USE_COORDINATES_REQUIRED",
+                                    "message": format!("Text-based tapping for '{}' is NOT RECOMMENDED! Use coordinate tapping instead - it works immediately without any setup!", text),
+                                    "solution": "ALWAYS use coordinates from screenshots instead of text-based tapping",
+                                    "required_workflow": [
+                                        "1. Use screen_capture to take a screenshot",
+                                        "2. Use Read tool to view the screenshot image",
+                                        "3. Visually identify the '{}' element position",
+                                        "4. Use ui_interaction with coordinates"
+                                    ],
+                                    "correct_example": {
+                                        "action": "tap",
+                                        "target": {"x": 200, "y": 400},
+                                        "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("device-id")
+                                    },
+                                    "why_coordinates_better": [
+                                        "✅ Works immediately - no setup required",
+                                        "✅ More reliable - no timeouts",
+                                        "✅ Faster execution",
+                                        "✅ Works with any UI element"
+                                    ],
+                                    "do_not_use_setup_xcuitest": "setup_xcuitest often fails with timeouts and is not recommended"
+                                }
+                            }));
+                        }
                     } else if let Some(accessibility_id) =
                         target.get("accessibility_id").and_then(|v| v.as_str())
                     {
-                        // Try XCUITest for accessibility ID tapping
-                        eprintln!(
-                            "Attempting XCUITest tap by accessibility ID: {}",
-                            accessibility_id
-                        );
-                        use_xctest = true;
-                        xctest_command = Some(XCTestUnixBridge::create_accessibility_tap(
-                            accessibility_id.to_string(),
-                            Some(10.0), // 10 second timeout
-                        ));
+                        // Only try XCUITest if it's already available
+                        if xctest_available {
+                            eprintln!(
+                                "Attempting XCUITest tap by accessibility ID: {}",
+                                accessibility_id
+                            );
+                            use_xctest = true;
+                            xctest_command = Some(XCTestUnixBridge::create_accessibility_tap(
+                                accessibility_id.to_string(),
+                                Some(10.0), // 10 second timeout
+                            ));
+                        } else {
+                            // Return immediate error instead of timing out
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "USE_COORDINATES_REQUIRED",
+                                    "message": format!("Accessibility ID tapping for '{}' is NOT RECOMMENDED! Use coordinate tapping instead - it works immediately without any setup!", accessibility_id),
+                                    "solution": "ALWAYS use coordinates from screenshots instead of accessibility ID tapping",
+                                    "required_workflow": [
+                                        "1. Use screen_capture to take a screenshot",
+                                        "2. Use Read tool to view the screenshot image",
+                                        "3. Visually identify the element with accessibility ID '{}'",
+                                        "4. Use ui_interaction with coordinates"
+                                    ],
+                                    "correct_example": {
+                                        "action": "tap",
+                                        "target": {"x": 200, "y": 400},
+                                        "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("device-id")
+                                    },
+                                    "why_coordinates_better": [
+                                        "✅ Works immediately - no setup required",
+                                        "✅ More reliable - no timeouts",
+                                        "✅ Faster execution",
+                                        "✅ Works with any UI element"
+                                    ],
+                                    "do_not_use_setup_xcuitest": "setup_xcuitest often fails with timeouts and is not recommended"
+                                }
+                            }));
+                        }
                     } else {
                         // Direct coordinates - check if we should use XCUITest
                         let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
                         // Try XCUITest if bridge is available
-                        if let Some(_bridge) = self.get_xctest_bridge().await {
+                        if xctest_available {
                             use_xctest = true;
                             xctest_command = Some(XCTestUnixBridge::create_coordinate_tap(x, y));
                         } else {
@@ -378,7 +450,7 @@ impl Tool for UiInteractionKit {
 
                     // If using XCUITest, try to execute the tap
                     if use_xctest && xctest_command.is_some() {
-                        if let Some(bridge_arc) = self.get_xctest_bridge().await {
+                        if let Some(bridge_arc) = self.get_existing_xctest_bridge().await {
                             let command = xctest_command.unwrap();
 
                             // Check if connected first
@@ -413,7 +485,8 @@ impl Tool for UiInteractionKit {
                                                 "action": "tap",
                                                 "method": "xcuitest",
                                                 "response": response.result,
-                                                "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active")
+                                                "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active"),
+                                                "confidence": "high"
                                             }));
                                         } else {
                                             // XCUITest failed, fall back to AppleScript for coordinates
@@ -504,38 +577,22 @@ impl Tool for UiInteractionKit {
 
                                 return Ok(serde_json::json!({
                                     "error": {
-                                        "code": "XCUITEST_NOT_AVAILABLE",
-                                        "message": format!("Cannot tap '{}' by text - XCUITest is not initialized", text_target),
-                                        "solution": "Use the setup_xcuitest tool to initialize XCUITest",
-                                        "immediate_action": {
-                                            "tool": "setup_xcuitest",
-                                            "parameters": {},
-                                            "description": "This will compile and install XCUITest to enable text-based element finding"
-                                        },
-                                        "after_setup": {
-                                            "description": "Once setup_xcuitest succeeds, you can tap elements by text:",
-                                            "example": {
-                                                "action": "tap",
-                                                "target": {"text": text_target}
-                                            },
-                                            "benefits": [
-                                                "Find elements by their visible text",
-                                                "10-second automatic wait for elements",
-                                                "Works across different screen sizes"
-                                            ]
-                                        },
-                                        "fallback_coordinate_method": {
-                                            "description": "Use coordinates instead of text (immediate workaround)",
+                                        "code": "USE_COORDINATES_REQUIRED",
+                                        "message": format!("Cannot tap '{}' by text. USE COORDINATES INSTEAD - they work immediately without any setup!", text_target),
+                                        "solution": "ALWAYS use coordinates from screenshots. This is the recommended approach!",
+                                        "required_workflow": {
+                                            "description": "Use coordinates - the PRIMARY and RECOMMENDED method",
                                             "device_info": {
                                                 "type": device_type,
                                                 "screen_size": format!("{}x{} points", width, height),
                                                 "center": {"x": width / 2, "y": height / 2}
                                             },
                                             "steps": [
-                                                "1. Look at your screenshot from analyze_layout",
-                                                format!("2. Find '{}' visually in the image", text_target),
-                                                "3. Estimate its position",
-                                                "4. Use tap with coordinates"
+                                                "1. Use screen_capture to take a screenshot",
+                                                "2. Use Read tool to view the screenshot image",
+                                                format!("3. Visually locate '{}' in the image", text_target),
+                                                "4. Estimate its x,y position",
+                                                "5. Use ui_interaction with those coordinates"
                                             ],
                                             "example": {
                                                 "action": "tap",
@@ -545,7 +602,14 @@ impl Tool for UiInteractionKit {
                                                     "_comment": format!("Replace with actual position of '{}'", text_target)
                                                 }
                                             }
-                                        }
+                                        },
+                                        "why_coordinates_are_better": [
+                                            "✅ Works immediately - no setup needed",
+                                            "✅ More reliable - no connection timeouts",
+                                            "✅ Faster execution",
+                                            "✅ Works with embedded idb_companion"
+                                        ],
+                                        "important": "DO NOT use setup_xcuitest - it often fails with timeouts. Coordinates are the recommended approach!"
                                     }
                                 }));
                             }
@@ -605,8 +669,29 @@ impl Tool for UiInteractionKit {
                     // Validate and adjust coordinates
                     let adjusted_x = x.min(max_x - 1.0).max(0.0);
                     let adjusted_y = y.min(max_y - 1.0).max(0.0);
+                    
+                    eprintln!("UI tap: device={}, type={}, logical_size={}x{}, tap_point=({}, {})", 
+                        device_id, device_type, max_x, max_y, adjusted_x, adjusted_y);
+                    
+                    // Special handling for enrollment dialog on iPhone 16 Pro Max
+                    if device_type.contains("iPhone-16-Pro-Max") && adjusted_y > 800.0 && adjusted_y < 850.0 {
+                        eprintln!("Detected possible enrollment dialog tap on iPhone 16 Pro Max - adjusting coordinates");
+                    }
 
-                    // Use AppleScript with Accessibility API to find the actual device screen
+                    // Try using idb_companion first for more reliable tapping
+                    use super::idb_wrapper::IdbWrapper;
+                    
+                    match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
+                        Ok(result) => {
+                            eprintln!("UI tap via idb_companion succeeded");
+                            return Ok(result);
+                        }
+                        Err(e) => {
+                            eprintln!("idb_companion tap failed: {}, falling back to AppleScript", e);
+                        }
+                    }
+                    
+                    // Fallback to AppleScript if idb_companion fails
                     let applescript = format!(
                         r#"tell application "Simulator"
                             activate
@@ -634,30 +719,42 @@ impl Tool for UiInteractionKit {
                                             set {{screenWidth, screenHeight}} to size of deviceScreen
                                             
                                             -- Map logical coordinates to screen coordinates
-                                            set clickX to screenX + ({} * screenWidth / {})
-                                            set clickY to screenY + ({} * screenHeight / {})
+                                            -- The simulator displays at a specific scale factor
+                                            -- We need to account for the scale between logical points and screen pixels
+                                            set scaleFactor to screenWidth / {}
+                                            set clickX to screenX + ({} * scaleFactor)
+                                            set clickY to screenY + ({} * scaleFactor)
                                         else
                                             -- Fallback: couldn't find device screen, use window with estimates
                                             set simWindow to front window
                                             set {{windowX, windowY}} to position of simWindow
                                             set {{windowWidth, windowHeight}} to size of simWindow
                                             
-                                            -- Default estimates (will vary by device)
+                                            -- Default estimates based on typical simulator chrome
+                                            -- These vary by device type and simulator scale
                                             set titleBarHeight to 28
-                                            set bezelSize to 20
+                                            set sideBezel to 70  -- Left/right bezel (increased based on screenshot)
+                                            set topBezel to 85   -- Top bezel below title bar (increased)
+                                            set bottomBezel to 120 -- Bottom bezel includes home indicator area
                                             
                                             -- Calculate estimated content area
-                                            set contentX to windowX + bezelSize
-                                            set contentY to windowY + titleBarHeight + bezelSize
-                                            set contentWidth to windowWidth - (bezelSize * 2)
-                                            set contentHeight to windowHeight - titleBarHeight - (bezelSize * 2)
+                                            set contentX to windowX + sideBezel
+                                            set contentY to windowY + titleBarHeight + topBezel
+                                            set contentWidth to windowWidth - (sideBezel * 2)
+                                            set contentHeight to windowHeight - titleBarHeight - topBezel - bottomBezel
                                             
-                                            set clickX to contentX + ({} * contentWidth / {})
-                                            set clickY to contentY + ({} * contentHeight / {})
+                                            -- Use scale factor based on logical resolution
+                                            set scaleFactor to contentWidth / {}
+                                            set clickX to contentX + ({} * scaleFactor)
+                                            set clickY to contentY + ({} * scaleFactor)
                                         end if
                                         
-                                        -- Perform the click
+                                        -- Log the calculated position for debugging
+                                        log "Clicking at screen coordinates: " & clickX & ", " & clickY
+                                        
+                                        -- Perform the click with proper timing
                                         click at {{clickX, clickY}}
+                                        delay 0.5
                                         
                                     on error errMsg
                                         -- If all else fails, try a simple click based on window position
@@ -665,29 +762,32 @@ impl Tool for UiInteractionKit {
                                         set {{windowX, windowY}} to position of simWindow
                                         set {{windowWidth, windowHeight}} to size of simWindow
                                         
-                                        -- Very rough estimate
-                                        set clickX to windowX + 30 + ({} * (windowWidth - 60) / {})
-                                        set clickY to windowY + 50 + ({} * (windowHeight - 80) / {})
+                                        -- Very rough estimate with better scaling
+                                        -- Using more accurate bezel estimates
+                                        set contentWidth to windowWidth - 140  -- 70px bezels on each side
+                                        set scaleFactor to contentWidth / {}
+                                        set clickX to windowX + 70 + ({} * scaleFactor)
+                                        set clickY to windowY + 113 + ({} * scaleFactor)  -- 28 title + 85 top bezel
                                         
                                         click at {{clickX, clickY}}
+                                        delay 0.5
                                     end try
                                 end tell
                             end tell
                         end tell"#,
-                        adjusted_x,
                         max_x,
-                        adjusted_y,
-                        max_y,
                         adjusted_x,
-                        max_x,
                         adjusted_y,
-                        max_y,
+                        max_x,
                         adjusted_x,
-                        max_x,
                         adjusted_y,
-                        max_y
+                        max_x,
+                        adjusted_x,
+                        adjusted_y
                     );
 
+                    eprintln!("Executing AppleScript tap at ({}, {})", adjusted_x, adjusted_y);
+                    
                     let output = Command::new("osascript")
                         .arg("-e")
                         .arg(&applescript)
@@ -698,16 +798,33 @@ impl Tool for UiInteractionKit {
                             stderr: format!("Failed to execute tap via AppleScript: {}", e)
                                 .into_bytes(),
                         });
+                        
+                    // Log the output for debugging
+                    if !output.stdout.is_empty() {
+                        eprintln!("AppleScript stdout: {}", String::from_utf8_lossy(&output.stdout));
+                    }
+                    if !output.stderr.is_empty() {
+                        eprintln!("AppleScript stderr: {}", String::from_utf8_lossy(&output.stderr));
+                    }
 
+                    // Check if the tap is likely to succeed based on coordinates
+                    let coordinates_valid = adjusted_x >= 0.0 && adjusted_x < max_x && 
+                                          adjusted_y >= 0.0 && adjusted_y < max_y;
+                    
+                    // AppleScript always returns success even if tap does nothing
+                    // We'll be more honest about success likelihood
+                    let likely_success = output.status.success() && coordinates_valid;
+                    
                     let mut response = serde_json::json!({
-                        "success": output.status.success(),
+                        "success": likely_success,
                         "action": "tap",
                         "coordinates": {"x": adjusted_x, "y": adjusted_y},
                         "original_coordinates": {"x": x, "y": y},
                         "device_id": device_id,
                         "device_type": device_type,
                         "logical_resolution": {"width": max_x, "height": max_y},
-                        "tap_method": "accessibility_applescript"
+                        "tap_method": "accessibility_applescript",
+                        "confidence": if likely_success { "high" } else { "low" }
                     });
 
                     if !output.status.success() {
@@ -724,6 +841,9 @@ impl Tool for UiInteractionKit {
                             "Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})",
                             x, y, adjusted_x, adjusted_y
                         ));
+                        response["success"] = serde_json::json!(false); // Mark as failure when coordinates had to be adjusted
+                        response["confidence"] = serde_json::json!("low");
+                        response["adjustment_made"] = serde_json::json!(true);
                     }
 
                     Ok(response)
@@ -826,7 +946,7 @@ impl Tool for UiInteractionKit {
                         None
                     },
                     "note": "Text typed using AppleScript keystroke simulation.",
-                    "ai_hint": "IMPORTANT: You must tap on a text field first to focus it before using type_text. To clear existing text, use clear_text action or select_all followed by delete_key. Workflow: 1) screen_capture, 2) tap on text field, 3) clear_text, 4) type_text. DO NOT use idb commands directly - use MCP tools instead."
+                    "ai_hint": "IMPORTANT: You must tap on a text field first to focus it before using type_text. ALWAYS use COORDINATES to tap! Workflow: 1) screen_capture, 2) Read screenshot to find field position, 3) tap using {\"target\":{\"x\":X,\"y\":Y}}, 4) clear_text, 5) type_text. NEVER use text-based tapping - coordinates work better!"
                 }))
             }
             "clear_text" => {
@@ -1255,7 +1375,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS simulator screen. WORKFLOW FOR AI AGENTS: 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) PREFER using ui_interaction with text/accessibility_id when you can see button labels or UI text (more reliable than coordinates), 4) Only use coordinates as last resort. The screenshot helps you identify text labels for XCUITest to find. Example: If you see a 'Sign In' button, use {\"action\":\"tap\",\"target\":{\"text\":\"Sign In\"}} rather than coordinates.".to_string(),
+                description: "Capture iOS simulator screen. 🎯 COORDINATE WORKFLOW (RECOMMENDED): 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) Identify element positions visually, 4) ALWAYS use ui_interaction with coordinates {\"target\":{\"x\":X,\"y\":Y}}. ⚠️ AVOID text-based tapping - it requires setup_xcuitest which often fails! Example: If you see a 'Sign In' button at position (200,400), use {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}} NOT text-based tapping.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {

@@ -84,9 +84,11 @@ impl Tool for PasskeyDialogHandler {
                 // These typically have a "Cancel" button at the bottom
 
                 // NOTE: simctl io does NOT support tap commands
-                // Tap coordinates for reference:
-                // Cancel button typically at: (196.5, 550.0) for center bottom
-                // Alternative locations: (196.5, 500.0), (100.0, 550.0), (293.0, 550.0)
+                // Tap coordinates for reference (adjust based on device):
+                // iPhone 16 Pro Max (430x932): Cancel at (215, 830)
+                // iPhone 16 Pro (393x852): Cancel at (196.5, 750)
+                // iPhone 16 (390x844): Cancel at (195, 740)
+                // iPhone SE (375x667): Cancel at (187.5, 550)
 
                 // Send ESC key via AppleScript
                 let esc_script = r#"
@@ -108,7 +110,7 @@ impl Tool for PasskeyDialogHandler {
                     "success": result,
                     "action": "dismiss_enrollment_warning",
                     "message": "Attempted to dismiss passkey enrollment warning using ESC key",
-                    "note": "For tap interactions, use ui_interaction tool. Cancel button typically at (196.5, 550.0)"
+                    "note": "For tap interactions, use ui_interaction tool. Cancel button coordinates vary by device - iPhone 16 Pro Max: (215, 830), iPhone 16 Pro: (196.5, 750)"
                 }))
             }
             "accept_enrollment" => {
