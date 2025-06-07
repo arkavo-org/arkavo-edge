@@ -33,6 +33,10 @@ fn main() {
 }
 
 fn setup_idb_companion() {
+    // idb_companion embedding setup
+    // This embeds Meta's idb_companion tool (MIT licensed) for iOS simulator automation
+    // See THIRD-PARTY-LICENSES.md for full license information
+    
     println!("cargo:rerun-if-changed=build.rs");
 
     // Determine architecture

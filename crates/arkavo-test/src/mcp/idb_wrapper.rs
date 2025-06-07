@@ -1,3 +1,10 @@
+// idb_companion - iOS Debug Bridge Companion
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+// Licensed under the MIT License
+//
+// This module embeds and wraps the idb_companion binary from Meta's idb project.
+// See THIRD-PARTY-LICENSES.md for full license text.
+
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::fs;
