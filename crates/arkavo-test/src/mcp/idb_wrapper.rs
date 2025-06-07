@@ -11,6 +11,10 @@ use crate::{Result, TestError};
 #[cfg(target_os = "macos")]
 static IDB_COMPANION_BYTES: &[u8] = include_bytes!(env!("IDB_COMPANION_PATH"));
 
+// Provide empty bytes for non-macOS platforms
+#[cfg(not(target_os = "macos"))]
+static IDB_COMPANION_BYTES: &[u8] = &[];
+
 // Global path to extracted binary
 static EXTRACTED_IDB_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 

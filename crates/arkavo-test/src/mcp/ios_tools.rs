@@ -688,18 +688,21 @@ impl Tool for UiInteractionKit {
                     }
 
                     // Try using idb_companion first for more reliable tapping
-                    use super::idb_wrapper::IdbWrapper;
+                    #[cfg(target_os = "macos")]
+                    {
+                        use super::idb_wrapper::IdbWrapper;
 
-                    match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
-                        Ok(result) => {
-                            eprintln!("UI tap via idb_companion succeeded");
-                            return Ok(result);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "idb_companion tap failed: {}, falling back to AppleScript",
-                                e
-                            );
+                        match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
+                            Ok(result) => {
+                                eprintln!("UI tap via idb_companion succeeded");
+                                return Ok(result);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "idb_companion tap failed: {}, falling back to AppleScript",
+                                    e
+                                );
+                            }
                         }
                     }
 

@@ -62,6 +62,12 @@ fn setup_idb_companion() {
         "cargo:rustc-env=IDB_COMPANION_PATH={}",
         idb_binary_path.display()
     );
+
+    // Ensure the file exists (even if it's just a placeholder)
+    if !idb_binary_path.exists() {
+        // Create a minimal placeholder to satisfy include_bytes!
+        fs::write(&idb_binary_path, b"placeholder").expect("Failed to create placeholder");
+    }
 }
 
 fn create_idb_companion_placeholder(target_path: &Path, arch: &str) {
