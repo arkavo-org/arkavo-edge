@@ -129,7 +129,7 @@ impl Tool for FaceIdController {
                                 ],
                                 "manual_steps": [
                                     "1. Focus on the iOS Simulator window",
-                                    "2. In menu bar: Device > Face ID > Enrolled (check it)",
+                                    "2. In menu bar: Features > Face ID > Enrolled (check it)",
                                     "3. Enrollment persists until manually unchecked"
                                 ],
                                 "grant_permissions": "System Preferences > Security & Privacy > Privacy > Accessibility > Add Terminal/IDE"
@@ -149,7 +149,7 @@ impl Tool for FaceIdController {
                         "message": "Face ID unenrollment requires manual interaction",
                         "details": {
                             "manual_steps": [
-                                "1. In menu bar: Device > Face ID > Enrolled (uncheck it)"
+                                "1. In menu bar: Features > Face ID > Enrolled (uncheck it)"
                             ]
                         }
                     }
@@ -193,7 +193,7 @@ impl Tool for FaceIdController {
                                 "manual_steps": [
                                     "1. Ensure Face ID is enrolled",
                                     "2. When biometric prompt appears",
-                                    "3. Go to Device > Face ID > Matching Face"
+                                    "3. Go to Features > Face ID > Matching Face"
                                 ],
                                 "timing": "Must be done while biometric prompt is active"
                             }
@@ -237,7 +237,7 @@ impl Tool for FaceIdController {
                             "details": {
                                 "manual_steps": [
                                     "1. When biometric prompt appears",
-                                    "2. Go to Device > Face ID > Non-matching Face"
+                                    "2. Go to Features > Face ID > Non-matching Face"
                                 ]
                             }
                         }
@@ -323,10 +323,10 @@ impl Tool for FaceIdStatusChecker {
             "face_id_enrolled": is_enrolled,
             "raw_status": status_output.trim(),
             "available_actions": {
-                "enroll": "Enable Face ID (like selecting 'Enrolled' in simulator menu)",
+                "enroll": "Enable Face ID (Features > Face ID > Enrolled)",
                 "unenroll": "Disable Face ID (clear enrollment)",
-                "match": "Simulate successful Face ID scan (like selecting 'Matching Face')",
-                "no_match": "Simulate failed Face ID scan (like selecting 'Non-matching Face')"
+                "match": "Simulate successful Face ID scan (Features > Face ID > Matching Face)",
+                "no_match": "Simulate failed Face ID scan (Features > Face ID > Non-matching Face)"
             }
         }))
     }

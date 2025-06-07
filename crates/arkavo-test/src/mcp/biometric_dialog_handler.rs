@@ -198,7 +198,7 @@ impl Tool for BiometricDialogHandler {
                             "reason": "iOS Simulator requires manual menu interaction for biometric simulation",
                             "manual_steps": [
                                 "1. When biometric dialog is visible",
-                                "2. Go to Device > Face ID/Touch ID > Matching Face/Touch"
+                                "2. Go to Features > Face ID/Touch ID > Matching Face/Touch"
                             ]
                         }
                     }

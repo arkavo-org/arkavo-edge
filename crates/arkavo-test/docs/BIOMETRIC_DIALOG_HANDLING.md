@@ -56,10 +56,10 @@ This is the recommended approach as it requires no external tools:
 
 ## How It Works
 
-The handler uses standard `xcrun simctl` commands:
-- **dismiss/cancel**: Sends ESC key or HOME button press
-- **accept**: Uses `xcrun simctl ui biometric match` to simulate successful auth
-- **use_passcode**: Types the passcode digits and presses return
+The handler uses various approaches:
+- **dismiss/cancel**: Sends ESC key via AppleScript or keyboard simulation
+- **accept**: Uses AppleScript to click "Matching Face" in Simulator menu (Device > Face ID > Matching Face)
+- **use_passcode**: Requires UI interaction with specific passcode button coordinates
 
 ## Fallback Options
 
