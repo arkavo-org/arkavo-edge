@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use crate::{TestError, Result};
+use crate::{Result, TestError};
 
 // Embed the idb_companion binary at compile time
 #[cfg(target_os = "macos")]
@@ -30,7 +30,7 @@ impl IdbWrapper {
         #[cfg(target_os = "macos")]
         {
             let mut path_guard = EXTRACTED_IDB_PATH.lock().unwrap();
-            
+
             if path_guard.is_some() {
                 // Already initialized
                 return Ok(());
@@ -39,7 +39,8 @@ impl IdbWrapper {
             // Check if we have a real binary or just a placeholder
             if IDB_COMPANION_BYTES.len() < 1000 || IDB_COMPANION_BYTES.starts_with(b"#!/bin/bash") {
                 return Err(TestError::Mcp(
-                    "idb_companion not properly embedded. Install with: brew install idb-companion".to_string(),
+                    "idb_companion not properly embedded. Install with: brew install idb-companion"
+                        .to_string(),
                 ));
             }
 
@@ -64,8 +65,11 @@ impl IdbWrapper {
                     .map_err(|e| TestError::Mcp(format!("Failed to set permissions: {}", e)))?;
             }
 
-            eprintln!("[IdbWrapper] Extracted idb_companion to: {}", binary_path.display());
-            
+            eprintln!(
+                "[IdbWrapper] Extracted idb_companion to: {}",
+                binary_path.display()
+            );
+
             *path_guard = Some(binary_path);
             Ok(())
         }
@@ -85,13 +89,18 @@ impl IdbWrapper {
         Self::initialize()?;
         let binary_path = Self::get_binary_path()?;
 
-        eprintln!("[IdbWrapper] Tapping at ({}, {}) on device {}", x, y, device_id);
+        eprintln!(
+            "[IdbWrapper] Tapping at ({}, {}) on device {}",
+            x, y, device_id
+        );
 
         // Execute idb_companion tap command
         let output = Command::new(&binary_path)
             .args([
-                "--udid", device_id,
-                "ui", "tap",
+                "--udid",
+                device_id,
+                "ui",
+                "tap",
                 &x.to_string(),
                 &y.to_string(),
             ])
@@ -110,7 +119,7 @@ impl IdbWrapper {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[IdbWrapper] Tap failed: {}", stderr);
-            
+
             Err(TestError::Mcp(format!(
                 "idb_companion tap failed: {}",
                 stderr
@@ -138,8 +147,10 @@ impl IdbWrapper {
         // Execute idb_companion swipe command
         let output = Command::new(&binary_path)
             .args([
-                "--udid", device_id,
-                "ui", "swipe",
+                "--udid",
+                device_id,
+                "ui",
+                "swipe",
                 &start_x.to_string(),
                 &start_y.to_string(),
                 &end_x.to_string(),
@@ -164,7 +175,7 @@ impl IdbWrapper {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[IdbWrapper] Swipe failed: {}", stderr);
-            
+
             Err(TestError::Mcp(format!(
                 "idb_companion swipe failed: {}",
                 stderr
@@ -177,15 +188,14 @@ impl IdbWrapper {
         Self::initialize()?;
         let binary_path = Self::get_binary_path()?;
 
-        eprintln!("[IdbWrapper] Typing text: '{}' on device {}", text, device_id);
+        eprintln!(
+            "[IdbWrapper] Typing text: '{}' on device {}",
+            text, device_id
+        );
 
         // Execute idb_companion text command
         let output = Command::new(&binary_path)
-            .args([
-                "--udid", device_id,
-                "ui", "text",
-                text,
-            ])
+            .args(["--udid", device_id, "ui", "text", text])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
 
@@ -201,7 +211,7 @@ impl IdbWrapper {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[IdbWrapper] Type text failed: {}", stderr);
-            
+
             Err(TestError::Mcp(format!(
                 "idb_companion type_text failed: {}",
                 stderr
@@ -214,15 +224,14 @@ impl IdbWrapper {
         Self::initialize()?;
         let binary_path = Self::get_binary_path()?;
 
-        eprintln!("[IdbWrapper] Pressing button: '{}' on device {}", button, device_id);
+        eprintln!(
+            "[IdbWrapper] Pressing button: '{}' on device {}",
+            button, device_id
+        );
 
         // Execute idb_companion button command
         let output = Command::new(&binary_path)
-            .args([
-                "--udid", device_id,
-                "ui", "button",
-                button,
-            ])
+            .args(["--udid", device_id, "ui", "button", button])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
 
@@ -238,7 +247,7 @@ impl IdbWrapper {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[IdbWrapper] Press button failed: {}", stderr);
-            
+
             Err(TestError::Mcp(format!(
                 "idb_companion press_button failed: {}",
                 stderr
@@ -265,13 +274,13 @@ mod tests {
     async fn test_idb_wrapper_initialization() {
         // This test will fail on non-macOS platforms as expected
         let result = IdbWrapper::initialize();
-        
+
         #[cfg(target_os = "macos")]
         {
             // On macOS, initialization should succeed (though the placeholder will fail)
             assert!(result.is_ok());
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             // On other platforms, should return error

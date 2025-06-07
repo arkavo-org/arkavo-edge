@@ -135,7 +135,7 @@ impl Tool for EnrollmentDialogHandler {
         match action {
             "get_cancel_coordinates" => {
                 let (x, y) = self.get_cancel_coordinates(device_type);
-                
+
                 Ok(json!({
                     "success": true,
                     "action": "get_cancel_coordinates",
@@ -162,7 +162,7 @@ impl Tool for EnrollmentDialogHandler {
             }
             "tap_cancel" => {
                 let (x, y) = self.get_cancel_coordinates(device_type);
-                
+
                 Ok(json!({
                     "success": true,
                     "action": "tap_cancel",

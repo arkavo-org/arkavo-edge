@@ -491,7 +491,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     "🚫 AVOID_TEXT_TAPPING": "Text-based tapping requires setup_xcuitest which OFTEN FAILS with timeouts. DO NOT USE unless absolutely necessary!",
                                     "✅ CORRECT_WORKFLOW": [
                                         "1. device_management → get device_id",
-                                        "2. screen_capture → see UI visually", 
+                                        "2. screen_capture → see UI visually",
                                         "3. Read the screenshot image",
                                         "4. ui_interaction with {\"target\":{\"x\":X,\"y\":Y}}"
                                     ],

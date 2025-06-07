@@ -172,7 +172,7 @@ impl McpTestServer {
             "passkey_dialog".to_string(),
             Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
         );
-        
+
         // Add enrollment dialog handler for precise Cancel button coordinates
         tools.insert(
             "enrollment_dialog".to_string(),

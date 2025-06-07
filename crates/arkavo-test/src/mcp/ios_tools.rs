@@ -103,6 +103,7 @@ impl UiInteractionKit {
     }
 
     /// Get the XCTest bridge (with initialization attempt)
+    #[allow(dead_code)]
     async fn get_xctest_bridge(&self) -> Option<Arc<Mutex<XCTestUnixBridge>>> {
         let bridge_holder = XCTEST_BRIDGE.get_or_init(|| Arc::new(RwLock::new(None)));
 
@@ -145,6 +146,7 @@ impl UiInteractionKit {
     }
 
     /// Set up the XCTest runner
+    #[allow(dead_code)]
     async fn setup_xctest_runner(&self) -> Result<XCTestUnixBridge> {
         eprintln!("[UiInteractionKit] Setting up XCTest runner...");
 
@@ -669,28 +671,38 @@ impl Tool for UiInteractionKit {
                     // Validate and adjust coordinates
                     let adjusted_x = x.min(max_x - 1.0).max(0.0);
                     let adjusted_y = y.min(max_y - 1.0).max(0.0);
-                    
-                    eprintln!("UI tap: device={}, type={}, logical_size={}x{}, tap_point=({}, {})", 
-                        device_id, device_type, max_x, max_y, adjusted_x, adjusted_y);
-                    
+
+                    eprintln!(
+                        "UI tap: device={}, type={}, logical_size={}x{}, tap_point=({}, {})",
+                        device_id, device_type, max_x, max_y, adjusted_x, adjusted_y
+                    );
+
                     // Special handling for enrollment dialog on iPhone 16 Pro Max
-                    if device_type.contains("iPhone-16-Pro-Max") && adjusted_y > 800.0 && adjusted_y < 850.0 {
-                        eprintln!("Detected possible enrollment dialog tap on iPhone 16 Pro Max - adjusting coordinates");
+                    if device_type.contains("iPhone-16-Pro-Max")
+                        && adjusted_y > 800.0
+                        && adjusted_y < 850.0
+                    {
+                        eprintln!(
+                            "Detected possible enrollment dialog tap on iPhone 16 Pro Max - adjusting coordinates"
+                        );
                     }
 
                     // Try using idb_companion first for more reliable tapping
                     use super::idb_wrapper::IdbWrapper;
-                    
+
                     match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
                         Ok(result) => {
                             eprintln!("UI tap via idb_companion succeeded");
                             return Ok(result);
                         }
                         Err(e) => {
-                            eprintln!("idb_companion tap failed: {}, falling back to AppleScript", e);
+                            eprintln!(
+                                "idb_companion tap failed: {}, falling back to AppleScript",
+                                e
+                            );
                         }
                     }
-                    
+
                     // Fallback to AppleScript if idb_companion fails
                     let applescript = format!(
                         r#"tell application "Simulator"
@@ -786,8 +798,11 @@ impl Tool for UiInteractionKit {
                         adjusted_y
                     );
 
-                    eprintln!("Executing AppleScript tap at ({}, {})", adjusted_x, adjusted_y);
-                    
+                    eprintln!(
+                        "Executing AppleScript tap at ({}, {})",
+                        adjusted_x, adjusted_y
+                    );
+
                     let output = Command::new("osascript")
                         .arg("-e")
                         .arg(&applescript)
@@ -798,23 +813,31 @@ impl Tool for UiInteractionKit {
                             stderr: format!("Failed to execute tap via AppleScript: {}", e)
                                 .into_bytes(),
                         });
-                        
+
                     // Log the output for debugging
                     if !output.stdout.is_empty() {
-                        eprintln!("AppleScript stdout: {}", String::from_utf8_lossy(&output.stdout));
+                        eprintln!(
+                            "AppleScript stdout: {}",
+                            String::from_utf8_lossy(&output.stdout)
+                        );
                     }
                     if !output.stderr.is_empty() {
-                        eprintln!("AppleScript stderr: {}", String::from_utf8_lossy(&output.stderr));
+                        eprintln!(
+                            "AppleScript stderr: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        );
                     }
 
                     // Check if the tap is likely to succeed based on coordinates
-                    let coordinates_valid = adjusted_x >= 0.0 && adjusted_x < max_x && 
-                                          adjusted_y >= 0.0 && adjusted_y < max_y;
-                    
+                    let coordinates_valid = adjusted_x >= 0.0
+                        && adjusted_x < max_x
+                        && adjusted_y >= 0.0
+                        && adjusted_y < max_y;
+
                     // AppleScript always returns success even if tap does nothing
                     // We'll be more honest about success likelihood
                     let likely_success = output.status.success() && coordinates_valid;
-                    
+
                     let mut response = serde_json::json!({
                         "success": likely_success,
                         "action": "tap",

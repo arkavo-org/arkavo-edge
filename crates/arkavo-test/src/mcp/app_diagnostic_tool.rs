@@ -69,12 +69,12 @@ impl Tool for AppDiagnosticTool {
         // Parse the plist-style output to find apps
         if let Some(target_bundle_id) = bundle_id {
             // Look for the specific bundle ID in the output
-            let found = output_text.contains(&format!("\"{}\"", target_bundle_id)) ||
-                       output_text.contains(&format!("{} =", target_bundle_id));
-            
+            let found = output_text.contains(&format!("\"{}\"", target_bundle_id))
+                || output_text.contains(&format!("{} =", target_bundle_id));
+
             // Try to extract some info about the app
             let mut app_info = serde_json::json!({});
-            
+
             if found {
                 // Look for the app's display name
                 if let Some(start) = output_text.find(&format!("\"{}\"", target_bundle_id)) {
@@ -88,7 +88,7 @@ impl Tool for AppDiagnosticTool {
                     }
                 }
             }
-            
+
             return Ok(serde_json::json!({
                 "found": found,
                 "bundle_id": target_bundle_id,
@@ -104,7 +104,7 @@ impl Tool for AppDiagnosticTool {
 
         // Count total apps if no specific bundle ID requested
         let app_count = output_text.matches(" = ").count() / 10; // Rough estimate
-        
+
         Ok(serde_json::json!({
             "device_id": device_id,
             "status": "success",

@@ -76,11 +76,15 @@ impl Tool for XCTestSetupKit {
 
         // Ignore target_app_bundle_id even if provided - it causes security restrictions
         let _target_app_bundle_id: Option<String> = None;
-        
+
         // Log warning if target_app_bundle_id was provided
         if params.get("target_app_bundle_id").is_some() {
-            eprintln!("[XCTestSetupKit] WARNING: target_app_bundle_id parameter is deprecated and will be ignored");
-            eprintln!("[XCTestSetupKit] XCUITest will work with any app on the simulator without specifying a target");
+            eprintln!(
+                "[XCTestSetupKit] WARNING: target_app_bundle_id parameter is deprecated and will be ignored"
+            );
+            eprintln!(
+                "[XCTestSetupKit] XCUITest will work with any app on the simulator without specifying a target"
+            );
         }
 
         // Check if XCUITest is already available and functional
@@ -285,7 +289,7 @@ impl Tool for XCTestSetupKit {
 
                 // Return to the previous app if there was one
                 eprintln!("[XCTestSetupKit] Setup complete, returning to previous app...");
-                
+
                 // Launch the previous app or home screen to hide the test host
                 let _ = Command::new("xcrun")
                     .args(["simctl", "launch", &device_id, "com.apple.springboard"])

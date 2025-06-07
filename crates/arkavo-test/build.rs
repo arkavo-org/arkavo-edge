@@ -16,7 +16,7 @@ fn main() {
 
             // Link with CoreFoundation framework
             println!("cargo:rustc-link-lib=framework=CoreFoundation");
-            
+
             // Setup idb_companion embedding for macOS
             if target_os == "macos" {
                 setup_idb_companion();
@@ -34,14 +34,17 @@ fn main() {
 
 fn setup_idb_companion() {
     println!("cargo:rerun-if-changed=build.rs");
-    
+
     // Determine architecture
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let arch_suffix = match target_arch.as_str() {
         "aarch64" => "arm64",
         "x86_64" => "x86_64",
         _ => {
-            eprintln!("Warning: Unsupported architecture {} for idb_companion", target_arch);
+            eprintln!(
+                "Warning: Unsupported architecture {} for idb_companion",
+                target_arch
+            );
             return;
         }
     };
@@ -55,7 +58,10 @@ fn setup_idb_companion() {
     }
 
     // Tell Rust where to find the binary for embedding
-    println!("cargo:rustc-env=IDB_COMPANION_PATH={}", idb_binary_path.display());
+    println!(
+        "cargo:rustc-env=IDB_COMPANION_PATH={}",
+        idb_binary_path.display()
+    );
 }
 
 fn create_idb_companion_placeholder(target_path: &Path, arch: &str) {
@@ -63,10 +69,10 @@ fn create_idb_companion_placeholder(target_path: &Path, arch: &str) {
 
     // Try to find installed idb_companion
     let possible_sources = vec![
-        "/opt/homebrew/bin/idb_companion",  // Homebrew on Apple Silicon
-        "/usr/local/bin/idb_companion",      // Homebrew on Intel
+        "/opt/homebrew/bin/idb_companion", // Homebrew on Apple Silicon
+        "/usr/local/bin/idb_companion",    // Homebrew on Intel
     ];
-    
+
     let mut source_found = None;
     for source in &possible_sources {
         if Path::new(source).exists() {
@@ -74,7 +80,7 @@ fn create_idb_companion_placeholder(target_path: &Path, arch: &str) {
             break;
         }
     }
-    
+
     if let Some(source) = source_found {
         // Copy the actual binary
         eprintln!("Copying idb_companion from: {}", source);
@@ -109,7 +115,7 @@ exit 1
 
     let script_content = placeholder_script.replace("{arch}", arch);
     fs::write(target_path, script_content).expect("Failed to write placeholder");
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

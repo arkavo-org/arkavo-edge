@@ -1,7 +1,7 @@
 use serde_json::json;
 use std::process::Command;
 
-use crate::{TestError, Result};
+use crate::{Result, TestError};
 
 /// A more reliable approach to simulator UI automation
 pub struct SimulatorTap;
@@ -26,7 +26,7 @@ impl SimulatorTap {
         }
 
         Err(TestError::Mcp(
-            "All tap methods failed. Ensure simulator is running and accessible.".to_string()
+            "All tap methods failed. Ensure simulator is running and accessible.".to_string(),
         ))
     }
 
@@ -46,7 +46,7 @@ impl SimulatorTap {
         // This works by launching a dummy app with specific launch arguments
         let tap_x = x as i32;
         let tap_y = y as i32;
-        
+
         // Create a synthetic touch event using simctl launch with special args
         let output = Command::new("xcrun")
             .args([
@@ -55,7 +55,7 @@ impl SimulatorTap {
                 device_id,
                 "notifyutil",
                 "-p",
-                &format!("com.apple.synthesized.touch.event.x:{},y:{}", tap_x, tap_y)
+                &format!("com.apple.synthesized.touch.event.x:{},y:{}", tap_x, tap_y),
             ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to send tap event: {}", e)))?;
@@ -68,9 +68,7 @@ impl SimulatorTap {
                 "device_id": device_id
             }))
         } else {
-            Err(TestError::Mcp(
-                "Simctl event injection failed".to_string()
-            ))
+            Err(TestError::Mcp("Simctl event injection failed".to_string()))
         }
     }
 
@@ -89,13 +87,7 @@ impl SimulatorTap {
         });
 
         let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "push",
-                device_id,
-                "com.apple.springboard",
-                "-"
-            ])
+            .args(["simctl", "push", device_id, "com.apple.springboard", "-"])
             .env("SIMCTL_CHILD_STDIN", payload.to_string())
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to send device event: {}", e)))?;
@@ -108,9 +100,7 @@ impl SimulatorTap {
                 "device_id": device_id
             }))
         } else {
-            Err(TestError::Mcp(
-                "Device event simulation failed".to_string()
-            ))
+            Err(TestError::Mcp("Device event simulation failed".to_string()))
         }
     }
 
@@ -118,9 +108,7 @@ impl SimulatorTap {
     async fn tap_via_xctest(_device_id: &str, _x: f64, _y: f64) -> Result<serde_json::Value> {
         // XCTest bridge integration would go here
         // For now, just return an error
-        Err(TestError::Mcp(
-            "XCTest bridge not available".to_string()
-        ))
+        Err(TestError::Mcp("XCTest bridge not available".to_string()))
     }
 
     /// Perform a swipe gesture
@@ -130,33 +118,33 @@ impl SimulatorTap {
         start_y: f64,
         end_x: f64,
         end_y: f64,
-        duration: f64
+        duration: f64,
     ) -> Result<serde_json::Value> {
         // For now, we'll implement this as a series of move events
         // This is a simplified implementation
-        
+
         let steps = (duration * 60.0) as usize; // 60 fps
         let step_x = (end_x - start_x) / steps as f64;
         let step_y = (end_y - start_y) / steps as f64;
-        
+
         // Start touch
         Self::tap(device_id, start_x, start_y).await?;
-        
+
         // Move through intermediate points
         for i in 1..steps {
             let x = start_x + (step_x * i as f64);
             let y = start_y + (step_y * i as f64);
-            
+
             // Small delay between moves
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
-            
+
             // We'd need a proper move event here, for now just track position
             eprintln!("Swipe position: ({}, {})", x, y);
         }
-        
+
         // End touch
         Self::tap(device_id, end_x, end_y).await?;
-        
+
         Ok(json!({
             "success": true,
             "method": "simulated_swipe",
@@ -176,10 +164,10 @@ mod tests {
     async fn test_tap_structure() {
         // This is a unit test that doesn't require a real device
         let result = SimulatorTap::tap("test-device", 100.0, 200.0).await;
-        
+
         // We expect it to fail without a real device, but check the error
         assert!(result.is_err());
-        
+
         let err = result.unwrap_err();
         assert!(err.to_string().contains("All tap methods failed"));
     }

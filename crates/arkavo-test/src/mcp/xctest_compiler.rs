@@ -932,12 +932,21 @@ int main(int argc, char * argv[]) {
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {}", e)))?;
 
-        eprintln!("[XCTestCompiler] Launch command completed with status: {}", output.status);
+        eprintln!(
+            "[XCTestCompiler] Launch command completed with status: {}",
+            output.status
+        );
         if !output.stdout.is_empty() {
-            eprintln!("[XCTestCompiler] stdout: {}", String::from_utf8_lossy(&output.stdout));
+            eprintln!(
+                "[XCTestCompiler] stdout: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
         if !output.stderr.is_empty() {
-            eprintln!("[XCTestCompiler] stderr: {}", String::from_utf8_lossy(&output.stderr));
+            eprintln!(
+                "[XCTestCompiler] stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         if !output.status.success() {
@@ -950,13 +959,13 @@ int main(int argc, char * argv[]) {
 
         // Verify the app is running
         std::thread::sleep(std::time::Duration::from_secs(1));
-        
+
         // Check if test host is running
         let check_cmd = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
-            
+
         let apps_output = String::from_utf8_lossy(&check_cmd.stdout);
         if !apps_output.contains("com.arkavo.testhost") {
             eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");

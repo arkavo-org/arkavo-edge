@@ -84,8 +84,12 @@ impl Tool for CoordinateConverterKit {
             s if s.contains("iPhone 12") => (3.0, 390.0, 844.0),
             s if s.contains("iPhone 11") => (2.0, 414.0, 896.0),
             s if s.contains("iPhone SE") => (2.0, 375.0, 667.0),
-            s if s.contains("iPad") && s.contains("Pro") && s.contains("13") => (2.0, 1024.0, 1366.0),
-            s if s.contains("iPad") && s.contains("Pro") && s.contains("11") => (2.0, 834.0, 1194.0),
+            s if s.contains("iPad") && s.contains("Pro") && s.contains("13") => {
+                (2.0, 1024.0, 1366.0)
+            }
+            s if s.contains("iPad") && s.contains("Pro") && s.contains("11") => {
+                (2.0, 834.0, 1194.0)
+            }
             s if s.contains("iPad") => (2.0, 820.0, 1180.0),
             _ => (3.0, 393.0, 852.0), // Default to iPhone Pro size
         };
@@ -108,22 +112,34 @@ impl Tool for CoordinateConverterKit {
 
         // Check if coordinates are within bounds
         let mut warnings = Vec::new();
-        
+
         if from == "points" {
             if x < 0.0 || x > logical_width {
-                warnings.push(format!("X coordinate {} is out of bounds (0-{})", x, logical_width));
+                warnings.push(format!(
+                    "X coordinate {} is out of bounds (0-{})",
+                    x, logical_width
+                ));
             }
             if y < 0.0 || y > logical_height {
-                warnings.push(format!("Y coordinate {} is out of bounds (0-{})", y, logical_height));
+                warnings.push(format!(
+                    "Y coordinate {} is out of bounds (0-{})",
+                    y, logical_height
+                ));
             }
         } else if from == "pixels" {
             let pixel_width = logical_width * scale_factor;
             let pixel_height = logical_height * scale_factor;
             if x < 0.0 || x > pixel_width {
-                warnings.push(format!("X coordinate {} is out of bounds (0-{})", x, pixel_width));
+                warnings.push(format!(
+                    "X coordinate {} is out of bounds (0-{})",
+                    x, pixel_width
+                ));
             }
             if y < 0.0 || y > pixel_height {
-                warnings.push(format!("Y coordinate {} is out of bounds (0-{})", y, pixel_height));
+                warnings.push(format!(
+                    "Y coordinate {} is out of bounds (0-{})",
+                    y, pixel_height
+                ));
             }
         }
 
