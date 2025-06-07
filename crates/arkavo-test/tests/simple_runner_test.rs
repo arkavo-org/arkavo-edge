@@ -6,6 +6,7 @@ mod tests {
     use tokio::time::sleep;
 
     #[tokio::test]
+    #[ignore] // Run with: cargo test test_simple_runner -- --ignored (requires booted simulator)
     async fn test_simple_runner() -> Result<(), Box<dyn std::error::Error>> {
         // Create simple runner
         let runner = XCTestSimpleRunner::new()?;
