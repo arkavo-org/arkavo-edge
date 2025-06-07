@@ -18,6 +18,7 @@ use super::passkey_dialog_handler::PasskeyDialogHandler;
 use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use super::template_diagnostics::TemplateDiagnosticsKit;
+use super::ui_element_handler::UiElementHandler;
 use super::usage_guide::UsageGuideKit;
 use super::xctest_setup_tool::XCTestSetupKit;
 use super::xctest_status_tool::XCTestStatusKit;
@@ -116,6 +117,10 @@ impl McpTestServer {
         tools.insert(
             "ui_query".to_string(),
             Arc::new(UiQueryKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "ui_element_handler".to_string(),
+            Arc::new(UiElementHandler::new(device_manager.clone())),
         );
         tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
         tools.insert(
@@ -341,6 +346,7 @@ impl McpTestServer {
                 | "ui_interaction"
                 | "screen_capture"
                 | "ui_query"
+                | "ui_element_handler"
                 | "usage_guide"
                 | "app_diagnostic"
                 | "setup_xcuitest"
