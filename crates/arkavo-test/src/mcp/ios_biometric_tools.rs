@@ -16,7 +16,7 @@ impl BiometricKit {
         Self {
             schema: ToolSchema {
                 name: "biometric_auth".to_string(),
-                description: "Handle Face ID/Touch ID authentication for both simulators and devices. For 'enroll' on simulator: returns instructions for manual enrollment (Device > Face ID > Enrolled) as this often cannot be done programmatically. After manual enrollment, use passkey_dialog tool to dismiss any enrollment warning dialogs. For 'match'/'fail'/'cancel': provides multiple fallback methods including simctl commands, notifications, and taps. Works best when Face ID is already enrolled in simulator.".to_string(),
+                description: "Handle Face ID/Touch ID authentication for both simulators and devices. For 'enroll' on simulator: returns instructions for manual enrollment (Features > Face ID > Enrolled) as this often cannot be done programmatically. After manual enrollment, use passkey_dialog tool to dismiss any enrollment warning dialogs. For 'match'/'fail'/'cancel': provides multiple fallback methods including simctl commands, notifications, and taps. Works best when Face ID is already enrolled in simulator.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -82,7 +82,7 @@ impl BiometricKit {
             _ => return false,
         };
 
-        // AppleScript to click menu item - correct menu path is Device > Face ID/Touch ID > Action
+        // AppleScript to click menu item - correct menu path is Features > Face ID/Touch ID > Action
         let applescript = format!(
             r#"
             tell application "Simulator"
@@ -90,7 +90,7 @@ impl BiometricKit {
                 delay 0.2
                 tell application "System Events"
                     tell process "Simulator"
-                        click menu item "{}" of menu "{}" of menu item "{}" of menu "Device" of menu bar 1
+                        click menu item "{}" of menu "{}" of menu item "{}" of menu "Features" of menu bar 1
                     end tell
                 end tell
             end tell
@@ -195,7 +195,7 @@ impl Tool for BiometricKit {
                         tell application "System Events"
                             tell process "Simulator"
                                 -- Click to ensure menu item is checked
-                                set enrollMenuItem to menu item "Enrolled" of menu "{}" of menu item "{}" of menu "Device" of menu bar 1
+                                set enrollMenuItem to menu item "Enrolled" of menu "{}" of menu item "{}" of menu "Features" of menu bar 1
                                 if exists enrollMenuItem then
                                     -- Check if not already enrolled
                                     if value of attribute "AXMenuItemMarkChar" of enrollMenuItem is not "✓" then
@@ -246,7 +246,7 @@ impl Tool for BiometricKit {
                                 "details": {
                                     "reason": "AppleScript automation failed - may require accessibility permissions",
                                     "manual_steps": [
-                                        format!("1. In the Simulator menu bar, go to Device > {}", menu_name),
+                                        format!("1. In the Simulator menu bar, go to Features > {}", menu_name),
                                         "2. Check the 'Enrolled' option",
                                         "3. Enrollment persists until manually unchecked"
                                     ],
@@ -297,7 +297,7 @@ impl Tool for BiometricKit {
                         "details": {
                             "reason": "iOS Simulator biometric control requires manual interaction or specialized tools",
                             "manual_steps": [
-                                "1. In Simulator menu, go to Device > Face ID/Touch ID",
+                                "1. In Simulator menu, go to Features > Face ID/Touch ID",
                                 "2. Ensure 'Enrolled' is checked",
                                 "3. Select 'Matching Face' or 'Matching Touch' when biometric prompt appears"
                             ],
@@ -330,7 +330,7 @@ impl Tool for BiometricKit {
                         "details": {
                             "manual_steps": [
                                 "1. When biometric prompt appears",
-                                "2. Go to Device > Face ID/Touch ID > Non-matching Face/Touch"
+                                "2. Go to Features > Face ID/Touch ID > Non-matching Face/Touch"
                             ],
                             "alternatives": {
                                 "appium": "Use Appium's mobile:sendBiometricMatch with match:false"

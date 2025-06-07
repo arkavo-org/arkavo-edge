@@ -110,7 +110,7 @@ impl Tool for BiometricTestScenario {
                             "message": "Face ID is not enrolled on this device",
                             "details": {
                                 "manual_steps": [
-                                    "1. In Simulator menu, go to Device > Face ID",
+                                    "1. In Simulator menu, go to Features > Face ID",
                                     "2. Check 'Enrolled' option",
                                     "3. Retry this scenario"
                                 ]
@@ -126,7 +126,7 @@ impl Tool for BiometricTestScenario {
                         delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -157,7 +157,7 @@ impl Tool for BiometricTestScenario {
                             "details": {
                                 "manual_steps": [
                                     "When biometric prompt appears:",
-                                    "Device > Face ID > Matching Face"
+                                    "Features > Face ID > Matching Face"
                                 ]
                             }
                         }
@@ -213,7 +213,7 @@ impl Tool for BiometricTestScenario {
                         delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -244,7 +244,7 @@ impl Tool for BiometricTestScenario {
                             "details": {
                                 "manual_steps": [
                                     "When biometric prompt appears:",
-                                    "Device > Face ID > Non-matching Face"
+                                    "Features > Face ID > Non-matching Face"
                                 ]
                             }
                         }
@@ -277,7 +277,7 @@ impl Tool for BiometricTestScenario {
                             "reason": "Cannot programmatically trigger multiple biometric failures in sequence",
                             "manual_steps": [
                                 "1. Trigger biometric prompt in app",
-                                "2. Go to Device > Face ID > Non-matching Face",
+                                "2. Go to Features > Face ID > Non-matching Face",
                                 "3. Repeat 5 times to trigger lockout",
                                 "4. Verify app handles lockout appropriately"
                             ]
@@ -402,7 +402,7 @@ impl Tool for SmartBiometricHandler {
                         delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -427,7 +427,7 @@ impl Tool for SmartBiometricHandler {
                         "error": {
                             "code": "AUTOMATION_FAILED",
                             "message": "Unable to trigger Face ID match",
-                            "manual_steps": ["Device > Face ID > Matching Face"]
+                            "manual_steps": ["Features > Face ID > Matching Face"]
                         }
                     }))
                 }
@@ -441,7 +441,7 @@ impl Tool for SmartBiometricHandler {
                         delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Non-matching Face" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -466,7 +466,7 @@ impl Tool for SmartBiometricHandler {
                         "error": {
                             "code": "AUTOMATION_FAILED",
                             "message": "Unable to trigger Face ID non-match",
-                            "manual_steps": ["Device > Face ID > Non-matching Face"]
+                            "manual_steps": ["Features > Face ID > Non-matching Face"]
                         }
                     }))
                 }
@@ -504,7 +504,7 @@ impl Tool for SmartBiometricHandler {
                         delay 0.2
                         tell application "System Events"
                             tell process "Simulator"
-                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Device" of menu bar 1
+                                click menu item "Matching Face" of menu "Face ID" of menu item "Face ID" of menu "Features" of menu bar 1
                             end tell
                         end tell
                     end tell
@@ -529,7 +529,7 @@ impl Tool for SmartBiometricHandler {
                         "error": {
                             "code": "AUTOMATION_FAILED",
                             "message": "Unable to trigger Face ID match",
-                            "manual_steps": ["Device > Face ID > Matching Face"]
+                            "manual_steps": ["Features > Face ID > Matching Face"]
                         }
                     }))
                 }
