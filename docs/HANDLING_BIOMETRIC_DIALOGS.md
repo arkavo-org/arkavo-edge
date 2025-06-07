@@ -4,7 +4,35 @@
 
 When encountering the "Simulator requires enrolled biometrics to use passkeys" dialog:
 
-### Quick Solution
+### Quick Solution - Complete Enrollment Flow
+```json
+{
+  "tool": "enrollment_flow",
+  "arguments": {
+    "action": "complete_enrollment",
+    "app_bundle_id": "com.arkavo.app"
+  }
+}
+```
+
+This will:
+1. Dismiss the enrollment dialog
+2. Enable Face ID enrollment in the simulator
+3. Terminate and relaunch the app
+
+### Alternative Solutions
+
+#### Just Dismiss and Relaunch
+```json
+{
+  "tool": "enrollment_flow",
+  "arguments": {
+    "action": "dismiss_and_relaunch"
+  }
+}
+```
+
+#### Basic Dialog Dismissal
 ```json
 {
   "tool": "enrollment_dialog",
