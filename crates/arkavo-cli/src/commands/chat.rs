@@ -530,11 +530,15 @@ fn handle_command(
             if let Some(client) = mcp_client {
                 match client.list_tools() {
                     Ok(tools) => {
-                        let mut output = "Available MCP tools:\n\n".to_string();
-                        for tool in tools {
-                            output.push_str(&format!("  {} - {}\n", tool.name, tool.description));
+                        if tools.is_empty() {
+                            Some("No MCP tools available. The server may not have returned tools in the expected format.".to_string())
+                        } else {
+                            let mut output = "Available MCP tools:\n\n".to_string();
+                            for tool in tools {
+                                output.push_str(&format!("  {} - {}\n", tool.name, tool.description));
+                            }
+                            Some(output)
                         }
-                        Some(output)
                     }
                     Err(e) => Some(format!("Failed to list MCP tools: {}", e)),
                 }
