@@ -42,6 +42,26 @@ impl LlmClient {
         self.provider.stream(messages).await
     }
 
+    pub async fn chat(&self, content: impl Into<String>) -> Result<String> {
+        let message = Message::user(content);
+        self.complete(vec![message]).await
+    }
+
+    pub async fn chat_with_images(
+        &self,
+        content: impl Into<String>,
+        image_paths: Vec<impl AsRef<Path>>,
+    ) -> Result<String> {
+        let mut images = Vec::new();
+        for path in image_paths {
+            let encoded = encode_image_file(path)?;
+            images.push(encoded);
+        }
+
+        let message = Message::user_with_images(content, images);
+        self.complete(vec![message]).await
+    }
+
     pub fn provider_name(&self) -> &str {
         self.provider.name()
     }

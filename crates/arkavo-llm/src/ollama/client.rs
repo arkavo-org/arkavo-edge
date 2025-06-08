@@ -22,6 +22,38 @@ impl OllamaClient {
         }
     }
 
+    fn select_model(&self, messages: &[Message]) -> String {
+        let has_images = messages.iter().any(|msg| {
+            msg.images.as_ref().is_some_and(|imgs| !imgs.is_empty())
+        });
+
+        if has_images {
+            // Auto-select vision model based on availability preference
+            self.select_vision_model()
+        } else {
+            self.model.clone()
+        }
+    }
+
+    fn select_vision_model(&self) -> String {
+        // Priority order for vision models
+        let vision_models = [
+            "qwen2.5vl:7b",
+            "qwen2.5vl:3b", 
+            "qwen2.5vl:32b",
+            "qwen2.5vl:72b",
+            "llama3.2-vision:11b",
+            "llama3.2-vision:90b",
+            "llava:7b",
+            "llava:13b",
+            "llava:34b",
+        ];
+
+        // For now, default to qwen2.5vl:7b as it's the most capable mid-size model
+        // In production, this could query available models from Ollama API
+        vision_models[0].to_string()
+    }
+
     pub fn from_env() -> Result<Self> {
         let base_url = std::env::var("OLLAMA_BASE_URL").ok();
         let model = std::env::var("OLLAMA_MODEL").ok();
@@ -32,8 +64,9 @@ impl OllamaClient {
 #[async_trait]
 impl Provider for OllamaClient {
     async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+        let model = self.select_model(&messages);
         let request = ChatRequest {
-            model: self.model.clone(),
+            model,
             messages,
             stream: false,
         };
@@ -63,8 +96,9 @@ impl Provider for OllamaClient {
         &self,
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let model = self.select_model(&messages);
         let request = ChatRequest {
-            model: self.model.clone(),
+            model,
             messages,
             stream: true,
         };
