@@ -43,6 +43,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools"
         );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
+        println!("Press Ctrl+R to toggle showing raw MCP tool responses");
     }
 
     // Initialize MCP client - attempt by default unless explicitly disabled
@@ -308,6 +309,11 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         match runtime.block_on(process_message(&client, &messages, &mcp_client)) {
             Ok(response) => {
                 messages.push(Message::assistant(&response));
+                
+                // If the response contains tool execution results, we might need to continue the conversation
+                if response.contains("[Tool execution completed. Results shown above.]") {
+                    // The tool results have been displayed
+                }
             }
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -358,9 +364,11 @@ async fn process_message(
         // If we executed tools, display them nicely
         if !tool_results.is_empty() {
             println!(); // Extra line before tool results
+            println!("=== MCP Tool Results ===");
             
-            for (tool_name, result) in tool_results {
-                println!("[Tool Result - {}]:", tool_name);
+            for (tool_name, result) in &tool_results {
+                println!("\n[Tool: {}]", tool_name);
+                println!("Response:");
                 
                 // Pretty print the result if it's JSON
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
@@ -372,10 +380,16 @@ async fn process_message(
                 } else {
                     println!("{}", result);
                 }
-                println!();
             }
             
-            return Ok(response_text);
+            println!("\n=== End Tool Results ===\n");
+            
+            // Now continue the conversation with the tool results
+            // Add the tool results to the response for context
+            let mut response_with_results = response_text.clone();
+            response_with_results.push_str("\n\n[Tool execution completed. Results shown above.]");
+            
+            return Ok(response_with_results);
         }
     }
     
@@ -681,6 +695,7 @@ fn handle_tool_calls_in_response(
         .replace("`", "");
     
     let mut remaining = &cleaned_response[..];
+    let mut found_tools = 0;
     
     while let Some(at_pos) = remaining.find('@') {
         // Check if this is a tool call (followed by word characters)
@@ -690,6 +705,7 @@ fn handle_tool_calls_in_response(
             
             // Only process if tool_name is alphanumeric
             if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                found_tools += 1;
                 let args_start = at_pos + 1 + space_or_brace;
                 let args_str = &remaining[args_start..].trim_start();
                 
@@ -757,6 +773,8 @@ fn handle_tool_calls_in_response(
         // Not a valid tool call, move past this @
         remaining = &remaining[at_pos + 1..];
     }
+    
+    eprintln!("DEBUG: Found {} tools in response, executed {} tools", found_tools, tool_results.len());
     
     Ok((result, tool_results))
 }
