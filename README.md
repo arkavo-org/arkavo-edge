@@ -73,6 +73,23 @@ arkavo chat --prompt "Explain this codebase"
 
 AI-powered conversational interface with streaming responses and repository context. Uses Ollama with `devstral` model by default.
 
+#### Vision Model Support
+For UI testing with screenshots, install a vision-capable model:
+
+```bash
+# Install llava vision model (4.7 GB)
+ollama pull llava:7b
+
+# Use with screenshots
+arkavo chat --prompt "What UI elements are visible?" --image screenshot.png
+
+# Or interactively
+arkavo chat
+> @screenshot path/to/screenshot.png
+```
+
+**Note:** Images are limited to 10MB. Supported formats: PNG, JPEG, WebP.
+
 ### Serve
 ```bash
 arkavo serve

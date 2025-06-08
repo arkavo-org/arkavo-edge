@@ -1,5 +1,5 @@
 use crate::mcp_client::McpClient;
-use arkavo_llm::{LlmClient, Message};
+use arkavo_llm::{LlmClient, Message, encode_image_file};
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -15,6 +15,15 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--prompt")
         .map(|w| w[1].clone());
 
+    // Check if there's an --image argument
+    let image_path = args
+        .windows(2)
+        .find(|w| w[0] == "--image")
+        .map(|w| w[1].clone());
+
+    // Check if --print flag is present
+    let print_mode = args.contains(&"--print".to_string());
+
     // Create runtime for async operations
     let runtime = Runtime::new()?;
 
@@ -23,12 +32,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         LlmClient::from_env().map_err(|e| format!("Failed to initialize LLM client: {}", e))
     })?;
 
-    println!("Starting chat session...");
-    println!("Repository context: {}", get_current_directory());
-    println!("LLM Provider: {}", client.provider_name());
-    println!("Type 'exit' or 'quit' to end the session.");
-    println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools");
-    println!();
+    if !print_mode {
+        println!("Starting UI testing chat session...");
+        println!("Repository context: {}", get_current_directory());
+        println!("LLM Provider: {}", client.provider_name());
+        println!("Type 'exit' or 'quit' to end the session.");
+        println!(
+            "Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools"
+        );
+        println!("Vision commands: @screenshot <path> - Analyze a screenshot");
+        println!();
+    }
 
     // Initialize MCP client if enabled
     let mcp_client = if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() == "true" {
@@ -74,9 +88,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let system_prompt = format!(
-        "You are Arkavo, an AI assistant helping with software development tasks. \
-         You have access to the current repository context and can help with code, \
-         testing, and development workflows.
+        "You are an expert UI testing assistant working with the Arkavo Edge project. \
+         You have access to MCP tools for taking screenshots, clicking elements, entering text, and other UI interactions. \
+         When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI and analyze screenshots. \
+         Always analyze screenshots thoroughly to understand the current state of the UI before suggesting next steps.
 
 \
          Repository context:
@@ -87,8 +102,26 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // If prompt provided via command line, process it and exit
     if let Some(prompt_text) = prompt {
-        messages.push(Message::user(&prompt_text));
-        runtime.block_on(process_message(&client, &messages))?;
+        // Check if image is also provided
+        if let Some(img_path) = image_path {
+            match encode_image_file(&img_path) {
+                Ok(encoded_image) => {
+                    messages.push(Message::user_with_images(&prompt_text, vec![encoded_image]));
+                }
+                Err(e) => {
+                    eprintln!("Error loading image: {}", e);
+                    messages.push(Message::user(&prompt_text));
+                }
+            }
+        } else {
+            messages.push(Message::user(&prompt_text));
+        }
+
+        if print_mode {
+            runtime.block_on(process_message_print(&client, &messages))?;
+        } else {
+            runtime.block_on(process_message(&client, &messages))?;
+        }
         return Ok(());
     }
 
@@ -124,25 +157,50 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
+        // Check for @screenshot command anywhere in the input
+        if let Some(screenshot_pos) = input.find("@screenshot ") {
+            // Extract the path after @screenshot
+            let after_command = &input[screenshot_pos + "@screenshot ".len()..];
+            let img_path = after_command.trim();
+
+            if !img_path.is_empty() {
+                match encode_image_file(img_path) {
+                    Ok(encoded_image) => {
+                        // Use the text before @screenshot as the prompt, or a default
+                        let prompt = if screenshot_pos > 0 {
+                            input[..screenshot_pos].trim()
+                        } else {
+                            "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features."
+                        };
+                        messages.push(Message::user_with_images(prompt, vec![encoded_image]));
+                    }
+                    Err(e) => {
+                        eprintln!("Error loading screenshot: {}", e);
+                        continue;
+                    }
+                }
+            } else {
+                eprintln!("Usage: @screenshot <path>");
+                continue;
+            }
         // Check if input contains explain command - enhance with file context
-        let enhanced_input = if input.starts_with("explain ") {
+        } else if input.starts_with("explain ") {
             let parts: Vec<&str> = input.split_whitespace().collect();
             if parts.len() >= 2 {
                 let file_path = parts[1..].join(" ");
                 if let Some(content) = read_file(&file_path) {
-                    format!("{}\n\nFile content:\n{}", input, content)
+                    let enhanced_input = format!("{}\n\nFile content:\n{}", input, content);
+                    messages.push(Message::user(&enhanced_input));
                 } else {
-                    input.to_string()
+                    messages.push(Message::user(input));
                 }
             } else {
-                input.to_string()
+                messages.push(Message::user(input));
             }
         } else {
-            input.to_string()
-        };
-
-        // Add user message
-        messages.push(Message::user(&enhanced_input));
+            // Add regular user message
+            messages.push(Message::user(input));
+        }
 
         // Process with LLM
         match runtime.block_on(process_message(&client, &messages)) {
@@ -190,6 +248,36 @@ async fn process_message(
 
     println!(); // New line after response
     println!(); // Extra line for readability
+
+    Ok(full_response)
+}
+
+async fn process_message_print(
+    client: &LlmClient,
+    messages: &[Message],
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Use streaming but only print content
+    let mut stream = client.stream(messages.to_vec()).await?;
+    let mut full_response = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(response) => {
+                print!("{}", response.content);
+                io::stdout().flush()?;
+                full_response.push_str(&response.content);
+
+                if response.done {
+                    break;
+                }
+            }
+            Err(e) => {
+                return Err(format!("Stream error: {}", e).into());
+            }
+        }
+    }
+
+    println!(); // New line at end
 
     Ok(full_response)
 }
