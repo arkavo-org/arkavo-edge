@@ -207,6 +207,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         io::stdin().read_line(&mut input)?;
 
         let input = input.trim();
+        eprintln!("DEBUG: User input: '{}'", input);
         if input.is_empty() {
             continue;
         }
@@ -359,6 +360,9 @@ async fn process_message(
     
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
+        eprintln!("DEBUG: Checking LLM response for tool calls. Response length: {}", full_response.len());
+        eprintln!("DEBUG: First 200 chars of response: {}", &full_response.chars().take(200).collect::<String>());
+        
         let (response_text, tool_results) = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
         
         // If we executed tools, display them nicely
