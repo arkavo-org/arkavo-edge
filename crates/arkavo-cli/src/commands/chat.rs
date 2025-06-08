@@ -21,6 +21,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--image")
         .map(|w| w[1].clone());
 
+    // Check if --print flag is present
+    let print_mode = args.contains(&"--print".to_string());
+
     // Create runtime for async operations
     let runtime = Runtime::new()?;
 
@@ -29,13 +32,15 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         LlmClient::from_env().map_err(|e| format!("Failed to initialize LLM client: {}", e))
     })?;
 
-    println!("Starting UI testing chat session...");
-    println!("Repository context: {}", get_current_directory());
-    println!("LLM Provider: {}", client.provider_name());
-    println!("Type 'exit' or 'quit' to end the session.");
-    println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools");
-    println!("Vision commands: @screenshot <path> - Analyze a screenshot");
-    println!();
+    if !print_mode {
+        println!("Starting UI testing chat session...");
+        println!("Repository context: {}", get_current_directory());
+        println!("LLM Provider: {}", client.provider_name());
+        println!("Type 'exit' or 'quit' to end the session.");
+        println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools");
+        println!("Vision commands: @screenshot <path> - Analyze a screenshot");
+        println!();
+    }
 
     // Initialize MCP client if enabled
     let mcp_client = if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() == "true" {
@@ -112,7 +117,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             messages.push(Message::user(&prompt_text));
         }
-        runtime.block_on(process_message(&client, &messages))?;
+        
+        if print_mode {
+            runtime.block_on(process_message_print(&client, &messages))?;
+        } else {
+            runtime.block_on(process_message(&client, &messages))?;
+        }
         return Ok(());
     }
 
@@ -232,6 +242,36 @@ async fn process_message(
 
     println!(); // New line after response
     println!(); // Extra line for readability
+
+    Ok(full_response)
+}
+
+async fn process_message_print(
+    client: &LlmClient,
+    messages: &[Message],
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Use streaming but only print content
+    let mut stream = client.stream(messages.to_vec()).await?;
+    let mut full_response = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(response) => {
+                print!("{}", response.content);
+                io::stdout().flush()?;
+                full_response.push_str(&response.content);
+
+                if response.done {
+                    break;
+                }
+            }
+            Err(e) => {
+                return Err(format!("Stream error: {}", e).into());
+            }
+        }
+    }
+
+    println!(); // New line at end
 
     Ok(full_response)
 }

@@ -4,7 +4,7 @@ AI-powered developer toolkit for secure, intelligent code transformation and tes
 
 ## Key Features
 
-### 🤖 AI Code Agent
+### 🤖 AI Code A@sgent
 - Multi-file refactoring with repository context
 - Automatic commit generation
 - GPU-accelerated terminal UI
