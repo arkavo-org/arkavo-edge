@@ -1,3 +1,4 @@
+use crate::chat::ChatRequest;
 use crate::ollama::OllamaClient;
 use crate::{Error, Message, Provider, Result, StreamResponse};
 use tokio_stream::Stream;
@@ -43,5 +44,18 @@ impl LlmClient {
 
     pub fn provider_name(&self) -> &str {
         self.provider.name()
+    }
+
+    pub async fn chat(&self, request: ChatRequest) -> Result<String> {
+        let message = request.to_message();
+        self.complete(vec![message]).await
+    }
+
+    pub async fn chat_stream(
+        &self,
+        request: ChatRequest,
+    ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let message = request.to_message();
+        self.stream(vec![message]).await
     }
 }

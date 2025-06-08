@@ -1,11 +1,22 @@
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use tokio_stream::Stream;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::types::{ChatRequest, ChatResponse};
 use crate::{Error, Message, Provider, Result, StreamResponse};
+
+#[derive(Debug, Deserialize)]
+struct ModelInfo {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsResponse {
+    models: Vec<ModelInfo>,
+}
 
 pub struct OllamaClient {
     client: Client,
@@ -27,13 +38,103 @@ impl OllamaClient {
         let model = std::env::var("OLLAMA_MODEL").ok();
         Ok(Self::new(base_url, model))
     }
+
+    async fn list_models(&self) -> Result<Vec<String>> {
+        debug!("Fetching available models from Ollama");
+        let response = self
+            .client
+            .get(format!("{}/api/tags", self.base_url))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            warn!("Failed to fetch models from Ollama");
+            return Ok(vec![]);
+        }
+
+        let models_response: ModelsResponse = response.json().await?;
+        Ok(models_response.models.into_iter().map(|m| m.name).collect())
+    }
+
+    async fn select_model(&self, messages: &[Message]) -> Result<String> {
+        let has_images = messages
+            .iter()
+            .any(|msg| msg.images.as_ref().is_some_and(|imgs| !imgs.is_empty()));
+
+        if has_images {
+            self.select_vision_model().await
+        } else {
+            self.select_text_model(messages).await
+        }
+    }
+
+    async fn select_vision_model(&self) -> Result<String> {
+        let available_models = self.list_models().await?;
+
+        let vision_models = ["llava:7b", "llava:latest", "llava"];
+
+        for model in &vision_models {
+            if available_models.iter().any(|m| m.contains(model)) {
+                debug!("Selected vision model: {}", model);
+                return Ok(model.to_string());
+            }
+        }
+
+        warn!(
+            "No vision model found, using default model. Install llava with: ollama pull llava:7b"
+        );
+        Ok(self.model.clone())
+    }
+
+    async fn select_text_model(&self, messages: &[Message]) -> Result<String> {
+        let available_models = self.list_models().await?;
+
+        let is_coding = messages.iter().any(|msg| {
+            let content = msg.content.to_lowercase();
+            content.contains("code")
+                || content.contains("function")
+                || content.contains("class")
+                || content.contains("debug")
+                || content.contains("implement")
+        });
+
+        if is_coding {
+            let coding_models = ["devstral:latest", "devstral"];
+            for model in &coding_models {
+                if available_models.iter().any(|m| m.contains(model)) {
+                    debug!("Selected coding model: {}", model);
+                    return Ok(model.to_string());
+                }
+            }
+        }
+
+        let general_models = [
+            "devstral:latest",
+            "devstral",
+            "llama3.2:latest",
+            "llama3.2",
+            "llama3.1:latest",
+            "llama3.1",
+        ];
+
+        for model in &general_models {
+            if available_models.iter().any(|m| m.contains(model)) {
+                debug!("Selected general model: {}", model);
+                return Ok(model.to_string());
+            }
+        }
+
+        debug!("Using default model: {}", self.model);
+        Ok(self.model.clone())
+    }
 }
 
 #[async_trait]
 impl Provider for OllamaClient {
     async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+        let model = self.select_model(&messages).await?;
         let request = ChatRequest {
-            model: self.model.clone(),
+            model,
             messages,
             stream: false,
         };
@@ -63,8 +164,9 @@ impl Provider for OllamaClient {
         &self,
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let model = self.select_model(&messages).await?;
         let request = ChatRequest {
-            model: self.model.clone(),
+            model,
             messages,
             stream: true,
         };
@@ -108,7 +210,24 @@ impl Provider for OllamaClient {
                                     }));
                                 }
                                 Err(e) => {
-                                    responses.push(Err(Error::Json(e)));
+                                    // Try alternative format for streaming responses
+                                    #[derive(Deserialize)]
+                                    struct StreamingResponse {
+                                        response: Option<String>,
+                                        done: bool,
+                                    }
+
+                                    if let Ok(stream_resp) =
+                                        serde_json::from_str::<StreamingResponse>(line)
+                                    {
+                                        responses.push(Ok(StreamResponse {
+                                            content: stream_resp.response.unwrap_or_default(),
+                                            done: stream_resp.done,
+                                        }));
+                                    } else {
+                                        warn!("Failed to parse response: {}", line);
+                                        responses.push(Err(Error::Json(e)));
+                                    }
                                 }
                             }
                         }

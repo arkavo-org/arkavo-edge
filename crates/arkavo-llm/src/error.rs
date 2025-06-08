@@ -19,6 +19,12 @@ pub enum Error {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Invalid image format: {0}")]
+    InvalidImageFormat(String),
+
+    #[error("Invalid image path: {0}")]
+    InvalidImagePath(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
