@@ -87,10 +87,14 @@ async fn test_ollama_error_handling() {
     let messages = vec![Message::user("Hello")];
 
     let result = client.complete(messages).await;
-    assert!(result.is_err());
-
-    if let Err(e) = result {
+    
+    // The error might occur either during model selection or during the actual request
+    // Since we're using a completely invalid URL, it should fail somewhere
+    if let Err(e) = &result {
         println!("Expected error: {}", e);
+        assert!(e.to_string().contains("error") || e.to_string().contains("failed"));
+    } else {
+        panic!("Expected an error but got success");
     }
 }
 
