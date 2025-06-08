@@ -14,6 +14,7 @@ use super::intelligent_tools::{
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::screenshot_analyzer::ScreenshotAnalyzer;
 use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use super::template_diagnostics::TemplateDiagnosticsKit;
@@ -177,6 +178,12 @@ impl McpTestServer {
         tools.insert(
             "enrollment_dialog".to_string(),
             Arc::new(EnrollmentDialogHandler::new(device_manager.clone())),
+        );
+
+        // Add screenshot analyzer tool
+        tools.insert(
+            "analyze_screenshot".to_string(),
+            Arc::new(ScreenshotAnalyzer::new()),
         );
 
         // Add Face ID control tools
@@ -343,6 +350,7 @@ impl McpTestServer {
                 | "system_dialog"
                 | "passkey_dialog"
                 | "enrollment_dialog"
+                | "analyze_screenshot"
                 | "simulator_control"
                 | "simulator_advanced"
                 | "app_management"

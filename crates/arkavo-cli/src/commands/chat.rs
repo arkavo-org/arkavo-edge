@@ -600,50 +600,100 @@ fn handle_tool_calls_in_response(
     let mut result = response.to_string();
     let mut tool_results = Vec::new();
     
-    // Regular expression to find @tool calls
-    let tool_pattern = regex::Regex::new(r"@(\w+)\s*(\{[^}]+\}|[^\n]+)")?;
-    
-    for cap in tool_pattern.captures_iter(response) {
-        let tool_name = &cap[1];
-        let args_str = &cap[2].trim();
-        
-        // Parse arguments
-        let args = if args_str.starts_with('{') {
-            serde_json::from_str(args_str).unwrap_or_else(|_| json!({"prompt": args_str}))
-        } else {
-            json!({"prompt": args_str})
-        };
-        
-        // Execute the tool
-        match mcp_client.call_tool(tool_name, args, llm_provider) {
-            Ok(tool_result) => {
-                // Special handling for screen_capture to automatically analyze the image
-                if tool_name == "screen_capture" {
-                    if let Some(screenshot_path) = tool_result.get("result")
-                        .and_then(|r| r.get("screenshot_path"))
-                        .and_then(|p| p.as_str()) {
-                        tool_results.push(format!("\n\n[Tool Result - {}]:\nScreenshot saved to: {}\n\nNow analyzing the screenshot...", 
-                            tool_name, screenshot_path));
-                        
-                        // Automatically analyze the screenshot
-                        tool_results.push(format!("\n\nUse @screenshot {} to analyze this image.", screenshot_path));
+    // Use a more robust approach to find @tool calls
+    let mut remaining = response;
+    while let Some(at_pos) = remaining.find('@') {
+        // Check if this is a tool call (followed by word characters)
+        let after_at = &remaining[at_pos + 1..];
+        if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
+            let tool_name = &after_at[..space_or_brace];
+            
+            // Only process if tool_name is alphanumeric
+            if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let args_start = at_pos + 1 + space_or_brace;
+                let args_str = &remaining[args_start..].trim_start();
+                
+                let (args, consumed_len) = if args_str.starts_with('{') {
+                    // Find matching closing brace
+                    let mut brace_count = 0;
+                    let mut end_pos = 0;
+                    for (i, ch) in args_str.chars().enumerate() {
+                        match ch {
+                            '{' => brace_count += 1,
+                            '}' => {
+                                brace_count -= 1;
+                                if brace_count == 0 {
+                                    end_pos = i + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    
+                    if end_pos > 0 {
+                        let json_str = &args_str[..end_pos];
+                        match serde_json::from_str(json_str) {
+                            Ok(json) => (json, end_pos),
+                            Err(_) => (json!({"prompt": json_str}), end_pos),
+                        }
                     } else {
-                        tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", 
-                            tool_name,
-                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
-                        ));
+                        (json!({"prompt": args_str}), 0)
                     }
                 } else {
-                    tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", 
-                        tool_name,
-                        serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
-                    ));
+                    // Take until newline or end of string
+                    let end_pos = args_str.find('\n').unwrap_or(args_str.len());
+                    let arg_text = &args_str[..end_pos].trim();
+                    (json!({"prompt": arg_text}), end_pos)
+                };
+                
+                // Execute the tool
+                match mcp_client.call_tool(tool_name, args, llm_provider) {
+                    Ok(tool_result) => {
+                        // Extract the actual result text from the MCP response
+                        let result_text = if let Some(result_obj) = tool_result.get("result") {
+                            if let Some(text) = result_obj.as_str() {
+                                text.to_string()
+                            } else {
+                                serde_json::to_string_pretty(&result_obj).unwrap_or_else(|_| result_obj.to_string())
+                            }
+                        } else {
+                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
+                        };
+                        
+                        // Special handling for screen_capture
+                        if tool_name == "screen_capture" {
+                            // Try to extract screenshot path from the result
+                            if result_text.contains("screenshot_path") || result_text.contains(".png") {
+                                tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
+                                
+                                // Extract the path if possible
+                                if let Some(path_start) = result_text.find("/var/") {
+                                    if let Some(path_end) = result_text[path_start..].find(".png") {
+                                        let screenshot_path = &result_text[path_start..path_start + path_end + 4];
+                                        tool_results.push(format!("\n\nTo analyze this screenshot, I would use: @screenshot {}", screenshot_path));
+                                    }
+                                }
+                            } else {
+                                tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
+                            }
+                        } else {
+                            tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
+                        }
+                    }
+                    Err(e) => {
+                        tool_results.push(format!("\n\n[Tool Error - {}]: {}", tool_name, e));
+                    }
                 }
-            }
-            Err(e) => {
-                tool_results.push(format!("\n\n[Tool Error - {}]: {}", tool_name, e));
+                
+                // Move past this tool call
+                remaining = &remaining[args_start + consumed_len..];
+                continue;
             }
         }
+        
+        // Not a valid tool call, move past this @
+        remaining = &remaining[at_pos + 1..];
     }
     
     // Append tool results to the response
