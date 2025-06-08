@@ -80,15 +80,58 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref client) = mcp_client {
             match client.list_tools() {
                 Ok(tools) => {
-                    let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-                    format!(
-                        "\n\nMCP Integration: Enabled\nAvailable MCP tools: {}\nYou can run tests and interact with iOS simulators through MCP tools.",
-                        tool_names.join(", ")
-                    )
+                    if tools.is_empty() {
+                        eprintln!("Warning: No MCP tools returned from server");
+                        "\n\nMCP Integration: Enabled\nNo tools available yet. Use /tools command to refresh.".to_string()
+                    } else {
+                        let mut tool_info = String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
+                        
+                        // Group tools by category for better organization
+                        let mut device_tools = Vec::new();
+                        let mut ui_tools = Vec::new();
+                        let mut test_tools = Vec::new();
+                        let mut other_tools = Vec::new();
+                        
+                        for tool in &tools {
+                            let tool_desc = format!("- @{}: {}", tool.name, tool.description);
+                            
+                            if tool.name.contains("device") || tool.name.contains("simulator") {
+                                device_tools.push(tool_desc);
+                            } else if tool.name.contains("ui_") || tool.name.contains("screen") || tool.name == "analyze_screenshot" {
+                                ui_tools.push(tool_desc);
+                            } else if tool.name.contains("test") || tool.name == "run_test" || tool.name == "list_tests" {
+                                test_tools.push(tool_desc);
+                            } else {
+                                other_tools.push(tool_desc);
+                            }
+                        }
+                        
+                        if !device_tools.is_empty() {
+                            tool_info.push_str("\nDevice Management:\n");
+                            tool_info.push_str(&device_tools.join("\n"));
+                        }
+                        
+                        if !ui_tools.is_empty() {
+                            tool_info.push_str("\n\nUI Interaction:\n");
+                            tool_info.push_str(&ui_tools.join("\n"));
+                        }
+                        
+                        if !test_tools.is_empty() {
+                            tool_info.push_str("\n\nTesting:\n");
+                            tool_info.push_str(&test_tools.join("\n"));
+                        }
+                        
+                        if !other_tools.is_empty() {
+                            tool_info.push_str("\n\nOther Tools:\n");
+                            tool_info.push_str(&other_tools.join("\n"));
+                        }
+                        
+                        tool_info
+                    }
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to list MCP tools: {}", e);
-                    "\n\nMCP Integration: Enabled (tool listing failed)\nYou can run tests and interact with iOS simulators through MCP tools.".to_string()
+                    "\n\nMCP Integration: Enabled (tool listing failed)\nYou can run tests and interact with iOS simulators through MCP tools. Use /tools command to see available tools.".to_string()
                 }
             }
         } else {

@@ -114,6 +114,14 @@ impl McpClient {
             // Removed large debug output
         }
 
+        // Send initialized notification
+        let initialized_notification = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+        writeln!(&mut stdin, "{}", serde_json::to_string(&initialized_notification)?)?;
+        stdin.flush()?;
+
         // Create the process wrapper with persistent stdin/stdout
         let mcp_process = McpProcess {
             child,
