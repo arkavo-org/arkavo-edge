@@ -342,6 +342,7 @@ impl McpTestServer {
                 | "biometric_auth"
                 | "system_dialog"
                 | "passkey_dialog"
+                | "enrollment_dialog"
                 | "simulator_control"
                 | "simulator_advanced"
                 | "app_management"

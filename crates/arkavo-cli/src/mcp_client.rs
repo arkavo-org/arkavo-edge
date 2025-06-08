@@ -16,6 +16,7 @@ struct McpProcess {
 pub struct McpClient {
     process: Arc<Mutex<McpProcess>>,
     request_id: Arc<Mutex<u64>>,
+    tools: Arc<Vec<Tool>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,13 +106,13 @@ impl McpClient {
         let mut reader = stdout_reader;
         let mut init_line = String::new();
         reader.read_line(&mut init_line)?;
-        
+
         if !init_line.is_empty() {
             let response: JsonRpcResponse = serde_json::from_str(&init_line)?;
             if let Some(error) = response.error {
                 return Err(format!("MCP initialization failed: {}", error.message).into());
             }
-            eprintln!("MCP server initialized: {:?}", response.result);
+            // Removed large debug output
         }
 
         // Create the process wrapper with persistent stdin/stdout
