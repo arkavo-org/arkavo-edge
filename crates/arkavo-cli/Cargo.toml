@@ -7,6 +7,7 @@ license.workspace = true
 description = "CLI Core for the Arkavo agentic CLI tool - command parser and multi-step agent loop"
 
 [dependencies]
+arkavo-llm = { path = "../arkavo-llm" }
 arkavo-terminal = { path = "../arkavo-terminal" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }

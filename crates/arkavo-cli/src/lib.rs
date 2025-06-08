@@ -7,7 +7,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match args[0].as_str() {
-        "chat" => commands::chat::execute(&args[1..]),
+        "chat" => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { commands::chat::execute(&args[1..]).await })
+        }
         "plan" => commands::plan::execute(&args[1..]),
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
@@ -39,13 +42,14 @@ fn print_usage() {
     println!("    arkavo <COMMAND> [OPTIONS]");
     println!();
     println!("COMMANDS:");
-    println!("    chat      Start conversational agent with repository context");
-    println!("    plan      Generate a change plan before code edits");
-    println!("    apply     Execute plan and commit changes");
-    println!("    test      Run intelligent tests (use --help for modes)");
-    println!("    vault     Import/export notes to Edge Vault");
-    println!("    serve     Run as MCP server for AI tools integration");
-    println!("    help      Print this help message");
+    println!("    chat [--print|-p] [prompt]  Start conversational agent with repository context");
+    println!("                                Use --print for non-interactive output");
+    println!("    plan                        Generate a change plan before code edits");
+    println!("    apply                       Execute plan and commit changes");
+    println!("    test                        Run intelligent tests (use --help for modes)");
+    println!("    vault                       Import/export notes to Edge Vault");
+    println!("    serve                       Run as MCP server for AI tools integration");
+    println!("    help                        Print this help message");
     println!();
     println!("OPTIONS:");
     println!("    -h, --help       Print help information");

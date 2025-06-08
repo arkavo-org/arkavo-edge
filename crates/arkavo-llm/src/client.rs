@@ -31,6 +31,25 @@ impl LlmClient {
         Ok(Self::new(provider))
     }
 
+    pub async fn from_env_with_discovery() -> Result<Self> {
+        // Check for provider preference
+        let provider_name = std::env::var("LLM_PROVIDER")
+            .unwrap_or_else(|_| "ollama".to_string())
+            .to_lowercase();
+
+        let provider: Box<dyn Provider> = match provider_name.as_str() {
+            "ollama" => Box::new(OllamaClient::from_env_with_discovery().await?),
+            _ => {
+                return Err(Error::Config(format!(
+                    "Unknown provider: {}",
+                    provider_name
+                )));
+            }
+        };
+
+        Ok(Self::new(provider))
+    }
+
     pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
         self.provider.complete(messages).await
     }
