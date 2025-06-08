@@ -7,6 +7,18 @@ use std::io::{self, Write};
 use std::path::Path;
 use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
+use std::sync::atomic::AtomicBool;
+
+// Global flag to control whether to show debug messages (kept for future use)
+#[allow(dead_code)]
+static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
+
+// Macro that does nothing - removes all DEBUG messages
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        // Do nothing
+    };
+}
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check if there's a --prompt argument (also accepts --print for compatibility)
@@ -43,7 +55,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools"
         );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
-        println!("Press Ctrl+R to toggle showing raw MCP tool responses");
     }
 
     // Initialize MCP client - attempt by default unless explicitly disabled
@@ -86,16 +97,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         "\n\nMCP Integration: Enabled\nNo tools available yet. Use /tools command to refresh.".to_string()
                     } else {
                         let mut tool_info = String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
-                        
+
                         // Group tools by category for better organization
                         let mut device_tools = Vec::new();
                         let mut ui_tools = Vec::new();
                         let mut test_tools = Vec::new();
                         let mut other_tools = Vec::new();
-                        
+
                         for tool in &tools {
                             let tool_desc = format!("- @{}: {}", tool.name, tool.description);
-                            
+
                             if tool.name.contains("device") || tool.name.contains("simulator") {
                                 device_tools.push(tool_desc);
                             } else if tool.name.contains("ui_") || tool.name.contains("screen") || tool.name == "analyze_screenshot" {
@@ -106,27 +117,27 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                                 other_tools.push(tool_desc);
                             }
                         }
-                        
+
                         if !device_tools.is_empty() {
                             tool_info.push_str("\nDevice Management:\n");
                             tool_info.push_str(&device_tools.join("\n"));
                         }
-                        
+
                         if !ui_tools.is_empty() {
                             tool_info.push_str("\n\nUI Interaction:\n");
                             tool_info.push_str(&ui_tools.join("\n"));
                         }
-                        
+
                         if !test_tools.is_empty() {
                             tool_info.push_str("\n\nTesting:\n");
                             tool_info.push_str(&test_tools.join("\n"));
                         }
-                        
+
                         if !other_tools.is_empty() {
                             tool_info.push_str("\n\nOther Tools:\n");
                             tool_info.push_str(&other_tools.join("\n"));
                         }
-                        
+
                         tool_info
                     }
                 }
@@ -145,26 +156,27 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let system_prompt = format!(
         "You are an expert UI testing assistant working with the Arkavo Edge project. \
-         You have access to MCP tools for taking screenshots, clicking elements, entering text, and other UI interactions. \
-         When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI and analyze screenshots. \
-         Always analyze screenshots thoroughly to understand the current state of the UI before suggesting next steps.
+         You have access to MCP tools for clicking elements, entering text, and other UI interactions. \
+         When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI. \
+         Always analyze images thoroughly to understand the current state of the UI before suggesting next steps.
 
 \
          To invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
-         For example: @screen_capture {{\"device_id\": \"12345\"}} or @device_management {{\"action\": \"list\"}}
+         For example: @device_management {{\"action\": \"list\"}} or @ui_interaction {{\"action\": \"tap\", \"element\": \"button\"}}
 
 \
-         TYPICAL SCREENSHOT WORKFLOW:\
+         TYPICAL UI TESTING WORKFLOW:\
          1. Use @device_management {{\"action\": \"list\"}} to find available devices\
          2. Use @screen_capture {{\"device_id\": \"<device_id>\"}} to take a screenshot\
          3. The screenshot path will be returned, which you can then analyze using vision capabilities\
          4. Use @ui_interaction for tapping, swiping, or entering text based on what you see
 
 \
-         When a user asks to 'take a screenshot', you should automatically:\
-         - First check for available devices if no device_id is known\
-         - Take the screenshot using the device_id\
-         - Analyze the screenshot and describe what you see
+         When a user asks to analyze an image, you should:\
+         - Use @analyze_screenshot with the path to analyze a screenshot: @analyze_screenshot path/to/screenshot.png\
+         - Or use your vision capabilities to analyze the provided image\
+         - Describe what you see in detail\
+         - Suggest appropriate UI interactions based on the content
 
 \
          Repository context:
@@ -207,7 +219,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         io::stdin().read_line(&mut input)?;
 
         let input = input.trim();
-        eprintln!("DEBUG: User input: '{}'", input);
+        debug_println!("DEBUG: User input: '{}'", input);
         if input.is_empty() {
             continue;
         }
@@ -275,8 +287,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // Check for @screenshot command without arguments
+        if input == "@screenshot" {
+            eprintln!("Usage: @screenshot <path>");
+            eprintln!("Note: The 'screenshot' tool is not available for direct LLM use. Please provide a path to an existing image file.");
+            continue;
+        }
         // Check for @screenshot command anywhere in the input
-        if let Some(screenshot_pos) = input.find("@screenshot ") {
+        else if let Some(screenshot_pos) = input.find("@screenshot ") {
             // Extract the path after @screenshot
             let after_command = &input[screenshot_pos + "@screenshot ".len()..];
             let img_path = after_command.trim();
@@ -301,6 +319,21 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Usage: @screenshot <path>");
                 continue;
             }
+        }
+        // Check for "analyze_screenshot on path" syntax and convert it to "@analyze_screenshot path"
+        else if let Some(analyze_pos) = input.find("analyze_screenshot on ") {
+            // Extract the path after "analyze_screenshot on"
+            let after_command = &input[analyze_pos + "analyze_screenshot on ".len()..];
+            let img_path = after_command.trim();
+
+            if !img_path.is_empty() {
+                // Convert to "@analyze_screenshot path" syntax
+                let converted_input = format!("@analyze_screenshot {}", img_path);
+                messages.push(Message::user(&converted_input));
+            } else {
+                eprintln!("Usage: analyze_screenshot on <path>");
+                continue;
+            }
         } else {
             // Add regular user message
             messages.push(Message::user(input));
@@ -310,7 +343,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         match runtime.block_on(process_message(&client, &messages, &mcp_client)) {
             Ok(response) => {
                 messages.push(Message::assistant(&response));
-                
+
                 // If the response contains tool execution results, we might need to continue the conversation
                 if response.contains("[Tool execution completed. Results shown above.]") {
                     // The tool results have been displayed
@@ -357,23 +390,25 @@ async fn process_message(
     }
 
     println!(); // New line after response
-    
+
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
-        eprintln!("DEBUG: Checking LLM response for tool calls. Response length: {}", full_response.len());
-        eprintln!("DEBUG: First 200 chars of response: {}", &full_response.chars().take(200).collect::<String>());
-        
+        debug_println!("DEBUG: Checking LLM response for tool calls. Response length: {}", full_response.len());
+        debug_println!("DEBUG: First 200 chars of response: {}", &full_response.chars().take(200).collect::<String>());
+
         let (response_text, tool_results) = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-        
+
+        debug_println!("DEBUG: Tool results count: {}", tool_results.len());
+
         // If we executed tools, display them nicely
         if !tool_results.is_empty() {
             println!(); // Extra line before tool results
             println!("=== MCP Tool Results ===");
-            
+
             for (tool_name, result) in &tool_results {
                 println!("\n[Tool: {}]", tool_name);
                 println!("Response:");
-                
+
                 // Pretty print the result if it's JSON
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
                     if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
@@ -385,18 +420,18 @@ async fn process_message(
                     println!("{}", result);
                 }
             }
-            
+
             println!("\n=== End Tool Results ===\n");
-            
+
             // Now continue the conversation with the tool results
             // Add the tool results to the response for context
             let mut response_with_results = response_text.clone();
             response_with_results.push_str("\n\n[Tool execution completed. Results shown above.]");
-            
+
             return Ok(response_with_results);
         }
     }
-    
+
     println!(); // Extra line for readability
 
     Ok(full_response)
@@ -429,16 +464,16 @@ async fn process_message_print(
     }
 
     println!(); // New line at end
-    
+
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
         let (response_text, tool_results) = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-        
+
         // If we executed tools, print them
         if !tool_results.is_empty() {
             for (tool_name, result) in tool_results {
                 println!("\n[Tool Result - {}]:", tool_name);
-                
+
                 // Pretty print the result if it's JSON
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
                     if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
@@ -689,31 +724,45 @@ fn handle_tool_calls_in_response(
     llm_provider: &str,
 ) -> Result<(String, Vec<(String, String)>), Box<dyn std::error::Error>> {
     // Find all @tool calls in the response
-    let result = response.to_string();
     let mut tool_results = Vec::new();
-    
+
+    // Return the original response text to avoid interrupting the flow
+    let original_response = response.to_string();
+
     // Use a more robust approach to find @tool calls
     // First, remove markdown code blocks to find tools within them
     let cleaned_response = response
         .replace("```", "")
         .replace("`", "");
-    
-    let mut remaining = &cleaned_response[..];
+
+    debug_println!("DEBUG: Cleaned response first 200 chars: {}", &cleaned_response.chars().take(200).collect::<String>());
+
+    let remaining = &cleaned_response[..];
     let mut found_tools = 0;
-    
-    while let Some(at_pos) = remaining.find('@') {
+
+    debug_println!("DEBUG: Starting tool detection in cleaned response");
+
+    // Process only the first tool call to avoid interrupting the flow
+    // This allows for multi-tasking by processing one tool at a time
+    if let Some(at_pos) = remaining.find('@') {
         // Check if this is a tool call (followed by word characters)
         let after_at = &remaining[at_pos + 1..];
+        debug_println!("DEBUG: Found @ symbol at position {}, text after @: '{}'", at_pos, &after_at.chars().take(20).collect::<String>());
+
         if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
             let tool_name = &after_at[..space_or_brace];
-            
-            // Only process if tool_name is alphanumeric
-            if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            debug_println!("DEBUG: Potential tool name: '{}'", tool_name);
+
+            // Only process if tool_name is alphanumeric and not exactly "screenshot" (which is not allowed)
+            if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') && tool_name != "screenshot" {
                 found_tools += 1;
+                debug_println!("DEBUG: Valid tool found: '{}' (tool #{} in response)", tool_name, found_tools);
+
                 let args_start = at_pos + 1 + space_or_brace;
                 let args_str = &remaining[args_start..].trim_start();
-                
-                let (args, consumed_len) = if args_str.starts_with('{') {
+                debug_println!("DEBUG: Arguments start: '{}'", &args_str.chars().take(30).collect::<String>());
+
+                let (args, _consumed_len) = if args_str.starts_with('{') {
                     // Find matching closing brace
                     let mut brace_count = 0;
                     let mut end_pos = 0;
@@ -730,57 +779,95 @@ fn handle_tool_calls_in_response(
                             _ => {}
                         }
                     }
-                    
+
                     if end_pos > 0 {
                         let json_str = &args_str[..end_pos];
+                        debug_println!("DEBUG: Attempting to parse JSON arguments: '{}'", json_str);
                         match serde_json::from_str(json_str) {
-                            Ok(json) => (json, end_pos),
-                            Err(_) => (json!({"prompt": json_str}), end_pos),
+                            Ok(json) => {
+                                debug_println!("DEBUG: Successfully parsed JSON arguments");
+                                (json, end_pos)
+                            },
+                            Err(_e) => {
+                                debug_println!("DEBUG: Failed to parse JSON arguments: {}", _e);
+                                debug_println!("DEBUG: Falling back to using raw text as prompt");
+                                (json!({"prompt": json_str}), end_pos)
+                            },
                         }
                     } else {
+                        debug_println!("DEBUG: No closing brace found, using entire string as prompt");
                         (json!({"prompt": args_str}), 0)
                     }
                 } else {
                     // Take until newline or end of string
                     let end_pos = args_str.find('\n').unwrap_or(args_str.len());
                     let arg_text = &args_str[..end_pos].trim();
+                    debug_println!("DEBUG: Using plain text as arguments: '{}'", arg_text);
                     (json!({"prompt": arg_text}), end_pos)
                 };
-                
+
+                debug_println!("DEBUG: About to execute tool {} with args: {:?}", tool_name, args);
+
                 // Execute the tool
                 match mcp_client.call_tool(tool_name, args, llm_provider) {
                     Ok(tool_result) => {
+                        debug_println!("DEBUG: Tool {} returned: {:?}", tool_name, tool_result);
+
                         // Extract the actual result text from the MCP response
+                        debug_println!("DEBUG: Extracting result text from tool response");
                         let result_text = if let Some(result_obj) = tool_result.get("result") {
                             if let Some(text) = result_obj.as_str() {
+                                debug_println!("DEBUG: Found string result in 'result' field");
                                 text.to_string()
                             } else {
-                                serde_json::to_string_pretty(&result_obj).unwrap_or_else(|_| result_obj.to_string())
+                                debug_println!("DEBUG: 'result' field is not a string, converting to JSON");
+                                serde_json::to_string_pretty(&result_obj).unwrap_or_else(|_e| {
+                                    debug_println!("DEBUG: Failed to convert result to JSON: {}", _e);
+                                    result_obj.to_string()
+                                })
                             }
                         } else {
-                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
+                            debug_println!("DEBUG: No 'result' field found, using entire response");
+                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_e| {
+                                debug_println!("DEBUG: Failed to convert entire response to JSON: {}", _e);
+                                tool_result.to_string()
+                            })
                         };
-                        
+
+                        debug_println!("DEBUG: Extracted result text: {}", result_text);
                         tool_results.push((tool_name.to_string(), result_text));
                     }
                     Err(e) => {
+                        debug_println!("DEBUG: Tool {} failed with error: {}", tool_name, e);
                         tool_results.push((tool_name.to_string(), format!("Error: {}", e)));
                     }
                 }
-                
-                // Move past this tool call
-                remaining = &remaining[args_start + consumed_len..];
-                continue;
+            } else {
+                debug_println!("DEBUG: Tool name '{}' rejected - not alphanumeric", tool_name);
             }
+        } else {
+            debug_println!("DEBUG: No space or brace after @ symbol - not a valid tool call");
         }
-        
-        // Not a valid tool call, move past this @
-        remaining = &remaining[at_pos + 1..];
     }
-    
-    eprintln!("DEBUG: Found {} tools in response, executed {} tools", found_tools, tool_results.len());
-    
-    Ok((result, tool_results))
+
+    debug_println!("DEBUG: Found {} tools in response, executed {} tools", found_tools, tool_results.len());
+
+    if found_tools == 0 {
+        debug_println!("DEBUG: No tools were detected in the response");
+    } else if found_tools != tool_results.len() {
+        debug_println!("DEBUG: Warning - {} tools were detected but only {} were successfully executed", 
+                 found_tools, tool_results.len());
+    }
+
+    // Print a summary of the entire pipeline
+    debug_println!("\nDEBUG: TOOL CALLING PIPELINE SUMMARY:");
+    debug_println!("DEBUG: 1. Cleaned response length: {} chars", cleaned_response.len());
+    debug_println!("DEBUG: 2. Tools found in response: {}", found_tools);
+    debug_println!("DEBUG: 3. Tools successfully executed: {}", tool_results.len());
+    debug_println!("DEBUG: 4. Final tool results count: {}", tool_results.len());
+
+    // Return the original response text to avoid interrupting the flow
+    Ok((original_response, tool_results))
 }
 
 fn list_files(path: &str) -> Option<String> {
