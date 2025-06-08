@@ -72,12 +72,15 @@ impl OllamaClient {
         let available_models = self.list_models().await?;
         
         let vision_models = [
-            "qwen2.5vl:latest",
-            "qwen2.5vl",
-            "llava:latest",
-            "llava",
             "llama3.2-vision:latest",
             "llama3.2-vision",
+            "llava:7b",
+            "llava:latest",
+            "llava",
+            "qwen2.5vl:latest",
+            "qwen2.5vl",
+            "bakllava:latest",
+            "bakllava",
         ];
 
         for model in &vision_models {
