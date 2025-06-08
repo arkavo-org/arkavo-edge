@@ -9,10 +9,10 @@ use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if there's a --prompt argument
+    // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
         .windows(2)
-        .find(|w| w[0] == "--prompt")
+        .find(|w| w[0] == "--prompt" || w[0] == "--print")
         .map(|w| w[1].clone());
 
     // Check if there's an --image argument
@@ -21,8 +21,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--image")
         .map(|w| w[1].clone());
 
-    // Check if --print flag is present
-    let print_mode = args.contains(&"--print".to_string());
+    // Check if --print or --prompt flag is present (print mode is enabled when prompt is provided)
+    let print_mode = args.contains(&"--print".to_string()) 
+        || args.contains(&"--prompt".to_string())
+        || prompt.is_some();
 
     // Create runtime for async operations
     let runtime = Runtime::new()?;
@@ -105,7 +107,20 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 \
          To invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
-         For example: @screen_capture {{\"device_id\": \"12345\"}} or @analyze_screenshot describe the UI
+         For example: @screen_capture {{\"device_id\": \"12345\"}} or @device_management {{\"action\": \"list\"}}
+
+\
+         TYPICAL SCREENSHOT WORKFLOW:\
+         1. Use @device_management {{\"action\": \"list\"}} to find available devices\
+         2. Use @screen_capture {{\"device_id\": \"<device_id>\"}} to take a screenshot\
+         3. The screenshot path will be returned, which you can then analyze using vision capabilities\
+         4. Use @ui_interaction for tapping, swiping, or entering text based on what you see
+
+\
+         When a user asks to 'take a screenshot', you should automatically:\
+         - First check for available devices if no device_id is known\
+         - Take the screenshot using the device_id\
+         - Analyze the screenshot and describe what you see
 
 \
          Repository context:
@@ -265,7 +280,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
-    _mcp_client: &Option<McpClient>,
+    mcp_client: &Option<McpClient>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
     io::stdout().flush()?;
@@ -292,6 +307,17 @@ async fn process_message(
     }
 
     println!(); // New line after response
+    
+    // Check if the response contains @tool calls and execute them
+    if let Some(mcp) = mcp_client {
+        let response_with_tool_results = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
+        if response_with_tool_results != full_response {
+            // If we executed tools, show the results
+            println!(); // Extra line for readability
+            return Ok(response_with_tool_results);
+        }
+    }
+    
     println!(); // Extra line for readability
 
     Ok(full_response)
@@ -300,7 +326,7 @@ async fn process_message(
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
-    _mcp_client: &Option<McpClient>,
+    mcp_client: &Option<McpClient>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use streaming but only print content
     let mut stream = client.stream(messages.to_vec()).await?;
@@ -324,6 +350,18 @@ async fn process_message_print(
     }
 
     println!(); // New line at end
+    
+    // Check if the response contains @tool calls and execute them
+    if let Some(mcp) = mcp_client {
+        let response_with_tool_results = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
+        if response_with_tool_results != full_response {
+            // If we executed tools, print the tool results
+            let tool_results_only = &response_with_tool_results[full_response.len()..];
+            print!("{}", tool_results_only);
+            io::stdout().flush()?;
+            return Ok(response_with_tool_results);
+        }
+    }
 
     Ok(full_response)
 }
@@ -551,6 +589,69 @@ fn read_file(file_path: &str) -> Option<String> {
         }
         Err(e) => Some(format!("Error reading file '{}': {}", file_path, e)),
     }
+}
+
+fn handle_tool_calls_in_response(
+    response: &str,
+    mcp_client: &McpClient,
+    llm_provider: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Find all @tool calls in the response
+    let mut result = response.to_string();
+    let mut tool_results = Vec::new();
+    
+    // Regular expression to find @tool calls
+    let tool_pattern = regex::Regex::new(r"@(\w+)\s*(\{[^}]+\}|[^\n]+)")?;
+    
+    for cap in tool_pattern.captures_iter(response) {
+        let tool_name = &cap[1];
+        let args_str = &cap[2].trim();
+        
+        // Parse arguments
+        let args = if args_str.starts_with('{') {
+            serde_json::from_str(args_str).unwrap_or_else(|_| json!({"prompt": args_str}))
+        } else {
+            json!({"prompt": args_str})
+        };
+        
+        // Execute the tool
+        match mcp_client.call_tool(tool_name, args, llm_provider) {
+            Ok(tool_result) => {
+                // Special handling for screen_capture to automatically analyze the image
+                if tool_name == "screen_capture" {
+                    if let Some(screenshot_path) = tool_result.get("result")
+                        .and_then(|r| r.get("screenshot_path"))
+                        .and_then(|p| p.as_str()) {
+                        tool_results.push(format!("\n\n[Tool Result - {}]:\nScreenshot saved to: {}\n\nNow analyzing the screenshot...", 
+                            tool_name, screenshot_path));
+                        
+                        // Automatically analyze the screenshot
+                        tool_results.push(format!("\n\nUse @screenshot {} to analyze this image.", screenshot_path));
+                    } else {
+                        tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", 
+                            tool_name,
+                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
+                        ));
+                    }
+                } else {
+                    tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", 
+                        tool_name,
+                        serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
+                    ));
+                }
+            }
+            Err(e) => {
+                tool_results.push(format!("\n\n[Tool Error - {}]: {}", tool_name, e));
+            }
+        }
+    }
+    
+    // Append tool results to the response
+    if !tool_results.is_empty() {
+        result.push_str(&tool_results.join(""));
+    }
+    
+    Ok(result)
 }
 
 fn list_files(path: &str) -> Option<String> {

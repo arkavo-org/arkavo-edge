@@ -92,6 +92,7 @@ dependencies = [
  "arkavo-terminal",
  "arkavo-test",
  "jsonschema",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
