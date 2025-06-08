@@ -675,7 +675,13 @@ fn handle_tool_calls_in_response(
     let mut tool_results = Vec::new();
     
     // Use a more robust approach to find @tool calls
-    let mut remaining = response;
+    // First, remove markdown code blocks to find tools within them
+    let cleaned_response = response
+        .replace("```", "")
+        .replace("`", "");
+    
+    let mut remaining = &cleaned_response[..];
+    
     while let Some(at_pos) = remaining.find('@') {
         // Check if this is a tool call (followed by word characters)
         let after_at = &remaining[at_pos + 1..];
