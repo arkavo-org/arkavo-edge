@@ -1,5 +1,5 @@
 use crate::mcp_client::McpClient;
-use arkavo_llm::{encode_image_file, LlmClient, Message};
+use arkavo_llm::{LlmClient, Message, encode_image_file};
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -37,7 +37,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Repository context: {}", get_current_directory());
         println!("LLM Provider: {}", client.provider_name());
         println!("Type 'exit' or 'quit' to end the session.");
-        println!("Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools");
+        println!(
+            "Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools"
+        );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
         println!();
     }
@@ -104,10 +106,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(img_path) = image_path {
             match encode_image_file(&img_path) {
                 Ok(encoded_image) => {
-                    messages.push(Message::user_with_images(
-                        &prompt_text,
-                        vec![encoded_image],
-                    ));
+                    messages.push(Message::user_with_images(&prompt_text, vec![encoded_image]));
                 }
                 Err(e) => {
                     eprintln!("Error loading image: {}", e);
@@ -117,7 +116,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             messages.push(Message::user(&prompt_text));
         }
-        
+
         if print_mode {
             runtime.block_on(process_message_print(&client, &messages))?;
         } else {
@@ -163,7 +162,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // Extract the path after @screenshot
             let after_command = &input[screenshot_pos + "@screenshot ".len()..];
             let img_path = after_command.trim();
-            
+
             if !img_path.is_empty() {
                 match encode_image_file(img_path) {
                     Ok(encoded_image) => {

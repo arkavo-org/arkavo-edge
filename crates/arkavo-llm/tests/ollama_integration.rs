@@ -87,7 +87,7 @@ async fn test_ollama_error_handling() {
     let messages = vec![Message::user("Hello")];
 
     let result = client.complete(messages).await;
-    
+
     // The error might occur either during model selection or during the actual request
     // Since we're using a completely invalid URL, it should fail somewhere
     if let Err(e) = &result {

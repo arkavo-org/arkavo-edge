@@ -46,7 +46,7 @@ impl ImageFormat {
 
 pub fn encode_image_file(path: impl AsRef<Path>) -> Result<String> {
     let path = path.as_ref();
-    
+
     if !path.exists() {
         return Err(Error::InvalidImagePath(format!(
             "Image file not found: {}",
@@ -54,12 +54,11 @@ pub fn encode_image_file(path: impl AsRef<Path>) -> Result<String> {
         )));
     }
 
-    let bytes = fs::read(path).map_err(|e| {
-        Error::InvalidImagePath(format!("Failed to read image file: {}", e))
-    })?;
+    let bytes = fs::read(path)
+        .map_err(|e| Error::InvalidImagePath(format!("Failed to read image file: {}", e)))?;
 
     ImageFormat::validate_bytes(&bytes)?;
-    
+
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
@@ -69,9 +68,10 @@ pub fn encode_image_bytes(bytes: &[u8]) -> Result<String> {
 }
 
 pub fn decode_image(encoded: &str) -> Result<Vec<u8>> {
-    let bytes = BASE64_STANDARD.decode(encoded)
+    let bytes = BASE64_STANDARD
+        .decode(encoded)
         .map_err(|e| Error::InvalidImageFormat(format!("Invalid base64: {}", e)))?;
-    
+
     ImageFormat::validate_bytes(&bytes)?;
     Ok(bytes)
 }
@@ -128,10 +128,10 @@ mod tests {
     #[test]
     fn test_encode_decode_roundtrip() {
         let test_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        
+
         let encoded = encode_image_bytes(&test_data).unwrap();
         let decoded = decode_image(&encoded).unwrap();
-        
+
         assert_eq!(test_data.to_vec(), decoded);
     }
 
@@ -145,13 +145,13 @@ mod tests {
     #[test]
     fn test_encode_image_file_success() {
         let png_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        
+
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file.write_all(&png_data).unwrap();
-        
+
         let encoded = encode_image_file(temp_file.path()).unwrap();
         let decoded = decode_image(&encoded).unwrap();
-        
+
         assert_eq!(png_data.to_vec(), decoded);
     }
 

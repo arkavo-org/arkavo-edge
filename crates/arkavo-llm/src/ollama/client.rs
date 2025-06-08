@@ -57,9 +57,9 @@ impl OllamaClient {
     }
 
     async fn select_model(&self, messages: &[Message]) -> Result<String> {
-        let has_images = messages.iter().any(|msg| {
-            msg.images.as_ref().is_some_and(|imgs| !imgs.is_empty())
-        });
+        let has_images = messages
+            .iter()
+            .any(|msg| msg.images.as_ref().is_some_and(|imgs| !imgs.is_empty()));
 
         if has_images {
             self.select_vision_model().await
@@ -70,16 +70,8 @@ impl OllamaClient {
 
     async fn select_vision_model(&self) -> Result<String> {
         let available_models = self.list_models().await?;
-        
-        let vision_models = [
-            "llama3.2-vision:latest",
-            "llama3.2-vision",
-            "llava:7b",
-            "llava:latest",
-            "llava",
-            "bakllava:latest",
-            "bakllava",
-        ];
+
+        let vision_models = ["llava:7b", "llava:latest", "llava"];
 
         for model in &vision_models {
             if available_models.iter().any(|m| m.contains(model)) {
@@ -94,14 +86,14 @@ impl OllamaClient {
 
     async fn select_text_model(&self, messages: &[Message]) -> Result<String> {
         let available_models = self.list_models().await?;
-        
+
         let is_coding = messages.iter().any(|msg| {
             let content = msg.content.to_lowercase();
-            content.contains("code") || 
-            content.contains("function") || 
-            content.contains("class") ||
-            content.contains("debug") ||
-            content.contains("implement")
+            content.contains("code")
+                || content.contains("function")
+                || content.contains("class")
+                || content.contains("debug")
+                || content.contains("implement")
         });
 
         if is_coding {
@@ -222,8 +214,10 @@ impl Provider for OllamaClient {
                                         response: Option<String>,
                                         done: bool,
                                     }
-                                    
-                                    if let Ok(stream_resp) = serde_json::from_str::<StreamingResponse>(line) {
+
+                                    if let Ok(stream_resp) =
+                                        serde_json::from_str::<StreamingResponse>(line)
+                                    {
                                         responses.push(Ok(StreamResponse {
                                             content: stream_resp.response.unwrap_or_default(),
                                             done: stream_resp.done,

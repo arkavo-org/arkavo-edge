@@ -47,9 +47,8 @@ mod tests {
     #[test]
     fn test_chat_request_with_images() {
         let images = vec!["img1".to_string(), "img2".to_string()];
-        let req = ChatRequest::new("Describe these")
-            .with_images(images.clone());
-        
+        let req = ChatRequest::new("Describe these").with_images(images.clone());
+
         assert_eq!(req.content, "Describe these");
         assert_eq!(req.images, images);
     }
@@ -59,7 +58,7 @@ mod tests {
         let req = ChatRequest::new("Test")
             .add_image("img1".to_string())
             .add_image("img2".to_string());
-        
+
         assert_eq!(req.images.len(), 2);
         assert_eq!(req.images[0], "img1");
         assert_eq!(req.images[1], "img2");
@@ -69,17 +68,16 @@ mod tests {
     fn test_chat_request_to_message_without_images() {
         let req = ChatRequest::new("Hello");
         let msg = req.to_message();
-        
+
         assert_eq!(msg.content, "Hello");
         assert_eq!(msg.images, None);
     }
 
     #[test]
     fn test_chat_request_to_message_with_images() {
-        let req = ChatRequest::new("Describe")
-            .with_images(vec!["img1".to_string()]);
+        let req = ChatRequest::new("Describe").with_images(vec!["img1".to_string()]);
         let msg = req.to_message();
-        
+
         assert_eq!(msg.content, "Describe");
         assert_eq!(msg.images, Some(vec!["img1".to_string()]));
     }
