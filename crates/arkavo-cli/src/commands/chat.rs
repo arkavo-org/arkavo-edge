@@ -41,25 +41,35 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools"
         );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
-        println!();
     }
 
-    // Initialize MCP client if enabled
-    let mcp_client = if std::env::var("ARKAVO_MCP_ENABLED").unwrap_or_default() == "true" {
+    // Initialize MCP client - attempt by default unless explicitly disabled
+    let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() != "true" {
         let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
         match McpClient::new(mcp_url) {
             Ok(client) => {
-                eprintln!("MCP client initialized successfully");
+                if !print_mode {
+                    eprintln!("✓ Connected to MCP server");
+                }
                 Some(client)
             }
-            Err(e) => {
-                eprintln!("Warning: Failed to initialize MCP client: {}", e);
+            Err(_e) => {
+                if !print_mode {
+                    eprintln!("ℹ MCP server not available - using LLM-only mode");
+                    eprintln!("  To start MCP server: arkavo serve");
+                }
                 None
             }
         }
     } else {
         None
     };
+
+    // Show MCP tools help if connected
+    if !print_mode && mcp_client.is_some() {
+        println!("MCP tools: @<toolname> [args] - Invoke MCP tool directly");
+        println!();
+    }
 
     // Initialize conversation with system message including repository context
     let repo_context = get_repository_context();
@@ -83,7 +93,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "\n\nMCP Integration: Enabled\nYou can run tests and interact with iOS simulators through MCP tools.".to_string()
         }
     } else {
-        "\n\nMCP Integration: Disabled\nTo enable MCP tools, set ARKAVO_MCP_ENABLED=true"
+        "\n\nMCP Integration: Disabled\nTo enable MCP tools, run 'arkavo serve' in another terminal"
             .to_string()
     };
 
@@ -92,6 +102,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
          You have access to MCP tools for taking screenshots, clicking elements, entering text, and other UI interactions. \
          When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI and analyze screenshots. \
          Always analyze screenshots thoroughly to understand the current state of the UI before suggesting next steps.
+
+\
+         To invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
+         For example: @screen_capture {{\"device_id\": \"12345\"}} or @analyze_screenshot describe the UI
 
 \
          Repository context:
@@ -118,9 +132,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if print_mode {
-            runtime.block_on(process_message_print(&client, &messages))?;
+            runtime.block_on(process_message_print(&client, &messages, &mcp_client))?;
         } else {
-            runtime.block_on(process_message(&client, &messages))?;
+            runtime.block_on(process_message(&client, &messages, &mcp_client))?;
         }
         return Ok(());
     }
@@ -148,6 +162,47 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             messages.truncate(1);
             println!("Conversation cleared.");
             continue;
+        }
+
+        // Check for @tool syntax at the beginning of input
+        if input.starts_with('@') && mcp_client.is_some() {
+            let parts: Vec<&str> = input.splitn(2, ' ').collect();
+            if parts.len() >= 1 {
+                let tool_name = &parts[0][1..]; // Remove @ prefix
+                let args_str = if parts.len() > 1 { parts[1] } else { "" };
+
+                // Try to parse arguments as JSON, or create a simple prompt object
+                let args = if args_str.trim().starts_with('{') {
+                    serde_json::from_str(args_str).unwrap_or_else(|_| json!({"prompt": args_str}))
+                } else {
+                    json!({"prompt": args_str})
+                };
+
+                if let Some(ref mcp) = mcp_client {
+                    match mcp.call_tool(tool_name, args, client.provider_name()) {
+                        Ok(result) => {
+                            println!("Tool Result ({}):", tool_name);
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&result)
+                                    .unwrap_or_else(|_| result.to_string())
+                            );
+                            println!();
+
+                            // Add to conversation context
+                            messages.push(Message::user(input));
+                            messages.push(Message::assistant(&format!(
+                                "Tool {} executed. Result: {}",
+                                tool_name, result
+                            )));
+                        }
+                        Err(e) => {
+                            eprintln!("Tool execution failed: {}", e);
+                        }
+                    }
+                    continue;
+                }
+            }
         }
 
         // Check for file operation commands
@@ -203,7 +258,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Process with LLM
-        match runtime.block_on(process_message(&client, &messages)) {
+        match runtime.block_on(process_message(&client, &messages, &mcp_client)) {
             Ok(response) => {
                 messages.push(Message::assistant(&response));
             }
@@ -221,6 +276,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
+    _mcp_client: &Option<McpClient>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
     io::stdout().flush()?;
@@ -255,6 +311,7 @@ async fn process_message(
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
+    _mcp_client: &Option<McpClient>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use streaming but only print content
     let mut stream = client.stream(messages.to_vec()).await?;
@@ -420,7 +477,10 @@ fn handle_command(
         }
         "test" => {
             if mcp_client.is_none() {
-                return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
+                return Some(
+                    "MCP server not available. Run 'arkavo serve' to enable test commands."
+                        .to_string(),
+                );
             }
 
             if let Some(client) = mcp_client {
@@ -443,7 +503,10 @@ fn handle_command(
                 return Some("Usage: run <test_name>".to_string());
             }
             if mcp_client.is_none() {
-                return Some("MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable test commands.".to_string());
+                return Some(
+                    "MCP server not available. Run 'arkavo serve' to enable test commands."
+                        .to_string(),
+                );
             }
 
             let test_name = parts[1..].join(" ");
@@ -477,8 +540,7 @@ fn handle_command(
                 }
             } else {
                 Some(
-                    "MCP integration is disabled. Set ARKAVO_MCP_ENABLED=true to enable MCP tools."
-                        .to_string(),
+                    "MCP server not available. Run 'arkavo serve' to enable MCP tools.".to_string(),
                 )
             }
         }

@@ -114,13 +114,23 @@ impl McpClient {
     }
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
+        // The tools are returned in the initialize response, let's request them again
         let response = self.send_request("tools/list", None)?;
 
         if let Some(result) = response.result {
+            // Check for tools in different possible locations
             if let Some(tools_value) = result.get("tools") {
                 let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
                 Ok(tools)
+            } else if let Some(tools_value) = result
+                .get("capabilities")
+                .and_then(|c| c.get("tools"))
+                .and_then(|t| t.get("available"))
+            {
+                let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+                Ok(tools)
             } else {
+                // If not found, return empty list
                 Ok(vec![])
             }
         } else {
