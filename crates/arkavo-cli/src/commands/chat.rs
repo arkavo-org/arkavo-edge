@@ -353,11 +353,29 @@ async fn process_message(
     
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
-        let response_with_tool_results = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-        if response_with_tool_results != full_response {
-            // If we executed tools, show the results
-            println!(); // Extra line for readability
-            return Ok(response_with_tool_results);
+        let (response_text, tool_results) = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
+        
+        // If we executed tools, display them nicely
+        if !tool_results.is_empty() {
+            println!(); // Extra line before tool results
+            
+            for (tool_name, result) in tool_results {
+                println!("[Tool Result - {}]:", tool_name);
+                
+                // Pretty print the result if it's JSON
+                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
+                    if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
+                        println!("{}", pretty);
+                    } else {
+                        println!("{}", result);
+                    }
+                } else {
+                    println!("{}", result);
+                }
+                println!();
+            }
+            
+            return Ok(response_text);
         }
     }
     
@@ -396,13 +414,26 @@ async fn process_message_print(
     
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
-        let response_with_tool_results = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-        if response_with_tool_results != full_response {
-            // If we executed tools, print the tool results
-            let tool_results_only = &response_with_tool_results[full_response.len()..];
-            print!("{}", tool_results_only);
+        let (response_text, tool_results) = handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
+        
+        // If we executed tools, print them
+        if !tool_results.is_empty() {
+            for (tool_name, result) in tool_results {
+                println!("\n[Tool Result - {}]:", tool_name);
+                
+                // Pretty print the result if it's JSON
+                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
+                    if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
+                        println!("{}", pretty);
+                    } else {
+                        println!("{}", result);
+                    }
+                } else {
+                    println!("{}", result);
+                }
+            }
             io::stdout().flush()?;
-            return Ok(response_with_tool_results);
+            return Ok(response_text);
         }
     }
 
@@ -638,9 +669,9 @@ fn handle_tool_calls_in_response(
     response: &str,
     mcp_client: &McpClient,
     llm_provider: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(String, Vec<(String, String)>), Box<dyn std::error::Error>> {
     // Find all @tool calls in the response
-    let mut result = response.to_string();
+    let result = response.to_string();
     let mut tool_results = Vec::new();
     
     // Use a more robust approach to find @tool calls
@@ -704,28 +735,10 @@ fn handle_tool_calls_in_response(
                             serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_| tool_result.to_string())
                         };
                         
-                        // Special handling for screen_capture
-                        if tool_name == "screen_capture" {
-                            // Try to extract screenshot path from the result
-                            if result_text.contains("screenshot_path") || result_text.contains(".png") {
-                                tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
-                                
-                                // Extract the path if possible
-                                if let Some(path_start) = result_text.find("/var/") {
-                                    if let Some(path_end) = result_text[path_start..].find(".png") {
-                                        let screenshot_path = &result_text[path_start..path_start + path_end + 4];
-                                        tool_results.push(format!("\n\nTo analyze this screenshot, I would use: @screenshot {}", screenshot_path));
-                                    }
-                                }
-                            } else {
-                                tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
-                            }
-                        } else {
-                            tool_results.push(format!("\n\n[Tool Result - {}]:\n{}", tool_name, result_text));
-                        }
+                        tool_results.push((tool_name.to_string(), result_text));
                     }
                     Err(e) => {
-                        tool_results.push(format!("\n\n[Tool Error - {}]: {}", tool_name, e));
+                        tool_results.push((tool_name.to_string(), format!("Error: {}", e)));
                     }
                 }
                 
@@ -739,12 +752,7 @@ fn handle_tool_calls_in_response(
         remaining = &remaining[at_pos + 1..];
     }
     
-    // Append tool results to the response
-    if !tool_results.is_empty() {
-        result.push_str(&tool_results.join(""));
-    }
-    
-    Ok(result)
+    Ok((result, tool_results))
 }
 
 fn list_files(path: &str) -> Option<String> {
