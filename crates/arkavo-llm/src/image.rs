@@ -3,6 +3,8 @@ use base64::prelude::*;
 use std::fs;
 use std::path::Path;
 
+const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit
+
 #[derive(Debug, Clone)]
 pub enum ImageFormat {
     Png,
@@ -57,12 +59,28 @@ pub fn encode_image_file(path: impl AsRef<Path>) -> Result<String> {
     let bytes = fs::read(path)
         .map_err(|e| Error::InvalidImagePath(format!("Failed to read image file: {}", e)))?;
 
+    if bytes.len() > MAX_IMAGE_SIZE {
+        return Err(Error::InvalidImageFormat(format!(
+            "Image too large: {} bytes (max: {} bytes)",
+            bytes.len(),
+            MAX_IMAGE_SIZE
+        )));
+    }
+
     ImageFormat::validate_bytes(&bytes)?;
 
     Ok(BASE64_STANDARD.encode(&bytes))
 }
 
 pub fn encode_image_bytes(bytes: &[u8]) -> Result<String> {
+    if bytes.len() > MAX_IMAGE_SIZE {
+        return Err(Error::InvalidImageFormat(format!(
+            "Image too large: {} bytes (max: {} bytes)",
+            bytes.len(),
+            MAX_IMAGE_SIZE
+        )));
+    }
+
     ImageFormat::validate_bytes(bytes)?;
     Ok(BASE64_STANDARD.encode(bytes))
 }
@@ -160,5 +178,24 @@ mod tests {
         let result = decode_image("invalid-base64!");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid base64"));
+    }
+
+    #[test]
+    fn test_image_size_limit() {
+        // Create an image that exceeds the size limit
+        let mut large_image = vec![0x89; MAX_IMAGE_SIZE + 1];
+        // Add PNG header
+        large_image[0] = 0x89;
+        large_image[1] = 0x50;
+        large_image[2] = 0x4E;
+        large_image[3] = 0x47;
+        large_image[4] = 0x0D;
+        large_image[5] = 0x0A;
+        large_image[6] = 0x1A;
+        large_image[7] = 0x0A;
+
+        let result = encode_image_bytes(&large_image);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Image too large"));
     }
 }

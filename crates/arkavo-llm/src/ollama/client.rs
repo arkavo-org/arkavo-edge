@@ -80,7 +80,9 @@ impl OllamaClient {
             }
         }
 
-        warn!("No vision model found, using default model");
+        warn!(
+            "No vision model found, using default model. Install llava with: ollama pull llava:7b"
+        );
         Ok(self.model.clone())
     }
 
