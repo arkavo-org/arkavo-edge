@@ -77,8 +77,6 @@ impl OllamaClient {
             "llava:7b",
             "llava:latest",
             "llava",
-            "qwen2.5vl:latest",
-            "qwen2.5vl",
             "bakllava:latest",
             "bakllava",
         ];
