@@ -16,7 +16,6 @@ struct McpProcess {
 pub struct McpClient {
     process: Arc<Mutex<McpProcess>>,
     request_id: Arc<Mutex<u64>>,
-    tools: Arc<Vec<Tool>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,7 +129,7 @@ impl McpClient {
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         // The tools are returned in the initialize response, let's request them again
-        let response = self.send_request("tools/list", None)?;
+        let response = self.send_request("tools/list", Some(json!({})))?;
 
         if let Some(result) = response.result {
             // Check for tools in different possible locations

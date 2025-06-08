@@ -36,7 +36,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Starting UI testing chat session...");
         println!("Repository context: {}", get_current_directory());
         println!("LLM Provider: {}", client.provider_name());
-        println!("Type 'exit' or 'quit' to end the session.");
+        println!("Type '/exit' or '/quit' to end the session.");
         println!(
             "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools"
         );
@@ -152,7 +152,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        if input == "exit" || input == "quit" {
+        if input == "/exit" || input == "/quit" || input == "exit" || input == "quit" {
             println!("Exiting chat session.");
             break;
         }
