@@ -1,6 +1,7 @@
 use crate::ollama::OllamaClient;
-use crate::{Error, Message, Provider, Result, StreamResponse};
+use crate::{Error, Message, Provider, Result, StreamResponse, encode_image_file};
 use tokio_stream::Stream;
+use std::path::Path;
 
 pub struct LlmClient {
     provider: Box<dyn Provider>,
@@ -43,5 +44,53 @@ impl LlmClient {
 
     pub fn provider_name(&self) -> &str {
         self.provider.name()
+    }
+
+    pub async fn complete_with_images(
+        &self,
+        content: impl Into<String>,
+        image_paths: Vec<impl AsRef<Path>>,
+    ) -> Result<String> {
+        let mut images = Vec::new();
+        for path in image_paths {
+            let encoded = encode_image_file(path)?;
+            images.push(encoded);
+        }
+
+        let message = Message::user_with_images(content, images);
+        self.complete(vec![message]).await
+    }
+
+    pub async fn stream_with_images(
+        &self,
+        content: impl Into<String>,
+        image_paths: Vec<impl AsRef<Path>>,
+    ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let mut images = Vec::new();
+        for path in image_paths {
+            let encoded = encode_image_file(path)?;
+            images.push(encoded);
+        }
+
+        let message = Message::user_with_images(content, images);
+        self.stream(vec![message]).await
+    }
+
+    pub async fn complete_with_encoded_images(
+        &self,
+        content: impl Into<String>,
+        encoded_images: Vec<String>,
+    ) -> Result<String> {
+        let message = Message::user_with_images(content, encoded_images);
+        self.complete(vec![message]).await
+    }
+
+    pub async fn stream_with_encoded_images(
+        &self,
+        content: impl Into<String>,
+        encoded_images: Vec<String>,
+    ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        let message = Message::user_with_images(content, encoded_images);
+        self.stream(vec![message]).await
     }
 }
