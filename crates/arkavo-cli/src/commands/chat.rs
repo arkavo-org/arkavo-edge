@@ -38,7 +38,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("LLM Provider: {}", client.provider_name());
         println!("Type 'exit' or 'quit' to end the session.");
         println!(
-            "Commands: read <file>, list [path], explain <file>, test, run <test_name>, tools"
+            "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools"
         );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
@@ -205,11 +205,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Check for file operation commands
-        if let Some(command_response) = handle_command(input, &mcp_client, client.provider_name()) {
-            println!("Assistant: {}", command_response);
-            println!();
-            continue;
+        // Check for slash commands
+        if input.starts_with('/') {
+            let command_input = &input[1..]; // Remove the slash
+            if let Some(command_response) = handle_command(command_input, &mcp_client, client.provider_name()) {
+                println!("{}", command_response);
+                println!();
+                continue;
+            }
         }
 
         // Check for @screenshot command anywhere in the input
@@ -237,20 +240,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 eprintln!("Usage: @screenshot <path>");
                 continue;
-            }
-        // Check if input contains explain command - enhance with file context
-        } else if input.starts_with("explain ") {
-            let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let file_path = parts[1..].join(" ");
-                if let Some(content) = read_file(&file_path) {
-                    let enhanced_input = format!("{}\n\nFile content:\n{}", input, content);
-                    messages.push(Message::user(&enhanced_input));
-                } else {
-                    messages.push(Message::user(input));
-                }
-            } else {
-                messages.push(Message::user(input));
             }
         } else {
             // Add regular user message
@@ -467,13 +456,6 @@ fn handle_command(
             } else {
                 list_files(&path)
             }
-        }
-        "explain" => {
-            if parts.len() < 2 {
-                return Some("Usage: explain <file_path>".to_string());
-            }
-            // This will be handled by the LLM with file context
-            None
         }
         "test" => {
             if mcp_client.is_none() {
