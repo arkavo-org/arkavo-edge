@@ -215,7 +215,22 @@ impl Provider for OllamaClient {
                                     }));
                                 }
                                 Err(e) => {
-                                    responses.push(Err(Error::Json(e)));
+                                    // Try alternative format for streaming responses
+                                    #[derive(Deserialize)]
+                                    struct StreamingResponse {
+                                        response: Option<String>,
+                                        done: bool,
+                                    }
+                                    
+                                    if let Ok(stream_resp) = serde_json::from_str::<StreamingResponse>(line) {
+                                        responses.push(Ok(StreamResponse {
+                                            content: stream_resp.response.unwrap_or_default(),
+                                            done: stream_resp.done,
+                                        }));
+                                    } else {
+                                        warn!("Failed to parse response: {}", line);
+                                        responses.push(Err(Error::Json(e)));
+                                    }
                                 }
                             }
                         }

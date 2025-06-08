@@ -158,14 +158,21 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        // Check for @screenshot command
-        if input.starts_with("@screenshot ") {
-            let parts: Vec<&str> = input.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let img_path = parts[1..].join(" ");
-                match encode_image_file(&img_path) {
+        // Check for @screenshot command anywhere in the input
+        if let Some(screenshot_pos) = input.find("@screenshot ") {
+            // Extract the path after @screenshot
+            let after_command = &input[screenshot_pos + "@screenshot ".len()..];
+            let img_path = after_command.trim();
+            
+            if !img_path.is_empty() {
+                match encode_image_file(img_path) {
                     Ok(encoded_image) => {
-                        let prompt = "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features.";
+                        // Use the text before @screenshot as the prompt, or a default
+                        let prompt = if screenshot_pos > 0 {
+                            input[..screenshot_pos].trim()
+                        } else {
+                            "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features."
+                        };
                         messages.push(Message::user_with_images(prompt, vec![encoded_image]));
                     }
                     Err(e) => {
