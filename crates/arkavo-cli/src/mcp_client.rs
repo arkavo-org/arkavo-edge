@@ -126,7 +126,11 @@ impl McpClient {
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
         });
-        writeln!(&mut stdin, "{}", serde_json::to_string(&initialized_notification)?)?;
+        writeln!(
+            &mut stdin,
+            "{}",
+            serde_json::to_string(&initialized_notification)?
+        )?;
         stdin.flush()?;
 
         // Create the process wrapper with persistent stdin/stdout

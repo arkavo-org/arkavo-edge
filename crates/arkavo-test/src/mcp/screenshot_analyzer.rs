@@ -35,6 +35,12 @@ impl ScreenshotAnalyzer {
     }
 }
 
+impl Default for ScreenshotAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Tool for ScreenshotAnalyzer {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -69,7 +75,8 @@ impl Tool for ScreenshotAnalyzer {
         }
 
         // Get file size for context
-        let metadata = fs::metadata(path).map_err(|e| TestError::Mcp(format!("Failed to read file metadata: {}", e)))?;
+        let metadata = fs::metadata(path)
+            .map_err(|e| TestError::Mcp(format!("Failed to read file metadata: {}", e)))?;
         let file_size = metadata.len();
 
         Ok(json!({
