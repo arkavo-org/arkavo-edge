@@ -173,6 +173,8 @@ struct BiometricTestView: View {
             return "Touch ID"
         case .none:
             return "None"
+        case .opticID:
+            return "Optic ID"
         @unknown default:
             return "Unknown"
         }

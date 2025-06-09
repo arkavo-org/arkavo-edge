@@ -243,6 +243,36 @@ impl McpTestServer {
             "explore_edge_cases".to_string(),
             Arc::new(EdgeCaseExplorerKit::new(analysis_engine.clone())),
         );
+        
+        // Add calibration tools
+        if let Ok(calibration_tool) = super::calibration_tools::CalibrationTool::new() {
+            tools.insert(
+                "calibration_manager".to_string(),
+                Arc::new(calibration_tool),
+            );
+        }
+        
+        // Add calibration setup tool
+        tools.insert(
+            "setup_calibration".to_string(),
+            Arc::new(super::calibration_setup_tool::CalibrationSetupKit::new(device_manager.clone())),
+        );
+        
+        // Add log streaming tools
+        tools.insert(
+            "log_stream".to_string(),
+            Arc::new(super::log_stream_tools::LogStreamKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "app_diagnostic_export".to_string(),
+            Arc::new(super::log_stream_tools::AppDiagnosticExporter::new(device_manager.clone())),
+        );
+        
+        // Add URL dialog handler for system dialogs
+        tools.insert(
+            "url_dialog".to_string(),
+            Arc::new(super::url_dialog_handler::UrlDialogHandler::new(device_manager.clone())),
+        );
 
         let state_store = Arc::new(StateStore::new());
 
@@ -368,6 +398,7 @@ impl McpTestServer {
                 | "simulator_advanced"
                 | "app_management"
                 | "file_operations"
+                | "calibration_manager"
                 | "find_bugs"
                 | "analyze_code"
                 | "analyze_tests"

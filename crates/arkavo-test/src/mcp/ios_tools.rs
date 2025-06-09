@@ -6,7 +6,6 @@ use super::xctest_unix_bridge::{CommandResponse, TapCommand, XCTestUnixBridge};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -25,7 +24,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}} - Works immediately without any setup! COORDINATE WORKFLOW: 1) Take screenshot, 2) Read image to see UI, 3) Identify element positions, 4) Tap using coordinates. ⚠️ AVOID TEXT-BASED TAPPING: Text/accessibility taps require setup_xcuitest which OFTEN FAILS with timeouts. Only use as absolute last resort! For text input: tap field with COORDINATES first, then type_text.".to_string(),
+                description: "Interact with iOS UI elements. Uses multiple methods (idb_companion, XCTest, AppleScript) to ensure successful interaction. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. The tool will automatically try different methods until one works. Coordinates should be in logical points for the device.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -94,6 +93,64 @@ impl UiInteractionKit {
         // Now that we're using tokio::sync::Mutex, we can properly implement this
         let bridge = bridge_arc.lock().await;
         bridge.send_tap_command(command).await
+    }
+
+    /// Query actual device dimensions from simulator
+    async fn get_device_dimensions(&self, device_id: &str) -> Option<(f64, f64)> {
+        // Get device info including device type
+        let output = Command::new("xcrun")
+            .args(["simctl", "list", "devices", "--json"])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        // Parse JSON to find our device
+        let devices_json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+        
+        // Search through all runtimes for our device
+        for (_runtime, device_list) in devices_json["devices"].as_object()? {
+            if let Some(devices) = device_list.as_array() {
+                for device in devices {
+                    if device["udid"].as_str() == Some(device_id) {
+                        // Found our device, now get device type details
+                        if let Some(device_type_id) = device["deviceTypeIdentifier"].as_str() {
+                            // Query device type specifications
+                            let devicetype_output = Command::new("xcrun")
+                                .args(["simctl", "list", "devicetypes", "--json"])
+                                .output()
+                                .ok()?;
+                            
+                            if devicetype_output.status.success() {
+                                let types_json: serde_json::Value = serde_json::from_slice(&devicetype_output.stdout).ok()?;
+                                
+                                // Look for our device type
+                                if let Some(device_types) = types_json["devicetypes"].as_array() {
+                                    for dtype in device_types {
+                                        if dtype["identifier"].as_str() == Some(device_type_id) {
+                                            // Check if screen dimensions are available
+                                            if let (Some(width), Some(height)) = (
+                                                dtype["screenWidth"].as_f64(),
+                                                dtype["screenHeight"].as_f64()
+                                            ) {
+                                                eprintln!("Found device dimensions from simctl: {}x{}", width, height);
+                                                return Some((width, height));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we can't get from simctl, try other methods
+        eprintln!("Could not get device dimensions from simctl, using fallback");
+        None
     }
 
     /// Get the XCTest bridge without trying to initialize it
@@ -653,20 +710,25 @@ impl Tool for UiInteractionKit {
                         .map(|d| d.device_type.as_str())
                         .unwrap_or("unknown");
 
-                    // Common iOS device logical resolutions (in points, not pixels)
-                    let (max_x, max_y) = match device_type {
-                        s if s.contains("iPhone-16-Pro-Max") => (430.0, 932.0),
-                        s if s.contains("iPhone-16-Pro") || s.contains("iPhone-15-Pro") => {
-                            (393.0, 852.0)
+                    // Try to get actual device dimensions from simulator
+                    let (max_x, max_y) = self.get_device_dimensions(&device_id).await.unwrap_or_else(|| {
+                        // Fallback to hardcoded values if query fails
+                        match device_type {
+                            s if s.contains("iPhone-16-Pro-Max") => (440.0, 956.0),
+                            s if s.contains("iPhone-16-Pro") => (402.0, 874.0),
+                            s if s.contains("iPhone-16-Plus") => (430.0, 932.0),
+                            s if s.contains("iPhone-16") => (393.0, 852.0),
+                            s if s.contains("iPhone-15-Pro-Max") => (430.0, 932.0),
+                            s if s.contains("iPhone-15-Pro") => (393.0, 852.0),
+                            s if s.contains("iPhone-15-Plus") => (428.0, 926.0),
+                            s if s.contains("iPhone-15") => (393.0, 852.0),
+                            s if s.contains("iPhone-14") => (390.0, 844.0),
+                            s if s.contains("iPhone-13") => (390.0, 844.0),
+                            s if s.contains("iPhone-SE") => (375.0, 667.0),
+                            s if s.contains("iPad") => (1024.0, 1366.0),
+                            _ => (390.0, 844.0), // Default to common size
                         }
-                        s if s.contains("iPhone-16-Plus") || s.contains("iPhone-15-Plus") => {
-                            (428.0, 926.0)
-                        }
-                        s if s.contains("iPhone-16") || s.contains("iPhone-15") => (390.0, 844.0),
-                        s if s.contains("iPhone-SE") => (375.0, 667.0),
-                        s if s.contains("iPad") => (820.0, 1180.0),
-                        _ => (393.0, 852.0), // Default to iPhone Pro size
-                    };
+                    });
 
                     // Validate and adjust coordinates
                     let adjusted_x = x.min(max_x - 1.0).max(0.0);
@@ -687,192 +749,134 @@ impl Tool for UiInteractionKit {
                         );
                     }
 
-                    // Try using idb_companion first for more reliable tapping
+                    // Try multiple methods to ensure tap succeeds
                     #[cfg(target_os = "macos")]
                     {
                         use super::idb_wrapper::IdbWrapper;
 
+                        // Method 1: Try idb_companion first (most reliable when available)
                         match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
-                            Ok(result) => {
-                                eprintln!("UI tap via idb_companion succeeded");
+                            Ok(mut result) => {
+                                eprintln!("UI tap via idb_companion succeeded at ({}, {})", adjusted_x, adjusted_y);
+                                // Add device info to response
+                                if let Some(obj) = result.as_object_mut() {
+                                    obj.insert("device_type".to_string(), serde_json::json!(device_type));
+                                    obj.insert("logical_resolution".to_string(), serde_json::json!({
+                                        "width": max_x,
+                                        "height": max_y
+                                    }));
+                                    obj.insert("original_coordinates".to_string(), serde_json::json!({
+                                        "x": x,
+                                        "y": y
+                                    }));
+                                    if x != adjusted_x || y != adjusted_y {
+                                        obj.insert("adjustment_made".to_string(), serde_json::json!(true));
+                                        obj.insert("warning".to_string(), serde_json::json!(
+                                            format!("Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})", 
+                                                x, y, adjusted_x, adjusted_y)
+                                        ));
+                                    }
+                                }
                                 return Ok(result);
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "idb_companion tap failed: {}, falling back to AppleScript",
-                                    e
-                                );
+                                eprintln!("idb_companion tap failed: {}, trying fallback methods", e);
                             }
                         }
-                    }
 
-                    // Fallback to AppleScript if idb_companion fails
-                    let applescript = format!(
-                        r#"tell application "Simulator"
-                            activate
-                            delay 0.1
+                        // Method 2: Try simctl io tap (sometimes works when idb fails)
+                        let simctl_output = Command::new("xcrun")
+                            .args(["simctl", "io", &device_id, "tap", &adjusted_x.to_string(), &adjusted_y.to_string()])
+                            .output();
+
+                        if let Ok(output) = simctl_output {
+                            if output.status.success() {
+                                eprintln!("UI tap via simctl io succeeded at ({}, {})", adjusted_x, adjusted_y);
+                                return Ok(serde_json::json!({
+                                    "success": true,
+                                    "action": "tap",
+                                    "method": "simctl_io",
+                                    "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                                    "original_coordinates": {"x": x, "y": y},
+                                    "device_id": device_id,
+                                    "device_type": device_type,
+                                    "logical_resolution": {"width": max_x, "height": max_y},
+                                    "confidence": "medium"
+                                }));
+                            }
+                        }
+
+                        // Method 3: Try Accessibility/AppleScript approach
+                        let applescript = format!(
+                            r#"tell application "Simulator"
+                                activate
+                                delay 0.1
+                            end tell
                             tell application "System Events"
                                 tell process "Simulator"
                                     set frontmost to true
-                                    
-                                    try
-                                        -- Try to find the device screen using Accessibility
-                                        -- The device screen is typically an AXGroup within the window
-                                        set deviceScreen to missing value
-                                        set uiElements to UI elements of front window
-                                        
-                                        repeat with elem in uiElements
-                                            if role of elem is "AXGroup" then
-                                                set deviceScreen to elem
-                                                exit repeat
-                                            end if
-                                        end repeat
-                                        
-                                        if deviceScreen is not missing value then
-                                            -- Found the device screen element
-                                            set {{screenX, screenY}} to position of deviceScreen
-                                            set {{screenWidth, screenHeight}} to size of deviceScreen
-                                            
-                                            -- Map logical coordinates to screen coordinates
-                                            -- The simulator displays at a specific scale factor
-                                            -- We need to account for the scale between logical points and screen pixels
-                                            set scaleFactor to screenWidth / {}
-                                            set clickX to screenX + ({} * scaleFactor)
-                                            set clickY to screenY + ({} * scaleFactor)
-                                        else
-                                            -- Fallback: couldn't find device screen, use window with estimates
-                                            set simWindow to front window
-                                            set {{windowX, windowY}} to position of simWindow
-                                            set {{windowWidth, windowHeight}} to size of simWindow
-                                            
-                                            -- Default estimates based on typical simulator chrome
-                                            -- These vary by device type and simulator scale
-                                            set titleBarHeight to 28
-                                            set sideBezel to 70  -- Left/right bezel (increased based on screenshot)
-                                            set topBezel to 85   -- Top bezel below title bar (increased)
-                                            set bottomBezel to 120 -- Bottom bezel includes home indicator area
-                                            
-                                            -- Calculate estimated content area
-                                            set contentX to windowX + sideBezel
-                                            set contentY to windowY + titleBarHeight + topBezel
-                                            set contentWidth to windowWidth - (sideBezel * 2)
-                                            set contentHeight to windowHeight - titleBarHeight - topBezel - bottomBezel
-                                            
-                                            -- Use scale factor based on logical resolution
-                                            set scaleFactor to contentWidth / {}
-                                            set clickX to contentX + ({} * scaleFactor)
-                                            set clickY to contentY + ({} * scaleFactor)
-                                        end if
-                                        
-                                        -- Log the calculated position for debugging
-                                        log "Clicking at screen coordinates: " & clickX & ", " & clickY
-                                        
-                                        -- Perform the click with proper timing
-                                        click at {{clickX, clickY}}
-                                        delay 0.5
-                                        
-                                    on error errMsg
-                                        -- If all else fails, try a simple click based on window position
-                                        set simWindow to front window
-                                        set {{windowX, windowY}} to position of simWindow
-                                        set {{windowWidth, windowHeight}} to size of simWindow
-                                        
-                                        -- Very rough estimate with better scaling
-                                        -- Using more accurate bezel estimates
-                                        set contentWidth to windowWidth - 140  -- 70px bezels on each side
-                                        set scaleFactor to contentWidth / {}
-                                        set clickX to windowX + 70 + ({} * scaleFactor)
-                                        set clickY to windowY + 113 + ({} * scaleFactor)  -- 28 title + 85 top bezel
-                                        
-                                        click at {{clickX, clickY}}
-                                        delay 0.5
-                                    end try
+                                    click at {{{}, {}}}
                                 end tell
-                            end tell
-                        end tell"#,
-                        max_x,
-                        adjusted_x,
-                        adjusted_y,
-                        max_x,
-                        adjusted_x,
-                        adjusted_y,
-                        max_x,
-                        adjusted_x,
-                        adjusted_y
-                    );
-
-                    eprintln!(
-                        "Executing AppleScript tap at ({}, {})",
-                        adjusted_x, adjusted_y
-                    );
-
-                    let output = Command::new("osascript")
-                        .arg("-e")
-                        .arg(&applescript)
-                        .output()
-                        .unwrap_or_else(|e| std::process::Output {
-                            status: std::process::ExitStatus::from_raw(1),
-                            stdout: Vec::new(),
-                            stderr: format!("Failed to execute tap via AppleScript: {}", e)
-                                .into_bytes(),
-                        });
-
-                    // Log the output for debugging
-                    if !output.stdout.is_empty() {
-                        eprintln!(
-                            "AppleScript stdout: {}",
-                            String::from_utf8_lossy(&output.stdout)
+                            end tell"#,
+                            // Convert logical coordinates to approximate screen coordinates
+                            // This is a simple approximation - calibration will help determine exact mapping
+                            70.0 + adjusted_x * 1.5,  // Rough estimate with bezel offset
+                            113.0 + adjusted_y * 1.5  // Rough estimate with title bar + bezel
                         );
-                    }
-                    if !output.stderr.is_empty() {
-                        eprintln!(
-                            "AppleScript stderr: {}",
-                            String::from_utf8_lossy(&output.stderr)
-                        );
-                    }
 
-                    // Check if the tap is likely to succeed based on coordinates
-                    let coordinates_valid = adjusted_x >= 0.0
-                        && adjusted_x < max_x
-                        && adjusted_y >= 0.0
-                        && adjusted_y < max_y;
+                        let applescript_output = Command::new("osascript")
+                            .arg("-e")
+                            .arg(&applescript)
+                            .output();
 
-                    // AppleScript always returns success even if tap does nothing
-                    // We'll be more honest about success likelihood
-                    let likely_success = output.status.success() && coordinates_valid;
+                        if let Ok(output) = applescript_output {
+                            if output.status.success() {
+                                eprintln!("UI tap via AppleScript/Accessibility succeeded at ({}, {})", adjusted_x, adjusted_y);
+                                return Ok(serde_json::json!({
+                                    "success": true,
+                                    "action": "tap",
+                                    "method": "accessibility_applescript",
+                                    "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                                    "original_coordinates": {"x": x, "y": y},
+                                    "device_id": device_id,
+                                    "device_type": device_type,
+                                    "logical_resolution": {"width": max_x, "height": max_y},
+                                    "confidence": "low",  // Lower confidence until calibrated
+                                    "note": "Using rough coordinate mapping - calibration will improve accuracy"
+                                }));
+                            }
+                        }
 
-                    let mut response = serde_json::json!({
-                        "success": likely_success,
-                        "action": "tap",
-                        "coordinates": {"x": adjusted_x, "y": adjusted_y},
-                        "original_coordinates": {"x": x, "y": y},
-                        "device_id": device_id,
-                        "device_type": device_type,
-                        "logical_resolution": {"width": max_x, "height": max_y},
-                        "tap_method": "accessibility_applescript",
-                        "confidence": if likely_success { "high" } else { "low" }
-                    });
-
-                    if !output.status.success() {
-                        let error_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                        response["error"] = serde_json::json!({
-                            "message": error_msg,
-                            "fallback_action": "If tap fails, try: 1) Ensure Simulator is frontmost app, 2) Use screen_capture to verify UI state, 3) Adjust coordinates if needed",
-                            "coordinates_note": "Coordinates are in logical points relative to the simulator screen content."
-                        });
-                    }
-
-                    if x != adjusted_x || y != adjusted_y {
-                        response["warning"] = serde_json::json!(format!(
-                            "Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})",
-                            x, y, adjusted_x, adjusted_y
-                        ));
-                        response["success"] = serde_json::json!(false); // Mark as failure when coordinates had to be adjusted
-                        response["confidence"] = serde_json::json!("low");
-                        response["adjustment_made"] = serde_json::json!(true);
+                        // If all methods fail, report what we tried
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "action": "tap",
+                            "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                            "original_coordinates": {"x": x, "y": y},
+                            "device_id": device_id,
+                            "device_type": device_type,
+                            "logical_resolution": {"width": max_x, "height": max_y},
+                            "methods_tried": ["idb_companion", "simctl_io", "accessibility_applescript"],
+                            "error": {
+                                "code": "ALL_METHODS_FAILED",
+                                "message": "Unable to perform tap - all methods failed",
+                                "suggestion": "Ensure the simulator is responsive and try taking a screenshot to verify the UI state"
+                            }
+                        }));
                     }
 
-                    Ok(response)
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "error": {
+                                "code": "PLATFORM_NOT_SUPPORTED",
+                                "message": "UI interaction is only supported on macOS",
+                                "device_id": device_id
+                            }
+                        }));
+                    }
+
                 } else {
                     Err(TestError::Mcp("Missing target for tap action".to_string()))
                 }

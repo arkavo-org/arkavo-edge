@@ -54,11 +54,9 @@ async fn test_enrollment_flow_dismiss_and_relaunch() {
     let result = handler.execute(params).await.unwrap();
 
     // Check if we got an error (no device available in test environment)
-    if result.get("error").is_some() {
-        if result["error"]["code"] == "DEVICE_ERROR" {
-            // This is expected in test environment without real devices
-            return;
-        }
+    if result.get("error").is_some() && result["error"]["code"] == "DEVICE_ERROR" {
+        // This is expected in test environment without real devices
+        return;
     }
 
     // Should have action in response
@@ -84,11 +82,9 @@ async fn test_enrollment_flow_enroll_only() {
     let result = handler.execute(params).await.unwrap();
 
     // Check if we got an error (no device available in test environment)
-    if result.get("error").is_some() {
-        if result["error"]["code"] == "DEVICE_ERROR" {
-            // This is expected in test environment without real devices
-            return;
-        }
+    if result.get("error").is_some() && result["error"]["code"] == "DEVICE_ERROR" {
+        // This is expected in test environment without real devices
+        return;
     }
 
     // Should have action in response

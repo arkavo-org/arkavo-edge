@@ -5,25 +5,12 @@ struct ContentView: View {
     @StateObject private var authManager = AuthenticationManager()
     @State private var showingLoginView = true
     @State private var showingTestComponents = false
+    @EnvironmentObject var navigationManager: NavigationManager
     
     var body: some View {
         NavigationView {
-            if authManager.isAuthenticated {
-                MainMenuView(
-                    authManager: authManager,
-                    showingTestComponents: $showingTestComponents
-                )
-            } else if showingLoginView {
-                LoginView(
-                    authManager: authManager,
-                    showingLoginView: $showingLoginView
-                )
-            } else {
-                RegistrationView(
-                    authManager: authManager,
-                    showingLoginView: $showingLoginView
-                )
-            }
+            // Always show calibration view for automation purposes
+            CalibrationView()
         }
         .sheet(isPresented: $showingTestComponents) {
             TestComponentsView()
@@ -50,6 +37,16 @@ struct MainMenuView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .accessibilityIdentifier("test_components_button")
+                
+                NavigationLink(destination: CalibrationView()) {
+                    Text("Calibration Mode")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+                .accessibilityIdentifier("calibration_button")
                 
                 Button("Coordinate Visualizer") {
                     // Navigate to coordinate visualizer

@@ -429,9 +429,16 @@ let package = Package(
     /// Create a minimal host app that can load and run our XCTest bundle
     fn create_test_host_app(&self) -> Result<PathBuf> {
         let app_dir = self.build_dir.join("ArkavoTestHost.app");
+        
+        // Remove existing app if it exists to ensure clean build
+        if app_dir.exists() {
+            eprintln!("[XCTestCompiler] Removing existing test host app to ensure clean build");
+            fs::remove_dir_all(&app_dir)?;
+        }
+        
         fs::create_dir_all(&app_dir)?;
 
-        // Create Info.plist
+        // Create Info.plist with deep link support for calibration
         let info_plist = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -458,10 +465,32 @@ let package = Package(
     <true/>
     <key>UIStatusBarHidden</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>arkavo-edge</string>
+                <string>arkavo-test</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>com.arkavo.testhost</string>
+        </dict>
+    </array>
 </dict>
 </plist>"#;
 
-        fs::write(app_dir.join("Info.plist"), info_plist)?;
+        let plist_path = app_dir.join("Info.plist");
+        fs::write(&plist_path, info_plist)?;
+        eprintln!("[XCTestCompiler] Wrote Info.plist to: {}", plist_path.display());
+        
+        // Verify the URL types were written correctly
+        let written_content = fs::read_to_string(&plist_path)?;
+        if written_content.contains("CFBundleURLTypes") {
+            eprintln!("[XCTestCompiler] ✓ Info.plist contains URL types for deep links");
+        } else {
+            eprintln!("[XCTestCompiler] ⚠️ Warning: Info.plist missing URL types!");
+        }
 
         // Create a minimal executable that loads and runs our test
         let main_m = r#"
@@ -566,8 +595,222 @@ let package = Package(
 
 @end
 
-// Minimal app delegate that doesn't create any UI
+// Calibration view controller with coordinate display
+@interface CalibrationViewController : UIViewController
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *instructionLabel;
+@property (nonatomic, strong) UILabel *coordinateLabel;
+@property (nonatomic, strong) UILabel *lastTapLabel;
+@property (nonatomic, strong) NSMutableArray *calibrationTargets;
+@property (nonatomic, strong) NSMutableArray *tapResults;
+@property (nonatomic, strong) NSMutableArray *tapMarkers;
+@property (nonatomic, assign) NSInteger currentTargetIndex;
+@property (nonatomic, strong) UIView *targetView;
+@property (nonatomic, strong) NSString *resultsFilePath;
+@property (nonatomic, assign) BOOL waitingForTap;
+@end
+
+@implementation CalibrationViewController
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        self.calibrationTargets = [NSMutableArray array];
+        self.tapResults = [NSMutableArray array];
+        self.tapMarkers = [NSMutableArray array];
+        self.currentTargetIndex = 0;
+        self.waitingForTap = YES;
+        
+        // Setup results file path
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *documentsPath = [paths firstObject];
+        self.resultsFilePath = [documentsPath stringByAppendingPathComponent:@"calibration_results.json"];
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    NSLog(@"[Calibration] View did load");
+    self.view.backgroundColor = [UIColor whiteColor];
+    
+    // Title
+    self.titleLabel = [[UILabel alloc] init];
+    self.titleLabel.text = @"Calibration Mode";
+    self.titleLabel.font = [UIFont boldSystemFontOfSize:24];
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.titleLabel];
+    
+    // Instructions
+    self.instructionLabel = [[UILabel alloc] init];
+    self.instructionLabel.text = @"Waiting for automated taps...";
+    self.instructionLabel.textAlignment = NSTextAlignmentCenter;
+    self.instructionLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.instructionLabel];
+    
+    // Coordinate display - LARGE and prominent
+    self.coordinateLabel = [[UILabel alloc] init];
+    self.coordinateLabel.text = @"TAP COORDINATES";
+    self.coordinateLabel.font = [UIFont boldSystemFontOfSize:32];
+    self.coordinateLabel.textAlignment = NSTextAlignmentCenter;
+    self.coordinateLabel.backgroundColor = [UIColor blackColor];
+    self.coordinateLabel.textColor = [UIColor whiteColor];
+    self.coordinateLabel.layer.cornerRadius = 10;
+    self.coordinateLabel.layer.masksToBounds = YES;
+    self.coordinateLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.coordinateLabel];
+    
+    // Last tap info
+    self.lastTapLabel = [[UILabel alloc] init];
+    self.lastTapLabel.text = @"No taps yet";
+    self.lastTapLabel.font = [UIFont systemFontOfSize:18];
+    self.lastTapLabel.textAlignment = NSTextAlignmentCenter;
+    self.lastTapLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.lastTapLabel];
+    
+    // Layout
+    [NSLayoutConstraint activateConstraints:@[
+        [self.titleLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:20],
+        [self.titleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        
+        [self.instructionLabel.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:10],
+        [self.instructionLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        
+        [self.coordinateLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.coordinateLabel.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [self.coordinateLabel.widthAnchor constraintEqualToConstant:350],
+        [self.coordinateLabel.heightAnchor constraintEqualToConstant:80],
+        
+        [self.lastTapLabel.topAnchor constraintEqualToAnchor:self.coordinateLabel.bottomAnchor constant:20],
+        [self.lastTapLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor]
+    ]];
+    
+    // Start calibration immediately
+    NSLog(@"[Calibration] Ready to receive taps");
+    [self showNextTarget];
+}
+
+- (void)showNextTarget {
+    self.waitingForTap = YES;
+    self.instructionLabel.text = @"Waiting for next tap...";
+    self.coordinateLabel.text = @"READY FOR TAP";
+    self.coordinateLabel.backgroundColor = [UIColor blackColor];
+    NSLog(@"[Calibration] showNextTarget - waiting for tap %ld", (long)self.tapResults.count + 1);
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    NSLog(@"[Calibration] touchesBegan called - waitingForTap: %@", self.waitingForTap ? @"YES" : @"NO");
+    
+    if (!self.waitingForTap) return;
+    
+    UITouch *touch = [touches anyObject];
+    CGPoint tapLocation = [touch locationInView:self.view];
+    NSLog(@"[Calibration] Tap detected at (%.0f, %.0f)", tapLocation.x, tapLocation.y);
+    
+    // Show tap coordinates prominently
+    self.coordinateLabel.text = [NSString stringWithFormat:@"X: %.0f  Y: %.0f", tapLocation.x, tapLocation.y];
+    self.coordinateLabel.backgroundColor = [UIColor systemGreenColor];
+    self.coordinateLabel.textColor = [UIColor blackColor];
+    
+    // Update last tap info
+    self.lastTapLabel.text = [NSString stringWithFormat:@"Tap %ld at (%.0f, %.0f)", 
+                              (long)self.tapResults.count + 1, tapLocation.x, tapLocation.y];
+    
+    // Create visual marker at tap location
+    UIView *tapMarker = [[UIView alloc] initWithFrame:CGRectMake(tapLocation.x - 15, tapLocation.y - 15, 30, 30)];
+    tapMarker.backgroundColor = [UIColor systemGreenColor];
+    tapMarker.layer.cornerRadius = 15;
+    tapMarker.layer.borderWidth = 2;
+    tapMarker.layer.borderColor = [UIColor whiteColor].CGColor;
+    tapMarker.alpha = 0.8;
+    [self.view addSubview:tapMarker];
+    [self.tapMarkers addObject:tapMarker];
+    
+    // Add coordinate label at tap location
+    UILabel *coordLabel = [[UILabel alloc] init];
+    coordLabel.text = [NSString stringWithFormat:@"(%.0f,%.0f)", tapLocation.x, tapLocation.y];
+    coordLabel.font = [UIFont boldSystemFontOfSize:14];
+    coordLabel.textColor = [UIColor blackColor];
+    coordLabel.backgroundColor = [UIColor whiteColor];
+    coordLabel.layer.cornerRadius = 4;
+    coordLabel.layer.masksToBounds = YES;
+    coordLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:coordLabel];
+    [self.tapMarkers addObject:coordLabel];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [coordLabel.centerXAnchor constraintEqualToAnchor:tapMarker.centerXAnchor],
+        [coordLabel.topAnchor constraintEqualToAnchor:tapMarker.bottomAnchor constant:5]
+    ]];
+    
+    // Record the result
+    NSDictionary *result = @{
+        @"timestamp": [NSDate date],
+        @"actual": @{@"x": @(tapLocation.x), @"y": @(tapLocation.y)},
+        @"targetHit": @YES
+    };
+    [self.tapResults addObject:result];
+    
+    // Save after each tap for real-time access
+    [self saveCalibrationResults];
+    
+    self.waitingForTap = NO;
+    
+    // Check if we've collected enough taps
+    if (self.tapResults.count >= 5) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self calibrationComplete];
+        });
+    } else {
+        // Ready for next tap after a short delay
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self showNextTarget];
+        });
+    }
+}
+
+- (void)calibrationComplete {
+    self.instructionLabel.text = @"Calibration Complete!";
+    self.coordinateLabel.text = @"FINISHED";
+    self.coordinateLabel.backgroundColor = [UIColor systemBlueColor];
+    self.coordinateLabel.textColor = [UIColor whiteColor];
+    
+    // Save final results
+    [self saveCalibrationResults];
+    
+    // Keep the view open to show results
+    self.lastTapLabel.text = [NSString stringWithFormat:@"Collected %ld tap coordinates", (long)self.tapResults.count];
+}
+
+- (void)saveCalibrationResults {
+    NSDictionary *results = @{
+        @"device_info": [[UIDevice currentDevice] model],
+        @"screen_size": @{
+            @"width": @(self.view.bounds.size.width),
+            @"height": @(self.view.bounds.size.height)
+        },
+        @"tap_events": self.tapResults,
+        @"calibration_complete": @YES
+    };
+    
+    NSError *error;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:results options:NSJSONWritingPrettyPrinted error:&error];
+    
+    if (!error) {
+        [jsonData writeToFile:self.resultsFilePath atomically:YES];
+        NSLog(@"[Calibration] Results saved to: %@", self.resultsFilePath);
+    }
+}
+
+@end
+
+// Enhanced app delegate with calibration support
 @interface TestHostAppDelegate : UIResponder <UIApplicationDelegate>
+@property (strong, nonatomic) UIWindow *window;
+@property (strong, nonatomic) UINavigationController *navigationController;
+@property (nonatomic, assign) BOOL isInCalibrationMode;
 @end
 
 @implementation TestHostAppDelegate
@@ -578,6 +821,31 @@ let package = Package(
     // Set up the bridge immediately to ensure socket is ready when Rust connects
     [TestBridge setupBridge];
     
+    // Create window and root view controller
+    self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    
+    // Create a minimal root view controller
+    UIViewController *rootVC = [[UIViewController alloc] init];
+    rootVC.view.backgroundColor = [UIColor blackColor];
+    
+    UILabel *label = [[UILabel alloc] init];
+    label.text = @"ArkavoTestHost";
+    label.textColor = [UIColor whiteColor];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [rootVC.view addSubview:label];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [label.centerXAnchor constraintEqualToAnchor:rootVC.view.centerXAnchor],
+        [label.centerYAnchor constraintEqualToAnchor:rootVC.view.centerYAnchor]
+    ]];
+    
+    self.navigationController = [[UINavigationController alloc] initWithRootViewController:rootVC];
+    self.navigationController.navigationBarHidden = YES;
+    
+    self.window.rootViewController = self.navigationController;
+    [self.window makeKeyAndVisible];
+    
     // Log target app if specified
     NSString *targetAppId = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_TARGET_APP_ID"];
     if (!targetAppId) {
@@ -586,20 +854,60 @@ let package = Package(
     
     if (targetAppId) {
         NSLog(@"[TestHost] Target app specified: %@", targetAppId);
-        // The test host will remain in the background naturally since the target app is in foreground
     }
     
-    // Don't create any windows or UI - this is just a bridge
+    // Check for calibration mode via environment variable instead of deep link
+    NSString *calibrationMode = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARKAVO_CALIBRATION_MODE"];
+    if (!calibrationMode) {
+        calibrationMode = [[[NSProcessInfo processInfo] environment] objectForKey:@"SIMCTL_CHILD_ARKAVO_CALIBRATION_MODE"];
+    }
     
-    // Important: Move the app to background immediately after setup
-    // This prevents the black screen from confusing testing agents
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        NSLog(@"[TestHost] Moving to background to avoid confusion...");
-        // Suspend the app to move it to background
-        [[UIApplication sharedApplication] performSelector:@selector(suspend)];
-    });
+    if (calibrationMode && [calibrationMode isEqualToString:@"1"]) {
+        NSLog(@"[TestHost] Calibration mode enabled via environment variable");
+        [self enterCalibrationMode];
+    } else {
+        // Check if launched for calibration via deep link (fallback)
+        NSURL *url = launchOptions[UIApplicationLaunchOptionsURLKey];
+        if (url && [[url scheme] isEqualToString:@"arkavo-edge"] && [[url host] isEqualToString:@"calibration"]) {
+            [self enterCalibrationMode];
+        } else {
+            // Move to background after a delay if not in calibration mode
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (!self.isInCalibrationMode) {
+                    NSLog(@"[TestHost] Moving to background...");
+                    [[UIApplication sharedApplication] performSelector:@selector(suspend)];
+                }
+            });
+        }
+    }
     
     return YES;
+}
+
+- (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
+    NSLog(@"[TestHost] Open URL: %@", url);
+    
+    if ([[url scheme] isEqualToString:@"arkavo-edge"] && [[url host] isEqualToString:@"calibration"]) {
+        [self enterCalibrationMode];
+        return YES;
+    }
+    
+    return NO;
+}
+
+- (void)enterCalibrationMode {
+    NSLog(@"[TestHost] Entering calibration mode");
+    self.isInCalibrationMode = YES;
+    
+    // Present calibration view modally to ensure it's visible
+    CalibrationViewController *calibrationVC = [[CalibrationViewController alloc] init];
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:calibrationVC];
+    navController.modalPresentationStyle = UIModalPresentationFullScreen;
+    
+    // Present from the root view controller
+    [self.window.rootViewController presentViewController:navController animated:NO completion:^{
+        NSLog(@"[TestHost] Calibration view presented");
+    }];
 }
 
 @end
@@ -729,8 +1037,26 @@ int main(int argc, char * argv[]) {
             )));
         }
 
+        // Uninstall existing host app if present to ensure clean install
+        eprintln!("[XCTestCompiler] Uninstalling existing host app if present...");
+        let _ = Command::new("xcrun")
+            .args(["simctl", "uninstall", device_id, "com.arkavo.testhost"])
+            .output();
+        
         // Install the host app
         eprintln!("[XCTestCompiler] Installing host app...");
+        eprintln!("[XCTestCompiler] Host app path: {}", host_app_path.display());
+        
+        // Verify Info.plist contains URL types before installing
+        let info_plist_path = host_app_path.join("Info.plist");
+        if let Ok(plist_content) = fs::read_to_string(&info_plist_path) {
+            if plist_content.contains("arkavo-edge") {
+                eprintln!("[XCTestCompiler] ✓ Info.plist contains arkavo-edge URL scheme");
+            } else {
+                eprintln!("[XCTestCompiler] ⚠️ WARNING: Info.plist missing arkavo-edge URL scheme!");
+            }
+        }
+        
         let install_output = Command::new("xcrun")
             .args([
                 "simctl",

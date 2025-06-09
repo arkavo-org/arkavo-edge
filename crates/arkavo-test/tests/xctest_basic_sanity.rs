@@ -141,7 +141,7 @@ fn test_macos_tools_available() {
 
     // Check if we can run simctl
     let simctl = Command::new("xcrun")
-        .args(&["simctl", "help"])
+        .args(["simctl", "help"])
         .output()
         .expect("Failed to run simctl");
 

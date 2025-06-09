@@ -51,6 +51,7 @@
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>
+                <string>arkavo-edge</string>
                 <string>arkavo-reference</string>
             </array>
             <key>CFBundleURLName</key>

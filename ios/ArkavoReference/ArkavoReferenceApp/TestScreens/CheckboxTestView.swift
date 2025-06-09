@@ -221,8 +221,3 @@ extension CheckboxTestView {
         // This would be triggered by deep link or test runner
     }
 }
-
-#Preview {
-    NavigationView {
-        CheckboxTestView()
-    }

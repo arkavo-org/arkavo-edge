@@ -172,8 +172,8 @@ impl Tool for CoordinateValidator {
                         "description": "Recommended tap area avoiding edges",
                         "min_x": 10,
                         "min_y": 50,
-                        "max_x": width - 10,
-                        "max_y": height - 50
+                        "max_x": width - 10.0,
+                        "max_y": height - 50.0
                     }
                 }))
             }

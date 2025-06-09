@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DAB467FD2DF5D01300BC7525 /* CalibrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAB467FC2DF5D01300BC7525 /* CalibrationView.swift */; };
 		E400000128A0000000000001 /* ArkavoReferenceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400000028A0000000000001 /* ArkavoReferenceApp.swift */; };
 		E400000328A0000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400000228A0000000000002 /* ContentView.swift */; };
 		E400000528A0000000000003 /* TestComponentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E400000428A0000000000003 /* TestComponentsView.swift */; };
@@ -16,6 +17,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DAB467FC2DF5D01300BC7525 /* CalibrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationView.swift; sourceTree = "<group>"; };
 		E400000028A0000000000001 /* ArkavoReferenceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArkavoReferenceApp.swift; sourceTree = "<group>"; };
 		E400000228A0000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E400000428A0000000000003 /* TestComponentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestComponentsView.swift; sourceTree = "<group>"; };
@@ -69,6 +71,7 @@
 		E400001328A000000000000D /* TestScreens */ = {
 			isa = PBXGroup;
 			children = (
+				DAB467FC2DF5D01300BC7525 /* CalibrationView.swift */,
 				E400000828A0000000000005 /* CheckboxTestView.swift */,
 				E400000A28A0000000000006 /* BiometricTestView.swift */,
 			);
@@ -147,6 +150,7 @@
 				E400000328A0000000000002 /* ContentView.swift in Sources */,
 				E400000528A0000000000003 /* TestComponentsView.swift in Sources */,
 				E400000728A0000000000004 /* DiagnosticOverlay.swift in Sources */,
+				DAB467FD2DF5D01300BC7525 /* CalibrationView.swift in Sources */,
 				E400000928A0000000000005 /* CheckboxTestView.swift in Sources */,
 				E400000B28A0000000000006 /* BiometricTestView.swift in Sources */,
 			);

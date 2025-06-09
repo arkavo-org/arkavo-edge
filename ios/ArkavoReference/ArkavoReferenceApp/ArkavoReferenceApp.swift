@@ -36,21 +36,35 @@ struct ArkavoReferenceApp: App {
         // Log app launch
         diagnosticManager.logEvent(DiagnosticEvent(
             type: .navigation,
-            details: "App launched"
+            details: "App launched - starting in calibration mode"
         ))
     }
     
     private func handleDeepLink(_ url: URL) {
-        // arkavo-reference://screen/checkboxes
-        // arkavo-reference://screen/biometric
-        // arkavo-reference://diagnostic/enable
-        
-        guard url.scheme == "arkavo-reference" else { return }
+        // Support both schemes:
+        // arkavo-edge://calibration
+        // arkavo-reference://screen/calibration
         
         diagnosticManager.logEvent(DiagnosticEvent(
             type: .navigation,
             details: "Deep link: \(url.absoluteString)"
         ))
+        
+        // Handle simple arkavo-edge:// scheme
+        if url.scheme == "arkavo-edge" {
+            switch url.host {
+            case "calibration":
+                navigationManager.navigateToScreen("calibration")
+            case "test":
+                navigationManager.navigateToScreen("test")
+            default:
+                break
+            }
+            return
+        }
+        
+        // Handle arkavo-reference:// scheme
+        guard url.scheme == "arkavo-reference" else { return }
         
         switch url.host {
         case "screen":
@@ -156,6 +170,8 @@ class NavigationManager: ObservableObject {
         case interactions
         case grid
         case edges
+        case calibration
+        case test
     }
     
     func navigateToScreen(_ screenName: String) {

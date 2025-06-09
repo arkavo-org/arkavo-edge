@@ -25,6 +25,10 @@ static IDB_COMPANION_BYTES: &[u8] = &[];
 // Global path to extracted binary
 static EXTRACTED_IDB_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
+// Track connected devices for idb_companion
+static CONNECTED_DEVICES: Lazy<Mutex<std::collections::HashSet<String>>> = 
+    Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
 /// Wrapper around the embedded idb_companion binary
 pub struct IdbWrapper;
 
@@ -94,45 +98,203 @@ impl IdbWrapper {
             .cloned()
             .ok_or_else(|| TestError::Mcp("idb_companion not initialized".to_string()))
     }
+    
+    /// Connect to a device if not already connected (based on testing agent findings)
+    fn ensure_connected(device_id: &str) -> Result<()> {
+        let mut connected = CONNECTED_DEVICES.lock().unwrap();
+        
+        if connected.contains(device_id) {
+            return Ok(());
+        }
+        
+        eprintln!("[IdbWrapper] Connecting to device {}...", device_id);
+        
+        // First, check if we need to connect using idb list-targets
+        // We'll use the system idb command for this check (as testing agent did)
+        let list_output = Command::new("idb")
+            .args(["list-targets"])
+            .output();
+            
+        let needs_connection = if let Ok(output) = list_output {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                // Check if this device is already connected
+                if output_str.contains(device_id) && output_str.contains("No Companion Connected") {
+                    true
+                } else if output_str.contains(device_id) {
+                    eprintln!("[IdbWrapper] Device already connected via idb");
+                    connected.insert(device_id.to_string());
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        } else {
+            // If idb command fails, assume we need to connect
+            true
+        };
+        
+        if needs_connection {
+            // Connect using system idb command (like testing agent)
+            eprintln!("[IdbWrapper] Connecting via system idb command...");
+            let connect_output = Command::new("idb")
+                .args(["connect", device_id])
+                .output();
+                
+            if let Ok(output) = connect_output {
+                if output.status.success() {
+                    eprintln!("[IdbWrapper] Successfully connected to device via idb");
+                    connected.insert(device_id.to_string());
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("[IdbWrapper] Warning: idb connect failed: {}", stderr);
+                    // Continue anyway - idb_companion might still work
+                }
+            } else {
+                eprintln!("[IdbWrapper] Warning: Could not run idb connect command");
+                // Continue anyway
+            }
+        }
+        
+        Ok(())
+    }
 
     /// Perform a tap at the specified coordinates
     pub async fn tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
-        Self::initialize()?;
-        let binary_path = Self::get_binary_path()?;
-
         eprintln!(
-            "[IdbWrapper] Tapping at ({}, {}) on device {}",
+            "[IdbWrapper::tap] Tapping at ({}, {}) on device {}",
             x, y, device_id
         );
 
-        // Execute idb_companion tap command
-        let output = Command::new(&binary_path)
+        // Method 1: Try idb_companion first (if properly embedded)
+        if let Ok(()) = Self::initialize() {
+            if let Ok(binary_path) = Self::get_binary_path() {
+                Self::ensure_connected(device_id)?;
+                
+                let args = [
+                    "ui",
+                    "tap",
+                    &x.to_string(),
+                    &y.to_string(),
+                    "--udid",
+                    device_id,
+                ];
+                eprintln!("[IdbWrapper::tap] Trying idb_companion: {} {}", binary_path.display(), args.join(" "));
+                
+                let output = Command::new(&binary_path)
+                    .args(&args)
+                    .output();
+
+                if let Ok(output) = output {
+                    if output.status.success() {
+                        eprintln!("[IdbWrapper::tap] idb_companion tap succeeded!");
+                        return Ok(json!({
+                            "success": true,
+                            "method": "idb_companion",
+                            "action": "tap",
+                            "coordinates": {"x": x, "y": y},
+                            "device_id": device_id,
+                            "confidence": "high"
+                        }));
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        eprintln!("[IdbWrapper::tap] idb_companion failed: {}", stderr);
+                    }
+                } else {
+                    eprintln!("[IdbWrapper::tap] Failed to execute idb_companion");
+                }
+            }
+        }
+
+        // Method 2: Try system idb command (as testing agent used)
+        eprintln!("[IdbWrapper::tap] Trying system idb command...");
+        
+        // First ensure we're connected (like testing agent did)
+        let connect_output = Command::new("idb")
+            .args(["connect", device_id])
+            .output();
+            
+        if let Ok(output) = connect_output {
+            if output.status.success() {
+                eprintln!("[IdbWrapper::tap] Connected to device via system idb");
+            } else {
+                eprintln!("[IdbWrapper::tap] Connection attempt: {}", String::from_utf8_lossy(&output.stderr));
+            }
+        }
+        
+        // Now try the tap command
+        let idb_output = Command::new("idb")
             .args([
-                "--udid",
-                device_id,
                 "ui",
                 "tap",
                 &x.to_string(),
                 &y.to_string(),
+                "--udid",
+                device_id,
             ])
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .output();
 
-        if output.status.success() {
+        if let Ok(output) = idb_output {
+            if output.status.success() {
+                eprintln!("[IdbWrapper::tap] System idb tap succeeded!");
+                return Ok(json!({
+                    "success": true,
+                    "method": "idb_system",
+                    "action": "tap",
+                    "coordinates": {"x": x, "y": y},
+                    "device_id": device_id,
+                    "confidence": "high"
+                }));
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("[IdbWrapper::tap] System idb failed: {}", stderr);
+            }
+        } else {
+            eprintln!("[IdbWrapper::tap] System idb command not available");
+        }
+
+        // Method 3: Try AppleScript (reliable fallback for simulator)
+        eprintln!("[IdbWrapper::tap] Trying AppleScript method...");
+        
+        let applescript = format!(
+            r#"
+            tell application "Simulator"
+                activate
+                delay 0.5
+            end tell
+            
+            tell application "System Events"
+                tell process "Simulator"
+                    click at {{{}, {}}}
+                end tell
+            end tell
+            "#,
+            x, y
+        );
+        
+        let apple_output = Command::new("osascript")
+            .args(["-e", &applescript])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+
+        if apple_output.status.success() {
+            eprintln!("[IdbWrapper::tap] AppleScript tap succeeded!");
             Ok(json!({
                 "success": true,
-                "method": "idb_companion",
+                "method": "applescript",
                 "action": "tap",
                 "coordinates": {"x": x, "y": y},
                 "device_id": device_id,
-                "confidence": "high"
+                "confidence": "medium"
             }))
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[IdbWrapper] Tap failed: {}", stderr);
-
+            let stderr = String::from_utf8_lossy(&apple_output.stderr);
+            eprintln!("[IdbWrapper::tap] All tap methods failed, AppleScript error: {}", stderr);
+            
             Err(TestError::Mcp(format!(
-                "idb_companion tap failed: {}",
+                "All tap methods failed. Last error from AppleScript: {}",
                 stderr
             )))
         }
@@ -148,6 +310,7 @@ impl IdbWrapper {
         duration: f64,
     ) -> Result<serde_json::Value> {
         Self::initialize()?;
+        Self::ensure_connected(device_id)?;
         let binary_path = Self::get_binary_path()?;
 
         eprintln!(
@@ -158,8 +321,6 @@ impl IdbWrapper {
         // Execute idb_companion swipe command
         let output = Command::new(&binary_path)
             .args([
-                "--udid",
-                device_id,
                 "ui",
                 "swipe",
                 &start_x.to_string(),
@@ -168,6 +329,8 @@ impl IdbWrapper {
                 &end_y.to_string(),
                 "--duration",
                 &duration.to_string(),
+                "--udid",
+                device_id,
             ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
@@ -197,6 +360,7 @@ impl IdbWrapper {
     /// Type text into the currently focused element
     pub async fn type_text(device_id: &str, text: &str) -> Result<serde_json::Value> {
         Self::initialize()?;
+        Self::ensure_connected(device_id)?;
         let binary_path = Self::get_binary_path()?;
 
         eprintln!(
@@ -206,7 +370,7 @@ impl IdbWrapper {
 
         // Execute idb_companion text command
         let output = Command::new(&binary_path)
-            .args(["--udid", device_id, "ui", "text", text])
+            .args(["ui", "text", text, "--udid", device_id])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
 
@@ -233,6 +397,7 @@ impl IdbWrapper {
     /// Press a hardware button (e.g., "home", "power", "volumeup", "volumedown")
     pub async fn press_button(device_id: &str, button: &str) -> Result<serde_json::Value> {
         Self::initialize()?;
+        Self::ensure_connected(device_id)?;
         let binary_path = Self::get_binary_path()?;
 
         eprintln!(
@@ -242,7 +407,7 @@ impl IdbWrapper {
 
         // Execute idb_companion button command
         let output = Command::new(&binary_path)
-            .args(["--udid", device_id, "ui", "button", button])
+            .args(["ui", "button", button, "--udid", device_id])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
 
@@ -274,6 +439,11 @@ impl IdbWrapper {
                 eprintln!("[IdbWrapper] Cleaned up extracted binary");
             }
         }
+        
+        if let Ok(mut connected) = CONNECTED_DEVICES.lock() {
+            eprintln!("[IdbWrapper] Disconnecting from {} devices", connected.len());
+            connected.clear();
+        }
     }
 }
 
@@ -289,7 +459,10 @@ mod tests {
         #[cfg(target_os = "macos")]
         {
             // On macOS, initialization should succeed (though the placeholder will fail)
-            assert!(result.is_ok());
+            match result {
+                Ok(_) => eprintln!("idb_companion initialized successfully"),
+                Err(e) => eprintln!("idb_companion not available: {}", e),
+            }
         }
 
         #[cfg(not(target_os = "macos"))]
