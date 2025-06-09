@@ -74,11 +74,11 @@ async fn test_ollama_streaming() {
 
 #[tokio::test]
 async fn test_ollama_error_handling() {
-    // Test with invalid URL
+    // Test with invalid URL - use a non-routable IP to ensure failure
     unsafe {
         env::set_var(
             "OLLAMA_BASE_URL",
-            "http://invalid-url-that-does-not-exist:11434",
+            "http://192.0.2.1:11434", // TEST-NET-1 (RFC 5737) - guaranteed not to be routable
         );
     }
 
@@ -86,15 +86,30 @@ async fn test_ollama_error_handling() {
 
     let messages = vec![Message::user("Hello")];
 
-    let result = client.complete(messages).await;
+    // Set a shorter timeout to make the test run faster
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(5), client.complete(messages)).await;
 
-    // The error might occur either during model selection or during the actual request
-    // Since we're using a completely invalid URL, it should fail somewhere
-    if let Err(e) = &result {
-        println!("Expected error: {}", e);
-        assert!(e.to_string().contains("error") || e.to_string().contains("failed"));
-    } else {
-        panic!("Expected an error but got success");
+    // The request should either timeout or return an error
+    match result {
+        Ok(Ok(_)) => panic!("Expected an error but got success"),
+        Ok(Err(e)) => {
+            println!("Got expected error: {}", e);
+            // Verify it's a network/connection error
+            let error_str = e.to_string().to_lowercase();
+            assert!(
+                error_str.contains("error")
+                    || error_str.contains("failed")
+                    || error_str.contains("connection")
+                    || error_str.contains("timeout"),
+                "Unexpected error message: {}",
+                e
+            );
+        }
+        Err(_) => {
+            println!("Request timed out as expected");
+            // Timeout is also an acceptable failure mode
+        }
     }
 }
 

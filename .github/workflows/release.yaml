@@ -20,20 +20,20 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          
+
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           override: true
-          
+
       - name: Extract version
         id: version
         run: |
           VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -59,7 +59,7 @@ jobs:
             - macOS (ARM64): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            
+
   build-linux-x86_64:
     needs: release
     name: Build Linux (x86_64)
@@ -67,7 +67,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
+
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -75,25 +75,25 @@ jobs:
           target: x86_64-unknown-linux-musl
           profile: minimal
           override: true
-          
+
       - name: Install musl tools
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-          
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --target x86_64-unknown-linux-musl
-          
+
       - name: Prepare binary
         run: |
           cd target/x86_64-unknown-linux-musl/release
           strip arkavo
           tar -czf arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz arkavo
           shasum -a 256 arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz > arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
-          
+
       - name: Create .deb package
         run: |
           mkdir -p debian/DEBIAN
@@ -115,7 +115,7 @@ jobs:
           dpkg-deb --build debian arkavo_${{ needs.release.outputs.version }}_amd64.deb
           dpkg-deb --info arkavo_${{ needs.release.outputs.version }}_amd64.deb
           shasum -a 256 arkavo_${{ needs.release.outputs.version }}_amd64.deb > arkavo_${{ needs.release.outputs.version }}_amd64.deb.sha256
-      
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
@@ -125,9 +125,10 @@ jobs:
             ./target/x86_64-unknown-linux-musl/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
             ./arkavo_${{ needs.release.outputs.version }}_amd64.deb
             ./arkavo_${{ needs.release.outputs.version }}_amd64.deb.sha256
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
+
   build-macos-arm64:
     needs: release
     name: Build macOS (ARM64)
@@ -195,7 +196,7 @@ jobs:
           cd target/aarch64-apple-darwin/release
           # checked online by Gatekeeper
           spctl -a -v arkavo || echo "Note: spctl may fail in CI but the binary is notarized"
-          
+
       - name: Cleanup temporary files
         run: |
           cd target/aarch64-apple-darwin/release
@@ -214,6 +215,7 @@ jobs:
           files: |
             ./target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz
             ./target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz.sha256
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   
@@ -233,14 +235,14 @@ jobs:
         run: |
           apt-get update
           apt-get install -y curl ca-certificates
-          
+
       - name: Download and test tar.gz binary
         run: |
           curl -L -o arkavo.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
           tar -xzf arkavo.tar.gz
           chmod +x arkavo
           ./arkavo --version
-          
+
       - name: Download and test .deb package
         run: |
           curl -L -o arkavo.deb https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo_${{ needs.release.outputs.version }}_amd64.deb
@@ -266,7 +268,7 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
+
       - name: Update release to published
         uses: softprops/action-gh-release@v1
         with:

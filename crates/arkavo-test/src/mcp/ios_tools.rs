@@ -1407,7 +1407,7 @@ impl ScreenCaptureKit {
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Name for the screenshot"
+                            "description": "Name for the screenshot (optional - will generate timestamp-based name if not provided)"
                         },
                         "device_id": {
                             "type": "string",
@@ -1418,7 +1418,7 @@ impl ScreenCaptureKit {
                             "description": "Whether to analyze the screenshot"
                         }
                     },
-                    "required": ["name"]
+                    "required": []
                 }),
             },
             device_manager,
@@ -1437,7 +1437,22 @@ impl Tool for ScreenCaptureKit {
         let name = params
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| TestError::Mcp("Missing name parameter".to_string()))?;
+            .unwrap_or_else(|| {
+                // Generate random name with timestamp if not provided
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S_%3f");
+                let random_suffix: String = (0..4)
+                    .map(|_| {
+                        use rand::Rng;
+                        let n = rand::thread_rng().gen_range(0..36);
+                        if n < 10 {
+                            (b'0' + n) as char
+                        } else {
+                            (b'a' + n - 10) as char
+                        }
+                    })
+                    .collect();
+                Box::leak(format!("screenshot_{}_{}", timestamp, random_suffix).into_boxed_str())
+            });
 
         let path = format!("test_results/{}.png", name);
 

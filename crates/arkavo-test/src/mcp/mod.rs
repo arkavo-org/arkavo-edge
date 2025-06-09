@@ -19,6 +19,7 @@ pub mod ios_errors;
 pub mod ios_tools;
 pub mod passkey_dialog_handler;
 pub mod schema;
+pub mod screenshot_analyzer;
 pub mod server;
 pub mod simulator_advanced_tools;
 pub mod simulator_manager;
