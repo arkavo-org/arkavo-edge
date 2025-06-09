@@ -73,6 +73,24 @@ arkavo chat --prompt "Explain this codebase"
 
 AI-powered conversational interface with streaming responses and repository context. Uses Ollama with `devstral` model by default.
 
+#### MCP Integration
+The chat command automatically connects to a local MCP server (if running) to provide access to powerful tools:
+
+```bash
+# Terminal 1: Start MCP server
+arkavo serve
+
+# Terminal 2: Use chat with MCP tools
+arkavo chat
+```
+
+In chat, you can:
+- Type `tools` to list available MCP tools
+- Use `@toolname [args]` to invoke tools directly
+- Example: `@screen_capture {"name": "test1"}`
+
+The integration is automatic - if no MCP server is running, chat falls back to LLM-only mode.
+
 #### Vision Model Support
 For UI testing with screenshots, install a vision-capable model:
 

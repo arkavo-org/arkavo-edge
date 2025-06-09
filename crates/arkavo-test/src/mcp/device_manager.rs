@@ -77,10 +77,6 @@ impl DeviceManager {
                                 .unwrap_or(true);
 
                             if !is_available {
-                                if let Some(name) = device_json.get("name").and_then(|n| n.as_str())
-                                {
-                                    eprintln!("Filtering out unavailable device: {}", name);
-                                }
                                 continue;
                             }
                         }

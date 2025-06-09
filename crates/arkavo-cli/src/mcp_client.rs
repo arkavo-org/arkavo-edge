@@ -1,13 +1,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Debug)]
+struct McpProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
 #[derive(Debug, Clone)]
 pub struct McpClient {
-    process: Arc<Mutex<Child>>,
+    process: Arc<Mutex<McpProcess>>,
     request_id: Arc<Mutex<u64>>,
 }
 
@@ -61,7 +68,14 @@ impl McpClient {
             (parts[0].clone(), parts[1..].to_vec())
         } else {
             // Default to local arkavo mcp
-            ("arkavo".to_string(), vec!["mcp".to_string()])
+            // Use development binary if available, otherwise fall back to system
+            let dev_binary = "./target/debug/arkavo";
+            let cmd = if std::path::Path::new(dev_binary).exists() {
+                dev_binary.to_string()
+            } else {
+                "arkavo".to_string()
+            };
+            (cmd, vec!["mcp".to_string()])
         };
 
         // Start MCP server process
@@ -73,9 +87,10 @@ impl McpClient {
             .spawn()
             .map_err(|e| format!("Failed to start MCP server '{}': {}", cmd, e))?;
 
-        // Initialize the MCP server
-        let stdin = child.stdin.as_mut().ok_or("Failed to get stdin")?;
+        // Take ownership of stdin and stdout
+        let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+        let stdout_reader = BufReader::new(stdout);
 
         let init_request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -90,37 +105,65 @@ impl McpClient {
         };
 
         // Send initialize request
-        writeln!(stdin, "{}", serde_json::to_string(&init_request)?)?;
+        writeln!(&mut stdin, "{}", serde_json::to_string(&init_request)?)?;
         stdin.flush()?;
 
-        // Read initialize response
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
-        if let Some(Ok(line)) = lines.next() {
-            let response: JsonRpcResponse = serde_json::from_str(&line)?;
+        // Create a mutable reference to read the response
+        let mut reader = stdout_reader;
+        let mut init_line = String::new();
+        reader.read_line(&mut init_line)?;
+
+        if !init_line.is_empty() {
+            let response: JsonRpcResponse = serde_json::from_str(&init_line)?;
             if let Some(error) = response.error {
                 return Err(format!("MCP initialization failed: {}", error.message).into());
             }
-            eprintln!("MCP server initialized: {:?}", response.result);
+            // Removed large debug output
         }
-        drop(lines); // Drop lines iterator to release reader
 
-        // Note: stdout is consumed by BufReader, process communication will happen per request
+        // Send initialized notification
+        let initialized_notification = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+        writeln!(
+            &mut stdin,
+            "{}",
+            serde_json::to_string(&initialized_notification)?
+        )?;
+        stdin.flush()?;
+
+        // Create the process wrapper with persistent stdin/stdout
+        let mcp_process = McpProcess {
+            child,
+            stdin,
+            stdout: reader,
+        };
 
         Ok(Self {
-            process: Arc::new(Mutex::new(child)),
+            process: Arc::new(Mutex::new(mcp_process)),
             request_id: Arc::new(Mutex::new(2)), // Start from 2 since we used 1 for init
         })
     }
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
-        let response = self.send_request("tools/list", None)?;
+        // The tools are returned in the initialize response, let's request them again
+        let response = self.send_request("tools/list", Some(json!({})))?;
 
         if let Some(result) = response.result {
+            // Check for tools in different possible locations
             if let Some(tools_value) = result.get("tools") {
                 let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
                 Ok(tools)
+            } else if let Some(tools_value) = result
+                .get("capabilities")
+                .and_then(|c| c.get("tools"))
+                .and_then(|t| t.get("available"))
+            {
+                let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+                Ok(tools)
             } else {
+                // If not found, return empty list
                 Ok(vec![])
             }
         } else {
@@ -204,23 +247,12 @@ impl McpClient {
         };
 
         // Send request
-        if let Some(stdin) = process.stdin.as_mut() {
-            writeln!(stdin, "{}", serde_json::to_string(&request)?)?;
-            stdin.flush()?;
-        } else {
-            return Err("Failed to get stdin".into());
-        }
+        writeln!(process.stdin, "{}", serde_json::to_string(&request)?)?;
+        process.stdin.flush()?;
 
-        // Read response line by line
+        // Read response
         let mut line = String::new();
-        use std::io::BufRead;
-
-        if let Some(stdout) = process.stdout.as_mut() {
-            let mut reader = BufReader::new(stdout);
-            reader.read_line(&mut line)?;
-        } else {
-            return Err("Failed to get stdout".into());
-        }
+        process.stdout.read_line(&mut line)?;
 
         if !line.is_empty() {
             let response: JsonRpcResponse = serde_json::from_str(&line)?;
@@ -242,7 +274,7 @@ pub struct Tool {
 impl Drop for McpClient {
     fn drop(&mut self) {
         if let Ok(mut process) = self.process.lock() {
-            let _ = process.kill();
+            let _ = process.child.kill();
         }
     }
 }
