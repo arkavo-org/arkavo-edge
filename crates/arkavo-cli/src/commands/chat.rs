@@ -1,4 +1,4 @@
-use crate::mcp_client::McpClient;
+use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use serde_json::json;
 use std::env;
@@ -60,17 +60,24 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize MCP client - attempt by default unless explicitly disabled
     let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() != "true" {
         let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-        match McpClient::new(mcp_url) {
+        let result = match mcp_url {
+            Some(url) => McpConnection::new_external(Some(url)),
+            None => McpConnection::new_in_process(),
+        };
+        
+        match result {
             Ok(client) => {
                 if !print_mode {
-                    eprintln!("✓ Connected to MCP server");
+                    match &client {
+                        McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
+                        McpConnection::External(_) => eprintln!("✓ Connected to external MCP server"),
+                    }
                 }
                 Some(client)
             }
             Err(_e) => {
                 if !print_mode {
                     eprintln!("ℹ MCP server not available - using LLM-only mode");
-                    eprintln!("  To start MCP server: arkavo serve");
                 }
                 None
             }
@@ -363,7 +370,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpClient>,
+    mcp_client: &Option<McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
     io::stdout().flush()?;
@@ -440,7 +447,7 @@ async fn process_message(
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpClient>,
+    mcp_client: &Option<McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use streaming but only print content
     let mut stream = client.stream(messages.to_vec()).await?;
@@ -562,7 +569,7 @@ fn get_repository_context() -> String {
 
 fn handle_command(
     input: &str,
-    mcp_client: &Option<McpClient>,
+    mcp_client: &Option<McpConnection>,
     llm_provider: &str,
 ) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
@@ -720,7 +727,7 @@ fn read_file(file_path: &str) -> Option<String> {
 
 fn handle_tool_calls_in_response(
     response: &str,
-    mcp_client: &McpClient,
+    mcp_client: &McpConnection,
     llm_provider: &str,
 ) -> Result<(String, Vec<(String, String)>), Box<dyn std::error::Error>> {
     // Find all @tool calls in the response

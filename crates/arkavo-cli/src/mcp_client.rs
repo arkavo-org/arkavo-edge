@@ -68,7 +68,14 @@ impl McpClient {
             (parts[0].clone(), parts[1..].to_vec())
         } else {
             // Default to local arkavo mcp
-            ("arkavo".to_string(), vec!["mcp".to_string()])
+            // Use development binary if available, otherwise fall back to system
+            let dev_binary = "./target/debug/arkavo";
+            let cmd = if std::path::Path::new(dev_binary).exists() {
+                dev_binary.to_string()
+            } else {
+                "arkavo".to_string()
+            };
+            (cmd, vec!["mcp".to_string()])
         };
 
         // Start MCP server process
