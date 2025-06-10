@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
@@ -57,8 +58,8 @@ fn setup_idb_companion() {
     let idb_binary_path = Path::new(&out_dir).join(format!("idb_companion_{}", arch_suffix));
 
     // Check if we already have the binary
-    if !idb_binary_path.exists() {
-        create_idb_companion_placeholder(&idb_binary_path, arch_suffix);
+    if !idb_binary_path.exists() || is_placeholder(&idb_binary_path) {
+        download_and_extract_idb_companion(&idb_binary_path);
     }
 
     // Tell Rust where to find the binary for embedding
@@ -66,66 +67,66 @@ fn setup_idb_companion() {
         "cargo:rustc-env=IDB_COMPANION_PATH={}",
         idb_binary_path.display()
     );
+}
 
-    // Ensure the file exists (even if it's just a placeholder)
-    if !idb_binary_path.exists() {
-        // Create a minimal placeholder to satisfy include_bytes!
-        fs::write(&idb_binary_path, b"placeholder").expect("Failed to create placeholder");
+fn is_placeholder(path: &Path) -> bool {
+    if let Ok(content) = fs::read(path) {
+        // Check if it's our placeholder script
+        content.len() < 1000 || content.starts_with(b"#!/bin/bash")
+    } else {
+        true
     }
 }
 
-fn create_idb_companion_placeholder(target_path: &Path, arch: &str) {
-    eprintln!("Setting up idb_companion for {}...", arch);
-
-    // Try to find installed idb_companion
-    let possible_sources = vec![
-        "/opt/homebrew/bin/idb_companion", // Homebrew on Apple Silicon
-        "/usr/local/bin/idb_companion",    // Homebrew on Intel
-    ];
-
-    let mut source_found = None;
-    for source in &possible_sources {
-        if Path::new(source).exists() {
-            source_found = Some(source);
-            break;
-        }
+fn download_and_extract_idb_companion(target_path: &Path) {
+    eprintln!("Downloading idb_companion from GitHub releases...");
+    
+    // Download the universal tarball
+    let download_url = "https://github.com/facebook/idb/releases/download/v1.1.8/idb-companion.universal.tar.gz";
+    let temp_dir = env::temp_dir();
+    let tar_path = temp_dir.join("idb-companion.universal.tar.gz");
+    
+    // Download the tarball
+    let status = Command::new("curl")
+        .args(&["-L", "-o", tar_path.to_str().unwrap(), download_url])
+        .status()
+        .expect("Failed to execute curl");
+    
+    if !status.success() {
+        panic!("Failed to download idb_companion from {}", download_url);
     }
-
-    if let Some(source) = source_found {
-        // Copy the actual binary
-        eprintln!("Copying idb_companion from: {}", source);
-        if let Err(e) = fs::copy(source, target_path) {
-            eprintln!("Warning: Failed to copy idb_companion: {}", e);
-            create_placeholder(target_path, arch);
+    
+    eprintln!("Extracting idb_companion...");
+    
+    // Extract the tarball
+    let extract_dir = temp_dir.join("idb_extract");
+    fs::create_dir_all(&extract_dir).expect("Failed to create extraction directory");
+    
+    let status = Command::new("tar")
+        .args(&["-xzf", tar_path.to_str().unwrap(), "-C", extract_dir.to_str().unwrap()])
+        .status()
+        .expect("Failed to execute tar");
+    
+    if !status.success() {
+        panic!("Failed to extract idb_companion tarball");
+    }
+    
+    // Find the idb_companion binary in the extracted files
+    let idb_binary = extract_dir.join("idb-companion.universal").join("bin").join("idb_companion");
+    if !idb_binary.exists() {
+        // Try alternate location
+        let alt_binary = extract_dir.join("bin").join("idb_companion");
+        if alt_binary.exists() {
+            fs::copy(&alt_binary, target_path).expect("Failed to copy idb_companion binary");
         } else {
-            eprintln!("Successfully copied idb_companion for embedding");
-            // Make it executable
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(target_path).unwrap().permissions();
-                perms.set_mode(0o755);
-                fs::set_permissions(target_path, perms).unwrap();
-            }
+            panic!("idb_companion binary not found in extracted tarball at expected locations");
         }
     } else {
-        eprintln!("idb_companion not found, creating placeholder");
-        create_placeholder(target_path, arch);
+        // Copy to target location
+        fs::copy(&idb_binary, target_path).expect("Failed to copy idb_companion binary");
     }
-}
-
-fn create_placeholder(target_path: &Path, arch: &str) {
-    let placeholder_script = r#"#!/bin/bash
-# idb_companion placeholder
-# Install with: brew install idb-companion
-echo "idb_companion placeholder - not installed"
-echo "Architecture: {arch}"
-exit 1
-"#;
-
-    let script_content = placeholder_script.replace("{arch}", arch);
-    fs::write(target_path, script_content).expect("Failed to write placeholder");
-
+    
+    // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -133,4 +134,10 @@ exit 1
         perms.set_mode(0o755);
         fs::set_permissions(target_path, perms).unwrap();
     }
+    
+    // Clean up
+    let _ = fs::remove_file(&tar_path);
+    let _ = fs::remove_dir_all(&extract_dir);
+    
+    eprintln!("Successfully downloaded and prepared idb_companion for embedding");
 }

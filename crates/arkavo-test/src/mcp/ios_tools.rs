@@ -754,7 +754,7 @@ impl Tool for UiInteractionKit {
                     {
                         use super::idb_wrapper::IdbWrapper;
 
-                        // Method 1: Try idb_companion first (most reliable when available)
+                        // Try idb_companion (embedded binary)
                         match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
                             Ok(mut result) => {
                                 eprintln!("UI tap via idb_companion succeeded at ({}, {})", adjusted_x, adjusted_y);
@@ -781,6 +781,7 @@ impl Tool for UiInteractionKit {
                             }
                             Err(e) => {
                                 eprintln!("idb_companion tap failed: {}, trying fallback methods", e);
+                                // Continue to fallback methods below
                             }
                         }
 
