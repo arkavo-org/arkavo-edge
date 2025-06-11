@@ -321,7 +321,7 @@ impl TestExecutor {
         Ok(("rust", combined_output))
     }
 
-    async fn run_swift_test(&self, test_name: &str) -> Result<(&'static str, String)> {
+    async fn run_swift_test(&self, _test_name: &str) -> Result<(&'static str, String)> {
         // Swift test implementation moved to test_executor_swift.rs
         Err(TestError::Mcp("Swift test execution requires test_executor_swift module".to_string()))
     }
@@ -523,8 +523,8 @@ impl TestExecutor {
 
     async fn discover_rust_tests(
         &self,
-        filter: Option<&str>,
-        test_type: &str,
+        _filter: Option<&str>,
+        _test_type: &str,
     ) -> Result<Vec<TestInfo>> {
         // Rust test discovery implementation
         // Moved to avoid exceeding file size limit
@@ -533,8 +533,8 @@ impl TestExecutor {
 
     async fn discover_js_tests(
         &self,
-        filter: Option<&str>,
-        test_type: &str,
+        _filter: Option<&str>,
+        _test_type: &str,
     ) -> Result<Vec<TestInfo>> {
         // JavaScript test discovery implementation
         // Moved to avoid exceeding file size limit
@@ -543,8 +543,8 @@ impl TestExecutor {
 
     async fn discover_python_tests(
         &self,
-        filter: Option<&str>,
-        test_type: &str,
+        _filter: Option<&str>,
+        _test_type: &str,
     ) -> Result<Vec<TestInfo>> {
         // Python test discovery implementation
         // Moved to avoid exceeding file size limit
@@ -553,8 +553,8 @@ impl TestExecutor {
 
     async fn discover_go_tests(
         &self,
-        filter: Option<&str>,
-        test_type: &str,
+        _filter: Option<&str>,
+        _test_type: &str,
     ) -> Result<Vec<TestInfo>> {
         // Go test discovery implementation
         // Moved to avoid exceeding file size limit

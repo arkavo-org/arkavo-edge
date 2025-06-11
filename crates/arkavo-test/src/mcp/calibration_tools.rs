@@ -14,7 +14,14 @@ pub struct CalibrationTool {
 
 impl CalibrationTool {
     pub fn new() -> Result<Self> {
-        let storage_path = PathBuf::from("/tmp/arkavo_calibration");
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let storage_path = project_root.join("target").join("arkavo_calibration");
         let server = CalibrationServer::new(storage_path)
             .map_err(|e| TestError::Mcp(e.to_string()))?;
         
@@ -611,12 +618,33 @@ impl CalibrationTool {
         
         eprintln!("[CalibrationTool] Successfully installed ArkavoReference app");
         
+        // Launch the app
+        eprintln!("[CalibrationTool] Launching ArkavoReference app...");
+        let launch_output = Command::new("xcrun")
+            .args([
+                "simctl",
+                "launch",
+                device_id,
+                "com.arkavo.reference"
+            ])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+            
+        if !launch_output.status.success() {
+            let error_msg = String::from_utf8_lossy(&launch_output.stderr);
+            eprintln!("[CalibrationTool] Warning: Failed to launch app: {}", error_msg);
+            // Don't fail the operation, just warn
+        } else {
+            eprintln!("[CalibrationTool] Successfully launched ArkavoReference app");
+        }
+        
         Ok(json!({
             "success": true,
-            "message": "ArkavoReference app built and installed successfully",
+            "message": "ArkavoReference app built, installed, and launched successfully",
             "device_id": device_id,
             "bundle_id": "com.arkavo.reference",
             "app_path": app_path.display().to_string(),
+            "app_launched": launch_output.status.success(),
             "next_steps": [
                 "Use calibration_manager with action 'start_calibration' to begin calibration",
                 "Or use deep_link tool to open arkavo-edge://calibration"

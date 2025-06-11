@@ -24,7 +24,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. Uses multiple methods (idb_companion, XCTest, AppleScript) to ensure successful interaction. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. The tool will automatically try different methods until one works. Coordinates should be in logical points for the device.".to_string(),
+                description: "Interact with iOS UI elements. Primary method: idb_companion (embedded binary), with fallback to simctl and AppleScript. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. The tool automatically initializes IDB companion for reliable interaction. Coordinates should be in logical points for the device.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -48,7 +48,7 @@ impl UiInteractionKit {
                         },
                         "value": {
                             "type": "string",
-                            "description": "Text to type or button to press"
+                            "description": "Text to type or button to press (for press_button: 'home', 'power', 'volumeup', 'volumedown')"
                         },
                         "count": {
                             "type": "integer",
@@ -754,34 +754,50 @@ impl Tool for UiInteractionKit {
                     {
                         use super::idb_wrapper::IdbWrapper;
 
-                        // Try idb_companion (embedded binary)
-                        match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
-                            Ok(mut result) => {
-                                eprintln!("UI tap via idb_companion succeeded at ({}, {})", adjusted_x, adjusted_y);
-                                // Add device info to response
-                                if let Some(obj) = result.as_object_mut() {
-                                    obj.insert("device_type".to_string(), serde_json::json!(device_type));
-                                    obj.insert("logical_resolution".to_string(), serde_json::json!({
-                                        "width": max_x,
-                                        "height": max_y
-                                    }));
-                                    obj.insert("original_coordinates".to_string(), serde_json::json!({
-                                        "x": x,
-                                        "y": y
-                                    }));
-                                    if x != adjusted_x || y != adjusted_y {
-                                        obj.insert("adjustment_made".to_string(), serde_json::json!(true));
-                                        obj.insert("warning".to_string(), serde_json::json!(
-                                            format!("Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})", 
-                                                x, y, adjusted_x, adjusted_y)
-                                        ));
+                        // Initialize IDB if not already done
+                        eprintln!("[ui_interaction] Initializing IDB wrapper...");
+                        if let Err(e) = IdbWrapper::initialize() {
+                            eprintln!("[ui_interaction] IDB initialization failed: {}, will try fallback methods", e);
+                        } else {
+                            // Ensure companion is running for this device
+                            eprintln!("[ui_interaction] Ensuring IDB companion is running for device {}...", device_id);
+                            match IdbWrapper::ensure_companion_running(&device_id).await {
+                                Ok(_) => {
+                                    eprintln!("[ui_interaction] IDB companion ready, attempting tap...");
+                                    // Try idb_companion (embedded binary)
+                                    match IdbWrapper::tap(&device_id, adjusted_x, adjusted_y).await {
+                                        Ok(mut result) => {
+                                            eprintln!("[ui_interaction] IDB tap succeeded at ({}, {})", adjusted_x, adjusted_y);
+                                            // Add device info to response
+                                            if let Some(obj) = result.as_object_mut() {
+                                                obj.insert("device_type".to_string(), serde_json::json!(device_type));
+                                                obj.insert("logical_resolution".to_string(), serde_json::json!({
+                                                    "width": max_x,
+                                                    "height": max_y
+                                                }));
+                                                obj.insert("original_coordinates".to_string(), serde_json::json!({
+                                                    "x": x,
+                                                    "y": y
+                                                }));
+                                                if x != adjusted_x || y != adjusted_y {
+                                                    obj.insert("adjustment_made".to_string(), serde_json::json!(true));
+                                                    obj.insert("warning".to_string(), serde_json::json!(
+                                                        format!("Coordinates were adjusted to fit device bounds. Original: ({}, {}), Adjusted: ({}, {})", 
+                                                            x, y, adjusted_x, adjusted_y)
+                                                    ));
+                                                }
+                                            }
+                                            return Ok(result);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[ui_interaction] IDB tap failed: {}, trying fallback methods", e);
+                                            // Continue to fallback methods below
+                                        }
                                     }
                                 }
-                                return Ok(result);
-                            }
-                            Err(e) => {
-                                eprintln!("idb_companion tap failed: {}, trying fallback methods", e);
-                                // Continue to fallback methods below
+                                Err(e) => {
+                                    eprintln!("[ui_interaction] Failed to ensure companion running: {}, trying fallback methods", e);
+                                }
                             }
                         }
 
@@ -936,7 +952,41 @@ impl Tool for UiInteractionKit {
                     }
                 };
 
-                // Type text using AppleScript
+                // Try idb_companion type_text first
+                #[cfg(target_os = "macos")]
+                {
+                    use super::idb_wrapper::IdbWrapper;
+
+                    // Initialize IDB if not already done
+                    eprintln!("[ui_interaction] Initializing IDB wrapper for type_text...");
+                    if let Err(e) = IdbWrapper::initialize() {
+                        eprintln!("[ui_interaction] IDB initialization failed: {}, will try fallback methods", e);
+                    } else {
+                        // Ensure companion is running for this device
+                        eprintln!("[ui_interaction] Ensuring IDB companion is running for device {}...", device_id);
+                        match IdbWrapper::ensure_companion_running(&device_id).await {
+                            Ok(_) => {
+                                eprintln!("[ui_interaction] IDB companion ready, attempting type_text...");
+                                // Try idb_companion type_text
+                                match IdbWrapper::type_text(&device_id, text).await {
+                                    Ok(result) => {
+                                        eprintln!("[ui_interaction] IDB type_text succeeded: '{}'", text);
+                                        return Ok(result);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[ui_interaction] IDB type_text failed: {}, trying fallback methods", e);
+                                        // Continue to fallback methods below
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[ui_interaction] Failed to ensure companion running: {}, trying fallback methods", e);
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: Type text using AppleScript
                 // First ensure the Simulator is active
                 let activate_script = r#"tell application "Simulator" to activate"#;
                 Command::new("osascript")
@@ -1313,7 +1363,41 @@ impl Tool for UiInteractionKit {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.5);
 
-                // Determine swipe direction and use scroll instead
+                // Try idb_companion swipe first
+                #[cfg(target_os = "macos")]
+                {
+                    use super::idb_wrapper::IdbWrapper;
+
+                    // Initialize IDB if not already done
+                    eprintln!("[ui_interaction] Initializing IDB wrapper for swipe...");
+                    if let Err(e) = IdbWrapper::initialize() {
+                        eprintln!("[ui_interaction] IDB initialization failed: {}, will try fallback methods", e);
+                    } else {
+                        // Ensure companion is running for this device
+                        eprintln!("[ui_interaction] Ensuring IDB companion is running for device {}...", device_id);
+                        match IdbWrapper::ensure_companion_running(&device_id).await {
+                            Ok(_) => {
+                                eprintln!("[ui_interaction] IDB companion ready, attempting swipe...");
+                                // Try idb_companion swipe
+                                match IdbWrapper::swipe(&device_id, x1, y1, x2, y2, duration).await {
+                                    Ok(result) => {
+                                        eprintln!("[ui_interaction] IDB swipe succeeded from ({}, {}) to ({}, {})", x1, y1, x2, y2);
+                                        return Ok(result);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[ui_interaction] IDB swipe failed: {}, trying fallback methods", e);
+                                        // Continue to fallback methods below
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[ui_interaction] Failed to ensure companion running: {}, trying fallback methods", e);
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: Determine swipe direction and use scroll simulation
                 let is_vertical = (x2 - x1).abs() < (y2 - y1).abs();
                 let is_scroll_down = y2 < y1; // Swipe up = scroll down
                 let is_scroll_right = x2 < x1; // Swipe left = scroll right
@@ -1386,6 +1470,121 @@ impl Tool for UiInteractionKit {
                         None
                     }
                 }))
+            }
+            "press_button" => {
+                // Check iOS availability first
+                if let Err(e) = check_ios_availability() {
+                    return Ok(e.to_response());
+                }
+
+                let button = params
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| TestError::Mcp("Missing button value".to_string()))?;
+
+                // Get device ID
+                let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
+                    id.to_string()
+                } else {
+                    match self.device_manager.get_active_device() {
+                        Some(device) => device.id,
+                        None => {
+                            self.device_manager.refresh_devices().ok();
+                            match self.device_manager.get_booted_devices().first() {
+                                Some(device) => device.id.clone(),
+                                None => {
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "NO_BOOTED_DEVICE",
+                                            "message": "No booted iOS device found"
+                                        }
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                };
+
+                // Try idb_companion press_button first
+                #[cfg(target_os = "macos")]
+                {
+                    use super::idb_wrapper::IdbWrapper;
+
+                    // Initialize IDB if not already done
+                    eprintln!("[ui_interaction] Initializing IDB wrapper for press_button...");
+                    if let Err(e) = IdbWrapper::initialize() {
+                        eprintln!("[ui_interaction] IDB initialization failed: {}", e);
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "action": "press_button",
+                            "button": button,
+                            "device_id": device_id,
+                            "error": {
+                                "code": "IDB_INIT_FAILED",
+                                "message": format!("IDB initialization failed: {}", e),
+                                "supported_buttons": ["home", "power", "volumeup", "volumedown"],
+                                "note": "Hardware button simulation requires idb_companion"
+                            }
+                        }));
+                    } else {
+                        // Ensure companion is running for this device
+                        eprintln!("[ui_interaction] Ensuring IDB companion is running for device {}...", device_id);
+                        match IdbWrapper::ensure_companion_running(&device_id).await {
+                            Ok(_) => {
+                                eprintln!("[ui_interaction] IDB companion ready, attempting press_button...");
+                                // Try idb_companion press_button
+                                match IdbWrapper::press_button(&device_id, button).await {
+                                    Ok(result) => {
+                                        eprintln!("[ui_interaction] IDB press_button succeeded: '{}'", button);
+                                        return Ok(result);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[ui_interaction] IDB press_button failed: {}, no fallback available", e);
+                                        return Ok(serde_json::json!({
+                                            "success": false,
+                                            "action": "press_button",
+                                            "button": button,
+                                            "device_id": device_id,
+                                            "error": {
+                                                "code": "BUTTON_PRESS_FAILED",
+                                                "message": format!("Failed to press button '{}': {}", button, e),
+                                                "supported_buttons": ["home", "power", "volumeup", "volumedown"],
+                                                "note": "Hardware button simulation requires idb_companion"
+                                            }
+                                        }));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[ui_interaction] Failed to ensure companion running: {}", e);
+                                return Ok(serde_json::json!({
+                                    "success": false,
+                                    "action": "press_button",
+                                    "button": button,
+                                    "device_id": device_id,
+                                    "error": {
+                                        "code": "IDB_NOT_AVAILABLE",
+                                        "message": format!("IDB companion not available: {}", e),
+                                        "supported_buttons": ["home", "power", "volumeup", "volumedown"],
+                                        "note": "Hardware button simulation requires idb_companion"
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                {
+                    return Ok(serde_json::json!({
+                        "success": false,
+                        "error": {
+                            "code": "PLATFORM_NOT_SUPPORTED",
+                            "message": "Press button is only supported on macOS",
+                            "device_id": device_id
+                        }
+                    }));
+                }
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
         }

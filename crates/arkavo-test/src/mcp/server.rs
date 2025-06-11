@@ -73,6 +73,15 @@ impl McpTestServer {
     pub fn new() -> Result<Self> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
+        // Initialize IDB companion early to ensure it's available for all tools
+        eprintln!("[McpTestServer] Initializing IDB companion...");
+        if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
+            eprintln!("[McpTestServer] Warning: Failed to initialize IDB companion: {}", e);
+            eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
+        } else {
+            eprintln!("[McpTestServer] IDB companion initialized successfully");
+        }
+
         // Initialize analysis engine for intelligent tools
         let analysis_engine = Arc::new(AnalysisEngine::new()?);
 

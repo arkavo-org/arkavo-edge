@@ -64,7 +64,7 @@ pub fn setup_framework_links(target_dir: &PathBuf) -> Result<()> {
         Ok(())
     } else {
         Err(TestError::Mcp(
-            "IDB frameworks not found. Please install IDB via: brew install facebook/fb/idb-companion".to_string()
+            "IDB frameworks not found in expected system locations".to_string()
         ))
     }
 }

@@ -49,12 +49,8 @@ fn setup_idb_companion() {
     let idb_binary = out_path.join("idb_companion");
     let frameworks_archive = out_path.join("frameworks.tar.gz");
     
-    if !idb_binary.exists() {
-        download_idb_companion(&idb_binary);
-    }
-    
-    if !frameworks_archive.exists() {
-        package_frameworks(&frameworks_archive);
+    if !idb_binary.exists() || !frameworks_archive.exists() {
+        download_and_extract_idb(&idb_binary, &frameworks_archive);
     }
 
     // Tell Rust where to find the files for embedding
@@ -62,13 +58,13 @@ fn setup_idb_companion() {
     println!("cargo:rustc-env=IDB_FRAMEWORKS_ARCHIVE={}", frameworks_archive.display());
 }
 
-fn download_idb_companion(target_path: &Path) {
-    eprintln!("Downloading IDB companion...");
+fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) {
+    eprintln!("Downloading IDB companion and frameworks...");
     
-    // Download the universal tarball
-    let download_url = "https://github.com/facebook/idb/releases/download/v1.1.8/idb-companion.universal.tar.gz";
+    // Download the combined archive
+    let download_url = "https://github.com/arkavo-org/idb/releases/download/1.1.7-arkavo.2/idb_companion-1.1.7-arkavo.2-macos-arm64.tar.gz";
     let temp_dir = env::temp_dir();
-    let tar_path = temp_dir.join("idb-companion.universal.tar.gz");
+    let tar_path = temp_dir.join("idb-companion-combined.tar.gz");
     
     // Download using curl
     let status = Command::new("curl")
@@ -93,104 +89,42 @@ fn download_idb_companion(target_path: &Path) {
         panic!("Failed to extract idb_companion tarball");
     }
     
-    // Find and copy the binary
-    let locations = [
-        extract_dir.join("idb-companion.universal").join("bin").join("idb_companion"),
-        extract_dir.join("bin").join("idb_companion"),
-    ];
-    
-    let mut found = false;
-    for location in &locations {
-        if location.exists() {
-            fs::copy(location, target_path).expect("Failed to copy idb_companion binary");
-            found = true;
-            break;
-        }
-    }
-    
-    if !found {
-        panic!("idb_companion binary not found in expected locations");
+    // Copy the binary
+    let src_binary = extract_dir.join("bin").join("idb_companion");
+    if src_binary.exists() {
+        fs::copy(&src_binary, binary_path).expect("Failed to copy idb_companion binary");
+    } else {
+        panic!("idb_companion binary not found at expected location: {}", src_binary.display());
     }
     
     // Make it executable
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(target_path).unwrap().permissions();
+        let mut perms = fs::metadata(binary_path).unwrap().permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(target_path, perms).unwrap();
+        fs::set_permissions(binary_path, perms).unwrap();
     }
     
-    // Clean up
-    let _ = fs::remove_file(&tar_path);
-    let _ = fs::remove_dir_all(&extract_dir);
-    
-    eprintln!("Successfully downloaded idb_companion");
-}
-
-fn package_frameworks(archive_path: &Path) {
-    eprintln!("Packaging IDB frameworks...");
-    
-    // Check common locations for IDB frameworks
-    let framework_locations = [
-        "/opt/homebrew/Frameworks",      // Apple Silicon homebrew
-        "/usr/local/Frameworks",         // Intel Mac homebrew
-        "/Library/Frameworks",           // System location
-    ];
-    
-    let mut frameworks_found = false;
-    let temp_dir = env::temp_dir().join("idb_frameworks_staging");
-    let _ = fs::remove_dir_all(&temp_dir);
-    fs::create_dir_all(&temp_dir).expect("Failed to create staging directory");
-    
-    let frameworks_dir = temp_dir.join("Frameworks");
-    fs::create_dir_all(&frameworks_dir).expect("Failed to create Frameworks directory");
-    
-    // Required frameworks
-    let required_frameworks = [
-        "FBControlCore.framework",
-        "FBDeviceControl.framework", 
-        "FBSimulatorControl.framework",
-        "IDBCompanionUtilities.framework",
-        "XCTestBootstrap.framework",
-        "IDBGRPCSwift.framework"
-    ];
-    
-    // Find and copy frameworks
-    for location in &framework_locations {
-        let location_path = Path::new(location);
-        if location_path.exists() {
-            let mut found_count = 0;
-            for framework in &required_frameworks {
-                let framework_path = location_path.join(framework);
-                if framework_path.exists() {
-                    eprintln!("Found {} in {}", framework, location);
-                    let dest = frameworks_dir.join(framework);
-                    
-                    // Use cp -RL to dereference symlinks and preserve framework structure
-                    let status = Command::new("cp")
-                        .args(&["-RL", framework_path.to_str().unwrap(), dest.to_str().unwrap()])
-                        .status()
-                        .expect("Failed to copy framework");
-                        
-                    if status.success() {
-                        found_count += 1;
-                    }
+    // Package the frameworks
+    let frameworks_dir = extract_dir.join("Frameworks");
+    if frameworks_dir.exists() {
+        eprintln!("Found Frameworks directory at: {}", frameworks_dir.display());
+        
+        // List framework contents for debugging
+        if let Ok(entries) = fs::read_dir(&frameworks_dir) {
+            eprintln!("Frameworks found:");
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    eprintln!("  - {}", entry.file_name().to_string_lossy());
                 }
             }
-            
-            if found_count > 0 {
-                frameworks_found = true;
-                break;
-            }
         }
-    }
-    
-    if frameworks_found {
-        // Create tar.gz archive
+        
+        // Create tar.gz archive of frameworks
         let status = Command::new("tar")
-            .current_dir(&temp_dir)
-            .args(&["-czf", archive_path.to_str().unwrap(), "Frameworks"])
+            .current_dir(&extract_dir)
+            .args(&["-czf", frameworks_archive_path.to_str().unwrap(), "Frameworks"])
             .status()
             .expect("Failed to create frameworks archive");
             
@@ -198,17 +132,24 @@ fn package_frameworks(archive_path: &Path) {
             panic!("Failed to create frameworks archive");
         }
         
-        eprintln!("Successfully packaged IDB frameworks");
+        // Verify the archive was created and has content
+        if let Ok(metadata) = fs::metadata(frameworks_archive_path) {
+            eprintln!("Successfully packaged IDB frameworks: {} bytes", metadata.len());
+            if metadata.len() == 0 {
+                panic!("Frameworks archive is empty!");
+            }
+        } else {
+            panic!("Failed to create frameworks archive at: {}", frameworks_archive_path.display());
+        }
     } else {
-        eprintln!("Warning: IDB frameworks not found on system");
-        eprintln!("IDB companion will require system-installed frameworks at runtime");
-        eprintln!("Install via: brew install facebook/fb/idb-companion");
-        
-        // Create empty archive so build doesn't fail
-        fs::write(archive_path, b"").expect("Failed to create placeholder archive");
+        panic!("Frameworks directory not found in extracted archive");
     }
     
     // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_file(&tar_path);
+    let _ = fs::remove_dir_all(&extract_dir);
+    
+    eprintln!("Successfully downloaded and extracted IDB companion");
 }
+
 

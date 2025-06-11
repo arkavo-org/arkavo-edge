@@ -1,4 +1,4 @@
-use arkavo_test::mcp::server::McpTestServer;
+use arkavo_test::mcp::server::{McpTestServer, ToolRequest};
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -12,12 +12,15 @@ async fn test_calibration_debug_flow() -> Result<(), Box<dyn std::error::Error>>
     
     // Step 1: Get booted device
     eprintln!("1. Getting booted device...");
-    let device_result = server.call_tool("device_manager", json!({
-        "action": "list",
-        "status": "booted"
-    })).await?;
+    let device_result = server.call_tool(ToolRequest {
+        tool_name: "device_manager".to_string(),
+        params: json!({
+            "action": "list",
+            "status": "booted"
+        })
+    }).await?;
     
-    let devices = device_result["devices"].as_array()
+    let devices = device_result.result["devices"].as_array()
         .ok_or("No devices found")?;
     let device = devices.first()
         .ok_or("No booted device found")?;
@@ -34,25 +37,31 @@ async fn test_calibration_debug_flow() -> Result<(), Box<dyn std::error::Error>>
     
     if !app_check_output.status.success() {
         eprintln!("   App not installed. Installing now...");
-        let install_result = server.call_tool("calibration_manager", json!({
-            "action": "install_reference_app",
-            "device_id": device_id
-        })).await?;
-        eprintln!("   Install result: {}", serde_json::to_string_pretty(&install_result)?);
+        let install_result = server.call_tool(ToolRequest {
+            tool_name: "calibration_manager".to_string(),
+            params: json!({
+                "action": "install_reference_app",
+                "device_id": device_id
+            })
+        }).await?;
+        eprintln!("   Install result: {}", serde_json::to_string_pretty(&install_result.result)?);
     } else {
         eprintln!("   App already installed");
     }
     
     // Step 3: Start calibration
     eprintln!("\n3. Starting calibration...");
-    let start_result = server.call_tool("calibration_manager", json!({
-        "action": "start_calibration",
-        "device_id": device_id
-    })).await?;
+    let start_result = server.call_tool(ToolRequest {
+        tool_name: "calibration_manager".to_string(),
+        params: json!({
+            "action": "start_calibration",
+            "device_id": device_id
+        })
+    }).await?;
     
-    eprintln!("   Start result: {}", serde_json::to_string_pretty(&start_result)?);
+    eprintln!("   Start result: {}", serde_json::to_string_pretty(&start_result.result)?);
     
-    let session_id = start_result["session_id"].as_str()
+    let session_id = start_result.result["session_id"].as_str()
         .ok_or("No session ID returned")?;
     
     // Step 4: Monitor calibration progress
@@ -64,14 +73,17 @@ async fn test_calibration_debug_flow() -> Result<(), Box<dyn std::error::Error>>
     for i in 0..30 {  // Check for up to 30 seconds
         sleep(Duration::from_secs(1)).await;
         
-        let status_result = server.call_tool("calibration_manager", json!({
-            "action": "get_status",
-            "session_id": session_id
-        })).await?;
+        let status_result = server.call_tool(ToolRequest {
+            tool_name: "calibration_manager".to_string(),
+            params: json!({
+                "action": "get_status",
+                "session_id": session_id
+            })
+        }).await?;
         
-        let status = status_result["status"].as_str().unwrap_or("unknown");
-        let elapsed = status_result["elapsed_seconds"].as_u64().unwrap_or(0);
-        let app_running = status_result["app_running"].as_bool().unwrap_or(false);
+        let status = status_result.result["status"].as_str().unwrap_or("unknown");
+        let elapsed = status_result.result["elapsed_seconds"].as_u64().unwrap_or(0);
+        let app_running = status_result.result["app_running"].as_bool().unwrap_or(false);
         
         eprintln!("   [{}s] Status: {} (elapsed: {}s, app_running: {})", 
             i + 1, status, elapsed, app_running);
@@ -138,14 +150,17 @@ async fn test_calibration_debug_flow() -> Result<(), Box<dyn std::error::Error>>
     
     // Step 5: Get final calibration data
     eprintln!("\n5. Getting calibration data...");
-    match server.call_tool("calibration_manager", json!({
-        "action": "get_calibration",
-        "device_id": device_id
-    })).await {
+    match server.call_tool(ToolRequest {
+        tool_name: "calibration_manager".to_string(),
+        params: json!({
+            "action": "get_calibration",
+            "device_id": device_id
+        })
+    }).await {
         Ok(cal_data) => {
-            if cal_data["success"].as_bool() == Some(true) {
+            if cal_data.result["success"].as_bool() == Some(true) {
                 eprintln!("   ✓ Calibration data retrieved successfully");
-                eprintln!("   Config: {}", serde_json::to_string_pretty(&cal_data["config"])?);
+                eprintln!("   Config: {}", serde_json::to_string_pretty(&cal_data.result["config"])?);
             } else {
                 eprintln!("   ✗ No calibration data found");
             }
