@@ -17,7 +17,15 @@ pub mod enrollment_dialog_handler;
 pub mod enrollment_flow_handler;
 pub mod face_id_control;
 #[cfg(target_os = "macos")]
+pub mod idb_installer;
+#[cfg(target_os = "macos")]
+pub mod idb_management_tool;
+#[cfg(target_os = "macos")]
+pub mod idb_recovery;
+#[cfg(target_os = "macos")]
 pub mod idb_wrapper;
+#[cfg(target_os = "macos")]
+pub mod frameworks_data;
 pub mod intelligent_tools;
 pub mod ios_biometric_tools;
 pub mod ios_errors;
@@ -28,12 +36,15 @@ pub mod schema;
 pub mod screenshot_analyzer;
 pub mod server;
 pub mod simulator_advanced_tools;
+pub mod simulator_interaction;
 pub mod simulator_manager;
 pub mod simulator_tap;
 pub mod simulator_tools;
+pub mod state_tools;
 pub mod template_diagnostics;
 pub mod templates;
 pub mod test_target_app;
+pub mod test_tools;
 pub mod tools;
 pub mod ui_element_handler;
 pub mod url_dialog_handler;
@@ -47,3 +58,5 @@ pub mod xctest_simple_runner;
 pub mod xctest_status_tool;
 pub mod xctest_unix_bridge;
 pub mod xctest_verifier;
+pub mod xcode_info_tool;
+pub mod xcode_version;

@@ -6,11 +6,17 @@ use crate::mcp::calibration::verification::{Coordinate, VerificationReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+#[cfg(target_os = "macos")]
+use crate::mcp::idb_wrapper::IdbWrapper;
+#[cfg(target_os = "macos")]
+use crate::mcp::idb_recovery::IdbRecovery;
 
 pub struct CalibrationServer {
     pub data_store: Arc<CalibrationDataStore>,
     active_calibrations: Arc<RwLock<HashMap<String, CalibrationSession>>>,
     auto_monitor: Arc<RwLock<AutoMonitor>>,
+    #[cfg(target_os = "macos")]
+    idb_recovery: Arc<IdbRecovery>,
 }
 
 struct CalibrationSession {
@@ -18,6 +24,9 @@ struct CalibrationSession {
     reference_app: ReferenceAppInterface,
     start_time: chrono::DateTime<chrono::Utc>,
     status: CalibrationStatus,
+    idb_status: IdbStatus,
+    last_tap_time: Option<chrono::DateTime<chrono::Utc>>,
+    tap_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +44,145 @@ struct AutoMonitor {
 }
 
 impl CalibrationServer {
+    async fn check_idb_health(&self, session_id: &str, device_id: &str) -> Result<bool, CalibrationError> {
+        #[cfg(target_os = "macos")]
+        {
+            // Initialize IDB if not already done
+            if let Err(e) = IdbWrapper::initialize() {
+                self.update_idb_status(session_id, IdbStatus {
+                    connected: false,
+                    last_health_check: Some(chrono::Utc::now()),
+                    last_error: Some(format!("IDB initialization failed: {}", e)),
+                    companion_running: false,
+                }).await;
+                return Ok(false);
+            }
+            
+            // Check if IDB companion process is running and port is accessible
+            let companion_running = IdbRecovery::is_companion_running().await;
+            let port_accessible = IdbRecovery::is_companion_port_accessible().await;
+            
+            
+            // If companion is running but port not accessible, it's stuck
+            if companion_running && !port_accessible {
+                self.update_idb_status(session_id, IdbStatus {
+                    connected: false,
+                    last_health_check: Some(chrono::Utc::now()),
+                    last_error: Some("IDB companion running but not accepting connections".to_string()),
+                    companion_running: true,
+                }).await;
+                
+                // Use the specific recovery method for stuck companion
+                self.idb_recovery.recover_stuck_companion().await
+                    .map_err(|e| CalibrationError::InteractionFailed(format!("Failed to recover stuck IDB: {}", e)))?;
+                
+                // Wait for recovery to take effect
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                
+                // Re-check after recovery
+                let companion_running = IdbRecovery::is_companion_running().await;
+                let port_accessible = IdbRecovery::is_companion_port_accessible().await;
+            }
+            
+            // Try a simple IDB command to check if it's working
+            match IdbWrapper::list_targets().await {
+                Ok(targets) => {
+                    let device_found = targets.as_array()
+                        .map(|arr| arr.iter().any(|t| {
+                            t.get("udid").and_then(|u| u.as_str()) == Some(device_id)
+                        }))
+                        .unwrap_or(false);
+                    
+                    // Check if IDB is actually connected to this specific device
+                    // Just having companion running doesn't mean it's connected to our device
+                    let is_connected = if device_found && companion_running {
+                        // Try a simple IDB command to verify connection
+                        match IdbWrapper::list_apps(device_id).await {
+                            Ok(_) => {
+                                true
+                            }
+                            Err(e) => {
+                                
+                                // Check if this is a framework loading error
+                                let error_str = e.to_string();
+                                if error_str.contains("Library not loaded") || error_str.contains("FBControlCore") {
+                                }
+                                false
+                            }
+                        }
+                    } else {
+                        false
+                    };
+                    
+                    // If device is found but companion not running or not fully connected, try to ensure connection
+                    if device_found && (!companion_running || !is_connected) {
+                        
+                        // Provide helpful error message
+                        if !companion_running {
+                        } else if !is_connected {
+                        }
+                        
+                        // If companion is running but not connected, use the stuck recovery
+                        if companion_running && !is_connected {
+                            if let Err(e) = self.idb_recovery.recover_stuck_companion().await {
+                            }
+                        } else {
+                            // Otherwise just try to reconnect the device
+                            if let Err(e) = self.idb_recovery.force_reconnect_device(device_id).await {
+                            }
+                        }
+                    }
+                    
+                    self.update_idb_status(session_id, IdbStatus {
+                        connected: is_connected,
+                        last_health_check: Some(chrono::Utc::now()),
+                        last_error: if is_connected { 
+                            None 
+                        } else {
+                            Some("Device found but IDB not fully connected. If you see framework errors above, install IDB via: brew install facebook/fb/idb-companion".to_string())
+                        },
+                        companion_running,
+                    }).await;
+                    
+                    Ok(is_connected)
+                }
+                Err(e) => {
+                    // Check if it's a connection issue
+                    let error_str = e.to_string();
+                    let is_connection_issue = error_str.contains("Connection refused") || 
+                                            error_str.contains("failed to connect");
+                    
+                    self.update_idb_status(session_id, IdbStatus {
+                        connected: false,
+                        last_health_check: Some(chrono::Utc::now()),
+                        last_error: Some(format!("IDB health check failed: {}", e)),
+                        companion_running: companion_running && !is_connection_issue,
+                    }).await;
+                    Ok(false)
+                }
+            }
+        }
+        
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(false)
+        }
+    }
+    
+    async fn update_idb_status(&self, session_id: &str, status: IdbStatus) {
+        let mut sessions = self.active_calibrations.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.idb_status = status;
+        }
+    }
+    
+    async fn record_tap(&self, session_id: &str) {
+        let mut sessions = self.active_calibrations.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.last_tap_time = Some(chrono::Utc::now());
+            session.tap_count += 1;
+        }
+    }
     pub fn new(storage_path: PathBuf) -> Result<Self, CalibrationError> {
         Ok(Self {
             data_store: Arc::new(CalibrationDataStore::new(storage_path)?),
@@ -44,6 +192,8 @@ impl CalibrationServer {
                 check_interval_hours: 24,
                 recalibration_threshold_hours: 24 * 7, // 1 week
             })),
+            #[cfg(target_os = "macos")]
+            idb_recovery: Arc::new(IdbRecovery::new()),
         })
     }
     
@@ -75,6 +225,14 @@ impl CalibrationServer {
             reference_app,
             start_time: chrono::Utc::now(),
             status: CalibrationStatus::Initializing,
+            idb_status: IdbStatus {
+                connected: false,
+                last_health_check: None,
+                last_error: None,
+                companion_running: false,
+            },
+            last_tap_time: None,
+            tap_count: 0,
         };
         
         {
@@ -128,6 +286,30 @@ impl CalibrationServer {
         self.update_session_status(session_id, CalibrationStatus::Initializing).await;
         eprintln!("Calibration: Starting calibration process for device {}", device_id);
         eprintln!("Calibration: Expected duration: 20-30 seconds");
+        
+        // Check IDB health before starting
+        eprintln!("Calibration: Checking IDB companion status...");
+        let idb_healthy = self.check_idb_health(session_id, &device_id).await?;
+        if !idb_healthy {
+            eprintln!("Calibration: WARNING - IDB companion not properly connected");
+            eprintln!("Calibration: Attempting IDB recovery...");
+            #[cfg(target_os = "macos")]
+            {
+                self.idb_recovery.attempt_recovery().await
+                    .map_err(|e| CalibrationError::InteractionFailed(format!("IDB recovery failed: {}", e)))?;
+                // Wait a bit for recovery to take effect
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                
+                // Check again
+                let idb_healthy_after = self.check_idb_health(session_id, &device_id).await?;
+                if !idb_healthy_after {
+                    return Err(CalibrationError::InteractionFailed(
+                        "IDB connection could not be established after recovery".to_string()
+                    ));
+                }
+                eprintln!("Calibration: IDB recovery successful, connection established");
+            }
+        }
         
         // Launch the reference app (this will launch in calibration mode if available)
         eprintln!("Calibration: Launching reference app...");
@@ -205,16 +387,173 @@ impl CalibrationServer {
             ];
             
             eprintln!("Calibration: Starting tap sequence...");
+            
+            // Track time since last successful tap for watchdog
+            let mut last_successful_tap = std::time::Instant::now();
+            let mut stuck_recovery_attempted = false;
+            
             for (idx, (x, y)) in test_points.iter().enumerate() {
                 eprintln!("Calibration: Tapping point {}/{}: ({}, {})", idx + 1, test_points.len(), x, y);
+                
+                // Watchdog: Check if we're stuck (no taps for 15 seconds)
+                if last_successful_tap.elapsed() > std::time::Duration::from_secs(15) && !stuck_recovery_attempted {
+                    eprintln!("Calibration: WATCHDOG - No successful taps for 15 seconds, attempting auto-recovery");
+                    
+                    #[cfg(target_os = "macos")]
+                    {
+                        // Check if companion is running but stuck
+                        let companion_running = IdbRecovery::is_companion_running().await;
+                        let port_accessible = IdbRecovery::is_companion_port_accessible().await;
+                        
+                        eprintln!("Calibration: WATCHDOG - Companion running: {}, Port accessible: {}", 
+                            companion_running, port_accessible);
+                        
+                        // Use appropriate recovery method
+                        if companion_running && !port_accessible {
+                            eprintln!("Calibration: WATCHDOG - Using targeted stuck companion recovery...");
+                            if let Ok(_) = self.idb_recovery.recover_stuck_companion().await {
+                                eprintln!("Calibration: WATCHDOG - Stuck companion recovery completed");
+                            }
+                        } else {
+                            eprintln!("Calibration: WATCHDOG - Using general IDB recovery...");
+                            if let Ok(_) = self.idb_recovery.attempt_recovery().await {
+                                eprintln!("Calibration: WATCHDOG - General recovery completed");
+                            }
+                        }
+                        
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                        
+                        // Re-check IDB health
+                        let idb_ok = self.check_idb_health(session_id, &device_id).await?;
+                        eprintln!("Calibration: IDB health after recovery: {}", if idb_ok { "healthy" } else { "unhealthy" });
+                        stuck_recovery_attempted = true;
+                    }
+                }
                 
                 // Apply current offset correction
                 let corrected_x = x - coordinate_offset.x;
                 let corrected_y = y - coordinate_offset.y;
                 
-                match agent.execute_tap(corrected_x, corrected_y) {
-                    Ok(_) => eprintln!("Calibration: Tap {} executed successfully", idx + 1),
-                    Err(e) => eprintln!("Calibration: Warning - Tap {} failed: {}", idx + 1, e),
+                // Check IDB health periodically during taps
+                if idx % 2 == 0 {
+                    let idb_ok = self.check_idb_health(session_id, &device_id).await?;
+                    if !idb_ok {
+                        eprintln!("Calibration: IDB health check failed during tap sequence");
+                    }
+                }
+                
+                // Wrap tap execution with a timeout using spawn_blocking since execute_tap is synchronous
+                let tap_timeout = std::time::Duration::from_secs(10);
+                let agent_clone = agent.clone();
+                
+                let tap_result = tokio::time::timeout(
+                    tap_timeout,
+                    tokio::task::spawn_blocking(move || {
+                        agent_clone.execute_tap(corrected_x, corrected_y)
+                    })
+                ).await;
+                
+                match tap_result {
+                    Ok(Ok(Ok(_))) => {
+                        eprintln!("Calibration: Tap {} executed successfully", idx + 1);
+                        self.record_tap(session_id).await;
+                        last_successful_tap = std::time::Instant::now();
+                        stuck_recovery_attempted = false; // Reset recovery flag on success
+                    },
+                    Ok(Ok(Err(e))) => {
+                        eprintln!("Calibration: Warning - Tap {} failed: {}", idx + 1, e);
+                        
+                        // Check if this is an IDB-related failure
+                        if e.to_string().contains("idb_companion") {
+                            eprintln!("Calibration: IDB failure detected, attempting recovery...");
+                            
+                            #[cfg(target_os = "macos")]
+                            {
+                                // Check the specific IDB state
+                                let companion_running = IdbRecovery::is_companion_running().await;
+                                let port_accessible = IdbRecovery::is_companion_port_accessible().await;
+                                
+                                // Use appropriate recovery
+                                let recovery_success = if companion_running && !port_accessible {
+                                    eprintln!("Calibration: Using targeted stuck companion recovery...");
+                                    self.idb_recovery.recover_stuck_companion().await.is_ok()
+                                } else {
+                                    eprintln!("Calibration: Using general IDB recovery...");
+                                    self.idb_recovery.attempt_recovery().await.is_ok()
+                                };
+                                
+                                if recovery_success {
+                                    eprintln!("Calibration: IDB recovery completed, retrying tap...");
+                                    
+                                    // Wait a bit for recovery to take effect
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                    
+                                    // Retry the tap once
+                                    let agent_retry = agent.clone();
+                                    let retry_result = tokio::task::spawn_blocking(move || {
+                                        agent_retry.execute_tap(corrected_x, corrected_y)
+                                    }).await;
+                                    
+                                    if let Ok(Ok(_)) = retry_result {
+                                        eprintln!("Calibration: Retry tap {} succeeded after recovery", idx + 1);
+                                        self.record_tap(session_id).await;
+                                        last_successful_tap = std::time::Instant::now();
+                                        continue;
+                                    } else {
+                                        eprintln!("Calibration: Retry tap {} failed after recovery", idx + 1);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Update IDB error status
+                        self.update_idb_status(session_id, IdbStatus {
+                            connected: false,
+                            last_health_check: Some(chrono::Utc::now()),
+                            last_error: Some(format!("Tap failed: {}", e)),
+                            companion_running: false,
+                        }).await;
+                    },
+                    Ok(Err(_)) => {
+                        eprintln!("Calibration: Tap {} - spawn_blocking task failed", idx + 1);
+                    },
+                    Err(_) => {
+                        eprintln!("Calibration: Tap {} timed out after 10 seconds", idx + 1);
+                        
+                        // Timeout indicates stuck IDB - attempt recovery
+                        #[cfg(target_os = "macos")]
+                        {
+                            eprintln!("Calibration: Tap timeout detected, checking IDB state...");
+                            
+                            // Check the specific IDB state
+                            let companion_running = IdbRecovery::is_companion_running().await;
+                            let port_accessible = IdbRecovery::is_companion_port_accessible().await;
+                            
+                            eprintln!("Calibration: Timeout recovery - Companion running: {}, Port accessible: {}", 
+                                companion_running, port_accessible);
+                            
+                            // Timeouts usually indicate stuck companion
+                            if companion_running {
+                                eprintln!("Calibration: Using stuck companion recovery for timeout...");
+                                if let Ok(_) = self.idb_recovery.recover_stuck_companion().await {
+                                    eprintln!("Calibration: Stuck companion recovery completed after timeout");
+                                }
+                            } else {
+                                eprintln!("Calibration: Using general recovery for timeout...");
+                                if let Ok(_) = self.idb_recovery.attempt_recovery().await {
+                                    eprintln!("Calibration: General recovery completed after timeout");
+                                }
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        }
+                        
+                        self.update_idb_status(session_id, IdbStatus {
+                            connected: false,
+                            last_health_check: Some(chrono::Utc::now()),
+                            last_error: Some("Tap operation timed out".to_string()),
+                            companion_running: false,
+                        }).await;
+                    }
                 }
                 
                 // Give more time between taps for the UI to update
@@ -260,10 +599,21 @@ impl CalibrationServer {
         }
         
         
+        // Get the tap count from the session
+        let tap_count = {
+            let sessions = self.active_calibrations.read().await;
+            sessions.get(session_id)
+                .map(|s| s.tap_count)
+                .unwrap_or(0)
+        };
+        
         // Phase 5: Generate calibration result with offset
+        const EXPECTED_TAPS: u32 = 5; // We expect 5 taps for calibration
         let calibration_result = self.generate_calibration_result_with_offset(
             device_params.clone(),
             coordinate_offset,
+            tap_count,
+            EXPECTED_TAPS,
         );
         
         // Phase 6: Store results
@@ -277,17 +627,29 @@ impl CalibrationServer {
             last_calibrated: chrono::Utc::now(),
         };
         
-        self.data_store.store_calibration(&device_id, config, calibration_result)?;
-        
-        // Mark complete
-        self.update_session_status(session_id, CalibrationStatus::Complete).await;
-        Ok(())
+        // Only store calibration if it was successful
+        if calibration_result.success {
+            eprintln!("Calibration: Success! Storing calibration result with {} successful taps", tap_count);
+            self.data_store.store_calibration(&device_id, config, calibration_result)?;
+            self.update_session_status(session_id, CalibrationStatus::Complete).await;
+            Ok(())
+        } else {
+            let error_msg = format!(
+                "Calibration failed: Only {} of {} taps succeeded ({}% accuracy)",
+                tap_count, EXPECTED_TAPS, calibration_result.validation_report.accuracy_percentage
+            );
+            eprintln!("Calibration: {}", error_msg);
+            self.update_session_status(session_id, CalibrationStatus::Failed(error_msg.clone())).await;
+            Err(CalibrationError::ValidationError(error_msg))
+        }
     }
     
     fn generate_calibration_result_with_offset(
         &self,
         device_profile: DeviceProfile,
         coordinate_offset: Coordinate,
+        tap_count: u32,
+        expected_taps: u32,
     ) -> CalibrationResult {
         let mut interaction_adjustments = HashMap::new();
         let edge_cases = Vec::new();
@@ -318,17 +680,48 @@ impl CalibrationServer {
             custom_delay_ms: Some(100),
         });
         
-        // Create a validation report indicating success
-        let validation_report = ValidationReport {
-            total_interactions: 5,
-            successful_interactions: 5,
-            failed_interactions: 0,
-            accuracy_percentage: 100.0,
-            issues: vec![],
+        // Create a validation report based on actual tap results
+        let failed_taps = expected_taps.saturating_sub(tap_count);
+        let accuracy = if expected_taps > 0 {
+            (tap_count as f64 / expected_taps as f64) * 100.0
+        } else {
+            0.0
         };
         
+        let mut issues = vec![];
+        if tap_count == 0 {
+            issues.push(ValidationIssue {
+                element_id: "calibration_tap".to_string(),
+                expected_result: format!("{} successful taps", expected_taps),
+                actual_result: "No taps were successfully executed".to_string(),
+                severity: IssueSeverity::Critical,
+            });
+        } else if tap_count < expected_taps {
+            issues.push(ValidationIssue {
+                element_id: "calibration_tap".to_string(),
+                expected_result: format!("{} successful taps", expected_taps),
+                actual_result: format!("Only {} taps succeeded", tap_count),
+                severity: IssueSeverity::Major,
+            });
+        }
+        
+        let validation_report = ValidationReport {
+            total_interactions: expected_taps as usize,
+            successful_interactions: tap_count as usize,
+            failed_interactions: failed_taps as usize,
+            accuracy_percentage: accuracy,
+            issues,
+        };
+        
+        // Consider calibration successful if we achieved at least 60% of expected taps
+        // AND we have at least one successful tap
+        let success = accuracy >= 60.0 && tap_count > 0;
+        
+        eprintln!("Calibration: Creating result - tap_count: {}, expected: {}, accuracy: {:.1}%, success: {}", 
+            tap_count, expected_taps, accuracy, success);
+        
         CalibrationResult {
-            success: true,
+            success,
             device_profile,
             interaction_adjustments,
             edge_cases,
@@ -350,6 +743,9 @@ impl CalibrationServer {
                     CalibrationStatus::Complete => "complete".to_string(),
                     CalibrationStatus::Failed(err) => format!("failed: {}", err),
                 },
+                idb_status: session.idb_status.clone(),
+                last_tap_time: session.last_tap_time,
+                tap_count: session.tap_count,
             }
         })
     }
@@ -419,6 +815,8 @@ impl Clone for CalibrationServer {
             data_store: Arc::clone(&self.data_store),
             active_calibrations: Arc::clone(&self.active_calibrations),
             auto_monitor: Arc::clone(&self.auto_monitor),
+            #[cfg(target_os = "macos")]
+            idb_recovery: Arc::clone(&self.idb_recovery),
         }
     }
 }
@@ -430,6 +828,17 @@ pub struct CalibrationStatusReport {
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub elapsed_seconds: u64,
     pub status: String,
+    pub idb_status: IdbStatus,
+    pub last_tap_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub tap_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdbStatus {
+    pub connected: bool,
+    pub last_health_check: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_error: Option<String>,
+    pub companion_running: bool,
 }
 
 pub struct CalibrationAPI {

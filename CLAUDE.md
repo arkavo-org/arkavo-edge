@@ -121,3 +121,7 @@ Avoid hardcoded paths, platform-specific assumptions, or environment-dependent c
 
 - Faking success is worse than an honest failure
 - do not use conventional commits
+- A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
+    •    You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
+    •    This includes trying to invoke Homebrew or similar to install dependencies at runtime.
+    •    Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.

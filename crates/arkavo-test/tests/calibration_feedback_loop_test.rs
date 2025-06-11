@@ -4,7 +4,7 @@ use serde_json::json;
 #[tokio::test]
 async fn test_calibration_feedback_loop() -> Result<(), Box<dyn std::error::Error>> {
     // Create MCP server
-    let server = McpTestServer::new().await?;
+    let server = McpTestServer::new()?;
     
     println!("=== MCP Calibration Feedback Loop Test ===\n");
     
@@ -161,7 +161,7 @@ async fn test_calibration_feedback_loop() -> Result<(), Box<dyn std::error::Erro
 
 #[tokio::test]
 async fn test_log_stream_functionality() -> Result<(), Box<dyn std::error::Error>> {
-    let server = McpServer::new().await?;
+    let server = McpTestServer::new()?;
     
     // Test log stream status
     let status = server.call_tool("log_stream", json!({

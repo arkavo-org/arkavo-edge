@@ -1,5 +1,6 @@
 use super::device_manager::DeviceManager;
 use super::server::{Tool, ToolSchema};
+use super::simulator_interaction::SimulatorInteraction;
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -11,11 +12,13 @@ use std::time::Duration;
 pub struct UiElementHandler {
     schema: ToolSchema,
     device_manager: Arc<DeviceManager>,
+    simulator_interaction: SimulatorInteraction,
 }
 
 impl UiElementHandler {
     pub fn new(device_manager: Arc<DeviceManager>) -> Self {
         Self {
+            simulator_interaction: SimulatorInteraction::new(),
             schema: ToolSchema {
                 name: "ui_element_handler".to_string(),
                 description: "Advanced UI element interaction with multiple strategies for checkboxes, switches, and other controls".to_string(),
@@ -72,6 +75,15 @@ impl UiElementHandler {
                     }
                 }
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    async fn perform_tap_async(&self, device_id: &str, x: f64, y: f64) -> Result<()> {
+        // Use the new version-aware simulator interaction
+        match self.simulator_interaction.tap(device_id, x, y).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e)
         }
     }
 
@@ -221,6 +233,10 @@ impl Tool for UiElementHandler {
                 }));
             }
         };
+
+        // Check Xcode version compatibility
+        let version_info = self.simulator_interaction.get_version_info();
+        eprintln!("Using Xcode version info: {}", version_info);
 
         match action {
             "tap_checkbox" => {

@@ -21,6 +21,7 @@ use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
 use super::template_diagnostics::TemplateDiagnosticsKit;
 use super::ui_element_handler::UiElementHandler;
 use super::usage_guide::UsageGuideKit;
+use super::xcode_info_tool::XcodeInfoTool;
 use super::xctest_setup_tool::XCTestSetupKit;
 use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
@@ -124,6 +125,14 @@ impl McpTestServer {
             Arc::new(UiElementHandler::new(device_manager.clone())),
         );
         tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
+        tools.insert("xcode_info".to_string(), Arc::new(XcodeInfoTool::new()));
+        
+        #[cfg(target_os = "macos")]
+        tools.insert(
+            "idb_management".to_string(),
+            Arc::new(super::idb_management_tool::IdbManagementTool::new()),
+        );
+        
         tools.insert(
             "app_diagnostic".to_string(),
             Arc::new(AppDiagnosticTool::new()),
@@ -354,12 +363,21 @@ impl McpTestServer {
             return Err(TestError::Mcp("Tool not allowed".to_string()));
         }
 
+        // Use longer timeout for IDB-based operations which can be slow on first run
+        let timeout_duration = match request.tool_name.as_str() {
+            "ui_interaction" | "screen_capture" | "ui_query" | "simulator_control" 
+            | "simulator_advanced" | "calibration_manager" | "setup_calibration" => {
+                Duration::from_secs(120) // 2 minutes for IDB operations
+            },
+            _ => Duration::from_secs(30) // Default 30 seconds
+        };
+
         let result = timeout(
-            Duration::from_secs(30),
+            timeout_duration,
             self.execute_tool(&request.tool_name, request.params),
         )
         .await
-        .map_err(|_| TestError::Mcp("Tool execution timeout".to_string()))??;
+        .map_err(|_| TestError::Mcp(format!("Tool execution timeout after {:?}", timeout_duration)))??;
 
         Ok(ToolResponse {
             result,
@@ -417,19 +435,24 @@ impl McpTestServer {
     }
 
     async fn execute_tool(&self, tool_name: &str, params: Value) -> Result<Value> {
+        eprintln!("[McpTestServer] execute_tool called for: {}", tool_name);
         let tool = {
             let tools = self
                 .tools
                 .read()
                 .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
 
+            eprintln!("[McpTestServer] Available tools: {:?}", tools.keys().collect::<Vec<_>>());
             tools
                 .get(tool_name)
                 .ok_or_else(|| TestError::Mcp(format!("Tool not found: {}", tool_name)))?
                 .clone()
         };
 
-        tool.execute(params).await
+        eprintln!("[McpTestServer] Executing tool: {}", tool_name);
+        let result = tool.execute(params).await;
+        eprintln!("[McpTestServer] Tool execution result: {:?}", result.is_ok());
+        result
     }
 }
 

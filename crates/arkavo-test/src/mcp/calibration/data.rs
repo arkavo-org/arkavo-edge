@@ -33,6 +33,13 @@ impl CalibrationDataStore {
         config: CalibrationConfig,
         result: CalibrationResult,
     ) -> Result<(), CalibrationError> {
+        eprintln!("[CalibrationDataStore] Storing calibration for device {}", device_id);
+        eprintln!("[CalibrationDataStore] Result - success: {}, successful_interactions: {}/{}", 
+            result.success, 
+            result.validation_report.successful_interactions,
+            result.validation_report.total_interactions
+        );
+        
         // Store config
         let config_path = self.get_config_path(device_id);
         let config_data = serde_json::to_string_pretty(&config)?;
@@ -42,6 +49,8 @@ impl CalibrationDataStore {
         let result_path = self.get_result_path(device_id);
         let result_data = serde_json::to_string_pretty(&result)?;
         fs::write(&result_path, result_data)?;
+        
+        eprintln!("[CalibrationDataStore] Wrote calibration result to: {}", result_path.display());
         
         // Update cache
         let mut cache = self.cache.lock().unwrap();
@@ -73,8 +82,15 @@ impl CalibrationDataStore {
     
     pub fn get_latest_result(&self, device_id: &str) -> Result<CalibrationResult, CalibrationError> {
         let result_path = self.get_result_path(device_id);
+        eprintln!("[CalibrationDataStore] Reading calibration result from: {}", result_path.display());
         let data = fs::read_to_string(&result_path)?;
-        Ok(serde_json::from_str(&data)?)
+        let result: CalibrationResult = serde_json::from_str(&data)?;
+        eprintln!("[CalibrationDataStore] Retrieved result - success: {}, successful_interactions: {}/{}", 
+            result.success,
+            result.validation_report.successful_interactions,
+            result.validation_report.total_interactions
+        );
+        Ok(result)
     }
     
     pub fn is_calibration_valid(&self, device_id: &str, max_age_hours: u64) -> bool {
@@ -96,13 +112,21 @@ impl CalibrationDataStore {
     }
     
     pub fn list_calibrated_devices(&self) -> Vec<DeviceSummary> {
-        let cache = self.cache.lock().unwrap();
-        cache.iter().map(|(id, config)| {
+        // First, collect all the device data we need while holding the lock
+        let device_data: Vec<(String, String, chrono::DateTime<chrono::Utc>)> = {
+            let cache = self.cache.lock().unwrap();
+            cache.iter().map(|(id, config)| {
+                (id.clone(), config.device_type.clone(), config.last_calibrated)
+            }).collect()
+        };
+        
+        // Now check validity without holding the lock
+        device_data.into_iter().map(|(id, device_type, last_calibrated)| {
             DeviceSummary {
                 device_id: id.clone(),
-                device_type: config.device_type.clone(),
-                last_calibrated: config.last_calibrated,
-                is_valid: self.is_calibration_valid(id, 24 * 7), // 1 week
+                device_type,
+                last_calibrated,
+                is_valid: self.is_calibration_valid(&id, 24 * 7), // 1 week
             }
         }).collect()
     }

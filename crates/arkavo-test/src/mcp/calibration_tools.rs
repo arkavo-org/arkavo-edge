@@ -62,8 +62,10 @@ impl CalibrationTool {
 #[async_trait]
 impl Tool for CalibrationTool {
     async fn execute(&self, params: Value) -> Result<Value> {
+        eprintln!("[CalibrationTool] Execute called with params: {:?}", params);
         let action = params["action"].as_str()
             .ok_or_else(|| TestError::Mcp("action is required".to_string()))?;
+        eprintln!("[CalibrationTool] Action: {}", action);
         
         match action {
             "start_calibration" => {
@@ -160,9 +162,16 @@ impl Tool for CalibrationTool {
                                 "Once complete, use 'get_calibration' to retrieve calibration data"
                             ],
                             "troubleshooting": {
-                                "stuck_in_initializing": "App may not be detecting taps. Check idb_companion is working",
+                                "stuck_in_initializing": "App may not be detecting taps. Auto-recovery will be attempted after 15 seconds",
                                 "no_verification_data": "App may not be writing results. Check Documents folder permissions",
-                                "calibration_timeout": "Process times out after 60 seconds"
+                                "calibration_timeout": "Process times out after 60 seconds",
+                                "idb_stuck": "If no taps are detected for 15 seconds, automatic IDB recovery will be triggered"
+                            },
+                            "auto_recovery": {
+                                "enabled": true,
+                                "watchdog_timeout": "15 seconds",
+                                "tap_timeout": "10 seconds per tap",
+                                "description": "Calibration manager will automatically recover from stuck IDB operations"
                             }
                         }))
                     }
@@ -190,7 +199,15 @@ impl Tool for CalibrationTool {
                             "session_id": status.session_id,
                             "device_id": status.device_id,
                             "start_time": status.start_time,
-                            "elapsed_seconds": status.elapsed_seconds
+                            "elapsed_seconds": status.elapsed_seconds,
+                            "tap_count": status.tap_count,
+                            "last_tap_time": status.last_tap_time,
+                            "idb_status": {
+                                "connected": status.idb_status.connected,
+                                "companion_running": status.idb_status.companion_running,
+                                "last_health_check": status.idb_status.last_health_check,
+                                "last_error": status.idb_status.last_error
+                            }
                         });
                         
                         // Check if ArkavoReference app is running by checking launchctl
@@ -214,6 +231,64 @@ impl Tool for CalibrationTool {
                             .unwrap_or(false);
                         
                         response["app_running"] = json!(app_running);
+                        
+                        // Check for IDB issues
+                        let idb_warning = if !status.idb_status.connected || !status.idb_status.companion_running {
+                            // Check if it's a framework issue
+                            if let Some(error) = &status.idb_status.last_error {
+                                if error.contains("Library not loaded") && error.contains("FBControlCore") {
+                                    Some("IDB companion has missing framework dependencies. Use 'idb_management' tool with 'install' action to fix.")
+                                } else if error.contains("Connection refused") || error.contains("not connected") {
+                                    Some("IDB companion is not connected to the device. The MCP server will handle auto-recovery.")
+                                } else if error.contains("timeout") || error.contains("timed out") {
+                                    Some("IDB operation timed out. Auto-recovery will restart IDB companion.")
+                                } else {
+                                    Some("IDB companion encountered an error. Check idb_status.last_error for details.")
+                                }
+                            } else if !status.idb_status.companion_running {
+                                Some("IDB companion process is not running. Use 'idb_management' tool with 'recover' action.")
+                            } else {
+                                Some("IDB companion is not connected. Auto-recovery will attempt to fix this.")
+                            }
+                        } else {
+                            None
+                        };
+                        
+                        if let Some(warning) = idb_warning {
+                            response["idb_warning"] = json!(warning);
+                            
+                            // Add specific action if framework issue
+                            if status.idb_status.last_error.as_ref().map(|e| e.contains("FBControlCore")).unwrap_or(false) {
+                                response["recommended_action"] = json!({
+                                    "tool": "idb_management",
+                                    "action": "install",
+                                    "description": "Install IDB with proper framework dependencies"
+                                });
+                            }
+                        }
+                        
+                        // Check for stuck calibration (no taps in last 10 seconds during validating phase)
+                        if status.status == "validating" && status.tap_count < 5 {
+                            if let Some(last_tap) = status.last_tap_time {
+                                let seconds_since_tap = (chrono::Utc::now() - last_tap).num_seconds();
+                                if seconds_since_tap > 10 {
+                                    response["stuck_warning"] = json!(format!(
+                                        "No taps detected in {} seconds. Auto-recovery will trigger at 15 seconds.",
+                                        seconds_since_tap
+                                    ));
+                                    response["auto_recovery_status"] = json!({
+                                        "will_trigger_in": (15 - seconds_since_tap).max(0),
+                                        "description": "Automatic IDB recovery will attempt to fix the issue"
+                                    });
+                                }
+                            } else if status.elapsed_seconds > 10 {
+                                response["stuck_warning"] = json!("No taps detected. Auto-recovery will trigger soon.");
+                                response["auto_recovery_status"] = json!({
+                                    "will_trigger_in": (15 - status.elapsed_seconds as i64).max(0),
+                                    "description": "Automatic IDB recovery will attempt to fix the issue"
+                                });
+                            }
+                        }
                         
                         // Add guidance based on status
                         match status.status.as_str() {
@@ -248,17 +323,40 @@ impl Tool for CalibrationTool {
                             }
                             "validating" => {
                                 let elapsed = status.elapsed_seconds;
-                                response["message"] = json!(format!("Calibration Phase 2-3: Tap sequence and verification ({}s elapsed)", elapsed));
-                                response["phase"] = json!({
-                                    "current": 2,
-                                    "name": "Tap Sequence & Verification",
-                                    "status": "in_progress", 
-                                    "description": "Performing calibration taps and reading results",
-                                    "expected_duration": "15-20 seconds",
-                                    "tap_percentages": ["20%/20%", "80%/20%", "50%/50%", "20%/80%", "80%/80%"],
-                                    "note": "Actual pixel coordinates calculated based on device screen size"
-                                });
-                                response["next_action"] = json!("Continue checking status until complete");
+                                
+                                // Check if we're in auto-recovery mode
+                                let is_recovering = status.tap_count == 0 && elapsed > 15;
+                                
+                                if is_recovering {
+                                    response["message"] = json!("Calibration Phase 2: Auto-recovery in progress");
+                                    response["phase"] = json!({
+                                        "current": 2,
+                                        "name": "Auto-Recovery",
+                                        "status": "recovering",
+                                        "description": "Automatic IDB recovery triggered due to no tap progress",
+                                        "recovery_steps": [
+                                            "Terminating stuck IDB companion processes",
+                                            "Clearing IDB cache",
+                                            "Re-initializing IDB connection",
+                                            "Retrying tap sequence"
+                                        ],
+                                        "elapsed": elapsed
+                                    });
+                                    response["next_action"] = json!("Wait for auto-recovery to complete (usually 5-10 seconds)");
+                                } else {
+                                    response["message"] = json!(format!("Calibration Phase 2-3: Tap sequence and verification ({}s elapsed, {} taps completed)", elapsed, status.tap_count));
+                                    response["phase"] = json!({
+                                        "current": 2,
+                                        "name": "Tap Sequence & Verification",
+                                        "status": "in_progress", 
+                                        "description": "Performing calibration taps and reading results",
+                                        "expected_duration": "15-20 seconds",
+                                        "tap_percentages": ["20%/20%", "80%/20%", "50%/50%", "20%/80%", "80%/80%"],
+                                        "progress": format!("{}/5 taps completed", status.tap_count),
+                                        "note": "Actual pixel coordinates calculated based on device screen size"
+                                    });
+                                    response["next_action"] = json!("Continue checking status until complete");
+                                }
                             }
                             "complete" => {
                                 response["message"] = json!("Calibration completed successfully!");
@@ -324,14 +422,18 @@ impl Tool for CalibrationTool {
             }
             
             "list_devices" => {
+                eprintln!("[CalibrationTool] Handling list_devices action");
                 let devices = self.server.data_store.list_calibrated_devices();
+                eprintln!("[CalibrationTool] Found {} devices", devices.len());
                 
-                Ok(json!({
+                let response = json!({
                     "success": true,
                     "message": format!("Found {} calibrated devices", devices.len()),
                     "devices": devices,
                     "count": devices.len()
-                }))
+                });
+                eprintln!("[CalibrationTool] Returning response: {:?}", response);
+                Ok(response)
             }
             
             "enable_monitoring" => {

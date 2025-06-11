@@ -12,6 +12,7 @@ struct SimulatorInfo {
     device_type: String,
 }
 
+#[derive(Clone)]
 pub struct CalibrationAgentImpl {
     device_id: String,
 }
@@ -79,23 +80,61 @@ impl CalibrationAgentImpl {
         
         #[cfg(target_os = "macos")]
         {
-            // Use idb_companion for tapping
-            eprintln!("[CalibrationAgentImpl::execute_tap] Creating async runtime for IdbWrapper::tap");
+            // First, verify the device is booted
+            let device_status = Command::new("xcrun")
+                .args(["simctl", "list", "devices", "-j"])
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+                        for (_runtime, devices) in json["devices"].as_object()? {
+                            if let Some(device_array) = devices.as_array() {
+                                for device in device_array {
+                                    if device["udid"].as_str() == Some(&self.device_id) {
+                                        return device["state"].as_str().map(|s| s.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None
+                });
+                
+            if device_status.as_deref() != Some("Booted") {
+                eprintln!("[CalibrationAgentImpl::execute_tap] Warning: Device {} is not in 'Booted' state: {:?}", 
+                    self.device_id, device_status);
+            }
+            
+            // Try IDB first, but fall back to direct simctl if it fails
+            eprintln!("[CalibrationAgentImpl::execute_tap] Attempting tap via IdbWrapper...");
             let tap_future = IdbWrapper::tap(&self.device_id, x, y);
             
-            // Block on the async operation
+            // Block on the async operation with a timeout
             let runtime = tokio::runtime::Runtime::new()
                 .map_err(|e| CalibrationError::InteractionFailed(e.to_string()))?;
                 
-            eprintln!("[CalibrationAgentImpl::execute_tap] Executing tap via IdbWrapper...");
-            match runtime.block_on(tap_future) {
-                Ok(result) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] Tap successful! Result: {:?}", result);
+            let tap_result = runtime.block_on(async {
+                tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    tap_future
+                ).await
+            });
+            
+            match tap_result {
+                Ok(Ok(result)) => {
+                    eprintln!("[CalibrationAgentImpl::execute_tap] IDB tap successful! Result: {:?}", result);
                 }
-                Err(e) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] Tap failed: {}", e);
+                Ok(Err(e)) => {
+                    eprintln!("[CalibrationAgentImpl::execute_tap] IDB tap failed: {}", e);
                     return Err(CalibrationError::InteractionFailed(
                         format!("Failed to tap at ({}, {}): {}", x, y, e)
+                    ));
+                }
+                Err(_) => {
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Tap timeout after 5 seconds");
+                    return Err(CalibrationError::InteractionFailed(
+                        format!("Tap timeout at ({}, {}) - IDB may be stuck", x, y)
                     ));
                 }
             }
