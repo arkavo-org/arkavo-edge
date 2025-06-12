@@ -80,6 +80,7 @@ impl McpTestServer {
             eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
         } else {
             eprintln!("[McpTestServer] IDB companion initialized successfully");
+            eprintln!("[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory");
         }
 
         // Initialize analysis engine for intelligent tools

@@ -62,7 +62,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
     eprintln!("Downloading IDB companion and frameworks...");
     
     // Download the combined archive
-    let download_url = "https://github.com/arkavo-org/idb/releases/download/1.1.7-arkavo.2/idb_companion-1.1.7-arkavo.2-macos-arm64.tar.gz";
+    let download_url = "https://github.com/arkavo-org/idb/releases/download/1.2.0-arkavo.0/idb_companion-1.2.0-arkavo.0-macos-arm64.tar.gz";
     let temp_dir = env::temp_dir();
     let tar_path = temp_dir.join("idb-companion-combined.tar.gz");
     

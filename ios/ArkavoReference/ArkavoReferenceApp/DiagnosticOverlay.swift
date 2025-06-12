@@ -213,25 +213,26 @@ struct CoordinateDisplay: View {
     var body: some View {
         VStack {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Screen: \(Int(screenSize.width)) × \(Int(screenSize.height))")
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Screen: \(Int(screenSize.width))×\(Int(screenSize.height))")
+                        .font(.system(size: 9, design: .monospaced))
                     if let lastTap = DiagnosticManager.shared.lastTapLocation {
-                        Text("Last tap: (\(Int(lastTap.x)), \(Int(lastTap.y)))")
-                        Text("Normalized: (\(String(format: "%.2f", lastTap.x/screenSize.width)), \(String(format: "%.2f", lastTap.y/screenSize.height)))")
+                        Text("Last: (\(Int(lastTap.x)), \(Int(lastTap.y)))")
+                            .font(.system(size: 9, design: .monospaced))
                     }
                 }
-                .font(.system(size: 10, design: .monospaced))
-                .padding(8)
-                .background(Color.black.opacity(0.8))
+                .padding(6)
+                .background(Color.black.opacity(0.7))
                 .foregroundColor(.green)
-                .cornerRadius(6)
-                
-                Spacer()
+                .cornerRadius(4)
             }
+            .padding(.top, 60) // Move below status bar and calibration mode
             
             Spacer()
         }
-        .padding()
+        .padding(.horizontal)
     }
 }
 

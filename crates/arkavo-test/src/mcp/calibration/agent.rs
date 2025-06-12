@@ -2,8 +2,6 @@ use super::*;
 use std::process::Command;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-#[cfg(target_os = "macos")]
-use crate::mcp::idb_wrapper::IdbWrapper;
 
 #[derive(Debug, Clone)]
 struct SimulatorInfo {
@@ -106,9 +104,11 @@ impl CalibrationAgentImpl {
                     self.device_id, device_status);
             }
             
-            // Try IDB first, but fall back to direct simctl if it fails
-            eprintln!("[CalibrationAgentImpl::execute_tap] Attempting tap via IdbWrapper...");
-            let tap_future = IdbWrapper::tap(&self.device_id, x, y);
+            // Use enhanced tap with retry and fallback
+            eprintln!("[CalibrationAgentImpl::execute_tap] Attempting enhanced tap...");
+            
+            // Import the enhanced tap module
+            use crate::mcp::idb_tap_enhanced::IdbTapEnhanced;
             
             // Block on the async operation with a timeout
             let runtime = tokio::runtime::Runtime::new()
@@ -116,25 +116,25 @@ impl CalibrationAgentImpl {
                 
             let tap_result = runtime.block_on(async {
                 tokio::time::timeout(
-                    tokio::time::Duration::from_secs(5),
-                    tap_future
+                    tokio::time::Duration::from_secs(10),
+                    IdbTapEnhanced::tap_with_verification(&self.device_id, x, y, 3)
                 ).await
             });
             
             match tap_result {
                 Ok(Ok(result)) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] IDB tap successful! Result: {:?}", result);
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {:?}", result);
                 }
                 Ok(Err(e)) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] IDB tap failed: {}", e);
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {}", e);
                     return Err(CalibrationError::InteractionFailed(
                         format!("Failed to tap at ({}, {}): {}", x, y, e)
                     ));
                 }
                 Err(_) => {
-                    eprintln!("[CalibrationAgentImpl::execute_tap] Tap timeout after 5 seconds");
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Tap timeout after 10 seconds");
                     return Err(CalibrationError::InteractionFailed(
-                        format!("Tap timeout at ({}, {}) - IDB may be stuck", x, y)
+                        format!("Tap timeout at ({}, {}) - All methods failed", x, y)
                     ));
                 }
             }

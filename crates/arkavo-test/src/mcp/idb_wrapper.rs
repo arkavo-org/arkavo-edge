@@ -16,6 +16,8 @@ use std::sync::Mutex;
 use crate::{Result, TestError};
 #[cfg(target_os = "macos")]
 use super::frameworks_data;
+use super::idb_port_manager::IdbPortManager;
+use super::idb_error_handler::{IdbErrorHandler, get_troubleshooting_guide};
 
 // Embed the idb_companion binary at compile time
 #[cfg(target_os = "macos")]
@@ -111,24 +113,38 @@ impl IdbWrapper {
                 ));
             }
 
-            // Create a directory structure within the project that matches the binary's expectations
-            // The binary expects to be in a 'bin' directory with frameworks at '../Frameworks'
-            let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let project_root = manifest_dir
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .to_path_buf();
-            let temp_dir = project_root.join("target").join("arkavo_idb");
+            // Create a directory structure relative to current working directory
+            // This ensures the extraction happens where the user launched the tool from
+            let cwd = std::env::current_dir()
+                .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+            let arkavo_dir = cwd.join(".arkavo");
+            let temp_dir = arkavo_dir.join("idb");
             let bin_dir = temp_dir.join("bin");
+            
+            // Create the directory structure
             fs::create_dir_all(&bin_dir)
-                .map_err(|e| TestError::Mcp(format!("Failed to create bin dir: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to create .arkavo/idb/bin dir: {}", e)))?;
+                
+            // Check if .gitignore exists and suggest adding .arkavo
+            let gitignore_path = cwd.join(".gitignore");
+            if gitignore_path.exists() {
+                if let Ok(content) = fs::read_to_string(&gitignore_path) {
+                    if !content.contains(".arkavo") {
+                        eprintln!("[IdbWrapper] 💡 Suggestion: Add '.arkavo/' to your .gitignore file to exclude IDB companion files");
+                    }
+                }
+            } else {
+                eprintln!("[IdbWrapper] 💡 Suggestion: Create a .gitignore file and add '.arkavo/' to exclude IDB companion files");
+            }
 
             let binary_path = bin_dir.join("idb_companion");
+            
+            // Remove any quarantine attributes that might have been added
+            eprintln!("[IdbWrapper] Checking for quarantine attributes...");
 
             // Extract the binary
-            eprintln!("[IdbWrapper] Extracting binary to: {}", binary_path.display());
+            eprintln!("[IdbWrapper] Extracting IDB companion to: {}", binary_path.display());
+            eprintln!("[IdbWrapper] Working directory: {}", cwd.display());
             fs::write(&binary_path, IDB_COMPANION_BYTES)
                 .map_err(|e| TestError::Mcp(format!("Failed to extract idb_companion: {}", e)))?;
             
@@ -201,6 +217,29 @@ impl IdbWrapper {
                 perms.set_mode(0o755);
                 fs::set_permissions(&binary_path, perms)
                     .map_err(|e| TestError::Mcp(format!("Failed to set permissions: {}", e)))?;
+            }
+            
+            // Remove quarantine attribute if present (macOS Gatekeeper)
+            #[cfg(target_os = "macos")]
+            {
+                eprintln!("[IdbWrapper] Removing quarantine attributes from binary...");
+                let xattr_output = Command::new("xattr")
+                    .args(["-cr", binary_path.to_str().unwrap()])
+                    .output();
+                    
+                if let Ok(output) = xattr_output {
+                    if !output.status.success() {
+                        eprintln!("[IdbWrapper] Warning: Failed to remove extended attributes");
+                    }
+                }
+                
+                // Also remove quarantine from frameworks
+                let frameworks_dir = temp_dir.join("Frameworks");
+                if frameworks_dir.exists() {
+                    let _ = Command::new("xattr")
+                        .args(["-cr", frameworks_dir.to_str().unwrap()])
+                        .output();
+                }
             }
             
 
@@ -300,19 +339,29 @@ impl IdbWrapper {
             
             if frameworks_dir.exists() {
                 eprintln!("[IdbWrapper::create_command] Frameworks directory exists, setting DYLD environment variables");
-                // Use DYLD_INSERT_LIBRARIES to force our frameworks to load first
-                // This helps prevent system framework conflicts
-                command.env("DYLD_FRAMEWORK_PATH", frameworks_dir.to_str().unwrap());
                 
-                // Disable library validation to allow loading of unsigned frameworks
+                // Critical environment variables to prevent SIGKILL and resolve conflicts
+                // These must be set for the binary to run in MCP server context
+                
+                // 1. Disable library validation - allows mixed TeamID frameworks
                 command.env("DYLD_DISABLE_LIBRARY_VALIDATION", "1");
                 
-                // Set up fallback paths excluding problematic system frameworks
-                // Don't include /System/Library/PrivateFrameworks to avoid FrontBoard conflicts
+                // 2. Force flat namespace - resolves FBProcess duplicate implementation
+                command.env("DYLD_FORCE_FLAT_NAMESPACE", "1");
+                
+                // 3. Disable fork safety - prevents Objective-C runtime issues in subprocess
+                command.env("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES");
+                
+                // 4. Set framework paths to use our embedded frameworks
+                command.env("DYLD_FRAMEWORK_PATH", frameworks_dir.to_str().unwrap());
                 command.env("DYLD_FALLBACK_FRAMEWORK_PATH", 
                     format!("{}:/System/Library/Frameworks", frameworks_dir.to_str().unwrap()));
                 
-                // Note: Not setting DYLD_FORCE_FLAT_NAMESPACE as it can cause issues with signed binaries
+                eprintln!("[IdbWrapper::create_command] Set critical environment variables to prevent SIGKILL:");
+                eprintln!("[IdbWrapper::create_command]   DYLD_DISABLE_LIBRARY_VALIDATION=1");
+                eprintln!("[IdbWrapper::create_command]   DYLD_FORCE_FLAT_NAMESPACE=1");
+                eprintln!("[IdbWrapper::create_command]   OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES");
+                eprintln!("[IdbWrapper::create_command]   DYLD_FRAMEWORK_PATH={}", frameworks_dir.display());
             }
         }
         
@@ -360,13 +409,63 @@ impl IdbWrapper {
         if needs_start {
             eprintln!("[IdbWrapper] Starting companion server for device {}...", device_id);
             
+            // First verify the device exists
+            if !Self::verify_device_target(device_id).await? {
+                let error_msg = format!("Device {} not found in IDB targets list", device_id);
+                let guidance = IdbErrorHandler::analyze_and_guide(&error_msg);
+                eprintln!("{}", IdbErrorHandler::format_guidance(&guidance));
+                
+                // Try to boot the device if it exists but isn't booted
+                eprintln!("[IdbWrapper] Attempting to boot device {} with simctl...", device_id);
+                let boot_cmd = Command::new("xcrun")
+                    .args(["simctl", "boot", device_id])
+                    .output();
+                    
+                match boot_cmd {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            if !stderr.contains("Unable to boot device in current state: Booted") {
+                                eprintln!("[IdbWrapper] Failed to boot device: {}", stderr);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[IdbWrapper] Failed to execute boot command: {}", e);
+                    }
+                }
+                
+                // Wait for boot
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                
+                // Check again after boot attempt
+                if !Self::verify_device_target(device_id).await? {
+                    return Err(TestError::Mcp(error_msg));
+                }
+                
+                eprintln!("[IdbWrapper] Device {} now visible after boot!", device_id);
+            }
+            
+            // Get an available port for this companion instance
+            let port = IdbPortManager::get_next_idb_port()?;
+            eprintln!("[IdbWrapper] Using port {} for IDB companion", port);
+            
             // Start a new companion process for this device
             let mut command = Self::create_command()?;
-            eprintln!("[IdbWrapper] Starting companion with command: {:?}", command);
             
-            // Try to run with verbose output first to diagnose issues
+            // Log the command details for debugging
             eprintln!("[IdbWrapper] Command path: {:?}", command.get_program());
-            eprintln!("[IdbWrapper] Command args: --udid {} --only simulator", device_id);
+            eprintln!("[IdbWrapper] Command args: --udid {} --only simulator --grpc-port {}", device_id, port);
+            
+            // Log environment variables to confirm they're set
+            eprintln!("[IdbWrapper] Environment variables set for companion spawn:");
+            for (key, value) in command.get_envs() {
+                if let (Some(k), Some(v)) = (key.to_str(), value.map(|val| val.to_str()).flatten()) {
+                    if k.starts_with("DYLD_") || k.starts_with("OBJC_") {
+                        eprintln!("[IdbWrapper]   {}={}", k, v);
+                    }
+                }
+            }
             
             // Check binary architecture
             let file_check = Command::new("file")
@@ -421,7 +520,7 @@ impl IdbWrapper {
             
             // Capture stderr to see any error messages
             let output = command
-                .args(["--udid", device_id, "--only", "simulator"])
+                .args(["--udid", device_id, "--only", "simulator", "--grpc-port", &port.to_string()])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::piped())
                 .spawn();
@@ -443,6 +542,35 @@ impl IdbWrapper {
                             
                             eprintln!("[IdbWrapper] Companion process exited immediately with status: {:?}", status);
                             eprintln!("[IdbWrapper] Stderr: {}", stderr_str);
+                            
+                            // Check for specific exit codes
+                            if let Some(code) = status.code() {
+                                if code == 9 {
+                                    eprintln!("[IdbWrapper] Exit code 9 (SIGKILL) detected - macOS security issue");
+                                    eprintln!("[IdbWrapper] The binary is signed by: Arkavo LLC (M8GS7ZT95Y)");
+                                    eprintln!("[IdbWrapper] But macOS is still blocking it. This can happen when:");
+                                    eprintln!("[IdbWrapper]   - The binary is not notarized by Apple");
+                                    eprintln!("[IdbWrapper]   - Running from a restricted context (MCP server)");
+                                    eprintln!("[IdbWrapper]   - Security settings are preventing execution");
+                                    eprintln!("[IdbWrapper] ");
+                                    eprintln!("[IdbWrapper] Immediate solutions:");
+                                    eprintln!("[IdbWrapper]   1. Install system IDB: brew install facebook/fb/idb-companion");
+                                    eprintln!("[IdbWrapper]   2. Set environment variable: export ARKAVO_USE_SYSTEM_IDB=1");
+                                    eprintln!("[IdbWrapper]   3. Use AppleScript fallback (automatically attempted)");
+                                    eprintln!("[IdbWrapper] ");
+                                    eprintln!("[IdbWrapper] For development, you can also try:");
+                                    eprintln!("[IdbWrapper]   - Add Terminal/your IDE to Privacy & Security > Developer Tools");
+                                    eprintln!("[IdbWrapper]   - Run: sudo spctl --master-disable (not recommended for production)");
+                                }
+                            }
+                            
+                            // Check for framework conflicts in stderr
+                            if stderr_str.contains("Class FBProcess is implemented in both") {
+                                eprintln!("[IdbWrapper] FRAMEWORK CONFLICT DETECTED!");
+                                eprintln!("[IdbWrapper] The embedded IDB frameworks are conflicting with system frameworks");
+                                eprintln!("[IdbWrapper] This is a known issue that we attempted to resolve with DYLD_FORCE_FLAT_NAMESPACE");
+                                eprintln!("[IdbWrapper] If the problem persists, please use system IDB instead");
+                            }
                             
                             return Err(TestError::Mcp(format!(
                                 "IDB companion failed to start: exited with status {:?}. Error: {}", 
@@ -630,6 +758,8 @@ impl IdbWrapper {
     pub async fn tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         let _start_time = std::time::Instant::now();
 
+        eprintln!("[IdbWrapper::tap] Starting tap at ({}, {}) on device {}", x, y, device_id);
+
         // Initialize and get the embedded binary path
         Self::initialize()?;
         
@@ -650,16 +780,29 @@ impl IdbWrapper {
             "simulator",
         ];
         
+        eprintln!("[IdbWrapper::tap] Executing command with args: {:?}", args);
         
         let mut command = Self::create_command()?;
         command.args(&args);
         
+        // Capture both stdout and stderr for diagnostics
         let output = command
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
         
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        
+        eprintln!("[IdbWrapper::tap] Command exit status: {:?}", output.status);
+        if !stdout.is_empty() {
+            eprintln!("[IdbWrapper::tap] Stdout: {}", stdout);
+        }
+        if !stderr.is_empty() {
+            eprintln!("[IdbWrapper::tap] Stderr: {}", stderr);
+        }
 
         if output.status.success() {
+            eprintln!("[IdbWrapper::tap] Tap succeeded at ({}, {})", x, y);
             Ok(json!({
                 "success": true,
                 "method": "idb_companion",
@@ -669,11 +812,17 @@ impl IdbWrapper {
                 "confidence": "high"
             }))
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
             
             // Check for specific errors
             if stderr.contains("Class FBProcess is implemented in both") {
-                // Framework conflict - already handled by create_command
+                eprintln!("[IdbWrapper::tap] FRAMEWORK CONFLICT DETECTED during tap operation!");
+                eprintln!("[IdbWrapper::tap] The embedded IDB frameworks are conflicting with system frameworks");
+                eprintln!("[IdbWrapper::tap] Despite DYLD_FORCE_FLAT_NAMESPACE=1, the conflict persists");
+                
+                // Report the specific conflict details
+                if let Some(conflict_line) = stderr.lines().find(|line| line.contains("Class FBProcess is implemented in both")) {
+                    eprintln!("[IdbWrapper::tap] Conflict details: {}", conflict_line);
+                }
                 
                 // Set flag to use system IDB
                 {
@@ -728,10 +877,37 @@ impl IdbWrapper {
                 ));
             }
             
-            Err(TestError::Mcp(format!(
-                "idb_companion tap failed: {}",
-                stderr
-            )))
+            // Analyze the error and provide guidance
+            let guidance = IdbErrorHandler::analyze_and_guide(&stderr);
+            eprintln!("{}", IdbErrorHandler::format_guidance(&guidance));
+            
+            // If IDB failed, try AppleScript fallback
+            eprintln!("[IdbWrapper::tap] IDB tap failed, attempting AppleScript fallback...");
+            
+            #[cfg(target_os = "macos")]
+            {
+                match crate::mcp::applescript_tap::AppleScriptTap::tap(device_id, x, y).await {
+                    Ok(result) => {
+                        eprintln!("[IdbWrapper::tap] ✅ AppleScript fallback succeeded!");
+                        return Ok(result);
+                    }
+                    Err(applescript_err) => {
+                        eprintln!("[IdbWrapper::tap] ❌ AppleScript fallback also failed: {}", applescript_err);
+                    }
+                }
+            }
+            
+            // Provide comprehensive error message
+            let error_msg = format!(
+                "UI automation failed. IDB Error: {}\n\nUI automation requires either:\n\
+                1. Working IDB companion (recommended)\n\
+                2. XCTest runner app installed on device\n\
+                3. Accessibility permissions for AppleScript\n\n{}",
+                stderr,
+                get_troubleshooting_guide()
+            );
+            
+            Err(TestError::Mcp(error_msg))
         }
     }
 
@@ -789,6 +965,72 @@ impl IdbWrapper {
         }
     }
 
+    /// Verify that a device is available in IDB targets
+    pub async fn verify_device_target(device_id: &str) -> Result<bool> {
+        eprintln!("[IdbWrapper] Verifying device {} is available in IDB targets...", device_id);
+        
+        let targets = Self::list_targets().await?;
+        
+        // Check if device is in the targets list
+        if let Some(devices) = targets.as_array() {
+            for device in devices {
+                if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
+                    if udid == device_id {
+                        eprintln!("[IdbWrapper] Device {} found in IDB targets", device_id);
+                        return Ok(true);
+                    }
+                }
+            }
+        } else if let Some(raw_output) = targets.get("raw_output").and_then(|v| v.as_str()) {
+            // Parse newline-delimited JSON
+            for line in raw_output.lines() {
+                if let Ok(device) = serde_json::from_str::<serde_json::Value>(line) {
+                    if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
+                        if udid == device_id {
+                            eprintln!("[IdbWrapper] Device {} found in IDB targets", device_id);
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+        
+        eprintln!("[IdbWrapper] Device {} NOT found in IDB targets", device_id);
+        
+        // Try to get more info about available devices
+        eprintln!("[IdbWrapper] Running xcrun simctl to check device status...");
+        let simctl_output = Command::new("xcrun")
+            .args(["simctl", "list", "devices", "-j"])
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to run simctl: {}", e)))?;
+            
+        if simctl_output.status.success() {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&simctl_output.stdout) {
+                for (_runtime, devices) in json["devices"].as_object().unwrap_or(&serde_json::Map::new()) {
+                    if let Some(device_array) = devices.as_array() {
+                        for device in device_array {
+                            if device["udid"].as_str() == Some(device_id) {
+                                let state = device["state"].as_str().unwrap_or("Unknown");
+                                let name = device["name"].as_str().unwrap_or("Unknown");
+                                eprintln!("[IdbWrapper] Found device in simctl: {} - {} (state: {})", 
+                                    device_id, name, state);
+                                
+                                if state != "Booted" {
+                                    eprintln!("[IdbWrapper] WARNING: Device is not booted! Current state: {}", state);
+                                }
+                                
+                                return Ok(false); // Found in simctl but not in IDB
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        eprintln!("[IdbWrapper] Device {} not found in simctl either!", device_id);
+        Ok(false)
+    }
+    
     /// List all available targets (devices/simulators)
     pub async fn list_targets() -> Result<serde_json::Value> {
         Self::initialize()?;

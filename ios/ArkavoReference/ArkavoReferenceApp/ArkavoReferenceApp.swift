@@ -15,11 +15,11 @@ struct ArkavoReferenceApp: App {
                         handleDeepLink(url)
                     }
                 
-                // Diagnostic overlay
-                GeometryReader { geometry in
-                    DiagnosticOverlay(screenSize: geometry.size)
-                }
-                .ignoresSafeArea()
+                // Diagnostic overlay - disabled to avoid duplicates in CalibrationView
+                // GeometryReader { geometry in
+                //     DiagnosticOverlay(screenSize: geometry.size)
+                // }
+                // .ignoresSafeArea()
             }
             .onAppear {
                 setupApp()
@@ -30,14 +30,15 @@ struct ArkavoReferenceApp: App {
     private func setupApp() {
         // Enable diagnostics in debug mode
         #if DEBUG
-        diagnosticManager.isEnabled = true
+        // Disabled by default - let CalibrationView manage its own diagnostics
+        diagnosticManager.isEnabled = false
         #endif
         
-        // Log app launch
-        diagnosticManager.logEvent(DiagnosticEvent(
-            type: .navigation,
-            details: "App launched - starting in calibration mode"
-        ))
+        // Don't log app launch to avoid enabling diagnostics
+        // diagnosticManager.logEvent(DiagnosticEvent(
+        //     type: .navigation,
+        //     details: "App launched - starting in calibration mode"
+        // ))
     }
     
     private func handleDeepLink(_ url: URL) {
