@@ -46,8 +46,8 @@ struct AutoMonitor {
 impl CalibrationServer {
     async fn check_idb_health(
         &self,
-        session_id: &str,
-        device_id: &str,
+        #[allow(unused_variables)] session_id: &str,
+        #[allow(unused_variables)] device_id: &str,
     ) -> Result<bool, CalibrationError> {
         #[cfg(target_os = "macos")]
         {

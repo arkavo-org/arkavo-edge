@@ -1561,6 +1561,7 @@ impl Tool for UiInteractionKit {
                     return Ok(e.to_response());
                 }
 
+                #[allow(unused_variables)]
                 let button = params
                     .get("value")
                     .and_then(|v| v.as_str())

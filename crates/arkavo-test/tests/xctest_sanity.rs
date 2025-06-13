@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Quick sanity check for XCUITest integration
 //!
 //! Run with: cargo test --test xctest_sanity
