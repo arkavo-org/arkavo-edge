@@ -18,7 +18,7 @@ impl UsageGuideKit {
                     "properties": {
                         "topic": {
                             "type": "string",
-                            "enum": ["overview", "text_based_tapping", "workflows", "debugging", "examples"],
+                            "enum": ["overview", "text_based_tapping", "workflows", "debugging", "examples", "calibration"],
                             "description": "Specific topic to get guidance on"
                         }
                     }
@@ -48,6 +48,14 @@ impl Tool for UsageGuideKit {
 # iOS Automation with Coordinate-Based Tapping
 
 This MCP server provides iOS UI automation with COORDINATE-BASED TAPPING as the PRIMARY method.
+
+## ⚠️ IMPORTANT: Calibration Setup
+
+For calibration with visual feedback:
+- Simply run `calibration_manager` with action `start_calibration`
+- The ArkavoReference app will be installed automatically if needed
+
+**DO NOT use setup_xcuitest** - it's for a different purpose and will fail with connection errors.
 
 ## 🎯 RECOMMENDED APPROACH: Coordinate Tapping
 
@@ -102,10 +110,11 @@ Text-based tapping requires setup_xcuitest which:
 ## Quick Start
 
 1. Use device_management to get device_id
-2. Use screen_capture to see the UI
-3. Read the screenshot image
-4. Identify element positions
-5. Use ui_interaction with coordinates
+2. (Optional) Run calibration_manager for better accuracy
+3. Use screen_capture to see the UI
+4. Read the screenshot image
+5. Identify element positions
+6. Use ui_interaction with coordinates
 
 Example:
 ```json
@@ -246,6 +255,81 @@ XCUITest will search for elements matching your text/ID for up to 10 seconds.
 - Use text/accessibility_id over coordinates
 "#
             }
+            "log_streaming" => {
+                r#"
+# Log Streaming and Diagnostics
+
+## Real-Time Log Streaming
+
+Stream logs from iOS apps to debug issues and monitor behavior:
+
+**Start streaming:**
+```json
+{
+  "tool": "log_stream",
+  "parameters": {
+    "action": "start",
+    "process_name": "ArkavoReference"
+  }
+}
+```
+
+**Read recent logs:**
+```json
+{
+  "tool": "log_stream",
+  "parameters": {
+    "action": "read",
+    "limit": 50
+  }
+}
+```
+
+**Stop streaming:**
+```json
+{
+  "tool": "log_stream",
+  "parameters": {
+    "action": "stop",
+    "stream_id": "<stream_id>"
+  }
+}
+```
+
+## ArkavoReference Diagnostic Export
+
+Export diagnostic data from the reference app:
+
+```json
+{
+  "tool": "app_diagnostic_export",
+  "parameters": {
+    "bundle_id": "com.arkavo.ArkavoReference"
+  }
+}
+```
+
+This triggers the app to export:
+- Tap event history with coordinates
+- UI state changes
+- Performance metrics
+- Device information
+
+## Calibration with Feedback
+
+1. **Start log stream** - Capture all diagnostic events
+2. **Launch in calibration mode** - `arkavo-edge://calibration`
+3. **Run calibration** - Monitor tap accuracy in logs
+4. **Export diagnostics** - Get complete interaction history
+5. **Analyze results** - Verify calibration accuracy
+
+## Tips
+- Always start log stream before launching app
+- Use process name exactly as shown in Activity Monitor
+- Diagnostic data appears in logs after export
+- Filter logs with custom predicates for specific events
+"#
+            }
             "examples" => {
                 r#"
 # Complete Examples
@@ -305,8 +389,123 @@ tool("ui_interaction", {"action": "tap", "target": {"x": 200, "y": 600}})
 ALWAYS use coordinates from screenshots instead!
 "#
             }
+            "calibration" => {
+                r#"
+# Calibration System for iOS UI Automation
+
+The calibration system helps ensure accurate tap coordinates by displaying actual tap locations on screen for easy verification.
+
+## 🎯 Visual Calibration Method (Recommended)
+
+### setup_calibration
+Launches the test host app in calibration mode with visual coordinate display:
+
+```json
+{
+  "tool": "setup_calibration",
+  "arguments": {}
+}
+```
+
+Features:
+- **Large coordinate display**: Shows "X: 123 Y: 456" prominently on screen
+- **Visual markers**: Green circles mark each tap location
+- **Persistent display**: All tap markers remain visible
+- **Screenshot-friendly**: High contrast for easy OCR/detection
+
+### How to Use Visual Calibration:
+
+1. **Launch calibration mode**:
+```json
+{"tool": "setup_calibration", "arguments": {}}
+```
+
+2. **Tap and capture coordinates**:
+```json
+// Tap at a location
+{"tool": "ui_interaction", "arguments": {"action": "tap", "target": {"x": 195, "y": 422}}}
+
+// Take screenshot to see displayed coordinates
+{"tool": "ui_query", "arguments": {"action": "screenshot"}}
+```
+
+3. **Compare results**:
+- If displayed coordinates match sent coordinates: Perfect calibration!
+- If offset exists: Apply inverse offset to future taps
+
+## 📊 Automated Calibration Manager
+
+### calibration_manager
+Automates calibration with intelligent offset detection:
+
+- `start_calibration` - Begin automated calibration (installs ArkavoReference app automatically if needed)
+- `get_status` - Check calibration progress
+- `get_calibration` - Retrieve calibration data
+- `list_devices` - Show all calibrated devices
+- `enable_monitoring` - Auto-recalibration when needed
+- `install_reference_app` - Manually install ArkavoReference app (usually not needed)
+
+### Quick Start:
+
+```json
+// Simply start calibration - app will be installed automatically if needed
+{
+  "tool": "calibration_manager",
+  "arguments": {
+    "action": "start_calibration",
+    "device_id": "YOUR_DEVICE_ID"
+  }
+}
+
+// Monitor progress
+{
+  "tool": "calibration_manager",
+  "arguments": {
+    "action": "get_status",
+    "session_id": "SESSION_ID_FROM_START"
+  }
+}
+```
+
+**IMPORTANT**: Do NOT use setup_xcuitest - it's for a different purpose and will fail
+
+### URL Dialog Handling
+
+iOS shows a system dialog when opening deep links. The calibration process handles this automatically, but you can also use:
+
+```json
+{
+  "tool": "url_dialog",
+  "arguments": {
+    "action": "tap_open"
+  }
+}
+```
+
+## When to Calibrate
+
+- First time using a new device/simulator
+- After iOS updates
+- If taps are missing their targets
+- When switching between device types
+
+## Benefits
+
+✅ **Visual verification** - See exactly where taps land
+✅ **Easy debugging** - Screenshot shows coordinates
+✅ **No guesswork** - Precise offset calculation
+✅ **Integrated solution** - Built into test host app
+
+## Best Practices
+
+- Use visual calibration for manual verification
+- Use automated calibration for production
+- Save screenshots for debugging
+- Recalibrate after major changes
+"#
+            }
             _ => {
-                "Unknown topic. Available topics: overview, text_based_tapping, workflows, debugging, examples"
+                "Unknown topic. Available topics: overview, text_based_tapping, workflows, debugging, examples, calibration, log_streaming"
             }
         };
 

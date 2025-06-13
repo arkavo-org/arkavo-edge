@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 #[cfg(test)]
 mod ui_interaction_tests {
     use arkavo_test::mcp::{

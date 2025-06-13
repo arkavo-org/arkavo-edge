@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Basic sanity check for XCUITest templates
 //!
 //! Run with: cargo test --test xctest_basic_sanity
@@ -141,7 +143,7 @@ fn test_macos_tools_available() {
 
     // Check if we can run simctl
     let simctl = Command::new("xcrun")
-        .args(&["simctl", "help"])
+        .args(["simctl", "help"])
         .output()
         .expect("Failed to run simctl");
 

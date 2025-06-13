@@ -121,3 +121,14 @@ Avoid hardcoded paths, platform-specific assumptions, or environment-dependent c
 
 - Faking success is worse than an honest failure
 - do not use conventional commits
+- A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
+    •    You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
+    •    This includes trying to invoke Homebrew or similar to install dependencies at runtime.
+    •    Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
+- **IMPORTANT: simctl does NOT support tap/touch/swipe commands**. The following commands are INVALID and do not exist:
+    • `xcrun simctl io <device> tap <x> <y>` - DOES NOT EXIST
+    • `xcrun simctl io <device> touch <x>,<y>` - DOES NOT EXIST  
+    • `xcrun simctl io <device> swipe` - DOES NOT EXIST
+    • `xcrun simctl io <device> sendkey` - DOES NOT EXIST
+    • Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
+    • For UI automation use: IDB, XCTest, or AppleScript - NOT simctl

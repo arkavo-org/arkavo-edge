@@ -81,6 +81,7 @@ The test harness provides AI‑driven intelligent test generation that understan
   - Hot‑reload test injection without rebuilds
   - Snapshot/restore with branching execution paths
   - Deterministic chaos injection
+  - UI interaction for agents (implementation solutions like idb_companion, AppleScript communicated without requiring knowledge of their complexity)
 
 3. **Test Generation Modes**
   - **Intelligent Mode**: AI autonomously explores and finds bugs
