@@ -36,6 +36,9 @@ pub mod idb_recovery;
 pub mod idb_tap_enhanced;
 #[cfg(target_os = "macos")]
 pub mod idb_wrapper;
+#[cfg(target_os = "macos")]
+pub mod idb_direct_wrapper;
+pub mod idb_unified;
 pub mod intelligent_tools;
 pub mod ios_biometric_tools;
 pub mod ios_errors;

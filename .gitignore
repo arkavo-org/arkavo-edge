@@ -1,6 +1,7 @@
 /target
 .claude/settings.local.json
 .arkavo/
+vendor/
 
 # IDE files
 .idea/

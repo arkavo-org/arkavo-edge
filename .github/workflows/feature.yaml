@@ -11,6 +11,8 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
+  IDB_VERSION: 1.3.0-arkavo.0
+  IDB_SHA256: 02ad470cf0ea9b5893668a5b1160f1ad76c4622c266791e89dafe1fc699b8777
 
 jobs:
   # Quick checks that can run in parallel
@@ -102,10 +104,34 @@ jobs:
         with:
           shared-key: "macos-arm64"
       
-      - name: Install idb-companion
+      - name: Download and cache libidb_direct
+        uses: actions/cache@v4
+        id: cache-idb
+        with:
+          path: vendor/idb
+          key: idb-direct-${{ env.IDB_VERSION }}-${{ env.IDB_SHA256 }}
+      
+      - name: Download libidb_direct if not cached
+        if: steps.cache-idb.outputs.cache-hit != 'true'
         run: |
-          brew tap facebook/fb
-          brew install idb-companion
+          mkdir -p vendor/idb
+          gh release download "${{ env.IDB_VERSION }}" \
+            --repo arkavo-org/idb \
+            --pattern 'libidb_direct-*-macos-arm64.tar.gz' \
+            --output libidb.tar.gz
+          
+          # Verify checksum
+          ACTUAL_SHA=$(shasum -a 256 libidb.tar.gz | cut -d' ' -f1)
+          if [ "$ACTUAL_SHA" != "${{ env.IDB_SHA256 }}" ]; then
+            echo "SHA256 mismatch! Expected: ${{ env.IDB_SHA256 }}, Got: $ACTUAL_SHA"
+            exit 1
+          fi
+          
+          # Extract to vendor/idb
+          tar -xzf libidb.tar.gz -C vendor/idb --strip-components=1
+          rm libidb.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
       
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin

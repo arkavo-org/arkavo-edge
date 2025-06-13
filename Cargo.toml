@@ -10,6 +10,7 @@ members = [
     "crates/arkavo-vault",
     "crates/arkavo-test",
     "crates/arkavo-llm",
+    "crates/arkavo-idb-direct",
 ]
 resolver = "2"
 
