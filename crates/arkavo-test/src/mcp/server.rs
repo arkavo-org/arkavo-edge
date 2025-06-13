@@ -74,18 +74,26 @@ impl McpTestServer {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
         // Initialize IDB companion early to ensure it's available for all tools
-        eprintln!("[McpTestServer] Initializing IDB companion...");
-        if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
-            eprintln!(
-                "[McpTestServer] Warning: Failed to initialize IDB companion: {}",
-                e
-            );
-            eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
-        } else {
-            eprintln!("[McpTestServer] IDB companion initialized successfully");
-            eprintln!(
-                "[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory"
-            );
+        #[cfg(target_os = "macos")]
+        {
+            eprintln!("[McpTestServer] Initializing IDB companion...");
+            if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
+                eprintln!(
+                    "[McpTestServer] Warning: Failed to initialize IDB companion: {}",
+                    e
+                );
+                eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
+            } else {
+                eprintln!("[McpTestServer] IDB companion initialized successfully");
+                eprintln!(
+                    "[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory"
+                );
+            }
+        }
+        
+        #[cfg(not(target_os = "macos"))]
+        {
+            eprintln!("[McpTestServer] IDB companion not available on this platform");
         }
 
         // Initialize analysis engine for intelligent tools
