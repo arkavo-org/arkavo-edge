@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 #[tokio::test]
 async fn test_idb_initialization() {
     use arkavo_test::mcp::idb_wrapper::IdbWrapper;

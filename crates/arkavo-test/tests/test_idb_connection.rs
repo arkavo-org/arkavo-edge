@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 #[cfg(test)]
 mod test_idb_connection {
     use arkavo_test::mcp::idb_wrapper::IdbWrapper;

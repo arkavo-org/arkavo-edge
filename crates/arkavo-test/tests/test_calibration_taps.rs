@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 use arkavo_test::mcp::idb_wrapper::IdbWrapper;
 use std::process::Command;
 
