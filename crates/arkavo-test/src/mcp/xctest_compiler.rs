@@ -429,13 +429,13 @@ let package = Package(
     /// Create a minimal host app that can load and run our XCTest bundle
     fn create_test_host_app(&self) -> Result<PathBuf> {
         let app_dir = self.build_dir.join("ArkavoTestHost.app");
-        
+
         // Remove existing app if it exists to ensure clean build
         if app_dir.exists() {
             eprintln!("[XCTestCompiler] Removing existing test host app to ensure clean build");
             fs::remove_dir_all(&app_dir)?;
         }
-        
+
         fs::create_dir_all(&app_dir)?;
 
         // Create Info.plist with deep link support for calibration
@@ -482,8 +482,11 @@ let package = Package(
 
         let plist_path = app_dir.join("Info.plist");
         fs::write(&plist_path, info_plist)?;
-        eprintln!("[XCTestCompiler] Wrote Info.plist to: {}", plist_path.display());
-        
+        eprintln!(
+            "[XCTestCompiler] Wrote Info.plist to: {}",
+            plist_path.display()
+        );
+
         // Verify the URL types were written correctly
         let written_content = fs::read_to_string(&plist_path)?;
         if written_content.contains("CFBundleURLTypes") {
@@ -1042,21 +1045,26 @@ int main(int argc, char * argv[]) {
         let _ = Command::new("xcrun")
             .args(["simctl", "uninstall", device_id, "com.arkavo.testhost"])
             .output();
-        
+
         // Install the host app
         eprintln!("[XCTestCompiler] Installing host app...");
-        eprintln!("[XCTestCompiler] Host app path: {}", host_app_path.display());
-        
+        eprintln!(
+            "[XCTestCompiler] Host app path: {}",
+            host_app_path.display()
+        );
+
         // Verify Info.plist contains URL types before installing
         let info_plist_path = host_app_path.join("Info.plist");
         if let Ok(plist_content) = fs::read_to_string(&info_plist_path) {
             if plist_content.contains("arkavo-edge") {
                 eprintln!("[XCTestCompiler] ✓ Info.plist contains arkavo-edge URL scheme");
             } else {
-                eprintln!("[XCTestCompiler] ⚠️ WARNING: Info.plist missing arkavo-edge URL scheme!");
+                eprintln!(
+                    "[XCTestCompiler] ⚠️ WARNING: Info.plist missing arkavo-edge URL scheme!"
+                );
             }
         }
-        
+
         let install_output = Command::new("xcrun")
             .args([
                 "simctl",

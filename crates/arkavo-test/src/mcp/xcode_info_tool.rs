@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use super::xcode_version::XcodeVersion;
 use crate::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct XcodeInfoTool {
     schema: ToolSchema,
@@ -104,15 +104,15 @@ impl Tool for XcodeInfoTool {
 
                     // Add compatibility warnings
                     let mut warnings = Vec::new();
-                    
+
                     if version.major < 15 {
                         warnings.push("UI automation features are limited. Consider upgrading to Xcode 15 or later.");
                     }
-                    
+
                     if version.major >= 26 {
                         warnings.push("Running Xcode 26 beta. New features are being integrated.");
                     }
-                    
+
                     if !warnings.is_empty() {
                         result["warnings"] = json!(warnings);
                     }
@@ -126,7 +126,7 @@ impl Tool for XcodeInfoTool {
                     "message": e.to_string(),
                     "suggestion": "Ensure Xcode is installed and xcode-select is configured correctly"
                 }
-            }))
+            })),
         }
     }
 

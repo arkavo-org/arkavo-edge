@@ -104,7 +104,10 @@ pub enum IssueSeverity {
 pub trait CalibrationAgent {
     fn discover_ui_elements(&self) -> Result<Vec<UIElement>, CalibrationError>;
     fn get_device_parameters(&self) -> Result<DeviceProfile, CalibrationError>;
-    fn execute_interaction(&self, action: &CalibrationAction) -> Result<InteractionResult, CalibrationError>;
+    fn execute_interaction(
+        &self,
+        action: &CalibrationAction,
+    ) -> Result<InteractionResult, CalibrationError>;
     fn capture_ground_truth(&self) -> Result<GroundTruth, CalibrationError>;
 }
 
@@ -208,22 +211,22 @@ pub enum ValidationCriterion {
 pub enum CalibrationError {
     #[error("Device not found: {0}")]
     DeviceNotFound(String),
-    
+
     #[error("UI discovery failed: {0}")]
     UIDiscoveryFailed(String),
-    
+
     #[error("Interaction failed: {0}")]
     InteractionFailed(String),
-    
+
     #[error("Validation error: {0}")]
     ValidationError(String),
-    
+
     #[error("Configuration error: {0}")]
     ConfigurationError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }

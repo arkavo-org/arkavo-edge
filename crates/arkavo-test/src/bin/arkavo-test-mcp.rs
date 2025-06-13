@@ -1,6 +1,6 @@
-use arkavo_test::mcp::server::{McpTestServer, ToolRequest};
 use arkavo_test::Result;
-use serde_json::{json, Value};
+use arkavo_test::mcp::server::{McpTestServer, ToolRequest};
+use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use tracing_subscriber::EnvFilter;
 
@@ -26,36 +26,35 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
     eprintln!("Starting Arkavo Test MCP Server...");
-    
+
     // Create the MCP server
     let server = McpTestServer::new()?;
     eprintln!("MCP Server initialized successfully");
-    
+
     // Print available tools
     let schemas = server.get_tool_schemas()?;
     eprintln!("Available tools: {}", schemas.len());
     for schema in &schemas {
         eprintln!("  - {}: {}", schema.name, schema.description);
     }
-    
+
     // Start JSON-RPC loop
     eprintln!("\nMCP Server ready. Listening for JSON-RPC requests on stdin...");
-    
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    
+
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        
+
         // Parse JSON-RPC request
         let request: JsonRpcRequest = match serde_json::from_str(&line) {
             Ok(req) => req,
@@ -74,7 +73,7 @@ async fn main() -> Result<()> {
                 continue;
             }
         };
-        
+
         // Handle the request
         let response = match request.method.as_str() {
             "tools/list" => {
@@ -103,7 +102,7 @@ async fn main() -> Result<()> {
                             tool_name: name.to_string(),
                             params: arguments.clone(),
                         };
-                        
+
                         match server.call_tool(tool_request).await {
                             Ok(tool_response) => JsonRpcResponse {
                                 jsonrpc: "2.0".to_string(),
@@ -162,11 +161,11 @@ async fn main() -> Result<()> {
                 }
             }
         };
-        
+
         // Send response
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
         stdout.flush()?;
     }
-    
+
     Ok(())
 }

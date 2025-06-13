@@ -425,19 +425,21 @@ impl SimulatorManager {
 
     pub fn check_compatibility(&self) -> Vec<String> {
         let mut warnings = Vec::new();
-        
+
         if let Some(version) = &self.xcode_version {
             if version.major < 15 {
                 warnings.push("Xcode version is older than 15. Some UI automation features may not be available.".to_string());
             }
-            
+
             if version.major >= 26 {
                 warnings.push("Xcode 26 detected. Using latest simulator features.".to_string());
             }
         } else {
-            warnings.push("Unable to detect Xcode version. Some features may not work correctly.".to_string());
+            warnings.push(
+                "Unable to detect Xcode version. Some features may not work correctly.".to_string(),
+            );
         }
-        
+
         warnings
     }
 }

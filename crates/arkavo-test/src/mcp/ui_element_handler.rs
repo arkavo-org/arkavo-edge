@@ -4,8 +4,8 @@ use super::simulator_interaction::SimulatorInteraction;
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -83,7 +83,7 @@ impl UiElementHandler {
         // Use the new version-aware simulator interaction
         match self.simulator_interaction.tap(device_id, x, y).await {
             Ok(_) => Ok(()),
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 
@@ -160,7 +160,7 @@ impl UiElementHandler {
 
     fn tap_checkbox_with_strategies(&self, x: f64, y: f64) -> Result<Vec<String>> {
         let mut strategies_tried = Vec::new();
-        
+
         // Strategy 1: Direct tap on checkbox
         strategies_tried.push("direct_tap".to_string());
         if self.perform_tap(x, y).is_ok() {
@@ -196,7 +196,9 @@ impl UiElementHandler {
             }
         }
 
-        Err(TestError::Mcp("All checkbox tap strategies failed".to_string()))
+        Err(TestError::Mcp(
+            "All checkbox tap strategies failed".to_string(),
+        ))
     }
 }
 
@@ -239,26 +241,24 @@ impl Tool for UiElementHandler {
         eprintln!("Using Xcode version info: {}", version_info);
 
         match action {
-            "tap_checkbox" => {
-                match self.tap_checkbox_with_strategies(x, y) {
-                    Ok(strategies) => Ok(json!({
-                        "success": true,
-                        "action": "tap_checkbox",
-                        "coordinates": {"x": x, "y": y},
-                        "device_id": device_id,
-                        "strategies_tried": strategies,
-                        "message": "Checkbox tapped using multiple strategies"
-                    })),
-                    Err(e) => Ok(json!({
-                        "success": false,
-                        "error": {
-                            "code": "CHECKBOX_TAP_FAILED",
-                            "message": e.to_string(),
-                            "suggestion": "Try using tap_with_retry or adjusting coordinates"
-                        }
-                    }))
-                }
-            }
+            "tap_checkbox" => match self.tap_checkbox_with_strategies(x, y) {
+                Ok(strategies) => Ok(json!({
+                    "success": true,
+                    "action": "tap_checkbox",
+                    "coordinates": {"x": x, "y": y},
+                    "device_id": device_id,
+                    "strategies_tried": strategies,
+                    "message": "Checkbox tapped using multiple strategies"
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": {
+                        "code": "CHECKBOX_TAP_FAILED",
+                        "message": e.to_string(),
+                        "suggestion": "Try using tap_with_retry or adjusting coordinates"
+                    }
+                })),
+            },
             "tap_switch" => {
                 // Switches often need a tap on the right side
                 match self.perform_tap(x + 20.0, y) {
@@ -275,43 +275,39 @@ impl Tool for UiElementHandler {
                             "code": "SWITCH_TAP_FAILED",
                             "message": e.to_string()
                         }
-                    }))
-                }
-            }
-            "double_tap" => {
-                match self.perform_double_tap(x, y) {
-                    Ok(_) => Ok(json!({
-                        "success": true,
-                        "action": "double_tap",
-                        "coordinates": {"x": x, "y": y},
-                        "device_id": device_id
                     })),
-                    Err(e) => Ok(json!({
-                        "success": false,
-                        "error": {
-                            "code": "DOUBLE_TAP_FAILED",
-                            "message": e.to_string()
-                        }
-                    }))
                 }
             }
-            "long_press" => {
-                match self.perform_long_press(x, y) {
-                    Ok(_) => Ok(json!({
-                        "success": true,
-                        "action": "long_press",
-                        "coordinates": {"x": x, "y": y},
-                        "device_id": device_id
-                    })),
-                    Err(e) => Ok(json!({
-                        "success": false,
-                        "error": {
-                            "code": "LONG_PRESS_FAILED",
-                            "message": e.to_string()
-                        }
-                    }))
-                }
-            }
+            "double_tap" => match self.perform_double_tap(x, y) {
+                Ok(_) => Ok(json!({
+                    "success": true,
+                    "action": "double_tap",
+                    "coordinates": {"x": x, "y": y},
+                    "device_id": device_id
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": {
+                        "code": "DOUBLE_TAP_FAILED",
+                        "message": e.to_string()
+                    }
+                })),
+            },
+            "long_press" => match self.perform_long_press(x, y) {
+                Ok(_) => Ok(json!({
+                    "success": true,
+                    "action": "long_press",
+                    "coordinates": {"x": x, "y": y},
+                    "device_id": device_id
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": {
+                        "code": "LONG_PRESS_FAILED",
+                        "message": e.to_string()
+                    }
+                })),
+            },
             "tap_with_retry" => {
                 let retry_count = params
                     .get("retry_count")

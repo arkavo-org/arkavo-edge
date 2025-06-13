@@ -10,7 +10,11 @@ pub struct XcodeVersion {
 
 impl XcodeVersion {
     pub fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     pub fn detect() -> Result<Self> {
@@ -27,22 +31,25 @@ impl XcodeVersion {
         }
 
         let version_str = String::from_utf8_lossy(&output.stdout);
-        
+
         // Parse "Xcode X.Y.Z" or "Xcode X.Y"
         if let Some(version_line) = version_str.lines().find(|line| line.starts_with("Xcode")) {
             let parts: Vec<&str> = version_line.split_whitespace().collect();
             if parts.len() >= 2 {
                 let version_nums: Vec<&str> = parts[1].split('.').collect();
-                let major = version_nums.get(0)
+                let major = version_nums
+                    .get(0)
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
-                let minor = version_nums.get(1)
+                let minor = version_nums
+                    .get(1)
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
-                let patch = version_nums.get(2)
+                let patch = version_nums
+                    .get(2)
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
-                
+
                 return Ok(Self::new(major, minor, patch));
             }
         }

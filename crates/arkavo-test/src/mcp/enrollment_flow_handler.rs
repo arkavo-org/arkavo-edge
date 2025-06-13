@@ -3,8 +3,8 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -18,7 +18,9 @@ impl EnrollmentFlowHandler {
         Self {
             schema: ToolSchema {
                 name: "enrollment_flow".to_string(),
-                description: "Complete biometric enrollment flow including dialog handling and app relaunch".to_string(),
+                description:
+                    "Complete biometric enrollment flow including dialog handling and app relaunch"
+                        .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -177,7 +179,7 @@ impl Tool for EnrollmentFlowHandler {
             "complete_enrollment" => {
                 // Complete enrollment flow
                 let mut steps_completed = vec![];
-                
+
                 // Step 1: Dismiss dialog
                 if self.dismiss_dialog().is_ok() {
                     steps_completed.push("Dismissed enrollment dialog");
@@ -205,7 +207,7 @@ impl Tool for EnrollmentFlowHandler {
                 // Step 3: Relaunch app
                 self.terminate_app(&device_id, bundle_id).ok();
                 thread::sleep(Duration::from_millis(500));
-                
+
                 match self.launch_app(&device_id, bundle_id) {
                     Ok(_) => {
                         steps_completed.push("Relaunched app");
@@ -225,13 +227,13 @@ impl Tool for EnrollmentFlowHandler {
                             "message": e.to_string(),
                             "steps_completed": steps_completed
                         }
-                    }))
+                    })),
                 }
             }
             "dismiss_and_relaunch" => {
                 // Just dismiss and relaunch without enrollment
                 let mut steps_completed = vec![];
-                
+
                 // Dismiss dialog
                 if self.dismiss_dialog().is_ok() {
                     steps_completed.push("Dismissed enrollment dialog");
@@ -241,7 +243,7 @@ impl Tool for EnrollmentFlowHandler {
                 // Terminate and relaunch
                 self.terminate_app(&device_id, bundle_id).ok();
                 thread::sleep(Duration::from_millis(500));
-                
+
                 match self.launch_app(&device_id, bundle_id) {
                     Ok(_) => {
                         steps_completed.push("Relaunched app");
@@ -260,7 +262,7 @@ impl Tool for EnrollmentFlowHandler {
                             "message": e.to_string(),
                             "steps_completed": steps_completed
                         }
-                    }))
+                    })),
                 }
             }
             "enroll_and_continue" => {
@@ -278,7 +280,7 @@ impl Tool for EnrollmentFlowHandler {
                             "code": "ENROLLMENT_FAILED",
                             "message": e.to_string()
                         }
-                    }))
+                    })),
                 }
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),

@@ -15,7 +15,8 @@ impl CoordinateValidator {
         Self {
             schema: ToolSchema {
                 name: "coordinate_validator".to_string(),
-                description: "Validate and adjust coordinates for the current device screen bounds".to_string(),
+                description: "Validate and adjust coordinates for the current device screen bounds"
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -48,7 +49,9 @@ impl CoordinateValidator {
     fn get_device_bounds(&self, device_type: &str) -> (f64, f64) {
         // Return logical resolution for common devices
         match device_type {
-            s if s.contains("iPhone-16-Pro-Max") || s.contains("iPhone 16 Pro Max") => (430.0, 932.0),
+            s if s.contains("iPhone-16-Pro-Max") || s.contains("iPhone 16 Pro Max") => {
+                (430.0, 932.0)
+            }
             s if s.contains("iPhone-16-Pro") || s.contains("iPhone 16 Pro") => (393.0, 852.0),
             s if s.contains("iPhone-16-Plus") || s.contains("iPhone 16 Plus") => (428.0, 926.0),
             s if s.contains("iPhone-16") || s.contains("iPhone 16") => (390.0, 844.0),
@@ -66,7 +69,7 @@ impl CoordinateValidator {
 
     fn validate_coordinates(&self, x: f64, y: f64, width: f64, height: f64) -> (bool, String) {
         let mut issues = Vec::new();
-        
+
         if x < 0.0 {
             issues.push(format!("X coordinate {} is negative", x));
         }
@@ -77,24 +80,33 @@ impl CoordinateValidator {
             issues.push(format!("X coordinate {} exceeds screen width {}", x, width));
         }
         if y >= height {
-            issues.push(format!("Y coordinate {} exceeds screen height {}", y, height));
+            issues.push(format!(
+                "Y coordinate {} exceeds screen height {}",
+                y, height
+            ));
         }
-        
+
         let is_valid = issues.is_empty();
         let message = if is_valid {
             "Coordinates are within screen bounds".to_string()
         } else {
             issues.join(", ")
         };
-        
+
         (is_valid, message)
     }
 
-    fn adjust_coordinates(&self, x: f64, y: f64, width: f64, height: f64) -> (f64, f64, Vec<String>) {
+    fn adjust_coordinates(
+        &self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> (f64, f64, Vec<String>) {
         let mut adjusted_x = x;
         let mut adjusted_y = y;
         let mut adjustments = Vec::new();
-        
+
         // Clamp to screen bounds
         if x < 0.0 {
             adjusted_x = 0.0;
@@ -103,7 +115,7 @@ impl CoordinateValidator {
             adjusted_x = width - 1.0;
             adjustments.push(format!("X adjusted from {} to {}", x, adjusted_x));
         }
-        
+
         if y < 0.0 {
             adjusted_y = 0.0;
             adjustments.push(format!("Y adjusted from {} to 0", y));
@@ -111,7 +123,7 @@ impl CoordinateValidator {
             adjusted_y = height - 1.0;
             adjustments.push(format!("Y adjusted from {} to {}", y, adjusted_y));
         }
-        
+
         (adjusted_x, adjusted_y, adjustments)
     }
 }
@@ -154,29 +166,27 @@ impl Tool for CoordinateValidator {
             .as_ref()
             .map(|d| d.device_type.as_str())
             .unwrap_or("unknown");
-        
+
         let (width, height) = self.get_device_bounds(device_type);
 
         match action {
-            "get_bounds" => {
-                Ok(json!({
-                    "success": true,
-                    "action": "get_bounds",
-                    "device_type": device_type,
-                    "device_id": device_id,
-                    "bounds": {
-                        "width": width,
-                        "height": height
-                    },
-                    "safe_area": {
-                        "description": "Recommended tap area avoiding edges",
-                        "min_x": 10,
-                        "min_y": 50,
-                        "max_x": width - 10.0,
-                        "max_y": height - 50.0
-                    }
-                }))
-            }
+            "get_bounds" => Ok(json!({
+                "success": true,
+                "action": "get_bounds",
+                "device_type": device_type,
+                "device_id": device_id,
+                "bounds": {
+                    "width": width,
+                    "height": height
+                },
+                "safe_area": {
+                    "description": "Recommended tap area avoiding edges",
+                    "min_x": 10,
+                    "min_y": 50,
+                    "max_x": width - 10.0,
+                    "max_y": height - 50.0
+                }
+            })),
             "validate" => {
                 let coordinates = params
                     .get("coordinates")
@@ -219,7 +229,8 @@ impl Tool for CoordinateValidator {
                     .and_then(|v| v.as_f64())
                     .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
-                let (adjusted_x, adjusted_y, adjustments) = self.adjust_coordinates(x, y, width, height);
+                let (adjusted_x, adjusted_y, adjustments) =
+                    self.adjust_coordinates(x, y, width, height);
                 let was_adjusted = !adjustments.is_empty();
 
                 Ok(json!({

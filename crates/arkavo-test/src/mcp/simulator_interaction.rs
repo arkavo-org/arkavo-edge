@@ -36,7 +36,7 @@ impl SimulatorInteraction {
     async fn tap_enhanced(&self, device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         // Xcode 26 might have new simctl interaction commands
         // For now, we'll use the standard approach with better error handling
-        
+
         // Try using simctl ui if available
         let output = Command::new("xcrun")
             .args([
@@ -68,7 +68,7 @@ impl SimulatorInteraction {
     async fn tap_ui_command(&self, device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         // For Xcode 15+, we might have ui commands
         // But simctl doesn't actually have a tap command, so we use alternative methods
-        
+
         // Use AppleScript to send click events to the Simulator app
         let script = format!(
             r#"
@@ -152,11 +152,7 @@ impl SimulatorInteraction {
     async fn send_text_pasteboard(&self, device_id: &str, text: &str) -> Result<serde_json::Value> {
         // Set the pasteboard content
         let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "pbcopy",
-                device_id,
-            ])
+            .args(["simctl", "pbcopy", device_id])
             .env("SIMCTL_CHILD_STDIN", text)
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to set pasteboard: {}", e)))?;

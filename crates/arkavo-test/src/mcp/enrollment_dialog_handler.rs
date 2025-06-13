@@ -3,8 +3,8 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -214,7 +214,7 @@ impl Tool for EnrollmentDialogHandler {
             "dismiss" => {
                 // Try to dismiss the dialog using keyboard shortcuts
                 self.dismiss_dialog_with_keyboard()?;
-                
+
                 Ok(json!({
                     "success": true,
                     "action": "dismiss",
@@ -233,7 +233,7 @@ impl Tool for EnrollmentDialogHandler {
                         "device_id": device_id
                     }));
                 }
-                
+
                 // If that fails, provide coordinates for manual tap
                 let (x, y) = self.get_cancel_coordinates(device_type);
                 Ok(json!({
@@ -261,7 +261,7 @@ impl Tool for EnrollmentDialogHandler {
             "wait_for_dialog" => {
                 // Wait a moment for dialog to appear
                 thread::sleep(Duration::from_millis(500));
-                
+
                 Ok(json!({
                     "success": true,
                     "action": "wait_for_dialog",

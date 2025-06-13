@@ -1,6 +1,6 @@
 use arkavo_test::mcp::device_manager::DeviceManager;
-use arkavo_test::mcp::ui_element_handler::UiElementHandler;
 use arkavo_test::mcp::server::Tool;
+use arkavo_test::mcp::ui_element_handler::UiElementHandler;
 use serde_json::json;
 use std::sync::Arc;
 

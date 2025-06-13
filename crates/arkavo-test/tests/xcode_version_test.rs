@@ -7,21 +7,36 @@ mod tests {
         // This test will only work if Xcode is installed
         match XcodeVersion::detect() {
             Ok(version) => {
-                println!("Detected Xcode version: {}.{}.{}", version.major, version.minor, version.patch);
-                
+                println!(
+                    "Detected Xcode version: {}.{}.{}",
+                    version.major, version.minor, version.patch
+                );
+
                 // Check supported features
                 println!("Supported features:");
                 println!("  - Boot status: {}", version.supports_bootstatus());
                 println!("  - Privacy: {}", version.supports_privacy());
                 println!("  - UI commands: {}", version.supports_ui_commands());
-                println!("  - Device appearance: {}", version.supports_device_appearance());
-                println!("  - Push notifications: {}", version.supports_push_notification());
+                println!(
+                    "  - Device appearance: {}",
+                    version.supports_device_appearance()
+                );
+                println!(
+                    "  - Push notifications: {}",
+                    version.supports_push_notification()
+                );
                 println!("  - Clone: {}", version.supports_clone());
                 println!("  - Device pair: {}", version.supports_device_pair());
                 println!("  - Device focus: {}", version.supports_device_focus());
-                println!("  - Device streaming: {}", version.supports_device_streaming());
-                println!("  - Enhanced UI interaction: {}", version.supports_enhanced_ui_interaction());
-                
+                println!(
+                    "  - Device streaming: {}",
+                    version.supports_device_streaming()
+                );
+                println!(
+                    "  - Enhanced UI interaction: {}",
+                    version.supports_enhanced_ui_interaction()
+                );
+
                 // Test version comparisons
                 assert!(version >= XcodeVersion::new(10, 0, 0));
             }
@@ -38,7 +53,7 @@ mod tests {
         let v2 = XcodeVersion::new(16, 0, 0);
         let v3 = XcodeVersion::new(15, 1, 0);
         let v4 = XcodeVersion::new(15, 0, 1);
-        
+
         assert!(v1 < v2);
         assert!(v1 < v3);
         assert!(v1 < v4);
@@ -53,13 +68,13 @@ mod tests {
         assert!(xcode11.supports_bootstatus());
         assert!(!xcode11.supports_privacy());
         assert!(!xcode11.supports_ui_commands());
-        
+
         let xcode15 = XcodeVersion::new(15, 0, 0);
         assert!(xcode15.supports_bootstatus());
         assert!(xcode15.supports_privacy());
         assert!(xcode15.supports_ui_commands());
         assert!(!xcode15.supports_enhanced_ui_interaction());
-        
+
         let xcode26 = XcodeVersion::new(26, 0, 0);
         assert!(xcode26.supports_bootstatus());
         assert!(xcode26.supports_privacy());

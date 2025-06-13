@@ -76,11 +76,16 @@ impl McpTestServer {
         // Initialize IDB companion early to ensure it's available for all tools
         eprintln!("[McpTestServer] Initializing IDB companion...");
         if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
-            eprintln!("[McpTestServer] Warning: Failed to initialize IDB companion: {}", e);
+            eprintln!(
+                "[McpTestServer] Warning: Failed to initialize IDB companion: {}",
+                e
+            );
             eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
         } else {
             eprintln!("[McpTestServer] IDB companion initialized successfully");
-            eprintln!("[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory");
+            eprintln!(
+                "[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory"
+            );
         }
 
         // Initialize analysis engine for intelligent tools
@@ -136,13 +141,13 @@ impl McpTestServer {
         );
         tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
         tools.insert("xcode_info".to_string(), Arc::new(XcodeInfoTool::new()));
-        
+
         #[cfg(target_os = "macos")]
         tools.insert(
             "idb_management".to_string(),
             Arc::new(super::idb_management_tool::IdbManagementTool::new()),
         );
-        
+
         tools.insert(
             "app_diagnostic".to_string(),
             Arc::new(AppDiagnosticTool::new()),
@@ -262,7 +267,7 @@ impl McpTestServer {
             "explore_edge_cases".to_string(),
             Arc::new(EdgeCaseExplorerKit::new(analysis_engine.clone())),
         );
-        
+
         // Add calibration tools
         if let Ok(calibration_tool) = super::calibration_tools::CalibrationTool::new() {
             tools.insert(
@@ -270,27 +275,35 @@ impl McpTestServer {
                 Arc::new(calibration_tool),
             );
         }
-        
+
         // Add calibration setup tool
         tools.insert(
             "setup_calibration".to_string(),
-            Arc::new(super::calibration_setup_tool::CalibrationSetupKit::new(device_manager.clone())),
+            Arc::new(super::calibration_setup_tool::CalibrationSetupKit::new(
+                device_manager.clone(),
+            )),
         );
-        
+
         // Add log streaming tools
         tools.insert(
             "log_stream".to_string(),
-            Arc::new(super::log_stream_tools::LogStreamKit::new(device_manager.clone())),
+            Arc::new(super::log_stream_tools::LogStreamKit::new(
+                device_manager.clone(),
+            )),
         );
         tools.insert(
             "app_diagnostic_export".to_string(),
-            Arc::new(super::log_stream_tools::AppDiagnosticExporter::new(device_manager.clone())),
+            Arc::new(super::log_stream_tools::AppDiagnosticExporter::new(
+                device_manager.clone(),
+            )),
         );
-        
+
         // Add URL dialog handler for system dialogs
         tools.insert(
             "url_dialog".to_string(),
-            Arc::new(super::url_dialog_handler::UrlDialogHandler::new(device_manager.clone())),
+            Arc::new(super::url_dialog_handler::UrlDialogHandler::new(
+                device_manager.clone(),
+            )),
         );
 
         let state_store = Arc::new(StateStore::new());
@@ -375,11 +388,16 @@ impl McpTestServer {
 
         // Use longer timeout for IDB-based operations which can be slow on first run
         let timeout_duration = match request.tool_name.as_str() {
-            "ui_interaction" | "screen_capture" | "ui_query" | "simulator_control" 
-            | "simulator_advanced" | "calibration_manager" | "setup_calibration" => {
+            "ui_interaction"
+            | "screen_capture"
+            | "ui_query"
+            | "simulator_control"
+            | "simulator_advanced"
+            | "calibration_manager"
+            | "setup_calibration" => {
                 Duration::from_secs(120) // 2 minutes for IDB operations
-            },
-            _ => Duration::from_secs(30) // Default 30 seconds
+            }
+            _ => Duration::from_secs(30), // Default 30 seconds
         };
 
         let result = timeout(
@@ -387,7 +405,12 @@ impl McpTestServer {
             self.execute_tool(&request.tool_name, request.params),
         )
         .await
-        .map_err(|_| TestError::Mcp(format!("Tool execution timeout after {:?}", timeout_duration)))??;
+        .map_err(|_| {
+            TestError::Mcp(format!(
+                "Tool execution timeout after {:?}",
+                timeout_duration
+            ))
+        })??;
 
         Ok(ToolResponse {
             result,
@@ -452,7 +475,10 @@ impl McpTestServer {
                 .read()
                 .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
 
-            eprintln!("[McpTestServer] Available tools: {:?}", tools.keys().collect::<Vec<_>>());
+            eprintln!(
+                "[McpTestServer] Available tools: {:?}",
+                tools.keys().collect::<Vec<_>>()
+            );
             tools
                 .get(tool_name)
                 .ok_or_else(|| TestError::Mcp(format!("Tool not found: {}", tool_name)))?
@@ -461,7 +487,10 @@ impl McpTestServer {
 
         eprintln!("[McpTestServer] Executing tool: {}", tool_name);
         let result = tool.execute(params).await;
-        eprintln!("[McpTestServer] Tool execution result: {:?}", result.is_ok());
+        eprintln!(
+            "[McpTestServer] Tool execution result: {:?}",
+            result.is_ok()
+        );
         result
     }
 }

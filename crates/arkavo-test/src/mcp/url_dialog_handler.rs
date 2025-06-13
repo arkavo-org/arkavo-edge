@@ -3,8 +3,8 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -82,30 +82,49 @@ impl UrlDialogHandler {
     }
 
     async fn tap_open(&self, device_id: &str) -> Result<Value> {
-        let device = self.device_manager.get_device(device_id)
+        let device = self
+            .device_manager
+            .get_device(device_id)
             .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
-        
+
         let (x, y) = self.get_open_button_coordinates(&device.name);
-        
-        eprintln!("[UrlDialogHandler] Tapping 'Open' button at ({}, {}) for {}", x, y, device.name);
-        
+
+        eprintln!(
+            "[UrlDialogHandler] Tapping 'Open' button at ({}, {}) for {}",
+            x, y, device.name
+        );
+
         // Use idb to tap the button
         let output = Command::new("idb")
-            .args(["ui", "tap", &x.to_string(), &y.to_string(), "--udid", device_id])
+            .args([
+                "ui",
+                "tap",
+                &x.to_string(),
+                &y.to_string(),
+                "--udid",
+                device_id,
+            ])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {}", e)))?;
 
         if !output.status.success() {
             let _stderr = String::from_utf8_lossy(&output.stderr);
-            
+
             // If idb fails, try using simctl
             eprintln!("[UrlDialogHandler] idb failed, trying simctl approach...");
-            
+
             let simctl_output = Command::new("xcrun")
-                .args(["simctl", "io", device_id, "tap", &x.to_string(), &y.to_string()])
+                .args([
+                    "simctl",
+                    "io",
+                    device_id,
+                    "tap",
+                    &x.to_string(),
+                    &y.to_string(),
+                ])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {}", e)))?;
-                
+
             if !simctl_output.status.success() {
                 return Ok(json!({
                     "success": false,
@@ -130,58 +149,70 @@ impl UrlDialogHandler {
 #[async_trait]
 impl Tool for UrlDialogHandler {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing action parameter".to_string()))?;
 
         let device_id = self.get_device_id(&params)?;
 
         match action {
-            "tap_open" => {
-                self.tap_open(&device_id).await
-            }
-            
+            "tap_open" => self.tap_open(&device_id).await,
+
             "tap_cancel" => {
                 // Cancel button is typically on the left side
-                let device = self.device_manager.get_device(&device_id)
+                let device = self
+                    .device_manager
+                    .get_device(&device_id)
                     .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
-                
+
                 let (x, y) = match device.name.as_str() {
                     name if name.contains("iPhone 16 Pro") => (78.0, 490.0),
                     name if name.contains("iPhone 14") => (78.0, 490.0),
                     _ => (78.0, 490.0),
                 };
-                
+
                 let output = Command::new("idb")
-                    .args(["ui", "tap", &x.to_string(), &y.to_string(), "--udid", &device_id])
+                    .args([
+                        "ui",
+                        "tap",
+                        &x.to_string(),
+                        &y.to_string(),
+                        "--udid",
+                        &device_id,
+                    ])
                     .output()
                     .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
 
                 Ok(json!({
                     "success": output.status.success(),
                     "action": "tap_cancel",
-                    "message": if output.status.success() { 
-                        "Successfully tapped 'Cancel' button" 
-                    } else { 
-                        "Failed to tap Cancel button" 
+                    "message": if output.status.success() {
+                        "Successfully tapped 'Cancel' button"
+                    } else {
+                        "Failed to tap Cancel button"
                     },
                     "coordinates": {"x": x, "y": y}
                 }))
             }
-            
+
             "auto_accept" => {
                 // Wait briefly for dialog to appear
-                let wait_timeout = params.get("wait_timeout")
+                let wait_timeout = params
+                    .get("wait_timeout")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(2);
-                    
-                eprintln!("[UrlDialogHandler] Waiting {}s for URL dialog to appear...", wait_timeout);
+
+                eprintln!(
+                    "[UrlDialogHandler] Waiting {}s for URL dialog to appear...",
+                    wait_timeout
+                );
                 thread::sleep(Duration::from_secs(wait_timeout));
-                
+
                 // Tap the Open button
                 self.tap_open(&device_id).await
             }
-            
+
             "detect" => {
                 // Take a screenshot and check for dialog presence
                 // This is a simplified detection - in production you'd use image recognition
@@ -192,8 +223,8 @@ impl Tool for UrlDialogHandler {
                     "hint": "Use 'auto_accept' after opening a URL to automatically handle the dialog"
                 }))
             }
-            
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action)))
+
+            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
         }
     }
 

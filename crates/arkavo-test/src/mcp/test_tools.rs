@@ -323,7 +323,9 @@ impl TestExecutor {
 
     async fn run_swift_test(&self, _test_name: &str) -> Result<(&'static str, String)> {
         // Swift test implementation moved to test_executor_swift.rs
-        Err(TestError::Mcp("Swift test execution requires test_executor_swift module".to_string()))
+        Err(TestError::Mcp(
+            "Swift test execution requires test_executor_swift module".to_string(),
+        ))
     }
 
     async fn run_javascript_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -373,7 +375,9 @@ impl TestExecutor {
                     .arg(test_name)
                     .current_dir(&self.working_dir)
                     .output()
-                    .map_err(|e| TestError::Execution(format!("Failed to run Python test: {}", e)))?
+                    .map_err(|e| {
+                        TestError::Execution(format!("Failed to run Python test: {}", e))
+                    })?
             }
         };
 
@@ -503,7 +507,11 @@ impl TestExecutor {
         None
     }
 
-    pub async fn discover_tests(&self, filter: Option<&str>, test_type: &str) -> Result<Vec<TestInfo>> {
+    pub async fn discover_tests(
+        &self,
+        filter: Option<&str>,
+        test_type: &str,
+    ) -> Result<Vec<TestInfo>> {
         let mut tests = Vec::new();
 
         if self.is_rust_project() {

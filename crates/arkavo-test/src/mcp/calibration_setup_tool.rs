@@ -3,8 +3,8 @@ use super::server::{Tool, ToolSchema};
 use crate::Result;
 use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
 use std::process::Command;
+use std::sync::Arc;
 
 pub struct CalibrationSetupKit {
     schema: ToolSchema,
@@ -57,7 +57,12 @@ impl Tool for CalibrationSetupKit {
 
         // Check if ArkavoReference app is installed
         let check_output = Command::new("xcrun")
-            .args(["simctl", "get_app_container", &device_id, "com.arkavo.ArkavoReference"])
+            .args([
+                "simctl",
+                "get_app_container",
+                &device_id,
+                "com.arkavo.ArkavoReference",
+            ])
             .output()?;
 
         if !check_output.status.success() {
@@ -73,9 +78,14 @@ impl Tool for CalibrationSetupKit {
         // Terminate app if already running
         eprintln!("[CalibrationSetupKit] Terminating any existing reference app...");
         let _ = Command::new("xcrun")
-            .args(["simctl", "terminate", &device_id, "com.arkavo.ArkavoReference"])
+            .args([
+                "simctl",
+                "terminate",
+                &device_id,
+                "com.arkavo.ArkavoReference",
+            ])
             .output();
-        
+
         // Launch the app first
         eprintln!("[CalibrationSetupKit] Launching ArkavoReference app...");
         let launch_output = Command::new("xcrun")
@@ -87,7 +97,7 @@ impl Tool for CalibrationSetupKit {
                 "success": false,
                 "error": {
                     "code": "LAUNCH_FAILED",
-                    "message": format!("Failed to launch ArkavoReference app: {}", 
+                    "message": format!("Failed to launch ArkavoReference app: {}",
                         String::from_utf8_lossy(&launch_output.stderr))
                 }
             }));
@@ -95,29 +105,33 @@ impl Tool for CalibrationSetupKit {
 
         // Wait for app to load
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        
+
         // Navigate to calibration mode using deep link
         eprintln!("[CalibrationSetupKit] Opening calibration mode via deep link...");
         let deeplink_output = Command::new("xcrun")
             .args(["simctl", "openurl", &device_id, "arkavo-edge://calibration"])
             .output()?;
-            
+
         if !deeplink_output.status.success() {
-            eprintln!("[CalibrationSetupKit] Warning: Failed to open calibration deep link: {}", 
-                String::from_utf8_lossy(&deeplink_output.stderr));
+            eprintln!(
+                "[CalibrationSetupKit] Warning: Failed to open calibration deep link: {}",
+                String::from_utf8_lossy(&deeplink_output.stderr)
+            );
         }
-        
+
         // Handle URL confirmation dialog
         eprintln!("[CalibrationSetupKit] Handling URL confirmation dialog...");
         tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-        
+
         // Tap "Open" button (centered on most iPhone models)
         let tap_output = Command::new("xcrun")
             .args(["simctl", "io", &device_id, "tap", "195", "490"])
             .output()?;
-            
+
         if !tap_output.status.success() {
-            eprintln!("[CalibrationSetupKit] Warning: Failed to tap URL dialog, it may not have appeared");
+            eprintln!(
+                "[CalibrationSetupKit] Warning: Failed to tap URL dialog, it may not have appeared"
+            );
         } else {
             eprintln!("[CalibrationSetupKit] Successfully handled URL confirmation dialog");
         }

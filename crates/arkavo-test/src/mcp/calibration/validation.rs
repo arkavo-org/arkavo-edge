@@ -34,12 +34,12 @@ impl CalibrationValidator {
             tolerance: ValidationTolerance::default(),
         }
     }
-    
+
     pub fn with_tolerance(mut self, tolerance: ValidationTolerance) -> Self {
         self.tolerance = tolerance;
         self
     }
-    
+
     pub fn validate_calibration(
         &self,
         ground_truth: &GroundTruth,
@@ -48,7 +48,7 @@ impl CalibrationValidator {
         let mut successful = 0;
         let mut failed = 0;
         let mut issues = Vec::new();
-        
+
         for test_result in interaction_results {
             match self.validate_interaction(ground_truth, test_result) {
                 ValidationOutcome::Success => successful += 1,
@@ -58,14 +58,14 @@ impl CalibrationValidator {
                 }
             }
         }
-        
+
         let total = successful + failed;
         let accuracy = if total > 0 {
             (successful as f64 / total as f64) * 100.0
         } else {
             0.0
         };
-        
+
         ValidationReport {
             total_interactions: total,
             successful_interactions: successful,
@@ -74,23 +74,28 @@ impl CalibrationValidator {
             issues,
         }
     }
-    
+
     pub fn validate_interaction(
         &self,
         ground_truth: &GroundTruth,
         test_result: &InteractionTestResult,
     ) -> ValidationOutcome {
         // Check if element exists in ground truth
-        let expected = match ground_truth.interaction_expectations.get(&test_result.element_id) {
+        let expected = match ground_truth
+            .interaction_expectations
+            .get(&test_result.element_id)
+        {
             Some(exp) => exp,
-            None => return ValidationOutcome::Failure(ValidationIssue {
-                element_id: test_result.element_id.clone(),
-                expected_result: "Element in ground truth".to_string(),
-                actual_result: "Element not found".to_string(),
-                severity: IssueSeverity::Critical,
-            }),
+            None => {
+                return ValidationOutcome::Failure(ValidationIssue {
+                    element_id: test_result.element_id.clone(),
+                    expected_result: "Element in ground truth".to_string(),
+                    actual_result: "Element not found".to_string(),
+                    severity: IssueSeverity::Critical,
+                });
+            }
         };
-        
+
         // Validate interaction success
         if !test_result.interaction_result.success {
             return ValidationOutcome::Failure(ValidationIssue {
@@ -100,35 +105,41 @@ impl CalibrationValidator {
                 severity: IssueSeverity::Major,
             });
         }
-        
+
         // Validate coordinates if available
         if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates {
             if let Some(expected_coords) = test_result.expected_coordinates {
-                let distance = ((actual_x - expected_coords.0).powi(2) + 
-                               (actual_y - expected_coords.1).powi(2)).sqrt();
-                
+                let distance = ((actual_x - expected_coords.0).powi(2)
+                    + (actual_y - expected_coords.1).powi(2))
+                .sqrt();
+
                 if distance > self.tolerance.coordinate_tolerance_pixels {
                     return ValidationOutcome::Failure(ValidationIssue {
                         element_id: test_result.element_id.clone(),
-                        expected_result: format!("Coordinates within {} pixels", 
-                                               self.tolerance.coordinate_tolerance_pixels),
+                        expected_result: format!(
+                            "Coordinates within {} pixels",
+                            self.tolerance.coordinate_tolerance_pixels
+                        ),
                         actual_result: format!("Distance: {:.2} pixels", distance),
                         severity: IssueSeverity::Minor,
                     });
                 }
             }
         }
-        
+
         // Validate response time
         if test_result.interaction_result.response_time_ms > self.tolerance.timing_tolerance_ms {
             return ValidationOutcome::Failure(ValidationIssue {
                 element_id: test_result.element_id.clone(),
-                expected_result: format!("Response time < {}ms", self.tolerance.timing_tolerance_ms),
+                expected_result: format!(
+                    "Response time < {}ms",
+                    self.tolerance.timing_tolerance_ms
+                ),
                 actual_result: format!("{}ms", test_result.interaction_result.response_time_ms),
                 severity: IssueSeverity::Minor,
             });
         }
-        
+
         // Validate state change if expected
         match &expected.expected_state_change {
             StateChange::None => {
@@ -148,20 +159,20 @@ impl CalibrationValidator {
                 // Other state changes would be validated here
             }
         }
-        
+
         ValidationOutcome::Success
     }
-    
+
     pub fn compare_calibrations(
         &self,
         old: &CalibrationResult,
         new: &CalibrationResult,
     ) -> CalibrationComparison {
-        let accuracy_change = new.validation_report.accuracy_percentage - 
-                            old.validation_report.accuracy_percentage;
-        
+        let accuracy_change =
+            new.validation_report.accuracy_percentage - old.validation_report.accuracy_percentage;
+
         let mut changed_adjustments = HashMap::new();
-        
+
         // Compare interaction adjustments
         for (element_type, new_adjustment) in &new.interaction_adjustments {
             if let Some(old_adjustment) = old.interaction_adjustments.get(element_type) {
@@ -191,11 +202,11 @@ impl CalibrationValidator {
                 );
             }
         }
-        
+
         let adjustment_count = changed_adjustments.len();
         let needs_recalibration = accuracy_change < -5.0 || // 5% accuracy drop
                                  adjustment_count > 3; // Many changes
-        
+
         CalibrationComparison {
             old_version: old.device_profile.os_version.clone(),
             new_version: new.device_profile.os_version.clone(),
@@ -211,12 +222,12 @@ impl CalibrationValidator {
             },
         }
     }
-    
+
     fn adjustments_equal(&self, a: &InteractionAdjustment, b: &InteractionAdjustment) -> bool {
-        a.tap_offset == b.tap_offset &&
-        a.requires_double_tap == b.requires_double_tap &&
-        a.requires_long_press == b.requires_long_press &&
-        a.custom_delay_ms == b.custom_delay_ms
+        a.tap_offset == b.tap_offset
+            && a.requires_double_tap == b.requires_double_tap
+            && a.requires_long_press == b.requires_long_press
+            && a.custom_delay_ms == b.custom_delay_ms
     }
 }
 
@@ -260,11 +271,9 @@ pub enum CalibrationRecommendation {
 pub struct ValidationHelpers;
 
 impl ValidationHelpers {
-    pub fn generate_validation_matrix(
-        elements: &[UIElement],
-    ) -> Vec<ValidationTestCase> {
+    pub fn generate_validation_matrix(elements: &[UIElement]) -> Vec<ValidationTestCase> {
         let mut test_cases = Vec::new();
-        
+
         for element in elements {
             // Basic tap test for all elements
             test_cases.push(ValidationTestCase {
@@ -277,7 +286,7 @@ impl ValidationHelpers {
                 },
                 expected_outcome: ExpectedOutcome::ElementTapped,
             });
-            
+
             // Additional tests based on element type
             match &element.element_type {
                 ElementType::Switch | ElementType::Checkbox => {
@@ -313,7 +322,7 @@ impl ValidationHelpers {
                 _ => {}
             }
         }
-        
+
         test_cases
     }
 }
