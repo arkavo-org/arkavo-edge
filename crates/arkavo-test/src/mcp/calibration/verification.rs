@@ -100,7 +100,7 @@ impl VerificationReader {
             eprintln!("[VerificationReader] Checking path: {}", path.display());
             if path.exists() {
                 eprintln!("[VerificationReader] Found results at: {}", path.display());
-                let data = fs::read_to_string(&path)?;
+                let data = fs::read_to_string(path)?;
                 eprintln!("[VerificationReader] Raw data: {}", data);
                 let results: CalibrationResults = serde_json::from_str(&data)?;
 
@@ -110,7 +110,7 @@ impl VerificationReader {
                 );
 
                 // Clean up after reading
-                let _ = fs::remove_file(&path);
+                let _ = fs::remove_file(path);
 
                 return Ok(results);
             }

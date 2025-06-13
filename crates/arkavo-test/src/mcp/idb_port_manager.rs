@@ -19,12 +19,7 @@ impl IdbPortManager {
     pub fn find_available_port(start: u16, end: u16) -> Option<u16> {
         let allocated = ALLOCATED_PORTS.lock().unwrap();
 
-        for port in start..=end {
-            if !allocated.contains(&port) && Self::is_port_available(port) {
-                return Some(port);
-            }
-        }
-        None
+        (start..=end).find(|&port| !allocated.contains(&port) && Self::is_port_available(port))
     }
 
     /// Allocate a port (mark it as in use)

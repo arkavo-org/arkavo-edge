@@ -215,6 +215,12 @@ pub struct TestExecutor {
     working_dir: PathBuf,
 }
 
+impl Default for TestExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestExecutor {
     pub fn new() -> Self {
         Self {

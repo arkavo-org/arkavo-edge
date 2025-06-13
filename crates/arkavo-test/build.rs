@@ -74,7 +74,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
 
     // Download using curl
     let status = Command::new("curl")
-        .args(&["-L", "-o", tar_path.to_str().unwrap(), download_url])
+        .args(["-L", "-o", tar_path.to_str().unwrap(), download_url])
         .status()
         .expect("Failed to execute curl");
 
@@ -87,7 +87,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
     fs::create_dir_all(&extract_dir).expect("Failed to create extraction directory");
 
     let status = Command::new("tar")
-        .args(&[
+        .args([
             "-xzf",
             tar_path.to_str().unwrap(),
             "-C",
@@ -131,17 +131,15 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
         // List framework contents for debugging
         if let Ok(entries) = fs::read_dir(&frameworks_dir) {
             eprintln!("Frameworks found:");
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    eprintln!("  - {}", entry.file_name().to_string_lossy());
-                }
+            for entry in entries.flatten() {
+                eprintln!("  - {}", entry.file_name().to_string_lossy());
             }
         }
 
         // Create tar.gz archive of frameworks
         let status = Command::new("tar")
             .current_dir(&extract_dir)
-            .args(&[
+            .args([
                 "-czf",
                 frameworks_archive_path.to_str().unwrap(),
                 "Frameworks",

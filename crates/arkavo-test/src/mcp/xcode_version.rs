@@ -38,7 +38,7 @@ impl XcodeVersion {
             if parts.len() >= 2 {
                 let version_nums: Vec<&str> = parts[1].split('.').collect();
                 let major = version_nums
-                    .get(0)
+                    .first()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
                 let minor = version_nums

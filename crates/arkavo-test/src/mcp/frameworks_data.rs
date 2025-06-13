@@ -3,7 +3,7 @@
 
 use crate::{Result, TestError};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Check if system has IDB frameworks installed
 pub fn check_system_frameworks() -> bool {
@@ -25,7 +25,7 @@ pub fn check_system_frameworks() -> bool {
 }
 
 // Set up framework symlinks in our temp directory
-pub fn setup_framework_links(target_dir: &PathBuf) -> Result<()> {
+pub fn setup_framework_links(target_dir: &Path) -> Result<()> {
     let frameworks_dir = target_dir.join("Frameworks");
     fs::create_dir_all(&frameworks_dir)
         .map_err(|e| TestError::Mcp(format!("Failed to create Frameworks directory: {}", e)))?;
@@ -79,6 +79,6 @@ pub fn setup_framework_links(target_dir: &PathBuf) -> Result<()> {
 }
 
 // For backwards compatibility
-pub fn extract_frameworks(target_dir: &PathBuf) -> Result<()> {
+pub fn extract_frameworks(target_dir: &Path) -> Result<()> {
     setup_framework_links(target_dir)
 }

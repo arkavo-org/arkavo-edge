@@ -90,7 +90,7 @@ impl McpTestServer {
                 );
             }
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             eprintln!("[McpTestServer] IDB companion not available on this platform");

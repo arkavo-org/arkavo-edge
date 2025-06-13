@@ -192,7 +192,7 @@ impl IdbWrapper {
             // Extract embedded frameworks
             #[cfg(target_os = "macos")]
             {
-                if IDB_FRAMEWORKS_ARCHIVE.len() > 0 {
+                if !IDB_FRAMEWORKS_ARCHIVE.is_empty() {
                     eprintln!(
                         "[IdbWrapper] Extracting embedded frameworks archive ({} bytes)",
                         IDB_FRAMEWORKS_ARCHIVE.len()
@@ -212,7 +212,7 @@ impl IdbWrapper {
 
                     // Extract the archive
                     let status = Command::new("tar")
-                        .args(&[
+                        .args([
                             "-xzf",
                             archive_path.to_str().unwrap(),
                             "-C",
@@ -543,8 +543,7 @@ impl IdbWrapper {
             // Log environment variables to confirm they're set
             eprintln!("[IdbWrapper] Environment variables set for companion spawn:");
             for (key, value) in command.get_envs() {
-                if let (Some(k), Some(v)) = (key.to_str(), value.map(|val| val.to_str()).flatten())
-                {
+                if let (Some(k), Some(v)) = (key.to_str(), value.and_then(|val| val.to_str())) {
                     if k.starts_with("DYLD_") || k.starts_with("OBJC_") {
                         eprintln!("[IdbWrapper]   {}={}", k, v);
                     }
@@ -799,7 +798,9 @@ impl IdbWrapper {
                                             let state =
                                                 device["state"].as_str().unwrap_or("Unknown");
 
-                                            if state != "Booted" {}
+                                            if state != "Booted" {
+                                                // Device is not booted
+                                            }
                                             break;
                                         }
                                     }
@@ -851,7 +852,6 @@ impl IdbWrapper {
                         device_id
                     )));
                 }
-            } else {
             }
         } else {
             let stderr = String::from_utf8_lossy(&list_output.stderr);

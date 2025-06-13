@@ -706,14 +706,14 @@ impl CalibrationServer {
                             eprintln!(
                                 "Calibration: WATCHDOG - Using targeted stuck companion recovery..."
                             );
-                            if let Ok(_) = self.idb_recovery.recover_stuck_companion().await {
+                            if self.idb_recovery.recover_stuck_companion().await.is_ok() {
                                 eprintln!(
                                     "Calibration: WATCHDOG - Stuck companion recovery completed"
                                 );
                             }
                         } else {
                             eprintln!("Calibration: WATCHDOG - Using general IDB recovery...");
-                            if let Ok(_) = self.idb_recovery.attempt_recovery().await {
+                            if self.idb_recovery.attempt_recovery().await.is_ok() {
                                 eprintln!("Calibration: WATCHDOG - General recovery completed");
                             }
                         }
@@ -856,14 +856,14 @@ impl CalibrationServer {
                                 eprintln!(
                                     "Calibration: Using stuck companion recovery for timeout..."
                                 );
-                                if let Ok(_) = self.idb_recovery.recover_stuck_companion().await {
+                                if self.idb_recovery.recover_stuck_companion().await.is_ok() {
                                     eprintln!(
                                         "Calibration: Stuck companion recovery completed after timeout"
                                     );
                                 }
                             } else {
                                 eprintln!("Calibration: Using general recovery for timeout...");
-                                if let Ok(_) = self.idb_recovery.attempt_recovery().await {
+                                if self.idb_recovery.attempt_recovery().await.is_ok() {
                                     eprintln!(
                                         "Calibration: General recovery completed after timeout"
                                     );

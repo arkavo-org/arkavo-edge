@@ -45,13 +45,13 @@ impl IdbRecovery {
         #[cfg(target_os = "macos")]
         {
             // Try to connect to default IDB port
-            if let Ok(_) = TcpStream::connect("127.0.0.1:10882") {
+            if TcpStream::connect("127.0.0.1:10882").is_ok() {
                 return true;
             }
 
             // Also check alternative ports
             for port in [10883, 10884, 10885] {
-                if let Ok(_) = TcpStream::connect(format!("127.0.0.1:{}", port)) {
+                if TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
                     return true;
                 }
             }

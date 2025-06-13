@@ -146,7 +146,7 @@ impl IdbInstaller {
 
         // First, tap the Facebook repository
         let tap_output = Command::new("brew")
-            .args(&["tap", "facebook/fb"])
+            .args(["tap", "facebook/fb"])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run brew tap: {}", e)))?;
 
@@ -161,7 +161,7 @@ impl IdbInstaller {
         // Install idb-companion
         eprintln!("[IdbInstaller] Installing idb-companion via brew...");
         let install_output = Command::new("brew")
-            .args(&["install", "facebook/fb/idb-companion"])
+            .args(["install", "facebook/fb/idb-companion"])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run brew install: {}", e)))?;
 

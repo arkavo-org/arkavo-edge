@@ -63,71 +63,88 @@ impl IdbCompanionHealth {
             device_id
         );
 
-        // Update or create metrics
-        let mut health_map = COMPANION_HEALTH.lock().unwrap();
-        let metrics = health_map
-            .entry(device_id.to_string())
-            .or_insert_with(|| CompanionHealthMetrics::new(device_id.to_string()));
-
-        // Check various health indicators
+        // Initial health check state
         let mut is_healthy = true;
 
-        // 1. Check if companion process is running
-        if let Some(pid) = metrics.companion_pid {
-            if !Self::is_process_running(pid) {
-                eprintln!(
-                    "[IdbCompanionHealth] Companion process {} is not running",
-                    pid
-                );
-                metrics.companion_pid = None;
-                is_healthy = false;
-            }
-        }
+        // Step 1: Check companion process and basic metrics
+        let (_companion_pid, consecutive_failures, last_successful_tap) = {
+            let mut health_map = COMPANION_HEALTH.lock().unwrap();
+            let metrics = health_map
+                .entry(device_id.to_string())
+                .or_insert_with(|| CompanionHealthMetrics::new(device_id.to_string()));
 
-        // 2. Check if we can list targets (basic connectivity test)
-        if is_healthy {
-            match Self::test_companion_connection(device_id).await {
-                Ok(connected) => {
-                    metrics.connection_established = connected;
-                    if !connected {
-                        eprintln!("[IdbCompanionHealth] Companion not connected to device");
-                        is_healthy = false;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[IdbCompanionHealth] Connection test failed: {}", e);
-                    metrics.connection_established = false;
+            // Check if companion process is running
+            if let Some(pid) = metrics.companion_pid {
+                if !Self::is_process_running(pid) {
+                    eprintln!(
+                        "[IdbCompanionHealth] Companion process {} is not running",
+                        pid
+                    );
+                    metrics.companion_pid = None;
                     is_healthy = false;
                 }
             }
-        }
 
-        // 3. Check failure rate
-        if metrics.consecutive_failures > 5 {
-            eprintln!(
-                "[IdbCompanionHealth] Too many consecutive failures: {}",
-                metrics.consecutive_failures
-            );
-            is_healthy = false;
-        }
+            (
+                metrics.companion_pid,
+                metrics.consecutive_failures,
+                metrics.last_successful_tap,
+            )
+        };
 
-        // 4. Check if companion is responsive (hasn't been used successfully in a while)
-        if let Some(last_success) = metrics.last_successful_tap {
-            if last_success.elapsed() > Duration::from_secs(300) {
-                // 5 minutes
-                eprintln!("[IdbCompanionHealth] No successful taps in last 5 minutes");
-                metrics.is_responsive = false;
+        // Step 2: Check if we can list targets (basic connectivity test)
+        let connection_test_result = if is_healthy {
+            Self::test_companion_connection(device_id).await
+        } else {
+            Ok(false)
+        };
+
+        // Step 3: Update metrics based on test results
+        {
+            let mut health_map = COMPANION_HEALTH.lock().unwrap();
+            if let Some(metrics) = health_map.get_mut(device_id) {
+                match connection_test_result {
+                    Ok(connected) => {
+                        metrics.connection_established = connected;
+                        if !connected {
+                            eprintln!("[IdbCompanionHealth] Companion not connected to device");
+                            is_healthy = false;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[IdbCompanionHealth] Connection test failed: {}", e);
+                        metrics.connection_established = false;
+                        is_healthy = false;
+                    }
+                }
+
+                // Check failure rate
+                if consecutive_failures > 5 {
+                    eprintln!(
+                        "[IdbCompanionHealth] Too many consecutive failures: {}",
+                        consecutive_failures
+                    );
+                    is_healthy = false;
+                }
+
+                // Check if companion is responsive
+                if let Some(last_success) = last_successful_tap {
+                    if last_success.elapsed() > Duration::from_secs(300) {
+                        eprintln!("[IdbCompanionHealth] No successful taps in last 5 minutes");
+                        metrics.is_responsive = false;
+                    }
+                }
+
+                metrics.last_health_check = Instant::now();
+                metrics.is_responsive = is_healthy;
+
+                eprintln!(
+                    "[IdbCompanionHealth] Health check result: {} (success rate: {:.1}%)",
+                    if is_healthy { "HEALTHY" } else { "UNHEALTHY" },
+                    metrics.success_rate()
+                );
             }
         }
-
-        metrics.last_health_check = Instant::now();
-        metrics.is_responsive = is_healthy;
-
-        eprintln!(
-            "[IdbCompanionHealth] Health check result: {} (success rate: {:.1}%)",
-            if is_healthy { "HEALTHY" } else { "UNHEALTHY" },
-            metrics.success_rate()
-        );
 
         Ok(is_healthy)
     }
