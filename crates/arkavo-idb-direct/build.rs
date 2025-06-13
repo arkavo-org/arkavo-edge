@@ -27,7 +27,7 @@ fn main() {
     // Check if the static library exists
     if !lib_path.exists() {
         panic!(
-            "libidb_direct.a not found at {:?}. Please run CI download step or manually download from https://github.com/arkavo-org/idb/releases/tag/1.3.0-arkavo.0",
+            "libidb_direct.a not found at {:?}. Please run CI download step or manually download from https://github.com/arkavo-org/idb/releases/tag/1.3.2-arkavo.0",
             lib_path
         );
     }
