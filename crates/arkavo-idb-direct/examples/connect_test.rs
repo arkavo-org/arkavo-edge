@@ -2,10 +2,13 @@ use arkavo_idb_direct::{IdbDirect, TargetType};
 
 fn main() {
     println!("=== IDB Direct FFI Connect Test ===\n");
-    
+
     println!("1. Setting DEVELOPER_DIR environment...");
-    std::env::set_var("DEVELOPER_DIR", "/Applications/Xcode-beta.app/Contents/Developer");
-    
+    std::env::set_var(
+        "DEVELOPER_DIR",
+        "/Applications/Xcode-beta.app/Contents/Developer",
+    );
+
     println!("2. Initializing IDB Direct FFI...");
     let mut idb = match IdbDirect::new() {
         Ok(idb) => {
@@ -18,11 +21,11 @@ fn main() {
             return;
         }
     };
-    
+
     println!("\n3. Attempting to connect to simulator...");
     let device_id = "4A05B20A-349D-4EC5-B796-8F384798268B";
     println!("   Device ID: {}", device_id);
-    
+
     match idb.connect_target(device_id, TargetType::Simulator) {
         Ok(()) => println!("   ✓ Connected successfully!"),
         Err(e) => {
@@ -32,6 +35,6 @@ fn main() {
             eprintln!("- Or there's another issue with CoreSimulator");
         }
     }
-    
+
     println!("\n=== Test Complete ===");
 }

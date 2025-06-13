@@ -1,6 +1,6 @@
+use once_cell::sync::Lazy;
 use serde_json::json;
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 use crate::{Result, TestError};
 
@@ -13,7 +13,7 @@ use super::idb_wrapper::IdbWrapper;
 static BACKEND: Lazy<Mutex<Backend>> = Lazy::new(|| Mutex::new(Backend::Auto));
 
 #[derive(Debug, Clone, Copy)]
-enum Backend {
+pub enum Backend {
     Auto,      // Automatically choose based on availability
     Direct,    // Force Direct FFI
     Companion, // Force IDB Companion
@@ -30,33 +30,37 @@ impl IdbUnified {
 
     /// Initialize with specific backend preference
     pub fn initialize_with_backend(backend: Backend) -> Result<()> {
-        eprintln!("[IdbUnified::initialize] Initializing with backend: {:?}", backend);
-        
+        eprintln!(
+            "[IdbUnified::initialize] Initializing with backend: {:?}",
+            backend
+        );
+
         #[cfg(not(target_os = "macos"))]
         {
             return Err(TestError::Mcp("IDB is only supported on macOS".to_string()));
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             let mut backend_guard = BACKEND.lock().unwrap();
-            
+
             match backend {
                 Backend::Direct => {
                     if IdbDirectWrapper::is_available() {
                         eprintln!("[IdbUnified] Using Direct FFI backend");
                         *backend_guard = Backend::Direct;
-                        return IdbDirectWrapper::initialize();
+                        IdbDirectWrapper::initialize()
                     } else {
-                        return Err(TestError::Mcp(
-                            "Direct FFI backend requested but libidb_direct.a not found".to_string()
-                        ));
+                        Err(TestError::Mcp(
+                            "Direct FFI backend requested but libidb_direct.a not found"
+                                .to_string(),
+                        ))
                     }
                 }
                 Backend::Companion => {
                     eprintln!("[IdbUnified] Using IDB Companion backend");
                     *backend_guard = Backend::Companion;
-                    return IdbWrapper::initialize();
+                    IdbWrapper::initialize()
                 }
                 Backend::Auto => {
                     // Try Direct FFI first if available
@@ -68,15 +72,18 @@ impl IdbUnified {
                                 return Ok(());
                             }
                             Err(e) => {
-                                eprintln!("[IdbUnified] Direct FFI failed: {}, falling back to companion", e);
+                                eprintln!(
+                                    "[IdbUnified] Direct FFI failed: {}, falling back to companion",
+                                    e
+                                );
                             }
                         }
                     }
-                    
+
                     // Fall back to IDB Companion
                     eprintln!("[IdbUnified] Auto-selected IDB Companion backend");
                     *backend_guard = Backend::Companion;
-                    return IdbWrapper::initialize();
+                    IdbWrapper::initialize()
                 }
             }
         }
@@ -95,7 +102,7 @@ impl IdbUnified {
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             Err(TestError::Mcp("IDB is only supported on macOS".to_string()))
@@ -117,14 +124,17 @@ impl IdbUnified {
                     // Use the existing IDB companion tap command
                     let idb_path = IdbWrapper::get_binary_path()?;
                     let output = std::process::Command::new(&idb_path)
-                        .args(&[
-                            "ui", "tap",
-                            "--udid", device_id,
-                            &x.to_string(), &y.to_string()
+                        .args([
+                            "ui",
+                            "tap",
+                            "--udid",
+                            device_id,
+                            &x.to_string(),
+                            &y.to_string(),
                         ])
                         .output()
                         .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
-                    
+
                     if output.status.success() {
                         Ok(json!({
                             "success": true,
@@ -141,7 +151,7 @@ impl IdbUnified {
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             Err(TestError::Mcp("IDB is only supported on macOS".to_string()))
@@ -163,14 +173,10 @@ impl IdbUnified {
                     // Use the existing IDB companion screenshot command
                     let idb_path = IdbWrapper::get_binary_path()?;
                     let output = std::process::Command::new(&idb_path)
-                        .args(&[
-                            "screenshot",
-                            "--udid", device_id,
-                            "--format", "png"
-                        ])
+                        .args(["screenshot", "--udid", device_id, "--format", "png"])
                         .output()
                         .map_err(|e| TestError::Mcp(format!("Failed to take screenshot: {}", e)))?;
-                    
+
                     if output.status.success() {
                         Ok(output.stdout)
                     } else {
@@ -180,7 +186,7 @@ impl IdbUnified {
                 }
             }
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             Err(TestError::Mcp("IDB is only supported on macOS".to_string()))
@@ -205,7 +211,7 @@ impl IdbUnified {
                 }
             })
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             json!({

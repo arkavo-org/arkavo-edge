@@ -23,7 +23,7 @@ fn main() {
         .join("idb");
 
     let lib_path = vendor_path.join("libidb_direct.a");
-    
+
     // Check if the static library exists
     if !lib_path.exists() {
         panic!(
@@ -59,22 +59,30 @@ fn main() {
     {
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=IOKit");
-        
+
         // CoreSimulator is a private framework in /Library/Developer/PrivateFrameworks
         let lib_dev_frameworks = PathBuf::from("/Library/Developer/PrivateFrameworks");
         if lib_dev_frameworks.join("CoreSimulator.framework").exists() {
-            println!("cargo:rustc-link-search=framework={}", lib_dev_frameworks.display());
+            println!(
+                "cargo:rustc-link-search=framework={}",
+                lib_dev_frameworks.display()
+            );
             println!("cargo:rustc-link-lib=framework=CoreSimulator");
         }
     }
 
     // Add the include path for headers
     println!("cargo:include={}/include", vendor_path.display());
-    
+
     // Generate bindings
     let bindings = bindgen::Builder::default()
         .header(vendor_path.join("include/idb_direct.h").to_str().unwrap())
-        .header(vendor_path.join("include/idb_direct_shm.h").to_str().unwrap())
+        .header(
+            vendor_path
+                .join("include/idb_direct_shm.h")
+                .to_str()
+                .unwrap(),
+        )
         .clang_arg(format!("-I{}/include", vendor_path.display()))
         // Whitelist the types and functions we need
         .allowlist_type("idb_.*")
@@ -89,8 +97,11 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
-    
+
     // Rerun if the library or headers change
     println!("cargo:rerun-if-changed={}", lib_path.display());
-    println!("cargo:rerun-if-changed={}/include/idb_direct.h", vendor_path.display());
+    println!(
+        "cargo:rerun-if-changed={}/include/idb_direct.h",
+        vendor_path.display()
+    );
 }

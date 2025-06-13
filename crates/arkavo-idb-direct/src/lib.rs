@@ -91,7 +91,7 @@ impl IdbDirect {
         if std::env::var("CI").is_ok() && std::env::var("IDB_TEST_CI_MODE").is_err() {
             eprintln!("[IdbDirect] Running in CI without simulator - initialization may fail");
         }
-        
+
         unsafe {
             let err = idb_initialize();
             if err != IDB_SUCCESS {
@@ -100,7 +100,7 @@ impl IdbDirect {
         }
         Ok(Self { connected: false })
     }
-    
+
     /// Perform safety check to verify simulator is available
     pub fn safety_check(&self) -> Result<()> {
         // Quick check for simulator availability
@@ -111,7 +111,7 @@ impl IdbDirect {
                 .args(["simctl", "list", "devices", "booted"])
                 .output()
                 .map_err(|_| IdbError::OperationFailed)?;
-                
+
             let stdout = String::from_utf8_lossy(&output.stdout);
             if !stdout.contains("(Booted)") {
                 return Err(IdbError::SimulatorNotRunning);
@@ -160,7 +160,7 @@ impl IdbDirect {
         if !self.connected {
             return Err(IdbError::NotInitialized);
         }
-        
+
         let mut screenshot = idb_screenshot_t {
             data: ptr::null_mut(),
             size: 0,
@@ -168,14 +168,14 @@ impl IdbDirect {
             height: 0,
             format: ptr::null_mut(),
         };
-        
+
         unsafe {
             let err = idb_take_screenshot(&mut screenshot);
             if err != IDB_SUCCESS {
                 return Err(err.into());
             }
         }
-        
+
         Ok(Screenshot::from_raw(screenshot))
     }
 
@@ -184,33 +184,29 @@ impl IdbDirect {
         // TODO: Enable once idb_list_targets is implemented in the static library
         eprintln!("[IdbDirect] list_targets not yet implemented in static library");
         Err(IdbError::NotImplemented)
-        
+
         // let mut targets: *mut idb_target_info_t = ptr::null_mut();
         // let mut count: usize = 0;
-        // 
+        //
         // unsafe {
         //     let err = idb_list_targets(&mut targets, &mut count);
         //     if err != IDB_SUCCESS {
         //         return Err(err.into());
         //     }
-        //     
+        //
         //     let mut result = Vec::with_capacity(count);
         //     for i in 0..count {
         //         let target = &*targets.add(i);
         //         result.push(TargetInfo::from_raw(target));
         //     }
-        //     
+        //
         //     idb_free_targets(targets, count);
         //     Ok(result)
         // }
     }
 
     pub fn version() -> &'static str {
-        unsafe {
-            CStr::from_ptr(idb_version())
-                .to_str()
-                .unwrap_or("unknown")
-        }
+        unsafe { CStr::from_ptr(idb_version()).to_str().unwrap_or("unknown") }
     }
 }
 
@@ -249,31 +245,29 @@ pub struct Screenshot {
 
 impl Screenshot {
     fn from_raw(raw: idb_screenshot_t) -> Self {
-        let data = unsafe {
-            std::slice::from_raw_parts(raw.data, raw.size).to_vec()
-        };
-        
+        let data = unsafe { std::slice::from_raw_parts(raw.data, raw.size).to_vec() };
+
         let format = unsafe {
             CStr::from_ptr(raw.format)
                 .to_str()
                 .unwrap_or("png")
                 .to_string()
         };
-        
+
         let screenshot = Self {
             data,
             width: raw.width,
             height: raw.height,
             format,
         };
-        
+
         unsafe {
             idb_free_screenshot(&raw as *const _ as *mut _);
         }
-        
+
         screenshot
     }
-    
+
     pub fn data(&self) -> &[u8] {
         &self.data
     }
@@ -295,8 +289,18 @@ impl TargetInfo {
         Self {
             udid: unsafe { CStr::from_ptr(raw.udid).to_str().unwrap_or("").to_string() },
             name: unsafe { CStr::from_ptr(raw.name).to_str().unwrap_or("").to_string() },
-            os_version: unsafe { CStr::from_ptr(raw.os_version).to_str().unwrap_or("").to_string() },
-            device_type: unsafe { CStr::from_ptr(raw.device_type).to_str().unwrap_or("").to_string() },
+            os_version: unsafe {
+                CStr::from_ptr(raw.os_version)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string()
+            },
+            device_type: unsafe {
+                CStr::from_ptr(raw.device_type)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string()
+            },
             target_type: match raw.type_ {
                 IDB_TARGET_SIMULATOR => TargetType::Simulator,
                 _ => TargetType::Device,

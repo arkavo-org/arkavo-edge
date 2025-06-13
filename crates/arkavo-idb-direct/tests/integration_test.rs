@@ -16,14 +16,14 @@ mod tests {
             println!("Skipping initialization test in CI environment");
             return;
         }
-        
+
         let result = IdbDirect::new();
         if result.is_err() {
             // This is expected in CI without simulator
             println!("IDB initialization failed (expected in CI): {:?}", result);
             return;
         }
-        
+
         let idb = result.unwrap();
         drop(idb); // Ensure cleanup
     }
@@ -36,7 +36,7 @@ mod tests {
             println!("Skipping list_targets test in CI environment");
             return;
         }
-        
+
         let idb = match IdbDirect::new() {
             Ok(idb) => idb,
             Err(e) => {

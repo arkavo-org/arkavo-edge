@@ -23,6 +23,8 @@ pub mod frameworks_data;
 #[cfg(target_os = "macos")]
 pub mod idb_companion_health;
 #[cfg(target_os = "macos")]
+pub mod idb_direct_wrapper;
+#[cfg(target_os = "macos")]
 pub mod idb_error_handler;
 #[cfg(target_os = "macos")]
 pub mod idb_installer;
@@ -34,11 +36,9 @@ pub mod idb_port_manager;
 pub mod idb_recovery;
 #[cfg(target_os = "macos")]
 pub mod idb_tap_enhanced;
+pub mod idb_unified;
 #[cfg(target_os = "macos")]
 pub mod idb_wrapper;
-#[cfg(target_os = "macos")]
-pub mod idb_direct_wrapper;
-pub mod idb_unified;
 pub mod intelligent_tools;
 pub mod ios_biometric_tools;
 pub mod ios_errors;
