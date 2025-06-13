@@ -3,7 +3,6 @@
 use arkavo_test::Result;
 use arkavo_test::mcp::idb_wrapper::IdbWrapper;
 use std::fs;
-use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_idb_extracts_to_arkavo_directory() -> Result<()> {
@@ -87,7 +86,7 @@ async fn test_idb_extracts_to_arkavo_directory() -> Result<()> {
 
     // Test that IDB can list targets (verifies it's working)
     println!("\n🧪 Testing IDB functionality...");
-    let targets = IdbWrapper::list_targets().await?;
+    let _targets = IdbWrapper::list_targets().await?;
     println!("✅ IDB is functional, found devices/simulators");
 
     println!("\n🎉 All tests passed! IDB is properly extracted to .arkavo directory");
