@@ -61,3 +61,14 @@ Until the static library is recompiled with Xcode version compatibility, Direct 
 3. Continue using IDB companion as fallback for Xcode 16+
 
 **Update**: The Arkavo × FB-IDB team is actively working on a fix to support both API versions.
+
+### Testing v1.3.2-arkavo.0
+
+The v1.3.2 release includes the API compatibility code (confirmed by strings in the binary), but still hangs when calling `connect_target` on Xcode 26 beta:
+
+- ✅ Contains both `SimDeviceSet` and `SimServiceContext` references
+- ✅ Has error message about trying both APIs
+- ❌ Still hangs indefinitely in `connect_target`
+- 🔍 Likely blocking on CoreSimulator API calls that don't return
+
+This suggests the compatibility layer is present but may need additional fixes for Xcode 26 beta.
