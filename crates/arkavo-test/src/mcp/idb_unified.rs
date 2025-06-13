@@ -115,7 +115,7 @@ impl IdbUnified {
                 }
                 Backend::Companion | Backend::Auto => {
                     // Use the existing IDB companion tap command
-                    let idb_path = IdbWrapper::get_idb_path()?;
+                    let idb_path = IdbWrapper::get_binary_path()?;
                     let output = std::process::Command::new(&idb_path)
                         .args(&[
                             "ui", "tap",
@@ -161,7 +161,7 @@ impl IdbUnified {
                 }
                 Backend::Companion | Backend::Auto => {
                     // Use the existing IDB companion screenshot command
-                    let idb_path = IdbWrapper::get_idb_path()?;
+                    let idb_path = IdbWrapper::get_binary_path()?;
                     let output = std::process::Command::new(&idb_path)
                         .args(&[
                             "screenshot",

@@ -3,6 +3,15 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // Architecture check
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    if target_arch != "aarch64" {
+        eprintln!("Error: IDB Direct FFI only supports arm64/aarch64 architecture.");
+        eprintln!("Current architecture: {}", target_arch);
+        eprintln!("Please build on an Apple Silicon Mac or use --target aarch64-apple-darwin");
+        panic!("Unsupported architecture");
+    }
+
     // Get the path to the vendor directory
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let vendor_path = PathBuf::from(&manifest_dir)
@@ -27,7 +36,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("otool")
-            .args(&["-h", lib_path.to_str().unwrap()])
+            .args(["-h", lib_path.to_str().unwrap()])
             .output()
             .expect("Failed to run otool");
 

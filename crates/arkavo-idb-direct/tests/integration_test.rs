@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use arkavo_idb_direct::{IdbDirect, TargetType};
+    use arkavo_idb_direct::IdbDirect;
 
     #[test]
     fn test_idb_version() {
@@ -11,6 +11,12 @@ mod tests {
 
     #[test]
     fn test_initialization() {
+        // Skip test in CI without simulator
+        if std::env::var("CI").is_ok() {
+            println!("Skipping initialization test in CI environment");
+            return;
+        }
+        
         let result = IdbDirect::new();
         if result.is_err() {
             // This is expected in CI without simulator
@@ -23,7 +29,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_list_targets() {
+        // Skip test in CI without simulator
+        if std::env::var("CI").is_ok() {
+            println!("Skipping list_targets test in CI environment");
+            return;
+        }
+        
         let idb = match IdbDirect::new() {
             Ok(idb) => idb,
             Err(e) => {

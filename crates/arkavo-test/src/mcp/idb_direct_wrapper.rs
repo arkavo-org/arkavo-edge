@@ -1,4 +1,4 @@
-use arkavo_idb_direct::{IdbDirect, IdbError, TargetType};
+use arkavo_idb_direct::{IdbDirect, TargetType};
 use once_cell::sync::Lazy;
 use serde_json::json;
 use std::sync::Mutex;
@@ -138,6 +138,7 @@ impl IdbDirectWrapper {
     }
 
     /// List available targets
+    #[allow(deprecated)]
     pub fn list_targets() -> Result<Vec<serde_json::Value>> {
         eprintln!("[IdbDirectWrapper] Listing targets");
         

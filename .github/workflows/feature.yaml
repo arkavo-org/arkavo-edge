@@ -123,9 +123,10 @@ jobs:
           # Verify checksum
           ACTUAL_SHA=$(shasum -a 256 libidb.tar.gz | cut -d' ' -f1)
           if [ "$ACTUAL_SHA" != "${{ env.IDB_SHA256 }}" ]; then
-            echo "SHA256 mismatch! Expected: ${{ env.IDB_SHA256 }}, Got: $ACTUAL_SHA"
+            echo "::error::SHA256 mismatch! Expected: ${{ env.IDB_SHA256 }}, Got: $ACTUAL_SHA"
             exit 1
           fi
+          echo "✓ SHA256 verified: $ACTUAL_SHA"
           
           # Extract to vendor/idb
           tar -xzf libidb.tar.gz -C vendor/idb --strip-components=1

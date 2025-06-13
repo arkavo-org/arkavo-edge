@@ -87,6 +87,11 @@ pub struct IdbDirect {
 
 impl IdbDirect {
     pub fn new() -> Result<Self> {
+        // Check if running in CI without simulator
+        if std::env::var("CI").is_ok() && std::env::var("IDB_TEST_CI_MODE").is_err() {
+            eprintln!("[IdbDirect] Running in CI without simulator - initialization may fail");
+        }
+        
         unsafe {
             let err = idb_initialize();
             if err != IDB_SUCCESS {
@@ -94,6 +99,25 @@ impl IdbDirect {
             }
         }
         Ok(Self { connected: false })
+    }
+    
+    /// Perform safety check to verify simulator is available
+    pub fn safety_check(&self) -> Result<()> {
+        // Quick check for simulator availability
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            let output = Command::new("xcrun")
+                .args(["simctl", "list", "devices", "booted"])
+                .output()
+                .map_err(|_| IdbError::OperationFailed)?;
+                
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.contains("(Booted)") {
+                return Err(IdbError::SimulatorNotRunning);
+            }
+        }
+        Ok(())
     }
 
     pub fn connect_target(&mut self, udid: &str, target_type: TargetType) -> Result<()> {
@@ -155,6 +179,7 @@ impl IdbDirect {
         Ok(Screenshot::from_raw(screenshot))
     }
 
+    #[deprecated(note = "Not yet implemented in static library - pending Obj-C support")]
     pub fn list_targets(&self) -> Result<Vec<TargetInfo>> {
         // TODO: Enable once idb_list_targets is implemented in the static library
         eprintln!("[IdbDirect] list_targets not yet implemented in static library");
@@ -265,6 +290,7 @@ pub struct TargetInfo {
 }
 
 impl TargetInfo {
+    #[allow(dead_code)]
     fn from_raw(raw: &idb_target_info_t) -> Self {
         Self {
             udid: unsafe { CStr::from_ptr(raw.udid).to_str().unwrap_or("").to_string() },
