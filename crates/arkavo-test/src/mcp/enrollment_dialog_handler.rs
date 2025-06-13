@@ -3,7 +3,10 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::process::Command;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 pub struct EnrollmentDialogHandler {
     schema: ToolSchema,
@@ -21,7 +24,7 @@ impl EnrollmentDialogHandler {
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["get_cancel_coordinates", "tap_cancel"],
+                            "enum": ["get_cancel_coordinates", "tap_cancel", "dismiss", "handle_automatically", "wait_for_dialog"],
                             "description": "Action to perform on enrollment dialog"
                         },
                         "device_id": {
@@ -54,6 +57,31 @@ impl EnrollmentDialogHandler {
                 }
             }
         }
+    }
+
+    fn dismiss_dialog_with_keyboard(&self) -> Result<()> {
+        // Use AppleScript to send ESC key to dismiss the dialog
+        let script = r#"tell application "Simulator"
+            activate
+        end tell
+        tell application "System Events"
+            key code 53 -- ESC key
+        end tell"#;
+
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(TestError::Mcp(format!(
+                "Failed to send ESC key: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        Ok(())
     }
 
     fn get_cancel_coordinates(&self, device_type: &str) -> (f64, f64) {
@@ -181,6 +209,68 @@ impl Tool for EnrollmentDialogHandler {
                             }
                         }
                     }
+                }))
+            }
+            "dismiss" => {
+                // Try to dismiss the dialog using keyboard shortcuts
+                self.dismiss_dialog_with_keyboard()?;
+
+                Ok(json!({
+                    "success": true,
+                    "action": "dismiss",
+                    "method": "keyboard_shortcut",
+                    "device_id": device_id,
+                    "message": "Attempted to dismiss enrollment dialog using ESC key"
+                }))
+            }
+            "handle_automatically" => {
+                // First try keyboard dismissal
+                if self.dismiss_dialog_with_keyboard().is_ok() {
+                    return Ok(json!({
+                        "success": true,
+                        "action": "handle_automatically",
+                        "method": "keyboard_dismissal",
+                        "device_id": device_id
+                    }));
+                }
+
+                // If that fails, provide coordinates for manual tap
+                let (x, y) = self.get_cancel_coordinates(device_type);
+                Ok(json!({
+                    "success": false,
+                    "action": "handle_automatically",
+                    "fallback": {
+                        "method": "manual_tap",
+                        "coordinates": {
+                            "x": x,
+                            "y": y
+                        },
+                        "next_step": {
+                            "tool": "ui_interaction",
+                            "params": {
+                                "action": "tap",
+                                "target": {
+                                    "x": x,
+                                    "y": y
+                                }
+                            }
+                        }
+                    }
+                }))
+            }
+            "wait_for_dialog" => {
+                // Wait a moment for dialog to appear
+                thread::sleep(Duration::from_millis(500));
+
+                Ok(json!({
+                    "success": true,
+                    "action": "wait_for_dialog",
+                    "device_id": device_id,
+                    "message": "Waited for enrollment dialog to appear",
+                    "next_actions": [
+                        "Use 'dismiss' or 'handle_automatically' to handle the dialog",
+                        "Use 'get_cancel_coordinates' to get button coordinates"
+                    ]
                 }))
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),

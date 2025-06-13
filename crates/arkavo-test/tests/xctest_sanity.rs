@@ -1,3 +1,5 @@
+#![cfg(target_os = "macos")]
+
 //! Quick sanity check for XCUITest integration
 //!
 //! Run with: cargo test --test xctest_sanity
@@ -81,7 +83,7 @@ fn test_macos_dependencies() {
 
     // Check if we can query simulators
     let simctl_output = Command::new("xcrun")
-        .args(&["simctl", "list", "devices", "-j"])
+        .args(["simctl", "list", "devices", "-j"])
         .output()
         .expect("Failed to run simctl");
 

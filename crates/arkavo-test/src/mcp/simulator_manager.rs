@@ -1,3 +1,4 @@
+use crate::mcp::xcode_version::XcodeVersion;
 use crate::{Result, TestError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,12 +24,15 @@ pub struct AppInfo {
 
 pub struct SimulatorManager {
     pub devices: HashMap<String, SimulatorDevice>,
+    xcode_version: Option<XcodeVersion>,
 }
 
 impl SimulatorManager {
     pub fn new() -> Self {
+        let xcode_version = XcodeVersion::detect().ok();
         let mut manager = Self {
             devices: HashMap::new(),
+            xcode_version,
         };
         manager.refresh_devices().ok();
         manager
@@ -413,6 +417,30 @@ impl SimulatorManager {
             .args(["simctl", "io", udid, "recordVideo", output_path])
             .spawn()
             .map_err(|e| TestError::Mcp(format!("Failed to start video recording: {}", e)))
+    }
+
+    pub fn get_xcode_version(&self) -> Option<&XcodeVersion> {
+        self.xcode_version.as_ref()
+    }
+
+    pub fn check_compatibility(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if let Some(version) = &self.xcode_version {
+            if version.major < 15 {
+                warnings.push("Xcode version is older than 15. Some UI automation features may not be available.".to_string());
+            }
+
+            if version.major >= 26 {
+                warnings.push("Xcode 26 detected. Using latest simulator features.".to_string());
+            }
+        } else {
+            warnings.push(
+                "Unable to detect Xcode version. Some features may not work correctly.".to_string(),
+            );
+        }
+
+        warnings
     }
 }
 
