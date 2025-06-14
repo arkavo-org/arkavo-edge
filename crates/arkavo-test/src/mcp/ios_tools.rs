@@ -24,7 +24,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. Primary method: idb_companion (embedded binary), with fallback to simctl and AppleScript. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. The tool automatically initializes IDB companion for reliable interaction. Coordinates should be in logical points for the device.".to_string(),
+                description: "Interact with iOS UI elements using coordinates. 🎯 WORKFLOW: 1) Use build_test_harness ONCE per app for fast AXP touch injection, 2) Use screen_capture to see UI, 3) Use coordinates: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. DO NOT use setup_xcuitest (deprecated). Coordinates are in logical points.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -1704,7 +1704,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS simulator screen. 🎯 COORDINATE WORKFLOW (RECOMMENDED): 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) Identify element positions visually, 4) ALWAYS use ui_interaction with coordinates {\"target\":{\"x\":X,\"y\":Y}}. ⚠️ AVOID text-based tapping - it requires setup_xcuitest which often fails! Example: If you see a 'Sign In' button at position (200,400), use {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}} NOT text-based tapping.".to_string(),
+                description: "Capture iOS simulator screen. 🎯 RECOMMENDED WORKFLOW: 1) Run build_test_harness ONCE for the app, 2) Use screen_capture to take screenshot, 3) Read the image file to see UI elements, 4) Use ui_interaction with coordinates {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}}. This is the fastest, most reliable approach.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -1844,7 +1844,7 @@ impl UiQueryKit {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
-                description: "Query UI elements (LIMITED). AI AGENTS: This tool has limited functionality without XCTest. Instead, use this workflow: 1) screen_capture to get screenshot, 2) Read the image file, 3) Use your vision capabilities to identify UI elements and coordinates, 4) Use tap/swipe/type_text with those coordinates.".to_string(),
+                description: "Query UI elements (LIMITED). For best results: 1) Use build_test_harness for the app, 2) Use screen_capture and Read to see UI visually, 3) Use ui_interaction with coordinates. Visual analysis is more reliable than programmatic queries.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {

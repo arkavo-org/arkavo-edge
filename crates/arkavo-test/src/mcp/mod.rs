@@ -38,6 +38,7 @@ pub mod idb_tap_enhanced;
 #[cfg(target_os = "macos")]
 pub mod idb_wrapper;
 pub mod intelligent_tools;
+pub mod ios_automation_guide;
 pub mod ios_biometric_tools;
 pub mod ios_errors;
 pub mod ios_tools;

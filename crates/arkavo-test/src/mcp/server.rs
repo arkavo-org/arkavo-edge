@@ -13,6 +13,7 @@ use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
+use super::ios_automation_guide::IosAutomationGuide;
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
@@ -149,6 +150,10 @@ impl McpTestServer {
             Arc::new(UiElementHandler::new(device_manager.clone())),
         );
         tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
+        tools.insert(
+            "ios_automation_guide".to_string(),
+            Arc::new(IosAutomationGuide::new()),
+        );
         tools.insert("xcode_info".to_string(), Arc::new(XcodeInfoTool::new()));
 
         #[cfg(target_os = "macos")]
