@@ -4,6 +4,9 @@ pub const ARKAVO_TEST_RUNNER_SWIFT: &str =
     include_str!("../../templates/XCTestRunner/ArkavoTestRunner.swift.template");
 pub const ARKAVO_TEST_RUNNER_ENHANCED_SWIFT: &str =
     include_str!("../../templates/XCTestRunner/ArkavoTestRunnerEnhanced.swift.template");
+pub const ARKAVO_TEST_RUNNER_AXP_SWIFT: &str =
+    include_str!("../../templates/XCTestRunner/ArkavoTestRunnerAXP.swift.template");
+pub const ARKAVO_AX_BRIDGE_SWIFT: &str = include_str!("../../templates/ArkavoAXBridge.swift");
 pub const INFO_PLIST: &str = include_str!("../../templates/XCTestRunner/Info.plist.template");
 
 #[cfg(test)]

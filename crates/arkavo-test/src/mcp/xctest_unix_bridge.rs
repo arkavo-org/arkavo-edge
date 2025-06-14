@@ -16,6 +16,10 @@ pub enum CommandType {
     TypeText,
     Scroll,
     LongPress,
+    // AXP-specific commands
+    AxpTap,
+    AxpSnapshot,
+    AxpCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -509,6 +513,50 @@ impl XCTestUnixBridge {
                 distance: None,
                 press_duration: None,
             },
+        }
+    }
+    
+    /// Create an AXP tap command
+    pub fn create_axp_tap(x: f64, y: f64) -> Command {
+        Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::AxpTap,
+            parameters: CommandParameters {
+                target_type: Some(TargetType::Coordinate),
+                x: Some(x),
+                y: Some(y),
+                text: None,
+                accessibility_id: None,
+                timeout: None,
+                x1: None,
+                y1: None,
+                x2: None,
+                y2: None,
+                duration: None,
+                text_to_type: None,
+                clear_first: None,
+                direction: None,
+                distance: None,
+                press_duration: None,
+            },
+        }
+    }
+    
+    /// Create an AXP capabilities query command
+    pub fn create_axp_capabilities() -> Command {
+        Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::AxpCapabilities,
+            parameters: CommandParameters::default(),
+        }
+    }
+    
+    /// Create an AXP snapshot command
+    pub fn create_axp_snapshot() -> Command {
+        Command {
+            id: Uuid::new_v4().to_string(),
+            command_type: CommandType::AxpSnapshot,
+            parameters: CommandParameters::default(),
         }
     }
 }

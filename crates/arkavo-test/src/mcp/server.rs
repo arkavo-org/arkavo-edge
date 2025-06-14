@@ -1,4 +1,5 @@
 use super::app_diagnostic_tool::AppDiagnosticTool;
+use super::axp_harness_builder::AxpHarnessBuilder;
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
@@ -167,6 +168,10 @@ impl McpTestServer {
         tools.insert(
             "xctest_status".to_string(),
             Arc::new(XCTestStatusKit::new(device_manager.clone())),
+        );
+        tools.insert(
+            "build_test_harness".to_string(),
+            Arc::new(AxpHarnessBuilder::new(device_manager.clone())),
         );
         tools.insert(
             "template_diagnostics".to_string(),

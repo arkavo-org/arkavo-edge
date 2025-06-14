@@ -1,6 +1,7 @@
 pub mod app_diagnostic_tool;
 #[cfg(target_os = "macos")]
 pub mod applescript_tap;
+pub mod axp_harness_builder;
 pub mod biometric_dialog_handler;
 pub mod biometric_test_scenarios;
 pub mod calibration;
