@@ -25,6 +25,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # MCP protocol
 arkavo-protocol = { path = "../arkavo-protocol" }
 
+# IDB Direct FFI
+arkavo-idb-direct = { path = "../arkavo-idb-direct" }
+
 # Gherkin parsing
 gherkin = "0.14"
 

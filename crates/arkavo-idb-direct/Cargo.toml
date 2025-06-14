@@ -1,0 +1,11 @@
+[package]
+name = "arkavo-idb-direct"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0"
+
+[build-dependencies]
+reqwest = { version = "0.12.19", features = ["blocking"] }
+bindgen = "0.70"
