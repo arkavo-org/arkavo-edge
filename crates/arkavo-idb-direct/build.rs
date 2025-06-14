@@ -58,7 +58,7 @@ fn main() {
     }
 
     // Get current version
-    let expected_version = "1.3.2-arkavo.0";
+    let expected_version = "1.4.0-arkavo";
     let version_file = deps_path.join("version.txt");
     let current_version = if version_file.exists() {
         fs::read_to_string(&version_file).unwrap_or_default()
@@ -75,7 +75,7 @@ fn main() {
         eprintln!("libidb_direct.a not found. Downloading from GitHub release...");
 
         // URL of the tar.gz archive
-        let archive_url = "https://github.com/arkavo-org/idb/releases/download/1.3.2-arkavo.0/libidb_direct-1.3.2-arkavo.0-macos-arm64.tar.gz";
+        let archive_url = "https://github.com/arkavo-org/idb/releases/download/1.4.0-arkavo/libidb_direct-1.4.0-arkavo-macos-arm64.tar.gz";
 
         // Download to target directory instead of temp dir
         let download_dir = deps_path.join("download");
@@ -278,7 +278,7 @@ fn main() {
         }
 
         // Write version file
-        let expected_version = "1.3.2-arkavo.0";
+        let expected_version = "1.4.0-arkavo";
         let version_file = deps_path.join("version.txt");
         fs::write(&version_file, expected_version)
             .expect("Failed to write version file");
