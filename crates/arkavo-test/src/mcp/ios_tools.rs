@@ -17,6 +17,7 @@ static XCTEST_BRIDGE: OnceLock<XCTestBridgeType> = OnceLock::new();
 pub struct UiInteractionKit {
     schema: ToolSchema,
     device_manager: Arc<DeviceManager>,
+    axp_socket_cache: Arc<RwLock<Option<(String, String)>>>, // (device_id, socket_path)
 }
 
 impl UiInteractionKit {
@@ -81,35 +82,66 @@ impl UiInteractionKit {
                 }),
             },
             device_manager,
+            axp_socket_cache: Arc::new(RwLock::new(None)),
         }
     }
     
     /// Check if AXP harness is available for the active app
     async fn check_axp_harness_available(&self) -> Option<(String, bool)> {
         // Get active device
-        let _device = self.device_manager.get_active_device()?;
+        let device = self.device_manager.get_active_device()?;
+        let device_id = device.id.clone();
         
-        // Try to find AXP socket for any app
-        // Use glob to find any AXP socket
+        // Check cache first
+        {
+            let cache = self.axp_socket_cache.read().await;
+            if let Some((cached_device_id, socket_path)) = cache.as_ref() {
+                if cached_device_id == &device_id {
+                    eprintln!("[AXP] Using cached socket for device {}: {}", device_id, socket_path);
+                    return Some((socket_path.clone(), true));
+                }
+            }
+        }
+        
+        // Try to find AXP socket for this specific device
+        // Socket naming pattern: arkavo-axp-{DEVICE_UDID}-{APP_BUNDLE_ID}.sock
         use std::fs;
         if let Ok(entries) = fs::read_dir(std::env::temp_dir()) {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
-                    if name.starts_with("arkavo-axp-") && name.ends_with(".sock") {
+                    // Check if socket is for this device
+                    if name.starts_with(&format!("arkavo-axp-{}-", device_id)) && name.ends_with(".sock") {
                         let socket_path = entry.path();
-                        eprintln!("[AXP] Found AXP socket: {}", socket_path.display());
+                        eprintln!("[AXP] Found AXP socket for device {}: {}", device_id, socket_path.display());
                         
                         // Try to connect to verify it's active
                         if let Ok(stream) = tokio::net::UnixStream::connect(&socket_path).await {
                             eprintln!("[AXP] Successfully connected to AXP harness");
                             drop(stream); // Close the test connection
-                            return Some((socket_path.to_string_lossy().to_string(), true));
+                            
+                            // Update cache
+                            let socket_path_str = socket_path.to_string_lossy().to_string();
+                            {
+                                let mut cache = self.axp_socket_cache.write().await;
+                                *cache = Some((device_id.clone(), socket_path_str.clone()));
+                            }
+                            
+                            return Some((socket_path_str, true));
+                        } else {
+                            eprintln!("[AXP] Socket exists but connection failed - harness may not be running");
                         }
                     }
                 }
             }
         }
         
+        // Clear cache if no socket found
+        {
+            let mut cache = self.axp_socket_cache.write().await;
+            *cache = None;
+        }
+        
+        eprintln!("[AXP] No active AXP harness found for device {}", device_id);
         None
     }
     
@@ -126,14 +158,27 @@ impl UiInteractionKit {
         let (reader, mut writer) = stream.split();
         let mut reader = BufReader::new(reader);
         
-        // Read initial capabilities message
+        // Read initial capabilities message with timeout
         let mut line = String::new();
-        reader.read_line(&mut line).await
-            .map_err(|e| TestError::Mcp(format!("Failed to read AXP capabilities: {}", e)))?;
-        
-        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
-            if msg.get("type").and_then(|t| t.as_str()) == Some("ready") {
-                eprintln!("[AXP] AXP harness ready with capabilities: {:?}", msg.get("capabilities"));
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            reader.read_line(&mut line)
+        ).await {
+            Ok(Ok(_)) => {
+                // Successfully read line
+                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if msg.get("type").and_then(|t| t.as_str()) == Some("ready") {
+                        eprintln!("[AXP] AXP harness ready with capabilities: {:?}", msg.get("capabilities"));
+                    }
+                } else {
+                    eprintln!("[AXP] Warning: Non-JSON response from harness: {}", line.trim());
+                }
+            }
+            Ok(Err(e)) => {
+                return Err(TestError::Mcp(format!("Failed to read AXP capabilities: {}", e)));
+            }
+            Err(_) => {
+                return Err(TestError::Mcp("AXP handshake timeout (250ms)".to_string()));
             }
         }
         

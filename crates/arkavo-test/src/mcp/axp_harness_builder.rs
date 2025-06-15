@@ -46,6 +46,46 @@ impl AxpHarnessBuilder {
         app_bundle_id: &str,
     ) -> Result<Value> {
         eprintln!("[AxpHarnessBuilder] Building generic AXP harness for {}", app_bundle_id);
+        
+        // Pre-flight check: Verify Xcode tools are available
+        let xcrun_check = Command::new("which")
+            .arg("xcrun")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+            
+        if !xcrun_check {
+            return Ok(serde_json::json!({
+                "success": false,
+                "error": {
+                    "code": "IOS_SDK_MISSING",
+                    "message": "Xcode command line tools not found",
+                    "solution": "Install Xcode and run: xcode-select --install"
+                }
+            }));
+        }
+        
+        // Check if developer directory is set
+        let xcode_select_check = Command::new("xcode-select")
+            .arg("-p")
+            .output();
+            
+        match xcode_select_check {
+            Ok(output) if output.status.success() => {
+                let dev_dir = String::from_utf8_lossy(&output.stdout);
+                eprintln!("[AxpHarnessBuilder] Developer directory: {}", dev_dir.trim());
+            }
+            _ => {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "error": {
+                        "code": "IOS_SDK_MISSING",
+                        "message": "Xcode developer directory not set",
+                        "solution": "Run: sudo xcode-select --switch /Applications/Xcode.app"
+                    }
+                }));
+            }
+        }
 
         // Validate bundle ID format
         if !app_bundle_id.contains('.') {
@@ -74,9 +114,13 @@ impl AxpHarnessBuilder {
         fs::create_dir_all(&harness_dir)
             .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {}", e)))?;
 
-        // Generate socket path for this harness
+        // Generate socket path for this harness with device UDID
+        let device_id = self.device_manager.get_active_device()
+            .map(|d| d.id.clone())
+            .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
+            
         let socket_path = std::env::temp_dir()
-            .join(format!("arkavo-axp-{}.sock", app_bundle_id.replace('.', "_")));
+            .join(format!("arkavo-axp-{}-{}.sock", device_id, app_bundle_id.replace('.', "_")));
 
         // Write AXP bridge code
         let ax_bridge_path = harness_dir.join("ArkavoAXBridge.swift");
