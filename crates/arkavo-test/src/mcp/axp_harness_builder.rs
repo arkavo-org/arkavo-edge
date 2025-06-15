@@ -217,23 +217,44 @@ let package = Package(
     }
 
     async fn compile_harness(&self, build_dir: &Path, plist_path: &Path) -> Result<Value> {
-        // Get SDK paths
+        // Try to get SDK for specific version first (for beta support)
+        let sim_major_version = self.device_manager.get_active_device()
+            .and_then(|device| {
+                device.runtime.split("iOS-").nth(1)
+                    .and_then(|v| v.split('-').next())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "18".to_string());
+        
+        // Try version-specific SDK first (e.g., iphonesimulator26.0 for iOS 26 beta)
         let sdk_output = Command::new("xcrun")
-            .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+            .args(["--sdk", &format!("iphonesimulator{}.0", sim_major_version), "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}", e)))?;
+            .ok()
+            .filter(|o| o.status.success())
+            .or_else(|| {
+                // Fall back to default SDK
+                eprintln!("[AxpHarnessBuilder] Beta SDK not found, using default iphonesimulator SDK");
+                Command::new("xcrun")
+                    .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+                    .output()
+                    .ok()
+            })
+            .ok_or_else(|| TestError::Mcp("Failed to execute xcrun".to_string()))?;
 
         if !sdk_output.status.success() {
             return Ok(serde_json::json!({
                 "success": false,
                 "error": {
                     "code": "SDK_NOT_FOUND",
-                    "message": "Failed to get iOS simulator SDK path"
+                    "message": "Failed to get iOS simulator SDK path",
+                    "details": String::from_utf8_lossy(&sdk_output.stderr).to_string()
                 }
             }));
         }
 
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+        eprintln!("[AxpHarnessBuilder] Using SDK: {}", sdk_path);
 
         // Build using Swift
         let swift_files = vec![
@@ -243,20 +264,34 @@ let package = Package(
 
         let output_binary = build_dir.join("ArkavoHarness");
         
+        // Determine simulator version from device runtime if possible
+        let sim_version = if let Some(device) = self.device_manager.get_active_device() {
+            // Extract version from runtime like "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+            if let Some(version_part) = device.runtime.split("iOS-").nth(1) {
+                version_part.replace('-', ".").trim_end_matches(".0").to_string()
+            } else {
+                "15.0".to_string() // Fallback to minimum supported
+            }
+        } else {
+            "15.0".to_string()
+        };
+        
+        eprintln!("[AxpHarnessBuilder] Target iOS version: {}", sim_version);
+        
         let mut cmd = Command::new("swiftc");
         cmd.args([
             "-sdk", &sdk_path,
-            "-target", "arm64-apple-ios15.0-simulator",
+            "-target", &format!("arm64-apple-ios{}-simulator", sim_version),
             "-parse-as-library",
             "-emit-library",
             "-module-name", "ArkavoHarness",
             "-o", output_binary.to_str().unwrap(),
-            "-suppress-warnings", // Suppress warnings that might fail compilation
+            "-suppress-warnings",
             "-framework", "Foundation",
             "-framework", "CoreGraphics",
             "-framework", "XCTest",
             "-F", &format!("{}/System/Library/Frameworks", sdk_path),
-            "-F", &format!("{}/../../Library/Frameworks", sdk_path), // For XCTest
+            "-F", &format!("{}/../../Library/Frameworks", sdk_path),
         ]);
 
         // Add all Swift files
@@ -271,22 +306,46 @@ let package = Package(
 
         if !output.status.success() {
             eprintln!("[AxpHarnessBuilder] Compilation failed!");
+            eprintln!("[AxpHarnessBuilder] Exit code: {:?}", output.status.code());
             eprintln!("[AxpHarnessBuilder] stderr: {}", String::from_utf8_lossy(&output.stderr));
             eprintln!("[AxpHarnessBuilder] stdout: {}", String::from_utf8_lossy(&output.stdout));
+            
+            let error_code = match output.status.code() {
+                Some(127) => "SDK_NOT_INSTALLED",
+                Some(1) => "COMPILATION_FAILED", 
+                _ => "UNKNOWN_ERROR"
+            };
+            
+            // Check for beta SDK mismatch
+            let is_beta_issue = String::from_utf8_lossy(&output.stderr)
+                .contains("SDK does not contain") || 
+                String::from_utf8_lossy(&output.stderr)
+                .contains("no such module");
             
             return Ok(serde_json::json!({
                 "success": false,
                 "error": {
-                    "code": "COMPILATION_FAILED",
+                    "code": error_code,
                     "message": "Failed to compile AXP harness",
                     "details": String::from_utf8_lossy(&output.stderr).to_string(),
                     "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-                    "troubleshooting": [
-                        "Check that Xcode command line tools are installed",
-                        "Try: xcode-select --install",
-                        "For iOS 26 beta, ensure you have the latest Xcode beta",
-                        "Try the fallback: setup_xcuitest (slower but may work)"
-                    ]
+                    "exit_code": output.status.code(),
+                    "sdk_path": sdk_path,
+                    "target_ios": sim_version,
+                    "is_beta_issue": is_beta_issue,
+                    "troubleshooting": if is_beta_issue {
+                        vec![
+                            "iOS 26 beta detected - AXP may not be available",
+                            "Fallback: Use ui_interaction with coordinates (slower)",
+                            "Or install matching Xcode beta for iOS 26 SDK"
+                        ]
+                    } else {
+                        vec![
+                            "Check that Xcode command line tools are installed",
+                            "Try: xcode-select --install",
+                            "Verify Swift is available: swift --version"
+                        ]
+                    }
                 }
             }));
         }
