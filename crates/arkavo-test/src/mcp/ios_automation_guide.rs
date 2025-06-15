@@ -53,14 +53,13 @@ impl Tool for IosAutomationGuide {
                     },
                     {
                         "step": 2,
-                        "action": "Build AXP test harness for your app (ONCE per app)",
+                        "action": "Build generic AXP test harness (ONCE per simulator)",
                         "tool": "build_test_harness",
                         "example": {
-                            "project_path": "./MyApp.xcodeproj",
                             "app_bundle_id": "com.arkavo.app"
                         },
-                        "note": "This is an MCP TOOL - call it like any other MCP tool. Do NOT try to run swift build commands!",
-                        "important": "Use RELATIVE paths from your current directory"
+                        "note": "Creates a generic harness that works with ANY iOS app",
+                        "important": "No project files needed - just the bundle ID!"
                     },
                     {
                         "step": 3,

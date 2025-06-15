@@ -5,7 +5,7 @@ use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -19,30 +19,22 @@ impl AxpHarnessBuilder {
         Self {
             schema: ToolSchema {
                 name: "build_test_harness".to_string(),
-                description: "MCP TOOL (not a separate binary!) - Build a minimal UI test harness with AXP touch injection for a specific iOS app. This is an MCP tool that creates a test bundle using Apple's private AXP APIs for fast, reliable UI automation. Call this tool via MCP, do NOT try to run any swift build commands.".to_string(),
+                description: "Build a generic AXP test harness for fast touch injection. This creates a lightweight service that provides <30ms taps for ANY iOS app. Just provide the bundle ID - no Xcode project needed. The harness compiles embedded Swift code using the iOS SDK.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "project_path": {
-                            "type": "string",
-                            "description": "Path to the .xcodeproj file"
-                        },
                         "app_bundle_id": {
                             "type": "string",
-                            "description": "Bundle ID of the target app (e.g., com.example.myapp)"
+                            "description": "Bundle ID of the app to test (e.g., com.example.myapp)"
                         },
                         "harness_type": {
                             "type": "string",
                             "enum": ["axp", "xcuitest"],
                             "default": "axp",
                             "description": "Type of harness to build (axp recommended for speed)"
-                        },
-                        "output_dir": {
-                            "type": "string",
-                            "description": "Directory to output the built harness (optional)"
                         }
                     },
-                    "required": ["project_path", "app_bundle_id"]
+                    "required": ["app_bundle_id"]
                 }),
             },
             device_manager,
@@ -51,32 +43,25 @@ impl AxpHarnessBuilder {
 
     async fn build_axp_harness(
         &self,
-        project_path: &str,
         app_bundle_id: &str,
-        output_dir: Option<&str>,
     ) -> Result<Value> {
-        eprintln!("[AxpHarnessBuilder] Building AXP harness for {}", app_bundle_id);
+        eprintln!("[AxpHarnessBuilder] Building generic AXP harness for {}", app_bundle_id);
 
-        // Verify project exists
-        let project_path = Path::new(project_path);
-        if !project_path.exists() {
+        // Validate bundle ID format
+        if !app_bundle_id.contains('.') {
             return Ok(serde_json::json!({
                 "success": false,
                 "error": {
-                    "code": "PROJECT_NOT_FOUND",
-                    "message": format!("Project not found at: {}", project_path.display()),
-                    "suggestion": "Make sure the path is relative to your current directory and the .xcodeproj exists",
-                    "example": "For an app in the current directory, use: ./MyApp.xcodeproj"
+                    "code": "INVALID_BUNDLE_ID",
+                    "message": "Bundle ID must be in reverse domain format",
+                    "example": "com.company.appname"
                 }
             }));
         }
 
-        // Create build directory
-        let build_dir = if let Some(dir) = output_dir {
-            PathBuf::from(dir)
-        } else {
-            std::env::temp_dir().join(format!("arkavo-axp-harness-{}", app_bundle_id))
-        };
+        // Create build directory in temp
+        let build_dir = std::env::temp_dir()
+            .join(format!("arkavo-axp-harness-{}", app_bundle_id.replace('.', "_")));
 
         fs::create_dir_all(&build_dir)
             .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {}", e)))?;
@@ -138,10 +123,8 @@ let package = Package(
         fs::write(&package_path, package_swift)
             .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {}", e)))?;
 
-        // Create Info.plist for the test bundle
-        let info_plist = templates::INFO_PLIST
-            .replace("com.arkavo.testhost", &format!("{}.axp-harness", app_bundle_id))
-            .replace("ArkavoTestHost", &format!("{} AXP Harness", app_bundle_id));
+        // Create Info.plist for the generic test bundle
+        let info_plist = templates::GENERIC_AXP_HARNESS_PLIST;
 
         let plist_path = build_dir.join("Info.plist");
         fs::write(&plist_path, info_plist)
@@ -180,10 +163,11 @@ let package = Package(
                 "axp_snapshot": "Accessibility tree snapshots",
                 "fallback": "Automatic fallback to XCUICoordinate if AXP unavailable"
             },
+            "important": "This generic harness works with ANY iOS app - no project files needed",
             "next_steps": [
+                "The harness is now installed on the simulator",
                 "Launch your app using app_launcher tool",
-                "The harness will automatically start and connect",
-                "Use ui_interaction with coordinates for fast, reliable tapping"
+                "Use ui_interaction - taps will now be <30ms!"
             ]
         }))
     }
@@ -305,11 +289,6 @@ let package = Package(
 #[async_trait]
 impl Tool for AxpHarnessBuilder {
     async fn execute(&self, params: Value) -> Result<Value> {
-        let project_path = params
-            .get("project_path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| TestError::Mcp("Missing project_path parameter".to_string()))?;
-
         let app_bundle_id = params
             .get("app_bundle_id")
             .and_then(|v| v.as_str())
@@ -320,10 +299,8 @@ impl Tool for AxpHarnessBuilder {
             .and_then(|v| v.as_str())
             .unwrap_or("axp");
 
-        let output_dir = params.get("output_dir").and_then(|v| v.as_str());
-
         match harness_type {
-            "axp" => self.build_axp_harness(project_path, app_bundle_id, output_dir).await,
+            "axp" => self.build_axp_harness(app_bundle_id).await,
             "xcuitest" => Ok(serde_json::json!({
                 "success": false,
                 "error": {

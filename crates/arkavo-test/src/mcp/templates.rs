@@ -8,6 +8,8 @@ pub const ARKAVO_TEST_RUNNER_AXP_SWIFT: &str =
     include_str!("../../templates/XCTestRunner/ArkavoTestRunnerAXP.swift.template");
 pub const ARKAVO_AX_BRIDGE_SWIFT: &str = include_str!("../../templates/ArkavoAXBridge.swift");
 pub const INFO_PLIST: &str = include_str!("../../templates/XCTestRunner/Info.plist.template");
+pub const GENERIC_AXP_HARNESS_PLIST: &str = 
+    include_str!("../../templates/XCTestRunner/GenericAXPHarness.plist.template");
 
 #[cfg(test)]
 mod tests {
