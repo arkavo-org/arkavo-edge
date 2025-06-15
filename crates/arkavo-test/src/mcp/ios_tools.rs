@@ -908,8 +908,18 @@ impl Tool for UiInteractionKit {
                                     "device_id": device_id,
                                     "device_type": device_type,
                                     "logical_resolution": {"width": max_x, "height": max_y},
-                                    "confidence": "low",  // Lower confidence until calibrated
-                                    "note": "Using rough coordinate mapping - calibration will improve accuracy"
+                                    "confidence": "low",
+                                    "warning": "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!",
+                                    "optimization": {
+                                        "suggestion": "Build AXP harness for fast touch injection",
+                                        "tool": "build_test_harness",
+                                        "required_params": {
+                                            "project_path": "Path to your .xcodeproj file",
+                                            "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
+                                        },
+                                        "benefit": "Taps will be <30ms instead of 300ms+",
+                                        "note": "Run this ONCE per app for permanent speed boost"
+                                    }
                                 }));
                             }
                         }
