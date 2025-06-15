@@ -83,6 +83,108 @@ impl UiInteractionKit {
             device_manager,
         }
     }
+    
+    /// Check if AXP harness is available for the active app
+    async fn check_axp_harness_available(&self) -> Option<(String, bool)> {
+        // Get active device
+        let _device = self.device_manager.get_active_device()?;
+        
+        // Try to find AXP socket for any app
+        // Use glob to find any AXP socket
+        use std::fs;
+        if let Ok(entries) = fs::read_dir(std::env::temp_dir()) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with("arkavo-axp-") && name.ends_with(".sock") {
+                        let socket_path = entry.path();
+                        eprintln!("[AXP] Found AXP socket: {}", socket_path.display());
+                        
+                        // Try to connect to verify it's active
+                        if let Ok(stream) = tokio::net::UnixStream::connect(&socket_path).await {
+                            eprintln!("[AXP] Successfully connected to AXP harness");
+                            drop(stream); // Close the test connection
+                            return Some((socket_path.to_string_lossy().to_string(), true));
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Send AXP tap command
+    async fn send_axp_tap(&self, socket_path: &str, x: f64, y: f64) -> Result<serde_json::Value> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+        
+        eprintln!("[AXP] Sending tap to ({}, {}) via {}", x, y, socket_path);
+        
+        let mut stream = UnixStream::connect(socket_path).await
+            .map_err(|e| TestError::Mcp(format!("Failed to connect to AXP socket: {}", e)))?;
+        
+        let (reader, mut writer) = stream.split();
+        let mut reader = BufReader::new(reader);
+        
+        // Read initial capabilities message
+        let mut line = String::new();
+        reader.read_line(&mut line).await
+            .map_err(|e| TestError::Mcp(format!("Failed to read AXP capabilities: {}", e)))?;
+        
+        if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+            if msg.get("type").and_then(|t| t.as_str()) == Some("ready") {
+                eprintln!("[AXP] AXP harness ready with capabilities: {:?}", msg.get("capabilities"));
+            }
+        }
+        
+        // Send tap command
+        let tap_command = serde_json::json!({
+            "action": "axp_tap",
+            "x": x,
+            "y": y
+        });
+        
+        let command_str = serde_json::to_string(&tap_command)
+            .map_err(|e| TestError::Mcp(format!("Failed to serialize AXP command: {}", e)))?;
+        
+        writer.write_all(command_str.as_bytes()).await
+            .map_err(|e| TestError::Mcp(format!("Failed to send AXP command: {}", e)))?;
+        writer.write_all(b"\n").await
+            .map_err(|e| TestError::Mcp(format!("Failed to send newline: {}", e)))?;
+        writer.flush().await
+            .map_err(|e| TestError::Mcp(format!("Failed to flush: {}", e)))?;
+        
+        // Read response
+        let mut response_line = String::new();
+        reader.read_line(&mut response_line).await
+            .map_err(|e| TestError::Mcp(format!("Failed to read AXP response: {}", e)))?;
+        
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| TestError::Mcp(format!("Failed to parse AXP response: {}", e)))?;
+        
+        if response.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
+            let tap_time = response.get("tapTime").and_then(|t| t.as_f64()).unwrap_or(0.0);
+            eprintln!("[AXP] Tap completed in {:.1}ms", tap_time);
+            
+            Ok(serde_json::json!({
+                "success": true,
+                "action": "tap",
+                "method": "axp",
+                "coordinates": {"x": x, "y": y},
+                "device_id": self.device_manager.get_active_device()
+                    .map(|d| d.id.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                "performance": {
+                    "tap_time_ms": tap_time,
+                    "fast": tap_time < 50.0
+                },
+                "note": "Using AXP for fast touch injection"
+            }))
+        } else {
+            let error = response.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+            Err(TestError::Mcp(format!("AXP tap failed: {}", error)))
+        }
+    }
 
     /// Send a tap command through XCTest bridge (helper to avoid mutex issues)
     async fn send_xctest_tap(
@@ -410,6 +512,9 @@ impl Tool for UiInteractionKit {
                     let guard = bridge_holder.read().await;
                     guard.is_some()
                 };
+                
+                // Check for AXP harness availability
+                let axp_available = self.check_axp_harness_available().await;
 
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
@@ -496,9 +601,21 @@ impl Tool for UiInteractionKit {
                             }));
                         }
                     } else {
-                        // Direct coordinates - check if we should use XCUITest
+                        // Direct coordinates - check if we should use AXP, XCUITest, or fallback
                         let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+                        // First try AXP if available (fastest)
+                        if let Some((socket_path, _)) = &axp_available {
+                            eprintln!("[ui_interaction] Using AXP for tap at ({}, {})", x, y);
+                            match self.send_axp_tap(socket_path, x, y).await {
+                                Ok(result) => return Ok(result),
+                                Err(e) => {
+                                    eprintln!("[ui_interaction] AXP tap failed: {}, falling back", e);
+                                    // Continue to other methods
+                                }
+                            }
+                        }
 
                         // Try XCUITest if bridge is available
                         if xctest_available {
@@ -909,16 +1026,25 @@ impl Tool for UiInteractionKit {
                                     "device_type": device_type,
                                     "logical_resolution": {"width": max_x, "height": max_y},
                                     "confidence": "low",
-                                    "warning": "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!",
-                                    "optimization": {
-                                        "suggestion": "Build AXP harness for fast touch injection",
-                                        "tool": "build_test_harness",
-                                        "required_params": {
-                                            "project_path": "Path to your .xcodeproj file",
-                                            "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
-                                        },
-                                        "benefit": "Taps will be <30ms instead of 300ms+",
-                                        "note": "Run this ONCE per app for permanent speed boost"
+                                    "warning": if axp_available.is_none() { 
+                                        "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!" 
+                                    } else { 
+                                        "Using fallback method - AXP harness was found but tap failed" 
+                                    },
+                                    "optimization": if axp_available.is_none() {
+                                        serde_json::json!({
+                                            "suggestion": "Build AXP harness for fast touch injection",
+                                            "tool": "build_test_harness",
+                                            "required_params": {
+                                                "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
+                                            },
+                                            "benefit": "Taps will be <30ms instead of 300ms+",
+                                            "note": "Run this ONCE per app for permanent speed boost"
+                                        })
+                                    } else {
+                                        serde_json::json!({
+                                            "note": "AXP harness detected but failed - check simulator state"
+                                        })
                                     }
                                 }));
                             }

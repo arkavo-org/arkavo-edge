@@ -56,10 +56,11 @@ impl Tool for IosAutomationGuide {
                         "action": "Build generic AXP test harness (ONCE per simulator)",
                         "tool": "build_test_harness",
                         "example": {
-                            "app_bundle_id": "com.arkavo.app"
+                            "app_bundle_id": "com.example.myapp"
                         },
                         "note": "Creates a generic harness that works with ANY iOS app",
-                        "important": "No project files needed - just the bundle ID!"
+                        "important": "No project files needed - just the bundle ID!",
+                        "benefit": "After running this, all taps will be <30ms instead of 300ms+"
                     },
                     {
                         "step": 3,
