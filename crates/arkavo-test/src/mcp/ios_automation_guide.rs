@@ -58,8 +58,9 @@ impl Tool for IosAutomationGuide {
                         "action": "🚀 BUILD AXP HARNESS FIRST (ONE TIME SETUP)",
                         "tool": "build_test_harness",
                         "example": {
-                            "app_bundle_id": "com.arkavo.Arkavo"
+                            "app_bundle_id": "<YOUR_APP_BUNDLE_ID>"
                         },
+                        "note": "Replace <YOUR_APP_BUNDLE_ID> with your app's bundle identifier (e.g., com.company.appname)",
                         "critical": "THIS IS REQUIRED! Without AXP harness:",
                         "problems_without_axp": [
                             "❌ Taps take 300ms+ (vs <30ms with AXP)",
@@ -75,7 +76,7 @@ impl Tool for IosAutomationGuide {
                         "action": "Launch your app",
                         "tool": "app_launcher",
                         "example": {
-                            "bundle_id": "com.arkavo.Arkavo"
+                            "bundle_id": "<YOUR_APP_BUNDLE_ID>"
                         }
                     },
                     {

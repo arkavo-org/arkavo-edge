@@ -25,7 +25,7 @@ impl AxpHarnessBuilder {
                     "properties": {
                         "app_bundle_id": {
                             "type": "string",
-                            "description": "Bundle ID of the app to test (e.g., com.example.myapp)"
+                            "description": "Bundle ID of YOUR app to test (e.g., com.company.appname). Get this from your app's Info.plist or Xcode project settings."
                         },
                         "harness_type": {
                             "type": "string",
