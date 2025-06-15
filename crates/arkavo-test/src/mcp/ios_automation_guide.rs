@@ -41,33 +41,41 @@ impl Tool for IosAutomationGuide {
             "getting_started" => serde_json::json!({
                 "workflow": "iOS UI Automation Quick Start",
                 "overview": "arkavo-edge provides fast, reliable iOS automation using Apple's private AXP APIs",
+                "critical": "⚠️ ALWAYS BUILD AXP HARNESS FIRST! Without it, taps take 300ms+ and may fail with IDB errors.",
                 "steps": [
                     {
                         "step": 1,
-                        "action": "Boot a simulator",
+                        "action": "Boot a simulator (if not already running)",
                         "tool": "device_management",
                         "example": {
                             "action": "boot",
                             "device_name": "iPhone 15"
-                        }
+                        },
+                        "note": "Skip if simulator is already booted"
                     },
                     {
                         "step": 2,
-                        "action": "Build generic AXP test harness (ONCE per simulator)",
+                        "action": "🚀 BUILD AXP HARNESS FIRST (ONE TIME SETUP)",
                         "tool": "build_test_harness",
                         "example": {
-                            "app_bundle_id": "com.example.myapp"
+                            "app_bundle_id": "com.arkavo.Arkavo"
                         },
-                        "note": "Creates a generic harness that works with ANY iOS app",
-                        "important": "No project files needed - just the bundle ID!",
-                        "benefit": "After running this, all taps will be <30ms instead of 300ms+"
+                        "critical": "THIS IS REQUIRED! Without AXP harness:",
+                        "problems_without_axp": [
+                            "❌ Taps take 300ms+ (vs <30ms with AXP)",
+                            "❌ IDB may fail with port conflicts",
+                            "❌ Fallback methods are unreliable",
+                            "❌ Tests will be 10x slower"
+                        ],
+                        "important": "Run this ONCE per app. It creates fast touch injection that works every time.",
+                        "troubleshooting": "If this fails, ensure Xcode command line tools are installed"
                     },
                     {
                         "step": 3,
                         "action": "Launch your app",
                         "tool": "app_launcher",
                         "example": {
-                            "bundle_id": "com.example.myapp"
+                            "bundle_id": "com.arkavo.Arkavo"
                         }
                     },
                     {
@@ -89,11 +97,17 @@ impl Tool for IosAutomationGuide {
                         "example": {
                             "action": "tap",
                             "target": {"x": 200, "y": 400}
-                        }
+                        },
+                        "result": "With AXP harness: <30ms tap. Without: 300ms+ or failure."
                     }
                 ],
+                "summary": "1) BUILD_TEST_HARNESS FIRST, 2) Use coordinates from screenshots, 3) Enjoy fast, reliable automation",
                 "important": "ALWAYS use coordinates! They're fast and reliable.",
-                "avoid": "DO NOT use setup_xcuitest (deprecated, slow, unreliable)"
+                "avoid": [
+                    "DO NOT skip build_test_harness - it prevents IDB failures",
+                    "DO NOT use text-based tapping - unreliable and slow",
+                    "DO NOT use setup_xcuitest - deprecated"
+                ]
             }),
             
             "tap_button" => serde_json::json!({

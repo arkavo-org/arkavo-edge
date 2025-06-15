@@ -987,6 +987,11 @@ impl Tool for UiInteractionKit {
                                                 "[ui_interaction] IDB tap failed: {}, trying fallback methods",
                                                 e
                                             );
+                                            
+                                            // Check for common IDB port conflict error
+                                            if e.to_string().contains("Address already in use") || e.to_string().contains("port") {
+                                                eprintln!("[ui_interaction] IMPORTANT: IDB port conflict detected! Run build_test_harness to avoid IDB issues.");
+                                            }
                                             // Continue to fallback methods below
                                         }
                                     }
@@ -1885,7 +1890,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS simulator screen. 🎯 RECOMMENDED WORKFLOW: 1) Run build_test_harness ONCE for the app, 2) Use screen_capture to take screenshot, 3) Read the image file to see UI elements, 4) Use ui_interaction with coordinates {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}}. This is the fastest, most reliable approach.".to_string(),
+                description: "Capture iOS simulator screen. 🎯 WORKFLOW: 1) FIRST run build_test_harness (prevents IDB failures), 2) Use screen_capture to take screenshot, 3) Read the image file to see UI elements, 4) Use ui_interaction with coordinates. Without build_test_harness, taps are 10x slower and may fail!".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
