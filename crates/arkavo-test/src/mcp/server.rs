@@ -454,9 +454,12 @@ impl McpTestServer {
                 | "ui_query"
                 | "ui_element_handler"
                 | "usage_guide"
+                | "ios_automation_guide"
+                | "xcode_info"
                 | "app_diagnostic"
                 | "setup_xcuitest"
                 | "xctest_status"
+                | "build_test_harness"
                 | "template_diagnostics"
                 | "biometric_auth"
                 | "system_dialog"
@@ -482,6 +485,7 @@ impl McpTestServer {
                 | "biometric_test_scenario"
                 | "smart_biometric_handler"
                 | "enrollment_flow"
+                | "idb_management"
         )
     }
 
