@@ -19,7 +19,7 @@ impl AxpHarnessBuilder {
         Self {
             schema: ToolSchema {
                 name: "build_test_harness".to_string(),
-                description: "Build a minimal UI test harness with AXP touch injection for a specific iOS app. This creates a test bundle that uses Apple's private AXP APIs for fast, reliable UI automation without XCUITest complexity.".to_string(),
+                description: "MCP TOOL (not a separate binary!) - Build a minimal UI test harness with AXP touch injection for a specific iOS app. This is an MCP tool that creates a test bundle using Apple's private AXP APIs for fast, reliable UI automation. Call this tool via MCP, do NOT try to run any swift build commands.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -64,7 +64,9 @@ impl AxpHarnessBuilder {
                 "success": false,
                 "error": {
                     "code": "PROJECT_NOT_FOUND",
-                    "message": format!("Project not found at: {}", project_path.display())
+                    "message": format!("Project not found at: {}", project_path.display()),
+                    "suggestion": "Make sure the path is relative to your current directory and the .xcodeproj exists",
+                    "example": "For an app in the current directory, use: ./MyApp.xcodeproj"
                 }
             }));
         }
