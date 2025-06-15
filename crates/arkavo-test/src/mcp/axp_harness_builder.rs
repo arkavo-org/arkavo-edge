@@ -251,6 +251,12 @@ let package = Package(
             "-emit-library",
             "-module-name", "ArkavoHarness",
             "-o", output_binary.to_str().unwrap(),
+            "-suppress-warnings", // Suppress warnings that might fail compilation
+            "-framework", "Foundation",
+            "-framework", "CoreGraphics",
+            "-framework", "XCTest",
+            "-F", &format!("{}/System/Library/Frameworks", sdk_path),
+            "-F", &format!("{}/../../Library/Frameworks", sdk_path), // For XCTest
         ]);
 
         // Add all Swift files
@@ -264,12 +270,23 @@ let package = Package(
             .map_err(|e| TestError::Mcp(format!("Failed to compile: {}", e)))?;
 
         if !output.status.success() {
+            eprintln!("[AxpHarnessBuilder] Compilation failed!");
+            eprintln!("[AxpHarnessBuilder] stderr: {}", String::from_utf8_lossy(&output.stderr));
+            eprintln!("[AxpHarnessBuilder] stdout: {}", String::from_utf8_lossy(&output.stdout));
+            
             return Ok(serde_json::json!({
                 "success": false,
                 "error": {
                     "code": "COMPILATION_FAILED",
                     "message": "Failed to compile AXP harness",
-                    "details": String::from_utf8_lossy(&output.stderr).to_string()
+                    "details": String::from_utf8_lossy(&output.stderr).to_string(),
+                    "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+                    "troubleshooting": [
+                        "Check that Xcode command line tools are installed",
+                        "Try: xcode-select --install",
+                        "For iOS 26 beta, ensure you have the latest Xcode beta",
+                        "Try the fallback: setup_xcuitest (slower but may work)"
+                    ]
                 }
             }));
         }

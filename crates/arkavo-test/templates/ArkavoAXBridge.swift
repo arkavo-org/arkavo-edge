@@ -1,5 +1,10 @@
 import Foundation
+#if canImport(XCTest)
 import XCTest
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Swift bridge for AXP (Accessibility Private) functions
 /// Runs inside Apple-signed UI Test Runner with proper entitlements
