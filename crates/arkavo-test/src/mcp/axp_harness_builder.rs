@@ -335,9 +335,9 @@ let package = Package(
                     "is_beta_issue": is_beta_issue,
                     "troubleshooting": if is_beta_issue {
                         vec![
-                            "iOS 26 beta detected - AXP may not be available",
-                            "Fallback: Use ui_interaction with coordinates (slower)",
-                            "Or install matching Xcode beta for iOS 26 SDK"
+                            "iOS 26 beta detected - AXP calls might fail due to symbol drift",
+                            "The harness will automatically fall back to slower HID methods if needed",
+                            "For best results: Install matching Xcode beta with iOS 26 SDK"
                         ]
                     } else {
                         vec![

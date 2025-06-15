@@ -69,7 +69,13 @@ import UIKit
         }
         
         isAXPAvailable = performActionFunc != nil && hitTestFunc != nil
-        print("[ArkavoAXBridge] AXP availability: \(isAXPAvailable)")
+        
+        if !isAXPAvailable {
+            print("[ArkavoAXBridge] AXP symbols not found - likely due to SDK/runtime version mismatch")
+            print("[ArkavoAXBridge] This is normal for beta iOS versions - falling back to XCTest methods")
+        } else {
+            print("[ArkavoAXBridge] AXP symbols loaded successfully - fast path available")
+        }
     }
     
     // MARK: - Public API

@@ -227,6 +227,13 @@ impl UiInteractionKit {
             }))
         } else {
             let error = response.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error");
+            
+            // Check if this is a symbol resolution issue
+            if error.contains("not available") || error.contains("symbol") {
+                eprintln!("[AXP] Symbol resolution failed - likely iOS beta version mismatch");
+                eprintln!("[AXP] This is expected with beta iOS versions - will use fallback");
+            }
+            
             Err(TestError::Mcp(format!("AXP tap failed: {}", error)))
         }
     }
