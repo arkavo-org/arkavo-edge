@@ -1,0 +1,243 @@
+import XCTest
+import Foundation
+
+/// Test runner with integrated AXP bridge
+/// This version uses AXP for fast, reliable touch injection
+final class ArkavoTestRunnerAXP: XCTestCase {
+    static let socketPath = "{{SOCKET_PATH}}"
+    static var commandHandler: ArkavoCommandHandler!
+    static var axBridge: ArkavoAXBridge!
+    
+    override class func setUp() {
+        super.setUp()
+        print("[ArkavoTestRunnerAXP] Setting up test runner...")
+        
+        // Initialize AXP bridge
+        axBridge = ArkavoAXBridge()
+        print("[ArkavoTestRunnerAXP] AXP available: \(axBridge.isAvailable())")
+        
+        // Initialize command handler with AXP bridge
+        commandHandler = ArkavoCommandHandler(socketPath: socketPath, axBridge: axBridge)
+        commandHandler.start()
+    }
+    
+    override class func tearDown() {
+        commandHandler?.stop()
+        super.tearDown()
+    }
+    
+    func testRunWithAXP() {
+        // Keep test alive to process commands
+        let expectation = self.expectation(description: "Keep test running")
+        expectation.isInverted = true
+        
+        print("[ArkavoTestRunnerAXP] Test runner ready with AXP bridge")
+        print("[ArkavoTestRunnerAXP] Capabilities: \(Self.axBridge.capabilities())")
+        
+        wait(for: [expectation], timeout: 3600) // 1 hour timeout
+    }
+}
+
+/// Command handler that integrates with AXP bridge
+class ArkavoCommandHandler: NSObject {
+    private let socketPath: String
+    private let axBridge: ArkavoAXBridge
+    private var localSocket: CFSocket?
+    private var shouldStop = false
+    
+    init(socketPath: String, axBridge: ArkavoAXBridge) {
+        self.socketPath = socketPath
+        self.axBridge = axBridge
+        super.init()
+    }
+    
+    func start() {
+        // Remove existing socket file
+        try? FileManager.default.removeItem(atPath: socketPath)
+        
+        // Create Unix domain socket
+        var context = CFSocketContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: nil,
+            release: nil,
+            copyDescription: nil
+        )
+        
+        localSocket = CFSocketCreate(
+            kCFAllocatorDefault,
+            PF_UNIX,
+            SOCK_STREAM,
+            0,
+            CFSocketCallBackType.acceptCallBack.rawValue,
+            { (socket, callbackType, address, data, info) in
+                guard let info = info else { return }
+                let handler = Unmanaged<ArkavoCommandHandler>.fromOpaque(info).takeUnretainedValue()
+                handler.handleConnection(data!)
+            },
+            &context
+        )
+        
+        // Bind to socket path
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        socketPath.withCString { ptr in
+            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
+                _ = strcpy(pathPtr, ptr)
+            }
+        }
+        
+        let addressData = withUnsafePointer(to: &addr) { ptr in
+            CFDataCreate(nil, UnsafeRawPointer(ptr).assumingMemoryBound(to: UInt8.self), MemoryLayout<sockaddr_un>.size)
+        }
+        
+        CFSocketSetAddress(localSocket, addressData)
+        
+        // Add to run loop
+        let source = CFSocketCreateRunLoopSource(kCFAllocatorDefault, localSocket, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        
+        print("[ArkavoCommandHandler] Listening on: \(socketPath)")
+        
+        // Send ready signal with capabilities
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.broadcastCapabilities()
+        }
+    }
+    
+    func stop() {
+        shouldStop = true
+        if let socket = localSocket {
+            CFSocketInvalidate(socket)
+            localSocket = nil
+        }
+    }
+    
+    private func broadcastCapabilities() {
+        let capabilities = axBridge.capabilities()
+        print("[ArkavoCommandHandler] Broadcasting capabilities: \(capabilities)")
+    }
+    
+    private func handleConnection(_ data: UnsafeRawPointer) {
+        let handle = CFSocketNativeHandle(bitPattern: data.load(as: Int.self))!
+        
+        print("[ArkavoCommandHandler] New connection accepted")
+        
+        // Handle commands on this connection
+        DispatchQueue.global(qos: .userInteractive).async {
+            self.processCommands(handle: handle)
+        }
+    }
+    
+    private func processCommands(handle: CFSocketNativeHandle) {
+        let inputStream = InputStream(fileDescriptor: handle, retainReference: false)
+        let outputStream = OutputStream(fileDescriptor: handle, retainReference: false)
+        
+        inputStream.open()
+        outputStream.open()
+        
+        defer {
+            inputStream.close()
+            outputStream.close()
+            close(handle)
+        }
+        
+        // Send ready signal with AXP status
+        let readyMessage: [String: Any] = [
+            "type": "ready",
+            "capabilities": axBridge.capabilities()
+        ]
+        sendResponse(readyMessage, to: outputStream)
+        
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        
+        var messageBuffer = ""
+        
+        while !shouldStop && inputStream.hasBytesAvailable {
+            let bytesRead = inputStream.read(buffer, maxLength: bufferSize)
+            
+            if bytesRead <= 0 {
+                break
+            }
+            
+            let data = String(bytesDecoding: Data(bytes: buffer, count: bytesRead), as: UTF8.self)
+            messageBuffer += data
+            
+            // Process complete messages (newline delimited)
+            while let newlineIndex = messageBuffer.firstIndex(of: "\n") {
+                let messageData = String(messageBuffer[..<newlineIndex])
+                messageBuffer.removeSubrange(...newlineIndex)
+                
+                if let jsonData = messageData.data(using: .utf8),
+                   let command = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                    
+                    print("[ArkavoCommandHandler] Received command: \(command["type"] ?? "unknown")")
+                    
+                    // Route to appropriate handler based on command type
+                    let response: [String: Any]
+                    
+                    if let cmdType = command["type"] as? String, cmdType == "tap" {
+                        // Legacy format - convert to AXP format
+                        var axpCommand = ["cmd": "tap"]
+                        if let params = command["parameters"] as? [String: Any],
+                           let x = params["x"],
+                           let y = params["y"] {
+                            axpCommand["x"] = x
+                            axpCommand["y"] = y
+                        }
+                        
+                        let axpResponse = axBridge.processCommand(axpCommand)
+                        response = [
+                            "id": command["id"] ?? "",
+                            "success": axpResponse["success"] ?? false,
+                            "error": axpResponse["error"]
+                        ].compactMapValues { $0 }
+                    } else if let cmd = command["cmd"] as? String {
+                        // New AXP format
+                        let axpResponse = axBridge.processCommand(command)
+                        response = [
+                            "id": command["id"] ?? "",
+                            "result": axpResponse
+                        ]
+                    } else {
+                        // Fallback to legacy XCUITest handling
+                        response = processLegacyCommand(command)
+                    }
+                    
+                    sendResponse(response, to: outputStream)
+                }
+            }
+        }
+        
+        print("[ArkavoCommandHandler] Connection closed")
+    }
+    
+    private func processLegacyCommand(_ command: [String: Any]) -> [String: Any] {
+        // Handle legacy XCUITest commands for backwards compatibility
+        guard let type = command["type"] as? String,
+              let id = command["id"] as? String else {
+            return ["error": "Invalid command format"]
+        }
+        
+        // For now, return not implemented for legacy commands
+        return [
+            "id": id,
+            "success": false,
+            "error": "Legacy command not supported in AXP mode: \(type)"
+        ]
+    }
+    
+    private func sendResponse(_ response: [String: Any], to stream: OutputStream) {
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: response)
+            var message = String(data: jsonData, encoding: .utf8)! + "\n"
+            message.withUTF8 { bytes in
+                stream.write(bytes.baseAddress!, maxLength: bytes.count)
+            }
+        } catch {
+            print("[ArkavoCommandHandler] Failed to send response: \(error)")
+        }
+    }
+}

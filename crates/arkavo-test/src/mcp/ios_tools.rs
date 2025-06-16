@@ -17,6 +17,7 @@ static XCTEST_BRIDGE: OnceLock<XCTestBridgeType> = OnceLock::new();
 pub struct UiInteractionKit {
     schema: ToolSchema,
     device_manager: Arc<DeviceManager>,
+    axp_socket_cache: Arc<RwLock<Option<(String, String)>>>, // (device_id, socket_path)
 }
 
 impl UiInteractionKit {
@@ -24,7 +25,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
-                description: "Interact with iOS UI elements. Primary method: idb_companion (embedded binary), with fallback to simctl and AppleScript. 🎯 ALWAYS USE COORDINATES: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. The tool automatically initializes IDB companion for reliable interaction. Coordinates should be in logical points for the device.".to_string(),
+                description: "Interact with iOS UI elements using coordinates. 🎯 WORKFLOW: 1) Use build_test_harness ONCE per app for fast AXP touch injection, 2) Use screen_capture to see UI, 3) Use coordinates: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. DO NOT use setup_xcuitest (deprecated). Coordinates are in logical points.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -81,6 +82,205 @@ impl UiInteractionKit {
                 }),
             },
             device_manager,
+            axp_socket_cache: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Check if AXP harness is available for the active app
+    async fn check_axp_harness_available(&self) -> Option<(String, bool)> {
+        // Get active device
+        let device = self.device_manager.get_active_device()?;
+        let device_id = device.id.clone();
+
+        // Check cache first
+        {
+            let cache = self.axp_socket_cache.read().await;
+            if let Some((cached_device_id, socket_path)) = cache.as_ref() {
+                if cached_device_id == &device_id {
+                    eprintln!(
+                        "[AXP] Using cached socket for device {}: {}",
+                        device_id, socket_path
+                    );
+                    return Some((socket_path.clone(), true));
+                }
+            }
+        }
+
+        // Try to find AXP socket for this specific device
+        // Socket naming pattern: arkavo-axp-{DEVICE_UDID}-{APP_BUNDLE_ID}.sock
+        use std::fs;
+        let socket_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".arkavo")
+            .join("sockets");
+
+        if let Ok(entries) = fs::read_dir(&socket_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    // Check if socket is for this device
+                    if name.starts_with(&format!("arkavo-axp-{}-", device_id))
+                        && name.ends_with(".sock")
+                    {
+                        let socket_path = entry.path();
+                        eprintln!(
+                            "[AXP] Found AXP socket for device {}: {}",
+                            device_id,
+                            socket_path.display()
+                        );
+
+                        // Try to connect to verify it's active
+                        if let Ok(stream) = tokio::net::UnixStream::connect(&socket_path).await {
+                            eprintln!("[AXP] Successfully connected to AXP harness");
+                            drop(stream); // Close the test connection
+
+                            // Update cache
+                            let socket_path_str = socket_path.to_string_lossy().to_string();
+                            {
+                                let mut cache = self.axp_socket_cache.write().await;
+                                *cache = Some((device_id.clone(), socket_path_str.clone()));
+                            }
+
+                            return Some((socket_path_str, true));
+                        } else {
+                            eprintln!(
+                                "[AXP] Socket exists but connection failed - harness may not be running"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clear cache if no socket found
+        {
+            let mut cache = self.axp_socket_cache.write().await;
+            *cache = None;
+        }
+
+        eprintln!("[AXP] No active AXP harness found for device {}", device_id);
+        None
+    }
+
+    /// Send AXP tap command
+    async fn send_axp_tap(&self, socket_path: &str, x: f64, y: f64) -> Result<serde_json::Value> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+
+        eprintln!("[AXP] Sending tap to ({}, {}) via {}", x, y, socket_path);
+
+        let mut stream = UnixStream::connect(socket_path)
+            .await
+            .map_err(|e| TestError::Mcp(format!("Failed to connect to AXP socket: {}", e)))?;
+
+        let (reader, mut writer) = stream.split();
+        let mut reader = BufReader::new(reader);
+
+        // Read initial capabilities message with timeout
+        let mut line = String::new();
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            reader.read_line(&mut line),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {
+                // Successfully read line
+                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if msg.get("type").and_then(|t| t.as_str()) == Some("ready") {
+                        eprintln!(
+                            "[AXP] AXP harness ready with capabilities: {:?}",
+                            msg.get("capabilities")
+                        );
+                    }
+                } else {
+                    eprintln!(
+                        "[AXP] Warning: Non-JSON response from harness: {}",
+                        line.trim()
+                    );
+                }
+            }
+            Ok(Err(e)) => {
+                return Err(TestError::Mcp(format!(
+                    "Failed to read AXP capabilities: {}",
+                    e
+                )));
+            }
+            Err(_) => {
+                return Err(TestError::Mcp("AXP handshake timeout (250ms)".to_string()));
+            }
+        }
+
+        // Send tap command
+        let tap_command = serde_json::json!({
+            "action": "axp_tap",
+            "x": x,
+            "y": y
+        });
+
+        let command_str = serde_json::to_string(&tap_command)
+            .map_err(|e| TestError::Mcp(format!("Failed to serialize AXP command: {}", e)))?;
+
+        writer
+            .write_all(command_str.as_bytes())
+            .await
+            .map_err(|e| TestError::Mcp(format!("Failed to send AXP command: {}", e)))?;
+        writer
+            .write_all(b"\n")
+            .await
+            .map_err(|e| TestError::Mcp(format!("Failed to send newline: {}", e)))?;
+        writer
+            .flush()
+            .await
+            .map_err(|e| TestError::Mcp(format!("Failed to flush: {}", e)))?;
+
+        // Read response
+        let mut response_line = String::new();
+        reader
+            .read_line(&mut response_line)
+            .await
+            .map_err(|e| TestError::Mcp(format!("Failed to read AXP response: {}", e)))?;
+
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| TestError::Mcp(format!("Failed to parse AXP response: {}", e)))?;
+
+        if response
+            .get("success")
+            .and_then(|s| s.as_bool())
+            .unwrap_or(false)
+        {
+            let tap_time = response
+                .get("tapTime")
+                .and_then(|t| t.as_f64())
+                .unwrap_or(0.0);
+            eprintln!("[AXP] Tap completed in {:.1}ms", tap_time);
+
+            Ok(serde_json::json!({
+                "success": true,
+                "action": "tap",
+                "method": "axp",
+                "coordinates": {"x": x, "y": y},
+                "device_id": self.device_manager.get_active_device()
+                    .map(|d| d.id.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                "performance": {
+                    "tap_time_ms": tap_time,
+                    "fast": tap_time < 50.0
+                },
+                "note": "Using AXP for fast touch injection"
+            }))
+        } else {
+            let error = response
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+
+            // Check if this is a symbol resolution issue
+            if error.contains("not available") || error.contains("symbol") {
+                eprintln!("[AXP] Symbol resolution failed - likely iOS beta version mismatch");
+                eprintln!("[AXP] This is expected with beta iOS versions - will use fallback");
+            }
+
+            Err(TestError::Mcp(format!("AXP tap failed: {}", error)))
         }
     }
 
@@ -411,6 +611,9 @@ impl Tool for UiInteractionKit {
                     guard.is_some()
                 };
 
+                // Check for AXP harness availability
+                let axp_available = self.check_axp_harness_available().await;
+
                 if let Some(target) = params.get("target") {
                     let mut tap_params = serde_json::json!({});
                     let mut use_xctest = false;
@@ -496,9 +699,24 @@ impl Tool for UiInteractionKit {
                             }));
                         }
                     } else {
-                        // Direct coordinates - check if we should use XCUITest
+                        // Direct coordinates - check if we should use AXP, XCUITest, or fallback
                         let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+                        // First try AXP if available (fastest)
+                        if let Some((socket_path, _)) = &axp_available {
+                            eprintln!("[ui_interaction] Using AXP for tap at ({}, {})", x, y);
+                            match self.send_axp_tap(socket_path, x, y).await {
+                                Ok(result) => return Ok(result),
+                                Err(e) => {
+                                    eprintln!(
+                                        "[ui_interaction] AXP tap failed: {}, falling back",
+                                        e
+                                    );
+                                    // Continue to other methods
+                                }
+                            }
+                        }
 
                         // Try XCUITest if bridge is available
                         if xctest_available {
@@ -825,6 +1043,15 @@ impl Tool for UiInteractionKit {
                                                 "[ui_interaction] IDB tap failed: {}, trying fallback methods",
                                                 e
                                             );
+
+                                            // Check for common IDB port conflict error
+                                            if e.to_string().contains("Address already in use")
+                                                || e.to_string().contains("port")
+                                            {
+                                                eprintln!(
+                                                    "[ui_interaction] IMPORTANT: IDB port conflict detected! Run build_test_harness to avoid IDB issues."
+                                                );
+                                            }
                                             // Continue to fallback methods below
                                         }
                                     }
@@ -908,8 +1135,27 @@ impl Tool for UiInteractionKit {
                                     "device_id": device_id,
                                     "device_type": device_type,
                                     "logical_resolution": {"width": max_x, "height": max_y},
-                                    "confidence": "low",  // Lower confidence until calibrated
-                                    "note": "Using rough coordinate mapping - calibration will improve accuracy"
+                                    "confidence": "low",
+                                    "warning": if axp_available.is_none() {
+                                        "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!"
+                                    } else {
+                                        "Using fallback method - AXP harness was found but tap failed"
+                                    },
+                                    "optimization": if axp_available.is_none() {
+                                        serde_json::json!({
+                                            "suggestion": "Build AXP harness for fast touch injection",
+                                            "tool": "build_test_harness",
+                                            "required_params": {
+                                                "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
+                                            },
+                                            "benefit": "Taps will be <30ms instead of 300ms+",
+                                            "note": "Run this ONCE per app for permanent speed boost"
+                                        })
+                                    } else {
+                                        serde_json::json!({
+                                            "note": "AXP harness detected but failed - check simulator state"
+                                        })
+                                    }
                                 }));
                             }
                         }
@@ -1704,7 +1950,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
-                description: "Capture iOS simulator screen. 🎯 COORDINATE WORKFLOW (RECOMMENDED): 1) Use screen_capture to take screenshot, 2) Read the image file to see UI, 3) Identify element positions visually, 4) ALWAYS use ui_interaction with coordinates {\"target\":{\"x\":X,\"y\":Y}}. ⚠️ AVOID text-based tapping - it requires setup_xcuitest which often fails! Example: If you see a 'Sign In' button at position (200,400), use {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":400}} NOT text-based tapping.".to_string(),
+                description: "Capture iOS simulator screen. 🎯 WORKFLOW: 1) FIRST run build_test_harness (prevents IDB failures), 2) Use screen_capture to take screenshot, 3) Read the image file to see UI elements, 4) Use ui_interaction with coordinates. Without build_test_harness, taps are 10x slower and may fail!".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -1844,7 +2090,7 @@ impl UiQueryKit {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
-                description: "Query UI elements (LIMITED). AI AGENTS: This tool has limited functionality without XCTest. Instead, use this workflow: 1) screen_capture to get screenshot, 2) Read the image file, 3) Use your vision capabilities to identify UI elements and coordinates, 4) Use tap/swipe/type_text with those coordinates.".to_string(),
+                description: "Query UI elements (LIMITED). For best results: 1) Use build_test_harness for the app, 2) Use screen_capture and Read to see UI visually, 3) Use ui_interaction with coordinates. Visual analysis is more reliable than programmatic queries.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
