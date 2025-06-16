@@ -9,8 +9,8 @@ pub struct Ios26BetaGuidance {
     schema: ToolSchema,
 }
 
-impl Ios26BetaGuidance {
-    pub fn new() -> Self {
+impl Default for Ios26BetaGuidance {
+    fn default() -> Self {
         Self {
             schema: ToolSchema {
                 name: "ios26_beta_guidance".to_string(),
@@ -28,6 +28,12 @@ impl Ios26BetaGuidance {
                 }),
             },
         }
+    }
+}
+
+impl Ios26BetaGuidance {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

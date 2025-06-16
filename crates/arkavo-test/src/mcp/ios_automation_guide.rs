@@ -8,8 +8,8 @@ pub struct IosAutomationGuide {
     schema: ToolSchema,
 }
 
-impl IosAutomationGuide {
-    pub fn new() -> Self {
+impl Default for IosAutomationGuide {
+    fn default() -> Self {
         Self {
             schema: ToolSchema {
                 name: "ios_automation_guide".to_string(),
@@ -26,6 +26,12 @@ impl IosAutomationGuide {
                 }),
             },
         }
+    }
+}
+
+impl IosAutomationGuide {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

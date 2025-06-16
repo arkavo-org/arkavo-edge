@@ -1394,9 +1394,8 @@ mod tests {
         #[cfg(target_os = "macos")]
         {
             // On macOS, initialization should succeed (though the placeholder will fail)
-            match result {
-                Ok(_) => {}
-                Err(_) => {}
+            if result.is_err() {
+                // Error already logged during initialization
             }
         }
 
