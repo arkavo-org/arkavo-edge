@@ -16,6 +16,7 @@ pub mod device_health_manager;
 pub mod device_manager;
 pub mod device_tools;
 pub mod device_xctest_status;
+pub mod embedded_ios26_fix;
 pub mod enrollment_dialog_handler;
 pub mod enrollment_flow_handler;
 pub mod face_id_control;
@@ -38,6 +39,7 @@ pub mod idb_tap_enhanced;
 #[cfg(target_os = "macos")]
 pub mod idb_wrapper;
 pub mod intelligent_tools;
+pub mod ios26_beta_guidance;
 pub mod ios_automation_guide;
 pub mod ios_biometric_tools;
 pub mod ios_errors;

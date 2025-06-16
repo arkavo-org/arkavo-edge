@@ -4,7 +4,7 @@ import Foundation
 /// Test runner with integrated AXP bridge
 /// This version uses AXP for fast, reliable touch injection
 final class ArkavoTestRunnerAXP: XCTestCase {
-    static var socketPath = "{{SOCKET_PATH}}"
+    static let socketPath = "{{SOCKET_PATH}}"
     static var commandHandler: ArkavoCommandHandler!
     static var axBridge: ArkavoAXBridge!
     

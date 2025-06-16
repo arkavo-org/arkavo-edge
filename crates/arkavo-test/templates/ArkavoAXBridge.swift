@@ -5,6 +5,16 @@ import XCTest
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
+// iOS 26 beta compatibility flag
+#if swift(>=6.0) || IOS_26_BETA
+    let isIOS26Beta = true
+#else
+    let isIOS26Beta = false
+#endif
 
 /// Swift bridge for AXP (Accessibility Private) functions
 /// Runs inside Apple-signed UI Test Runner with proper entitlements
@@ -45,6 +55,12 @@ import UIKit
     }
     
     private func loadAXPSymbols() {
+        // iOS 26 beta warning
+        if isIOS26Beta {
+            print("[ArkavoAXBridge] iOS 26 beta detected - AXP symbols may have changed")
+            print("[ArkavoAXBridge] Attempting symbol discovery with multiple patterns")
+        }
+        
         // Try to load CoreSimulator framework symbols dynamically
         guard let handle = dlopen(nil, RTLD_NOW) else {
             print("[ArkavoAXBridge] Failed to open main executable")
@@ -52,29 +68,140 @@ import UIKit
         }
         defer { dlclose(handle) }
         
-        // Resolve AXP symbols
-        if let performActionPtr = dlsym(handle, "CSAccessibilityClientPerformAction") {
-            performActionFunc = unsafeBitCast(performActionPtr, to: CSAccessibilityClientPerformAction.self)
-            print("[ArkavoAXBridge] Loaded CSAccessibilityClientPerformAction")
+        // Define potential symbol name patterns for iOS 26 beta
+        let performActionPatterns = [
+            "CSAccessibilityClientPerformAction",
+            "_CSAccessibilityClientPerformAction",
+            "CSAccessibilityPerformAction",
+            "_CSAccessibilityPerformAction",
+            "AXPClientPerformAction",
+            "_AXPClientPerformAction",
+            "AXPerformAction",
+            "_AXPerformAction",
+            // iOS 26 beta variants
+            "CSAXClientPerformAction",
+            "_CSAXClientPerformAction",
+            "CSAXClientPerformAction2",
+            "_CSAXClientPerformAction2",
+            "AXClientPerformAction",
+            "_AXClientPerformAction"
+        ]
+        
+        let hitTestPatterns = [
+            "CSAccessibilityClientHitTest",
+            "_CSAccessibilityClientHitTest",
+            "CSAccessibilityHitTest",
+            "_CSAccessibilityHitTest",
+            "AXPClientHitTest",
+            "_AXPClientHitTest",
+            "AXHitTest",
+            "_AXHitTest",
+            // iOS 26 beta variants
+            "CSAXClientHitTest",
+            "_CSAXClientHitTest",
+            "CSAXClientHitTest2",
+            "_CSAXClientHitTest2"
+        ]
+        
+        let copyElementPatterns = [
+            "CSAccessibilityClientCopyElementAtPosition",
+            "_CSAccessibilityClientCopyElementAtPosition",
+            "CSAccessibilityCopyElementAtPosition",
+            "_CSAccessibilityCopyElementAtPosition",
+            "AXPClientCopyElementAtPosition",
+            "_AXPClientCopyElementAtPosition",
+            "AXCopyElementAtPosition",
+            "_AXCopyElementAtPosition"
+        ]
+        
+        // Try each pattern for performAction
+        for pattern in performActionPatterns {
+            if let ptr = dlsym(handle, pattern) {
+                performActionFunc = unsafeBitCast(ptr, to: CSAccessibilityClientPerformAction.self)
+                print("[ArkavoAXBridge] Found performAction symbol: \(pattern)")
+                break
+            }
         }
         
-        if let hitTestPtr = dlsym(handle, "CSAccessibilityClientHitTest") {
-            hitTestFunc = unsafeBitCast(hitTestPtr, to: CSAccessibilityClientHitTest.self)
-            print("[ArkavoAXBridge] Loaded CSAccessibilityClientHitTest")
+        // Try each pattern for hitTest
+        for pattern in hitTestPatterns {
+            if let ptr = dlsym(handle, pattern) {
+                hitTestFunc = unsafeBitCast(ptr, to: CSAccessibilityClientHitTest.self)
+                print("[ArkavoAXBridge] Found hitTest symbol: \(pattern)")
+                break
+            }
         }
         
-        if let copyElementPtr = dlsym(handle, "CSAccessibilityClientCopyElementAtPosition") {
-            copyElementFunc = unsafeBitCast(copyElementPtr, to: CSAccessibilityClientCopyElementAtPosition.self)
-            print("[ArkavoAXBridge] Loaded CSAccessibilityClientCopyElementAtPosition")
+        // Try each pattern for copyElement
+        for pattern in copyElementPatterns {
+            if let ptr = dlsym(handle, pattern) {
+                copyElementFunc = unsafeBitCast(ptr, to: CSAccessibilityClientCopyElementAtPosition.self)
+                print("[ArkavoAXBridge] Found copyElement symbol: \(pattern)")
+                break
+            }
+        }
+        
+        // Enumerate all symbols for debugging (iOS 26 beta)
+        if isIOS26Beta && performActionFunc == nil && hitTestFunc == nil {
+            print("[ArkavoAXBridge] Symbol discovery failed - enumerating available symbols")
+            enumerateSymbols(handle: handle)
         }
         
         isAXPAvailable = performActionFunc != nil && hitTestFunc != nil
         
         if !isAXPAvailable {
-            print("[ArkavoAXBridge] AXP symbols not found - likely due to SDK/runtime version mismatch")
+            print("[ArkavoAXBridge] AXP symbols not found - likely due to iOS 26 beta changes")
             print("[ArkavoAXBridge] This is normal for beta iOS versions - falling back to XCTest methods")
+            
+            // iOS 26 beta specific guidance
+            if isIOS26Beta {
+                print("[ArkavoAXBridge] iOS 26 beta compatibility mode active")
+                print("[ArkavoAXBridge] Performance impact: Taps will take ~50-100ms instead of <30ms")
+                print("[ArkavoAXBridge] Solution: Install matching Xcode beta or wait for stable release")
+            }
         } else {
             print("[ArkavoAXBridge] AXP symbols loaded successfully - fast path available")
+        }
+    }
+    
+    /// Enumerate symbols containing accessibility-related strings
+    private func enumerateSymbols(handle: UnsafeMutableRawPointer) {
+        // This is a debugging helper for iOS 26 beta
+        // In production, this would be removed or behind a debug flag
+        
+        let accessibilityKeywords = ["Accessibility", "AXP", "AX", "CS", "HitTest", "PerformAction", "Element"]
+        var foundSymbols: [String] = []
+        
+        // Note: Full symbol enumeration requires parsing the Mach-O binary
+        // This is a simplified version that checks known patterns
+        print("[ArkavoAXBridge] Checking for accessibility-related symbols...")
+        
+        // Try common prefixes with accessibility keywords
+        let prefixes = ["", "_", "__"]
+        let frameworks = ["CS", "AX", "AXP", "UIAccessibility", "Accessibility"]
+        let functions = ["ClientPerformAction", "ClientHitTest", "CopyElementAtPosition", 
+                        "PerformAction", "HitTest", "ElementAtPosition",
+                        "SendEvent", "DispatchEvent", "SimulateTouch"]
+        
+        for prefix in prefixes {
+            for framework in frameworks {
+                for function in functions {
+                    let symbol = "\(prefix)\(framework)\(function)"
+                    if dlsym(handle, symbol) != nil {
+                        foundSymbols.append(symbol)
+                    }
+                }
+            }
+        }
+        
+        if !foundSymbols.isEmpty {
+            print("[ArkavoAXBridge] Found potential accessibility symbols:")
+            for symbol in foundSymbols {
+                print("  - \(symbol)")
+            }
+            print("[ArkavoAXBridge] Update symbol patterns with these names for iOS 26 beta support")
+        } else {
+            print("[ArkavoAXBridge] No accessibility symbols found - may need entitlements or framework changes")
         }
     }
     
@@ -87,11 +214,20 @@ import UIKit
     
     /// Get capabilities dictionary for handshake
     @objc public func capabilities() -> [String: Any] {
-        return [
+        var caps: [String: Any] = [
             "axp": isAXPAvailable,
             "version": "1.0",
-            "functions": isAXPAvailable ? ["tap", "snapshot", "hitTest"] : []
+            "functions": isAXPAvailable ? ["tap", "snapshot", "hitTest"] : ["fallbackTap", "snapshot"]
         ]
+        
+        // Add iOS 26 beta status if applicable
+        if isIOS26Beta {
+            caps["ios26_beta"] = true
+            caps["fallback_mode"] = "XCUICoordinate"
+            caps["performance_note"] = "Using fallback mode due to iOS 26 beta"
+        }
+        
+        return caps
     }
     
     /// Tap at specific coordinates using AXP
@@ -157,19 +293,35 @@ import UIKit
     
     /// Capture accessibility snapshot
     @objc public func snapshot() -> Data? {
+        #if canImport(XCTest)
         // For now, use XCUIScreen for screenshots
         // In future, could use AXP to get accessibility tree
-        let screenshot = XCUIScreen.main.screenshot()
-        return screenshot.pngRepresentation
+        // Swift 6 requires MainActor for XCUIScreen
+        return MainActor.assumeIsolated {
+            let screenshot = XCUIScreen.main.screenshot()
+            return screenshot.pngRepresentation
+        }
+        #else
+        print("[ArkavoAXBridge] Screenshot capture not available")
+        return nil
+        #endif
     }
     
     /// Fallback tap using XCUICoordinate (when AXP unavailable)
     @objc public func fallbackTap(x: Double, y: Double) -> Bool {
-        let app = XCUIApplication()
-        let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: x, dy: y))
-        coordinate.tap()
-        return true
+        #if canImport(XCTest)
+        // Swift 6 requires MainActor for XCUIApplication
+        return MainActor.assumeIsolated {
+            let app = XCUIApplication()
+            let coordinate = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                .withOffset(CGVector(dx: x, dy: y))
+            coordinate.tap()
+            return true
+        }
+        #else
+        print("[ArkavoAXBridge] XCTest not available for fallback tap")
+        return false
+        #endif
     }
 }
 

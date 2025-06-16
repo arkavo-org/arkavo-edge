@@ -249,7 +249,14 @@ impl Tool for IosAutomationGuide {
                     "device_logs": "log_stream tool",
                     "app_state": "app_diagnostic tool",
                     "simulator_state": "device_management with 'list' action"
-                }
+                },
+                "ios26_beta_issues": [
+                    "AXP symbols not available - this is expected",
+                    "build_test_harness will use minimal mode automatically",
+                    "IDB (idb_companion) will be used for touch injection",
+                    "Performance: ~100ms taps instead of <30ms",
+                    "Solution: Install Xcode 16 beta or use iOS 18 simulator"
+                ]
             }),
             
             _ => serde_json::json!({

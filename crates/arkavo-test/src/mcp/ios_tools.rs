@@ -106,7 +106,12 @@ impl UiInteractionKit {
         // Try to find AXP socket for this specific device
         // Socket naming pattern: arkavo-axp-{DEVICE_UDID}-{APP_BUNDLE_ID}.sock
         use std::fs;
-        if let Ok(entries) = fs::read_dir(std::env::temp_dir()) {
+        let socket_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(".arkavo")
+            .join("sockets");
+        
+        if let Ok(entries) = fs::read_dir(&socket_dir) {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     // Check if socket is for this device

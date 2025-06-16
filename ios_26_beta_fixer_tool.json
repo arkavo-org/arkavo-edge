@@ -1,0 +1,38 @@
+{
+  "name": "ios_26_beta_fixer",
+  "description": "Automatically fix iOS 26 beta compilation issues for AXP harness. Use this when build_test_harness fails with SDK or symbol errors on iOS 26.",
+  "parameters": {
+    "type": "object", 
+    "properties": {
+      "apply_fix": {
+        "type": "boolean",
+        "description": "Whether to apply the fix automatically",
+        "default": true
+      },
+      "test_after_fix": {
+        "type": "boolean", 
+        "description": "Run tests after applying the fix",
+        "default": true
+      }
+    }
+  },
+  "implementation": {
+    "guide_path": "/Users/paul/Projects/arkavo/arkavo-edge/AXP_HARNESS_FIX_GUIDE.md",
+    "prompt_path": "/Users/paul/Projects/arkavo/arkavo-edge/AGENT_PROMPT_AXP_FIX.md",
+    "response_format": "/Users/paul/Projects/arkavo/arkavo-edge/AXP_FIX_MCP_RESPONSE.json"
+  },
+  "usage_example": {
+    "when_to_use": [
+      "build_test_harness fails with 'SDK does not contain' error",
+      "Compilation fails with undefined XCTest symbols", 
+      "iOS 26 beta is detected but harness won't compile"
+    ],
+    "sample_request": {
+      "tool_name": "ios_26_beta_fixer",
+      "params": {
+        "apply_fix": true,
+        "test_after_fix": true
+      }
+    }
+  }
+}

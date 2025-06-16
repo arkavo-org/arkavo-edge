@@ -88,8 +88,11 @@ impl McpTestServer {
             } else {
                 eprintln!("[McpTestServer] IDB companion initialized successfully");
                 eprintln!(
-                    "[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory"
+                    "[McpTestServer] Arkavo files are stored in .arkavo/ directory relative to your working directory:"
                 );
+                eprintln!("  - IDB companion: .arkavo/idb_companion");
+                eprintln!("  - AXP harnesses: .arkavo/axp-harnesses/");
+                eprintln!("  - Unix sockets: .arkavo/sockets/");
             }
         }
 
@@ -181,6 +184,10 @@ impl McpTestServer {
         tools.insert(
             "template_diagnostics".to_string(),
             Arc::new(TemplateDiagnosticsKit::new()),
+        );
+        tools.insert(
+            "ios26_beta_guidance".to_string(),
+            Arc::new(super::ios26_beta_guidance::Ios26BetaGuidance::new()),
         );
         tools.insert(
             "biometric_auth".to_string(),
