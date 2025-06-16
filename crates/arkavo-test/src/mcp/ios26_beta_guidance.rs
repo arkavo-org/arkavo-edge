@@ -38,7 +38,7 @@ impl Tool for Ios26BetaGuidance {
             .get("topic")
             .and_then(|v| v.as_str())
             .unwrap_or("all");
-        
+
         let guidance = match topic {
             "compilation" => COMPILATION_GUIDANCE,
             "symbols" => SYMBOLS_GUIDANCE,
@@ -47,7 +47,7 @@ impl Tool for Ios26BetaGuidance {
             "all" => ALL_GUIDANCE,
             _ => "Unknown topic. Use: compilation, symbols, workarounds, embedded, or all",
         };
-        
+
         Ok(serde_json::json!({
             "success": true,
             "topic": topic,
@@ -73,7 +73,7 @@ impl Tool for Ios26BetaGuidance {
             }
         }))
     }
-    
+
     fn schema(&self) -> &ToolSchema {
         &self.schema
     }

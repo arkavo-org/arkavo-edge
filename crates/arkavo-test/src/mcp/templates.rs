@@ -8,13 +8,13 @@ pub const ARKAVO_TEST_RUNNER_AXP_SWIFT: &str =
     include_str!("../../templates/XCTestRunner/ArkavoTestRunnerAXP.swift.template");
 pub const ARKAVO_AX_BRIDGE_SWIFT: &str = include_str!("../../templates/ArkavoAXBridge.swift");
 pub const INFO_PLIST: &str = include_str!("../../templates/XCTestRunner/Info.plist.template");
-pub const GENERIC_AXP_HARNESS_PLIST: &str = 
+pub const GENERIC_AXP_HARNESS_PLIST: &str =
     include_str!("../../templates/XCTestRunner/GenericAXPHarness.plist.template");
-pub const ARKAVO_AX_BRIDGE_MINIMAL_SWIFT: &str = 
+pub const ARKAVO_AX_BRIDGE_MINIMAL_SWIFT: &str =
     include_str!("../../templates/ArkavoAXBridgeMinimal.swift");
-pub const ARKAVO_TEST_RUNNER_MINIMAL_SWIFT: &str = 
+pub const ARKAVO_TEST_RUNNER_MINIMAL_SWIFT: &str =
     include_str!("../../templates/ArkavoTestRunnerMinimal.swift");
-pub const ARKAVO_AX_BRIDGE_IOS26_SWIFT: &str = 
+pub const ARKAVO_AX_BRIDGE_IOS26_SWIFT: &str =
     include_str!("../../templates/ArkavoAXBridgeIOS26.swift");
 
 #[cfg(test)]

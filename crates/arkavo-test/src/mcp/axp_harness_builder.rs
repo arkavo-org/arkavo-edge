@@ -79,25 +79,25 @@ impl AxpHarnessBuilder {
             device_manager,
         }
     }
-    
+
     /// Get iOS 26 beta compilation guidance
     pub fn get_ios26_beta_guidance() -> &'static str {
         IOS26_BETA_COMPILATION_GUIDANCE
     }
 
-    async fn build_axp_harness(
-        &self,
-        app_bundle_id: &str,
-    ) -> Result<Value> {
-        eprintln!("[AxpHarnessBuilder] Building generic AXP harness for {}", app_bundle_id);
-        
+    async fn build_axp_harness(&self, app_bundle_id: &str) -> Result<Value> {
+        eprintln!(
+            "[AxpHarnessBuilder] Building generic AXP harness for {}",
+            app_bundle_id
+        );
+
         // Pre-flight check: Verify Xcode tools are available
         let xcrun_check = Command::new("which")
             .arg("xcrun")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
-            
+
         if !xcrun_check {
             return Ok(serde_json::json!({
                 "success": false,
@@ -108,16 +108,17 @@ impl AxpHarnessBuilder {
                 }
             }));
         }
-        
+
         // Check if developer directory is set
-        let xcode_select_check = Command::new("xcode-select")
-            .arg("-p")
-            .output();
-            
+        let xcode_select_check = Command::new("xcode-select").arg("-p").output();
+
         match xcode_select_check {
             Ok(output) if output.status.success() => {
                 let dev_dir = String::from_utf8_lossy(&output.stdout);
-                eprintln!("[AxpHarnessBuilder] Developer directory: {}", dev_dir.trim());
+                eprintln!(
+                    "[AxpHarnessBuilder] Developer directory: {}",
+                    dev_dir.trim()
+                );
             }
             _ => {
                 return Ok(serde_json::json!({
@@ -148,14 +149,19 @@ impl AxpHarnessBuilder {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(".arkavo")
             .join("axp-harnesses");
-        
-        let build_dir = arkavo_dir
-            .join(format!("arkavo-axp-harness-{}", app_bundle_id.replace('.', "_")));
+
+        let build_dir = arkavo_dir.join(format!(
+            "arkavo-axp-harness-{}",
+            app_bundle_id.replace('.', "_")
+        ));
 
         fs::create_dir_all(&build_dir)
             .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {}", e)))?;
 
-        eprintln!("[AxpHarnessBuilder] Build directory: {}", build_dir.display());
+        eprintln!(
+            "[AxpHarnessBuilder] Build directory: {}",
+            build_dir.display()
+        );
 
         // Create source directory structure
         let sources_dir = build_dir.join("Sources");
@@ -164,29 +170,39 @@ impl AxpHarnessBuilder {
             .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {}", e)))?;
 
         // Generate socket path for this harness with device UDID
-        let device_id = self.device_manager.get_active_device()
+        let device_id = self
+            .device_manager
+            .get_active_device()
             .map(|d| d.id.clone())
             .ok_or_else(|| TestError::Mcp("No active device".to_string()))?;
-            
+
         // Use .arkavo/sockets directory for socket files
         let socket_dir = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(".arkavo")
             .join("sockets");
-        
+
         fs::create_dir_all(&socket_dir)
             .map_err(|e| TestError::Mcp(format!("Failed to create socket directory: {}", e)))?;
-            
-        let socket_path = socket_dir
-            .join(format!("arkavo-axp-{}-{}.sock", device_id, app_bundle_id.replace('.', "_")));
+
+        let socket_path = socket_dir.join(format!(
+            "arkavo-axp-{}-{}.sock",
+            device_id,
+            app_bundle_id.replace('.', "_")
+        ));
 
         // Check if we're on iOS 26 beta
-        let is_ios26_beta = self.device_manager.get_active_device()
+        let is_ios26_beta = self
+            .device_manager
+            .get_active_device()
             .map(|device| device.runtime.contains("iOS-26"))
             .unwrap_or(false);
-        
-        eprintln!("[AxpHarnessBuilder] iOS 26 beta detected: {}", is_ios26_beta);
-        
+
+        eprintln!(
+            "[AxpHarnessBuilder] iOS 26 beta detected: {}",
+            is_ios26_beta
+        );
+
         // Write appropriate bridge code based on iOS version
         let ax_bridge_path = harness_dir.join("ArkavoAXBridge.swift");
         if is_ios26_beta {
@@ -204,8 +220,9 @@ impl AxpHarnessBuilder {
             eprintln!("[AxpHarnessBuilder] Using minimal runner for iOS 26 beta compatibility");
             let runner_content = templates::ARKAVO_TEST_RUNNER_MINIMAL_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
-            fs::write(&runner_path, runner_content)
-                .map_err(|e| TestError::Mcp(format!("Failed to write minimal test runner: {}", e)))?;
+            fs::write(&runner_path, runner_content).map_err(|e| {
+                TestError::Mcp(format!("Failed to write minimal test runner: {}", e))
+            })?;
         } else {
             let runner_content = templates::ARKAVO_TEST_RUNNER_AXP_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
@@ -214,8 +231,7 @@ impl AxpHarnessBuilder {
         }
 
         // Create Package.swift with Swift 6.0
-        let package_swift = format!(
-            r#"// swift-tools-version:6.0
+        let package_swift = r#"// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -239,8 +255,7 @@ let package = Package(
         )
     ]
 )
-"#
-        );
+"#;
 
         let package_path = build_dir.join("Package.swift");
         fs::write(&package_path, package_swift)
@@ -255,9 +270,9 @@ let package = Package(
 
         // Compile the harness using Swift Package Manager
         eprintln!("[AxpHarnessBuilder] Compiling AXP harness using Swift PM...");
-        
+
         let compile_result = self.compile_harness_spm(&build_dir, &plist_path).await?;
-        
+
         if !compile_result["success"].as_bool().unwrap_or(false) {
             return Ok(compile_result);
         }
@@ -266,8 +281,11 @@ let package = Package(
 
         // Install to active simulator if available
         if let Some(device) = self.device_manager.get_active_device() {
-            eprintln!("[AxpHarnessBuilder] Installing to simulator {}...", device.id);
-            
+            eprintln!(
+                "[AxpHarnessBuilder] Installing to simulator {}...",
+                device.id
+            );
+
             if let Err(e) = self.install_to_simulator(&device.id, bundle_path) {
                 eprintln!("[AxpHarnessBuilder] Warning: Failed to auto-install: {}", e);
             } else {
@@ -275,10 +293,12 @@ let package = Package(
             }
         }
 
-        let is_ios26_beta = self.device_manager.get_active_device()
+        let is_ios26_beta = self
+            .device_manager
+            .get_active_device()
             .map(|device| device.runtime.contains("iOS-26"))
             .unwrap_or(false);
-        
+
         let mut result = serde_json::json!({
             "success": true,
             "harness_type": "axp",
@@ -320,7 +340,7 @@ let package = Package(
                 ]
             }
         });
-        
+
         if is_ios26_beta {
             result["ios26_beta_info"] = serde_json::json!({
                 "detected": true,
@@ -330,73 +350,83 @@ let package = Package(
                 "solution": "Install matching Xcode 16 beta or wait for stable iOS 26 release"
             });
         }
-        
+
         Ok(result)
     }
 
     async fn compile_harness_spm(&self, build_dir: &Path, plist_path: &Path) -> Result<Value> {
         // Use Swift Package Manager to build
         eprintln!("[AxpHarnessBuilder] Building with Swift Package Manager...");
-        
+
         let output = Command::new("swift")
             .args(["build", "-c", "release"])
             .current_dir(build_dir)
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run swift build: {}", e)))?;
-            
+
         if !output.status.success() {
-            eprintln!("[AxpHarnessBuilder] Swift PM build failed, falling back to direct compilation");
-            eprintln!("[AxpHarnessBuilder] Error: {}", String::from_utf8_lossy(&output.stderr));
-            
+            eprintln!(
+                "[AxpHarnessBuilder] Swift PM build failed, falling back to direct compilation"
+            );
+            eprintln!(
+                "[AxpHarnessBuilder] Error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+
             // Fall back to direct compilation
             return self.compile_harness_direct(build_dir, plist_path).await;
         }
-        
+
         // Find the built product
         let build_output_dir = build_dir.join(".build/release");
         let dylib_path = build_output_dir.join("libArkavoHarness.dylib");
-        
+
         if !dylib_path.exists() {
             return Err(TestError::Mcp("Built library not found".to_string()));
         }
-        
+
         // Create .xctest bundle
         let xctest_bundle = build_dir.join("ArkavoHarness.xctest");
         fs::create_dir_all(&xctest_bundle)
             .map_err(|e| TestError::Mcp(format!("Failed to create bundle: {}", e)))?;
-        
+
         // Copy binary
         fs::copy(&dylib_path, xctest_bundle.join("ArkavoHarness"))
             .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
-        
+
         // Copy Info.plist
         fs::copy(plist_path, xctest_bundle.join("Info.plist"))
             .map_err(|e| TestError::Mcp(format!("Failed to copy plist: {}", e)))?;
-        
+
         Ok(serde_json::json!({
             "success": true,
             "bundle_path": xctest_bundle.to_string_lossy().to_string()
         }))
     }
-    
+
     async fn compile_harness_direct(&self, build_dir: &Path, plist_path: &Path) -> Result<Value> {
         // Try to get SDK for specific version first (for beta support)
-        let sim_major_version = self.device_manager.get_active_device()
+        let sim_major_version = self
+            .device_manager
+            .get_active_device()
             .and_then(|device| {
-                device.runtime.split("iOS-").nth(1)
+                device
+                    .runtime
+                    .split("iOS-")
+                    .nth(1)
                     .and_then(|v| v.split('-').next())
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "18".to_string());
-        
-        eprintln!("[AxpHarnessBuilder] Looking for iOS {} SDK", sim_major_version);
-        
+
+        eprintln!(
+            "[AxpHarnessBuilder] Looking for iOS {} SDK",
+            sim_major_version
+        );
+
         // First check what SDKs are available
-        let list_sdks = Command::new("xcodebuild")
-            .arg("-showsdks")
-            .output()
-            .ok();
-            
+        let list_sdks = Command::new("xcodebuild").arg("-showsdks").output().ok();
+
         if let Some(output) = list_sdks {
             let sdks_list = String::from_utf8_lossy(&output.stdout);
             eprintln!("[AxpHarnessBuilder] Available simulator SDKs:");
@@ -406,7 +436,7 @@ let package = Package(
                 }
             }
         }
-        
+
         // Try version-specific SDK first (e.g., iphonesimulator26.0 for iOS 26 beta)
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", &format!("iphonesimulator{}.0", sim_major_version), "--show-sdk-path"])
@@ -434,7 +464,9 @@ let package = Package(
             }));
         }
 
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
         eprintln!("[AxpHarnessBuilder] Using SDK: {}", sdk_path);
 
         // Build using Swift
@@ -444,37 +476,46 @@ let package = Package(
         ];
 
         let output_binary = build_dir.join("ArkavoHarness");
-        
+
         // Determine simulator version from device runtime if possible
         let sim_version = if let Some(device) = self.device_manager.get_active_device() {
             // Extract version from runtime like "com.apple.CoreSimulator.SimRuntime.iOS-26-0"
             if let Some(version_part) = device.runtime.split("iOS-").nth(1) {
-                version_part.replace('-', ".").trim_end_matches(".0").to_string()
+                version_part
+                    .replace('-', ".")
+                    .trim_end_matches(".0")
+                    .to_string()
             } else {
                 "15.0".to_string() // Fallback to minimum supported
             }
         } else {
             "15.0".to_string()
         };
-        
+
         eprintln!("[AxpHarnessBuilder] Target iOS version: {}", sim_version);
-        
+
         let mut cmd = Command::new("swiftc");
         cmd.args([
-            "-sdk", &sdk_path,
-            "-target", &format!("arm64-apple-ios{}-simulator", sim_version),
+            "-sdk",
+            &sdk_path,
+            "-target",
+            &format!("arm64-apple-ios{}-simulator", sim_version),
             "-parse-as-library",
             "-emit-library",
-            "-module-name", "ArkavoHarness",
-            "-o", output_binary.to_str().unwrap(),
+            "-module-name",
+            "ArkavoHarness",
+            "-o",
+            output_binary.to_str().unwrap(),
             "-suppress-warnings",
-            "-framework", "Foundation",
-            "-framework", "CoreGraphics",
+            "-framework",
+            "Foundation",
+            "-framework",
+            "CoreGraphics",
         ]);
-        
+
         // Add XCTest - handle both standard and beta Xcode paths
         let is_ios26_beta = sim_version.starts_with("26");
-        
+
         // Detect Xcode path from SDK path
         let xcode_path = if let Some(xcode_idx) = sdk_path.find("/Contents/Developer") {
             sdk_path[..xcode_idx].to_string()
@@ -491,7 +532,8 @@ let package = Package(
                 .and_then(|output| {
                     if output.status.success() {
                         let dev_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        dev_path.strip_suffix("/Contents/Developer")
+                        dev_path
+                            .strip_suffix("/Contents/Developer")
                             .map(|s| s.to_string())
                     } else {
                         None
@@ -499,9 +541,9 @@ let package = Package(
                 })
                 .unwrap_or_else(|| "/Applications/Xcode.app".to_string())
         };
-        
+
         eprintln!("[AxpHarnessBuilder] Using Xcode at: {}", xcode_path);
-        
+
         // For iOS 26 beta, use specialized handling
         if is_ios26_beta {
             cmd.args([
@@ -521,10 +563,14 @@ let package = Package(
                 "-Xlinker", "-rpath", "-Xlinker", &format!("{}/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks", xcode_path),
             ]);
         }
-        
+
         cmd.args([
-            "-F", &format!("{}/System/Library/Frameworks", sdk_path),
-            "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks",
+            "-F",
+            &format!("{}/System/Library/Frameworks", sdk_path),
+            "-Xlinker",
+            "-rpath",
+            "-Xlinker",
+            "@loader_path/../Frameworks",
         ]);
 
         // Add all Swift files
@@ -534,98 +580,135 @@ let package = Package(
 
         eprintln!("[AxpHarnessBuilder] Running: {:?}", cmd);
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| TestError::Mcp(format!("Failed to compile: {}", e)))?;
 
         if !output.status.success() {
             eprintln!("[AxpHarnessBuilder] Compilation failed!");
             eprintln!("[AxpHarnessBuilder] Exit code: {:?}", output.status.code());
             eprintln!("[AxpHarnessBuilder] Command: {:?}", cmd);
-            eprintln!("[AxpHarnessBuilder] Working directory: {}", build_dir.display());
-            eprintln!("[AxpHarnessBuilder] stderr:\n{}", String::from_utf8_lossy(&output.stderr));
-            eprintln!("[AxpHarnessBuilder] stdout:\n{}", String::from_utf8_lossy(&output.stdout));
-            
+            eprintln!(
+                "[AxpHarnessBuilder] Working directory: {}",
+                build_dir.display()
+            );
+            eprintln!(
+                "[AxpHarnessBuilder] stderr:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            eprintln!(
+                "[AxpHarnessBuilder] stdout:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+
             // Write compilation log
             let log_path = build_dir.join("compilation_error.log");
-            let _ = fs::write(&log_path, format!(
-                "Command: {:?}\n\nWorking Dir: {}\nSDK: {}\nTarget: ios{}-simulator\n\nExit Code: {:?}\n\nSTDERR:\n{}\n\nSTDOUT:\n{}\n",
-                cmd,
-                build_dir.display(),
-                sdk_path,
-                sim_version,
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr),
-                String::from_utf8_lossy(&output.stdout)
-            ));
-            eprintln!("[AxpHarnessBuilder] Error log saved to: {}", log_path.display());
-            
+            let _ = fs::write(
+                &log_path,
+                format!(
+                    "Command: {:?}\n\nWorking Dir: {}\nSDK: {}\nTarget: ios{}-simulator\n\nExit Code: {:?}\n\nSTDERR:\n{}\n\nSTDOUT:\n{}\n",
+                    cmd,
+                    build_dir.display(),
+                    sdk_path,
+                    sim_version,
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&output.stdout)
+                ),
+            );
+            eprintln!(
+                "[AxpHarnessBuilder] Error log saved to: {}",
+                log_path.display()
+            );
+
             let error_code = match output.status.code() {
                 Some(127) => "SDK_NOT_INSTALLED",
-                Some(1) => "COMPILATION_FAILED", 
-                _ => "UNKNOWN_ERROR"
+                Some(1) => "COMPILATION_FAILED",
+                _ => "UNKNOWN_ERROR",
             };
-            
+
             // Check for beta SDK mismatch - comprehensive detection
             let stderr_text = String::from_utf8_lossy(&output.stderr);
-            let is_beta_issue = stderr_text.contains("SDK does not contain") || 
-                stderr_text.contains("no such module") ||
-                stderr_text.contains("could not find module") ||
-                stderr_text.contains("XCTest.framework") ||
-                stderr_text.contains("cannot find type 'XCUICoordinate'") ||
-                stderr_text.contains("framework not found XCTest");
-            
+            let is_beta_issue = stderr_text.contains("SDK does not contain")
+                || stderr_text.contains("no such module")
+                || stderr_text.contains("could not find module")
+                || stderr_text.contains("XCTest.framework")
+                || stderr_text.contains("cannot find type 'XCUICoordinate'")
+                || stderr_text.contains("framework not found XCTest");
+
             // If it's a beta issue, try a fallback compilation with minimal dependencies
             if is_beta_issue && sim_major_version == "26" {
-                eprintln!("[AxpHarnessBuilder] iOS 26 beta detected, trying fallback compilation...");
-                
+                eprintln!(
+                    "[AxpHarnessBuilder] iOS 26 beta detected, trying fallback compilation..."
+                );
+
                 // Try multiple fallback strategies for iOS 26 beta
                 eprintln!("[AxpHarnessBuilder] Attempting fallback strategy 1: iOS 18 target...");
-                
+
                 // Strategy 1: Use iOS 18 target with iOS 26 SDK
                 let mut fallback_cmd = Command::new("swiftc");
                 fallback_cmd.args([
-                    "-sdk", &sdk_path,
-                    "-target", "arm64-apple-ios18.0-simulator",
+                    "-sdk",
+                    &sdk_path,
+                    "-target",
+                    "arm64-apple-ios18.0-simulator",
                     "-parse-as-library",
                     "-emit-library",
-                    "-module-name", "ArkavoHarness",
-                    "-o", output_binary.to_str().unwrap(),
+                    "-module-name",
+                    "ArkavoHarness",
+                    "-o",
+                    output_binary.to_str().unwrap(),
                     "-suppress-warnings",
-                    "-framework", "Foundation",
-                    "-framework", "CoreGraphics",
-                    "-D", "IOS_26_BETA",
-                    "-Xlinker", "-undefined",
-                    "-Xlinker", "dynamic_lookup", // Allow missing symbols
+                    "-framework",
+                    "Foundation",
+                    "-framework",
+                    "CoreGraphics",
+                    "-D",
+                    "IOS_26_BETA",
+                    "-Xlinker",
+                    "-undefined",
+                    "-Xlinker",
+                    "dynamic_lookup", // Allow missing symbols
                 ]);
                 fallback_cmd.args(swift_files.iter().map(|f| f.to_str().unwrap()));
-                
+
                 let fallback_output = fallback_cmd.output();
-                    
+
                 if let Ok(fallback_output) = fallback_output {
                     if fallback_output.status.success() {
                         eprintln!("[AxpHarnessBuilder] Fallback compilation succeeded!");
                         // Continue with bundle creation
                     } else {
-                        eprintln!("[AxpHarnessBuilder] Fallback strategy 1 failed, trying strategy 2...");
-                        
+                        eprintln!(
+                            "[AxpHarnessBuilder] Fallback strategy 1 failed, trying strategy 2..."
+                        );
+
                         // Strategy 2: Use minimal compilation with no frameworks
                         let minimal_cmd = Command::new("swiftc")
                             .args([
-                                "-sdk", &sdk_path,
-                                "-target", "arm64-apple-ios15.0-simulator", // Even lower target
+                                "-sdk",
+                                &sdk_path,
+                                "-target",
+                                "arm64-apple-ios15.0-simulator", // Even lower target
                                 "-parse-as-library",
                                 "-emit-library",
-                                "-module-name", "ArkavoHarness",
-                                "-o", output_binary.to_str().unwrap(),
+                                "-module-name",
+                                "ArkavoHarness",
+                                "-o",
+                                output_binary.to_str().unwrap(),
                                 "-suppress-warnings",
-                                "-framework", "Foundation",
-                                "-D", "IOS_26_BETA_MINIMAL",
-                                "-Xlinker", "-undefined",
-                                "-Xlinker", "dynamic_lookup",
+                                "-framework",
+                                "Foundation",
+                                "-D",
+                                "IOS_26_BETA_MINIMAL",
+                                "-Xlinker",
+                                "-undefined",
+                                "-Xlinker",
+                                "dynamic_lookup",
                             ])
                             .args(swift_files.iter().map(|f| f.to_str().unwrap()))
                             .output();
-                            
+
                         if let Ok(minimal_output) = minimal_cmd {
                             if minimal_output.status.success() {
                                 eprintln!("[AxpHarnessBuilder] Fallback strategy 2 succeeded!");
@@ -729,25 +812,14 @@ let package = Package(
     fn install_to_simulator(&self, device_id: &str, bundle_path: &str) -> Result<()> {
         // Use simctl to install the test bundle
         let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "xctest",
-                "install",
-                device_id,
-                bundle_path,
-            ])
+            .args(["simctl", "xctest", "install", device_id, bundle_path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run xctest install: {}", e)))?;
 
         if !output.status.success() {
             // Try alternative installation method
             let alt_output = Command::new("xcrun")
-                .args([
-                    "simctl",
-                    "install",
-                    device_id,
-                    bundle_path,
-                ])
+                .args(["simctl", "install", device_id, bundle_path])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to run simctl install: {}", e)))?;
 

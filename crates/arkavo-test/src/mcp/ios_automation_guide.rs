@@ -110,7 +110,7 @@ impl Tool for IosAutomationGuide {
                     "DO NOT use setup_xcuitest - deprecated"
                 ]
             }),
-            
+
             "tap_button" => serde_json::json!({
                 "workflow": "Tapping a Button",
                 "steps": [
@@ -143,7 +143,7 @@ impl Tool for IosAutomationGuide {
                     "AXP harness makes taps instant (<30ms)"
                 ]
             }),
-            
+
             "enter_text" => serde_json::json!({
                 "workflow": "Entering Text",
                 "steps": [
@@ -177,7 +177,7 @@ impl Tool for IosAutomationGuide {
                 ],
                 "important": "MUST tap field first to focus it!"
             }),
-            
+
             "verify_screen" => serde_json::json!({
                 "workflow": "Verifying Screen Content",
                 "steps": [
@@ -200,7 +200,7 @@ impl Tool for IosAutomationGuide {
                 ],
                 "tip": "Visual verification is more reliable than programmatic queries"
             }),
-            
+
             "handle_dialogs" => serde_json::json!({
                 "workflow": "Handling System Dialogs",
                 "options": {
@@ -224,7 +224,7 @@ impl Tool for IosAutomationGuide {
                     }
                 }
             }),
-            
+
             "debug_issues" => serde_json::json!({
                 "workflow": "Debugging Automation Issues",
                 "common_problems": {
@@ -258,18 +258,18 @@ impl Tool for IosAutomationGuide {
                     "Solution: Install Xcode 16 beta or use iOS 18 simulator"
                 ]
             }),
-            
+
             _ => serde_json::json!({
                 "error": "Unknown scenario",
                 "available_scenarios": [
                     "getting_started",
-                    "tap_button", 
+                    "tap_button",
                     "enter_text",
                     "verify_screen",
                     "handle_dialogs",
                     "debug_issues"
                 ]
-            })
+            }),
         };
 
         Ok(guide)

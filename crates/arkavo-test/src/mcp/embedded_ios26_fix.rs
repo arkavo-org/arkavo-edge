@@ -1,7 +1,6 @@
 /// Embedded iOS 26 Beta Fix Documentation
 /// This module contains the complete iOS 26 beta fix compiled into the binary
 /// No external files or manual fixes needed - everything is self-contained
-
 pub const IOS26_BETA_FIX_VERSION: &str = "1.0";
 
 /// Complete iOS 26 beta detection and fix logic embedded in axp_harness_builder.rs
@@ -156,9 +155,6 @@ A: No, it would crash. The minimal templates are required for iOS 26 beta.
 pub fn get_all_documentation() -> String {
     format!(
         "iOS 26 Beta Fix v{}\n\n{}\n\n{}\n\n{}",
-        IOS26_BETA_FIX_VERSION,
-        EMBEDDED_FIX_SUMMARY,
-        TECHNICAL_DETAILS,
-        USER_GUIDANCE
+        IOS26_BETA_FIX_VERSION, EMBEDDED_FIX_SUMMARY, TECHNICAL_DETAILS, USER_GUIDANCE
     )
 }

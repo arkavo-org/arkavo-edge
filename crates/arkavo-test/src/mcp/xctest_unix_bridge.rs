@@ -515,7 +515,7 @@ impl XCTestUnixBridge {
             },
         }
     }
-    
+
     /// Create an AXP tap command
     pub fn create_axp_tap(x: f64, y: f64) -> Command {
         Command {
@@ -541,7 +541,7 @@ impl XCTestUnixBridge {
             },
         }
     }
-    
+
     /// Create an AXP capabilities query command
     pub fn create_axp_capabilities() -> Command {
         Command {
@@ -550,7 +550,7 @@ impl XCTestUnixBridge {
             parameters: CommandParameters::default(),
         }
     }
-    
+
     /// Create an AXP snapshot command
     pub fn create_axp_snapshot() -> Command {
         Command {
