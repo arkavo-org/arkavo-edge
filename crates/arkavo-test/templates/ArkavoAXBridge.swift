@@ -169,7 +169,7 @@ import CoreGraphics
         // This is a debugging helper for iOS 26 beta
         // In production, this would be removed or behind a debug flag
         
-        let accessibilityKeywords = ["Accessibility", "AXP", "AX", "CS", "HitTest", "PerformAction", "Element"]
+        _ = ["Accessibility", "AXP", "AX", "CS", "HitTest", "PerformAction", "Element"]
         var foundSymbols: [String] = []
         
         // Note: Full symbol enumeration requires parsing the Mach-O binary

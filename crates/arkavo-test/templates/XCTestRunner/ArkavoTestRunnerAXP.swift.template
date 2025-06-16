@@ -5,8 +5,8 @@ import Foundation
 /// This version uses AXP for fast, reliable touch injection
 final class ArkavoTestRunnerAXP: XCTestCase {
     static let socketPath = "{{SOCKET_PATH}}"
-    static var commandHandler: ArkavoCommandHandler!
-    static var axBridge: ArkavoAXBridge!
+    nonisolated(unsafe) private static var commandHandler: ArkavoCommandHandler!
+    nonisolated(unsafe) private static var axBridge: ArkavoAXBridge!
     
     override class func setUp() {
         super.setUp()
@@ -32,14 +32,14 @@ final class ArkavoTestRunnerAXP: XCTestCase {
         expectation.isInverted = true
         
         print("[ArkavoTestRunnerAXP] Test runner ready with AXP bridge")
-        print("[ArkavoTestRunnerAXP] Capabilities: \(Self.axBridge.capabilities())")
+        print("[ArkavoTestRunnerAXP] Capabilities: \(Self.axBridge?.capabilities() ?? [:])")
         
         wait(for: [expectation], timeout: 3600) // 1 hour timeout
     }
 }
 
 /// Command handler that integrates with AXP bridge
-class ArkavoCommandHandler: NSObject {
+final class ArkavoCommandHandler: NSObject, @unchecked Sendable {
     private let socketPath: String
     private let axBridge: ArkavoAXBridge
     private var localSocket: CFSocket?
@@ -119,27 +119,21 @@ class ArkavoCommandHandler: NSObject {
     }
     
     private func handleConnection(_ data: UnsafeRawPointer) {
-        let handle = CFSocketNativeHandle(bitPattern: data.load(as: Int.self))!
+        let handle = data.load(as: CFSocketNativeHandle.self)
         
         print("[ArkavoCommandHandler] New connection accepted")
         
         // Handle commands on this connection
-        DispatchQueue.global(qos: .userInteractive).async {
-            self.processCommands(handle: handle)
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            self?.processCommands(handle: handle)
         }
     }
     
     private func processCommands(handle: CFSocketNativeHandle) {
-        let inputStream = InputStream(fileDescriptor: handle, retainReference: false)
-        let outputStream = OutputStream(fileDescriptor: handle, retainReference: false)
-        
-        inputStream.open()
-        outputStream.open()
+        let fileHandle = FileHandle(fileDescriptor: handle, closeOnDealloc: true)
         
         defer {
-            inputStream.close()
-            outputStream.close()
-            close(handle)
+            fileHandle.closeFile()
         }
         
         // Send ready signal with AXP status
@@ -147,23 +141,19 @@ class ArkavoCommandHandler: NSObject {
             "type": "ready",
             "capabilities": axBridge.capabilities()
         ]
-        sendResponse(readyMessage, to: outputStream)
-        
-        let bufferSize = 4096
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
+        sendResponse(readyMessage, to: fileHandle)
         
         var messageBuffer = ""
         
-        while !shouldStop && inputStream.hasBytesAvailable {
-            let bytesRead = inputStream.read(buffer, maxLength: bufferSize)
+        while !shouldStop {
+            let data = fileHandle.availableData
             
-            if bytesRead <= 0 {
+            if data.isEmpty {
                 break
             }
             
-            let data = String(bytesDecoding: Data(bytes: buffer, count: bytesRead), as: UTF8.self)
-            messageBuffer += data
+            let text = String(decoding: data, as: UTF8.self)
+            messageBuffer += text
             
             // Process complete messages (newline delimited)
             while let newlineIndex = messageBuffer.firstIndex(of: "\n") {
@@ -180,7 +170,7 @@ class ArkavoCommandHandler: NSObject {
                     
                     if let cmdType = command["type"] as? String, cmdType == "tap" {
                         // Legacy format - convert to AXP format
-                        var axpCommand = ["cmd": "tap"]
+                        var axpCommand: [String: Any] = ["cmd": "tap"]
                         if let params = command["parameters"] as? [String: Any],
                            let x = params["x"],
                            let y = params["y"] {
@@ -192,9 +182,9 @@ class ArkavoCommandHandler: NSObject {
                         response = [
                             "id": command["id"] ?? "",
                             "success": axpResponse["success"] ?? false,
-                            "error": axpResponse["error"]
+                            "error": axpResponse["error"] as Any
                         ].compactMapValues { $0 }
-                    } else if let cmd = command["cmd"] as? String {
+                    } else if command["cmd"] != nil {
                         // New AXP format
                         let axpResponse = axBridge.processCommand(command)
                         response = [
@@ -206,7 +196,7 @@ class ArkavoCommandHandler: NSObject {
                         response = processLegacyCommand(command)
                     }
                     
-                    sendResponse(response, to: outputStream)
+                    sendResponse(response, to: fileHandle)
                 }
             }
         }
@@ -229,13 +219,12 @@ class ArkavoCommandHandler: NSObject {
         ]
     }
     
-    private func sendResponse(_ response: [String: Any], to stream: OutputStream) {
+    private func sendResponse(_ response: [String: Any], to fileHandle: FileHandle) {
         do {
             let jsonData = try JSONSerialization.data(withJSONObject: response)
-            var message = String(data: jsonData, encoding: .utf8)! + "\n"
-            message.withUTF8 { bytes in
-                stream.write(bytes.baseAddress!, maxLength: bytes.count)
-            }
+            var responseData = jsonData
+            responseData.append(contentsOf: "\n".data(using: .utf8)!)
+            fileHandle.write(responseData)
         } catch {
             print("[ArkavoCommandHandler] Failed to send response: \(error)")
         }
