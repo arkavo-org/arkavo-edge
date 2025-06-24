@@ -6,13 +6,13 @@ A local-first, privacy-focused memory service for AI agents with fast vector sim
 
 - 100% local storage with SQLite persistence
 - Fast semantic search using HNSW (Hierarchical Navigable Small World) algorithm
-- Text embeddings via bundled AllMiniLML6V2 model (~87MB embedded in binary)
+- Text embeddings via AllMiniLML6V2 model (downloaded at build time, embedded in binary)
 - MCP tool integration - no HTTP server needed
 - Automatic memory categorization
 - Flexible metadata support
 - **Zero configuration required** - all settings have sensible defaults
 - **Integrated into arkavo** - no separate server needed
-- **Fully offline** - model is bundled at compile time, no runtime downloads
+- **Fully offline at runtime** - model is downloaded during build, no runtime downloads
 
 ## Architecture
 
@@ -27,9 +27,9 @@ The memory service uses a hybrid approach:
 
 The service works out of the box with no configuration required:
 - Database is automatically created in `.arkavo/memory_server/` relative to where you run arkavo
-- Uses bundled `AllMiniLML6V2` embedding model (no downloads needed)
-- Model files are embedded in the binary at compile time
-- No external services or network access required
+- Uses `AllMiniLML6V2` embedding model (downloaded at build time)
+- Model files are embedded in the binary - no runtime downloads
+- No external services or runtime network access required
 - All data stays in the `.arkavo/` directory
 
 ## Integration with Arkavo
@@ -121,7 +121,7 @@ Category: facts (confidence: 0.87)
 
 ## Prerequisites
 
-None! The embedding model is bundled in the binary.
+None! The embedding model is downloaded automatically during the build process.
 
 ## Testing
 

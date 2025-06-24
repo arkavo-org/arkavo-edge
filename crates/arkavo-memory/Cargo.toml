@@ -25,5 +25,8 @@ arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = "0.1"
 
+[build-dependencies]
+ureq = "2.12"
+
 [dev-dependencies]
 tokio-test = "0.4"
