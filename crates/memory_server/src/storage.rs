@@ -5,6 +5,7 @@ use hnsw_rs::prelude::*;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
@@ -38,10 +39,23 @@ impl MemoryStorage {
     pub async fn new() -> Result<Self> {
         Self::with_config(HnswConfig::default()).await
     }
+    
+    pub fn get_data_directory() -> Result<PathBuf> {
+        let data_dir = dirs::data_dir()
+            .ok_or_else(|| MemoryError::Storage("Could not determine data directory".to_string()))?
+            .join("arkavo")
+            .join("memory_server");
+            
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {}", e)))?;
+            
+        Ok(data_dir)
+    }
 
     pub async fn with_config(config: HnswConfig) -> Result<Self> {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite:memories.db".to_string());
+        let data_dir = Self::get_data_directory()?;
+        let db_path = data_dir.join("memories.db");
+        let database_url = format!("sqlite:{}", db_path.display());
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)

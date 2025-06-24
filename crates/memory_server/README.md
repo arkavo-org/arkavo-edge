@@ -10,6 +10,7 @@ A local-first, privacy-focused memory server for AI agents with fast vector simi
 - RESTful API built with Actix-Web
 - Automatic memory categorization
 - Flexible metadata support
+- **Zero configuration required** - all settings have sensible defaults
 
 ## Architecture
 
@@ -19,12 +20,13 @@ The memory server uses a hybrid approach:
 - **HashMap**: O(1) lookup by memory ID
 - **Ollama**: Local LLM for generating text embeddings
 
-## Configuration
+## Zero Configuration
 
-Environment variables:
-- `DATABASE_URL`: SQLite database path (default: `sqlite:memories.db`)
-- `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://localhost:11434`)
-- `OLLAMA_EMBEDDING_MODEL`: Model for embeddings (default: `nomic-embed-text`)
+The server works out of the box with no configuration required:
+- Database is automatically created in the user's data directory (`~/Library/Application Support/arkavo/memory_server/` on macOS)
+- Ollama is expected to run on `localhost:11434` (standard installation)
+- Uses `nomic-embed-text` model by default
+- Automatically checks for Ollama availability on startup
 
 ## API Endpoints
 
@@ -77,14 +79,18 @@ Content-Type: application/json
 ## Running the Server
 
 ```bash
-# Ensure Ollama is running with an embedding model
+# First time setup - pull the embedding model
 ollama pull nomic-embed-text
 
-# Run the memory server
+# Run the memory server (no configuration needed)
 cargo run --bin memory_server
 ```
 
-The server will start on `http://localhost:8080`.
+The server will:
+1. Check if Ollama is running
+2. Verify the embedding model is available
+3. Create data directory automatically
+4. Start on `http://localhost:8080`
 
 ## Testing
 

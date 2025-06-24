@@ -19,6 +19,7 @@ thiserror = "1.0"
 anyhow = "1.0"
 hnsw_rs = "0.3"
 arkavo-llm = { path = "../arkavo-llm" }
+dirs = "5.0"
 
 [dev-dependencies]
 actix-rt = "2"
