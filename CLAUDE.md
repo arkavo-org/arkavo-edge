@@ -64,6 +64,19 @@ Arkavo Edge consists of several core components:
 - **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
 - **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability.  Do not use generic names as a catch-all.
 
+## Documentation and Test Organization
+
+- **Documentation files**: Technical documentation, implementation guides, and historical documents should be placed in the `docs/` directory. The following files should remain in root:
+  - `README.md` - Main project documentation
+  - `CLAUDE.md` - AI assistant instructions
+  - `REQUIREMENTS.md` - Project requirements
+  - `THIRD-PARTY-LICENSES.md` - License information
+  - Crate-specific `README.md` files remain in their respective crate directories
+- **Test files**: 
+  - Integration tests should be placed in the `tests/` directory at the crate level
+  - Unit tests should remain as inline `#[cfg(test)]` modules in source files (standard Rust convention)
+  - Temporary test scripts or debugging utilities should be removed rather than kept in the repository
+
 ## Key Command Interfaces
 
 The project will support the following main commands:
