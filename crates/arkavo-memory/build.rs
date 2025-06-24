@@ -43,7 +43,7 @@ fn main() {
 
             // Try to download using curl (more compatible with various environments)
             let output = Command::new("curl")
-                .args(&[
+                .args([
                     "-L", // Follow redirects
                     "-f", // Fail on HTTP errors
                     "-s", // Silent mode
@@ -58,7 +58,7 @@ fn main() {
                     if !result.status.success() {
                         // If curl fails, try wget as fallback
                         let wget_output = Command::new("wget")
-                            .args(&[
+                            .args([
                                 "-q", // Quiet mode
                                 "-O",
                                 file_path.to_str().unwrap(),
@@ -78,7 +78,7 @@ fn main() {
                 Err(_) => {
                     // curl not available, try wget
                     let wget_output = Command::new("wget")
-                        .args(&[
+                        .args([
                             "-q", // Quiet mode
                             "-O",
                             file_path.to_str().unwrap(),
@@ -113,3 +113,4 @@ fn main() {
         }
     }
 }
+
