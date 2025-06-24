@@ -1,5 +1,5 @@
 [package]
-name = "memory_server"
+name = "arkavo-memory"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,6 +19,8 @@ thiserror = "1.0"
 anyhow = "1.0"
 hnsw_rs = "0.3"
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+async-trait = "0.1"
 
 [dev-dependencies]
 actix-rt = "2"

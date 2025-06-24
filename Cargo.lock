@@ -354,6 +354,8 @@ dependencies = [
  "anyhow",
  "arkavo-git",
  "arkavo-llm",
+ "arkavo-mcp",
+ "arkavo-memory",
  "arkavo-repo",
  "arkavo-terminal",
  "arkavo-test",
@@ -392,6 +394,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp"
+version = "0.10.1"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arkavo-memory"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "actix-web",
+ "anyhow",
+ "arkavo-llm",
+ "arkavo-mcp",
+ "async-trait",
+ "chrono",
+ "env_logger 0.10.2",
+ "hnsw_rs",
+ "log",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-protocol"
 version = "0.10.1"
 
@@ -408,6 +442,8 @@ name = "arkavo-test"
 version = "0.10.1"
 dependencies = [
  "anyhow",
+ "arkavo-mcp",
+ "arkavo-memory",
  "arkavo-protocol",
  "async-trait",
  "bincode",
@@ -2140,27 +2176,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "memory_server"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "actix-web",
- "anyhow",
- "arkavo-llm",
- "chrono",
- "env_logger 0.10.2",
- "hnsw_rs",
- "log",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
 ]
 
 [[package]]

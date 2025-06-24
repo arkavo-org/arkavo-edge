@@ -33,34 +33,39 @@ impl EmbeddingService {
             model: "nomic-embed-text".to_string(),
         }
     }
-    
+
     pub async fn ensure_model_available(&self) -> Result<()> {
         let response = self.client
             .get(format!("{}/api/tags", self.base_url))
             .send()
             .await
             .map_err(|e| MemoryError::Embedding(format!("Failed to connect to Ollama: {}. Please ensure Ollama is running on localhost:11434", e)))?;
-            
+
         if !response.status().is_success() {
-            return Err(MemoryError::Embedding("Failed to list Ollama models".to_string()));
+            return Err(MemoryError::Embedding(
+                "Failed to list Ollama models".to_string(),
+            ));
         }
-        
-        let body: serde_json::Value = response.json().await
-            .map_err(|e| MemoryError::Embedding(format!("Failed to parse Ollama response: {}", e)))?;
-            
-        let models = body["models"].as_array()
+
+        let body: serde_json::Value = response.json().await.map_err(|e| {
+            MemoryError::Embedding(format!("Failed to parse Ollama response: {}", e))
+        })?;
+
+        let models = body["models"]
+            .as_array()
             .ok_or_else(|| MemoryError::Embedding("Invalid Ollama response format".to_string()))?;
-            
-        let has_model = models.iter()
+
+        let has_model = models
+            .iter()
             .any(|m| m["name"].as_str().unwrap_or("").contains(&self.model));
-            
+
         if !has_model {
             return Err(MemoryError::Embedding(format!(
-                "Embedding model '{}' not found. Please run: ollama pull {}", 
+                "Embedding model '{}' not found. Please run: ollama pull {}",
                 self.model, self.model
             )));
         }
-        
+
         Ok(())
     }
 

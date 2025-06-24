@@ -39,20 +39,27 @@ impl MemoryStorage {
     pub async fn new() -> Result<Self> {
         Self::with_config(HnswConfig::default()).await
     }
-    
+
     pub fn get_data_directory() -> Result<PathBuf> {
         let data_dir = PathBuf::from(".arkavo").join("memory_server");
-            
+
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {}", e)))?;
-            
+
         Ok(data_dir)
     }
 
     pub async fn with_config(config: HnswConfig) -> Result<Self> {
         let data_dir = Self::get_data_directory()?;
         let db_path = data_dir.join("memories.db");
-        let database_url = format!("sqlite:{}", db_path.display());
+        
+        // Debug logging for tests
+        eprintln!("Memory storage: Creating database at {:?}", db_path);
+        eprintln!("Current directory: {:?}", std::env::current_dir());
+        
+        // Use absolute path for SQLite
+        let abs_db_path = std::fs::canonicalize(&db_path).unwrap_or(db_path);
+        let database_url = format!("sqlite:{}?mode=rwc", abs_db_path.display());
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -89,7 +96,7 @@ impl MemoryStorage {
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
-            "#
+            "#,
         )
         .execute(pool)
         .await?;
@@ -97,7 +104,7 @@ impl MemoryStorage {
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)
-            "#
+            "#,
         )
         .execute(pool)
         .await?;
@@ -105,7 +112,7 @@ impl MemoryStorage {
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)
-            "#
+            "#,
         )
         .execute(pool)
         .await?;
@@ -135,7 +142,7 @@ impl MemoryStorage {
         for (idx, row) in rows.iter().enumerate() {
             let id_str: String = row.get("id");
             let embedding_str: String = row.get("embedding");
-            
+
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {}", e)))?;
             let embedding: Vec<f32> = serde_json::from_str(&embedding_str)
@@ -143,7 +150,7 @@ impl MemoryStorage {
 
             embeddings.insert(id, embedding.clone());
             id_mapping.insert(idx, id);
-            
+
             let mut point_data = Vec::with_capacity(embedding.len());
             point_data.extend_from_slice(&embedding);
             index.insert((&point_data, idx));
@@ -214,7 +221,7 @@ impl MemoryStorage {
 
         let embedding_str: String = row.get("embedding");
         let embedding: Vec<f32> = serde_json::from_str(&embedding_str)?;
-        
+
         let metadata_str: Option<String> = row.get("metadata");
         let metadata = metadata_str
             .as_ref()
@@ -223,7 +230,7 @@ impl MemoryStorage {
 
         let created_at_str: String = row.get("created_at");
         let updated_at_str: String = row.get("updated_at");
-        
+
         let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
             .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {}", e)))?
             .with_timezone(&chrono::Utc);
@@ -315,9 +322,7 @@ impl MemoryStorage {
 
             let avg_score: f32 = category_samples
                 .iter()
-                .map(|r| {
-                    EmbeddingService::cosine_similarity(&embedding, &r.memory.embedding)
-                })
+                .map(|r| EmbeddingService::cosine_similarity(&embedding, &r.memory.embedding))
                 .sum::<f32>()
                 / category_samples.len() as f32;
 

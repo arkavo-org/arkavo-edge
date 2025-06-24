@@ -10,7 +10,7 @@ members = [
     "crates/arkavo-vault",
     "crates/arkavo-test",
     "crates/arkavo-llm",
-    "crates/memory_server",
+    "crates/arkavo-memory",
 ]
 resolver = "2"
 

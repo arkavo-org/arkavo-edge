@@ -12,6 +12,8 @@ arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-mcp = { path = "../arkavo-mcp" }
 anyhow = "1.0"
 jsonschema = "0.26"
 tokio = { version = "1.41", features = ["rt", "macros", "rt-multi-thread"] }

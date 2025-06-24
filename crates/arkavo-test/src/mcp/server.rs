@@ -29,6 +29,7 @@ use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
+use arkavo_mcp::{Tool as McpTool, ToolSchema};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -106,6 +107,57 @@ impl McpTestServer {
 
         // Initialize device manager
         let device_manager = Arc::new(DeviceManager::new());
+
+        // Initialize memory tools
+        eprintln!("[McpTestServer] Initializing memory tools...");
+        let runtime = tokio::runtime::Runtime::new()?;
+        let memory_storage = runtime.block_on(async {
+            match arkavo_memory::storage::MemoryStorage::new().await {
+                Ok(storage) => {
+                    eprintln!("[McpTestServer] Memory storage initialized successfully");
+                    Some(Arc::new(storage))
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[McpTestServer] Warning: Failed to initialize memory storage: {}",
+                        e
+                    );
+                    eprintln!("[McpTestServer] Memory tools will not be available");
+                    None
+                }
+            }
+        });
+
+        // Add memory tools if storage is available
+        if let Some(storage) = memory_storage {
+            tools.insert(
+                "store_memory".to_string(),
+                Arc::new(McpToolAdapter::new(
+                    arkavo_memory::mcp_tools::StoreMemoryTool::new(storage.clone()),
+                )),
+            );
+            tools.insert(
+                "search_memory".to_string(),
+                Arc::new(McpToolAdapter::new(
+                    arkavo_memory::mcp_tools::SearchMemoryTool::new(storage.clone()),
+                )),
+            );
+            tools.insert(
+                "get_memory".to_string(),
+                Arc::new(McpToolAdapter::new(
+                    arkavo_memory::mcp_tools::GetMemoryTool::new(storage.clone()),
+                )),
+            );
+            tools.insert(
+                "categorize_memory".to_string(),
+                Arc::new(McpToolAdapter::new(
+                    arkavo_memory::mcp_tools::CategorizeMemoryTool::new(storage.clone()),
+                )),
+            );
+            eprintln!(
+                "[McpTestServer] Memory tools registered: store_memory, search_memory, get_memory, categorize_memory"
+            );
+        }
 
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
         tools.insert("mutate_state".to_string(), Arc::new(MutateStateKit::new()));
@@ -524,17 +576,39 @@ impl McpTestServer {
     }
 }
 
+// Re-export arkavo-mcp types for backward compatibility
+pub use arkavo_mcp::ToolSchema;
+
+// Wrapper trait that adapts McpTool to use TestError
 #[async_trait]
 pub trait Tool: Send + Sync {
     async fn execute(&self, params: Value) -> Result<Value>;
     fn schema(&self) -> &ToolSchema;
 }
 
-#[derive(Debug, Clone)]
-pub struct ToolSchema {
-    pub name: String,
-    pub description: String,
-    pub parameters: Value,
+// Adapter that wraps an McpTool to use TestError
+struct McpToolAdapter<T: McpTool> {
+    inner: T,
+}
+
+impl<T: McpTool> McpToolAdapter<T> {
+    fn new(tool: T) -> Self {
+        Self { inner: tool }
+    }
+}
+
+#[async_trait]
+impl<T: McpTool> Tool for McpToolAdapter<T> {
+    async fn execute(&self, params: Value) -> Result<Value> {
+        self.inner
+            .execute(params)
+            .await
+            .map_err(|e| TestError::Mcp(e.to_string()))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        self.inner.schema()
+    }
 }
 
 pub struct QueryStateKit {

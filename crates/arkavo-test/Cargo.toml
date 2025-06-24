@@ -25,6 +25,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # MCP protocol
 arkavo-protocol = { path = "../arkavo-protocol" }
 
+# Memory integration
+arkavo-memory = { path = "../arkavo-memory" }
+
+# MCP types
+arkavo-mcp = { path = "../arkavo-mcp" }
+
 # Gherkin parsing
 gherkin = "0.14"
 
