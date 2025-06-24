@@ -48,20 +48,40 @@ jobs:
         with:
           shared-key: "test"
       - name: Run tests
-        run: cargo test --workspace
+        run: |
+          # Run tests without embeddings feature to avoid ONNX Runtime dependency
+          cargo test --workspace --no-default-features
+          # Run specific crates with their required features
+          cargo test -p arkavo-memory --no-default-features
+          cargo test -p arkavo-cli --no-default-features
+          cargo test -p arkavo --no-default-features
       
       - name: Install cargo-tarpaulin
         run: |
           curl -L https://github.com/xd009642/tarpaulin/releases/download/0.31.2/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xzf - -C $HOME/.cargo/bin
           
       - name: Generate test coverage
-        run: cargo tarpaulin --ignore-tests --workspace --out Xml
+        run: cargo tarpaulin --ignore-tests --workspace --no-default-features --out Xml
           
       - name: Check test coverage
         run: |
           COVERAGE=$(grep -E 'line-rate="[0-9.]+"' cobertura.xml | head -1 | grep -oE '[0-9.]+')
           COVERAGE_PERCENT=$(awk -v cov="$COVERAGE" 'BEGIN {printf "%.2f", cov * 100}')
           echo "Coverage: $COVERAGE_PERCENT%"
+
+  test-embeddings:
+    name: Test with Embeddings (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-embeddings"
+      - name: Run embedding tests
+        run: |
+          # Test only the memory crate with embeddings enabled
+          cargo test -p arkavo-memory --features embeddings
 
   build-linux:
     name: Build Linux (musl)
@@ -195,7 +215,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [format, clippy, test, smoke-test-linux, smoke-test-macos, performance-check]
+    needs: [format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -204,6 +224,7 @@ jobs:
           if [[ "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
                 "${{ needs.test.result }}" != "success" || \
+                "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.performance-check.result }}" != "success" ]]; then
