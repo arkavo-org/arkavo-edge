@@ -17,7 +17,7 @@ static XCTEST_BRIDGE: OnceLock<XCTestBridgeType> = OnceLock::new();
 pub struct UiInteractionKit {
     schema: ToolSchema,
     device_manager: Arc<DeviceManager>,
-    axp_socket_cache: Arc<RwLock<Option<(String, String)>>>, // (device_id, socket_path)
+    axp_socket_cache: Arc<Mutex<Option<(String, String)>>>, // (device_id, socket_path) - Using Mutex to prevent race conditions
 }
 
 impl UiInteractionKit {
@@ -82,7 +82,7 @@ impl UiInteractionKit {
                 }),
             },
             device_manager,
-            axp_socket_cache: Arc::new(RwLock::new(None)),
+            axp_socket_cache: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -94,7 +94,7 @@ impl UiInteractionKit {
 
         // Check cache first
         {
-            let cache = self.axp_socket_cache.read().await;
+            let cache = self.axp_socket_cache.lock().await;
             if let Some((cached_device_id, socket_path)) = cache.as_ref() {
                 if cached_device_id == &device_id {
                     eprintln!(
@@ -136,7 +136,7 @@ impl UiInteractionKit {
                             // Update cache
                             let socket_path_str = socket_path.to_string_lossy().to_string();
                             {
-                                let mut cache = self.axp_socket_cache.write().await;
+                                let mut cache = self.axp_socket_cache.lock().await;
                                 *cache = Some((device_id.clone(), socket_path_str.clone()));
                             }
 
@@ -153,7 +153,7 @@ impl UiInteractionKit {
 
         // Clear cache if no socket found
         {
-            let mut cache = self.axp_socket_cache.write().await;
+            let mut cache = self.axp_socket_cache.lock().await;
             *cache = None;
         }
 
