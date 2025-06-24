@@ -9,7 +9,7 @@ description = "Test harness for the Arkavo agentic CLI tool - local test runner 
 [features]
 default = []
 # Enable memory tools with embeddings support
-embeddings = ["arkavo-memory/embeddings"]
+embeddings = ["arkavo-memory", "arkavo-memory/embeddings"]
 
 [dependencies]
 # Async runtime
@@ -31,7 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 
 # Memory integration
-arkavo-memory = { path = "../arkavo-memory", default-features = false }
+arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
 
 # MCP types
 arkavo-mcp = { path = "../arkavo-mcp" }
