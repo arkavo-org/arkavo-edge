@@ -45,3 +45,6 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 *-dependencies-*.json
+
+# Downloaded model files for arkavo-memory
+crates/arkavo-memory/models/
