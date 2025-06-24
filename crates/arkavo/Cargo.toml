@@ -6,8 +6,12 @@ authors.workspace = true
 license.workspace = true
 description = "Main binary for the Arkavo agentic CLI tool"
 
+[features]
+default = ["embeddings"]
+embeddings = ["arkavo-cli/embeddings"]
+
 [dependencies]
-arkavo-cli = { path = "../arkavo-cli" }
+arkavo-cli = { path = "../arkavo-cli", default-features = false }
 anyhow = "1.0"
 
 [build-dependencies]

@@ -6,13 +6,17 @@ authors.workspace = true
 license.workspace = true
 description = "CLI Core for the Arkavo agentic CLI tool - command parser and multi-step agent loop"
 
+[features]
+default = ["embeddings"]
+embeddings = ["arkavo-memory/embeddings"]
+
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm" }
-arkavo-memory = { path = "../arkavo-memory" }
+arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = "0.1"
 log = "0.4"
