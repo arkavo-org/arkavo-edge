@@ -34,6 +34,12 @@ fn main() {
         return;
     }
 
+    // Skip downloads if embeddings feature is not enabled
+    if env::var("CARGO_FEATURE_EMBEDDINGS").is_err() {
+        println!("cargo:warning=Skipping model downloads - embeddings feature not enabled");
+        return;
+    }
+
     // Skip downloads if feature flag is set (for CI environments)
     if env::var("CARGO_FEATURE_SKIP_MODEL_DOWNLOAD").is_ok() {
         println!("cargo:warning=Skipping model downloads due to skip-model-download feature");
@@ -150,4 +156,3 @@ fn try_wget(file_path: &Path, url: &str, filename: &str) {
         }
     }
 }
-

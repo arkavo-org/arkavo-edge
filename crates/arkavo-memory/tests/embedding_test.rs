@@ -1,6 +1,7 @@
 use arkavo_memory::embeddings::EmbeddingService;
 
 #[tokio::test]
+#[cfg(feature = "embeddings")]
 async fn test_embedding_generation() {
     let service = EmbeddingService::new();
 
@@ -25,6 +26,7 @@ async fn test_embedding_generation() {
 }
 
 #[tokio::test]
+#[cfg(feature = "embeddings")]
 async fn test_embedding_consistency() {
     let service = EmbeddingService::new();
 
@@ -43,6 +45,7 @@ async fn test_embedding_consistency() {
 }
 
 #[tokio::test]
+#[cfg(feature = "embeddings")]
 async fn test_cosine_similarity() {
     let service = EmbeddingService::new();
 
@@ -77,6 +80,7 @@ async fn test_cosine_similarity() {
 }
 
 #[tokio::test]
+#[cfg(feature = "embeddings")]
 async fn test_embedding_dimension() {
     let service = EmbeddingService::new();
 
