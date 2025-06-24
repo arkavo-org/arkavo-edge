@@ -11,8 +11,8 @@ impl IosVersion {
     /// Parse iOS version from runtime string
     /// Examples: "iOS-17-4", "iOS-26-0", "iOS 17.4", "iOS-18-0-beta"
     pub fn parse(runtime: &str) -> Option<Self> {
-        // Handle various formats
-        let normalized = runtime.replace(' ', "-");
+        // Handle various formats - normalize spaces and dots
+        let normalized = runtime.replace(' ', "-").replace('.', "-");
 
         // Extract version numbers
         let parts: Vec<&str> = normalized.split('-').collect();
