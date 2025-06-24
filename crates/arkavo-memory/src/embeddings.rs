@@ -208,4 +208,3 @@ pub fn list_available_models() -> Vec<String> {
         vec!["None (embeddings disabled)".to_string()]
     }
 }
-
