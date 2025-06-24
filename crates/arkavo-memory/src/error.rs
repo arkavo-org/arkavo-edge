@@ -1,5 +1,3 @@
-use actix_web::{HttpResponse, error::ResponseError, http::StatusCode};
-
 #[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
     #[error("Database error: {0}")]
@@ -23,24 +21,6 @@ pub enum MemoryError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
-}
-
-impl ResponseError for MemoryError {
-    fn error_response(&self) -> HttpResponse {
-        let status = self.status_code();
-        HttpResponse::build(status).json(serde_json::json!({
-            "error": self.to_string(),
-            "code": status.as_u16()
-        }))
-    }
-
-    fn status_code(&self) -> StatusCode {
-        match self {
-            MemoryError::NotFound => StatusCode::NOT_FOUND,
-            MemoryError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
 }
 
 pub type Result<T> = std::result::Result<T, MemoryError>;
