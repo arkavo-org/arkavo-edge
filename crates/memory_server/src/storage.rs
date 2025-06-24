@@ -41,10 +41,7 @@ impl MemoryStorage {
     }
     
     pub fn get_data_directory() -> Result<PathBuf> {
-        let data_dir = dirs::data_dir()
-            .ok_or_else(|| MemoryError::Storage("Could not determine data directory".to_string()))?
-            .join("arkavo")
-            .join("memory_server");
+        let data_dir = PathBuf::from(".arkavo").join("memory_server");
             
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {}", e)))?;

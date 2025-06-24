@@ -23,7 +23,7 @@ The memory server uses a hybrid approach:
 ## Zero Configuration
 
 The server works out of the box with no configuration required:
-- Database is automatically created in the user's data directory (`~/Library/Application Support/arkavo/memory_server/` on macOS)
+- Database is automatically created in `.arkavo/memory_server/` relative to where you run the server
 - Ollama is expected to run on `localhost:11434` (standard installation)
 - Uses `nomic-embed-text` model by default
 - Automatically checks for Ollama availability on startup
