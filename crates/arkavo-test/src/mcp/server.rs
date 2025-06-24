@@ -1,4 +1,5 @@
 use super::app_diagnostic_tool::AppDiagnosticTool;
+use super::axp_harness_builder::AxpHarnessBuilder;
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
 use super::code_analysis_tools::{CodeAnalysisKit, FindBugsKit, TestAnalysisKit};
@@ -12,6 +13,7 @@ use super::face_id_control::{FaceIdController, FaceIdStatusChecker};
 use super::intelligent_tools::{
     ChaosTestingKit, EdgeCaseExplorerKit, IntelligentBugFinderKit, InvariantDiscoveryKit,
 };
+use super::ios_automation_guide::IosAutomationGuide;
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
@@ -86,8 +88,11 @@ impl McpTestServer {
             } else {
                 eprintln!("[McpTestServer] IDB companion initialized successfully");
                 eprintln!(
-                    "[McpTestServer] IDB files are stored in .arkavo/ directory relative to your working directory"
+                    "[McpTestServer] Arkavo files are stored in .arkavo/ directory relative to your working directory:"
                 );
+                eprintln!("  - IDB companion: .arkavo/idb_companion");
+                eprintln!("  - AXP harnesses: .arkavo/axp-harnesses/");
+                eprintln!("  - Unix sockets: .arkavo/sockets/");
             }
         }
 
@@ -148,6 +153,10 @@ impl McpTestServer {
             Arc::new(UiElementHandler::new(device_manager.clone())),
         );
         tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
+        tools.insert(
+            "ios_automation_guide".to_string(),
+            Arc::new(IosAutomationGuide::new()),
+        );
         tools.insert("xcode_info".to_string(), Arc::new(XcodeInfoTool::new()));
 
         #[cfg(target_os = "macos")]
@@ -169,8 +178,16 @@ impl McpTestServer {
             Arc::new(XCTestStatusKit::new(device_manager.clone())),
         );
         tools.insert(
+            "build_test_harness".to_string(),
+            Arc::new(AxpHarnessBuilder::new(device_manager.clone())),
+        );
+        tools.insert(
             "template_diagnostics".to_string(),
             Arc::new(TemplateDiagnosticsKit::new()),
+        );
+        tools.insert(
+            "ios26_beta_guidance".to_string(),
+            Arc::new(super::ios26_beta_guidance::Ios26BetaGuidance::new()),
         );
         tools.insert(
             "biometric_auth".to_string(),
@@ -444,9 +461,12 @@ impl McpTestServer {
                 | "ui_query"
                 | "ui_element_handler"
                 | "usage_guide"
+                | "ios_automation_guide"
+                | "xcode_info"
                 | "app_diagnostic"
                 | "setup_xcuitest"
                 | "xctest_status"
+                | "build_test_harness"
                 | "template_diagnostics"
                 | "biometric_auth"
                 | "system_dialog"
@@ -472,6 +492,7 @@ impl McpTestServer {
                 | "biometric_test_scenario"
                 | "smart_biometric_handler"
                 | "enrollment_flow"
+                | "idb_management"
         )
     }
 

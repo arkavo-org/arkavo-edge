@@ -21,7 +21,7 @@ impl XCTestSetupKit {
         Self {
             schema: ToolSchema {
                 name: "setup_xcuitest".to_string(),
-                description: "⚠️ NOT RECOMMENDED - Often fails with timeouts! Coordinate-based tapping works better and requires NO setup. Only use this if absolutely necessary for text-based element finding, but coordinates are the PRIMARY method. Most agents should NEVER need this tool - just use coordinates from screenshots instead!".to_string(),
+                description: "⚠️ DEPRECATED - Use build_test_harness instead for fast, reliable automation. This old approach often fails with timeouts. The new AXP-based harness is 10x faster and more reliable. DO NOT USE unless specifically debugging legacy issues.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
