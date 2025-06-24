@@ -77,6 +77,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test-embeddings"
+      - name: Install ONNX Runtime for macOS
+        run: |
+          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          mkdir -p ort
+          tar -xzf ort-osx.tgz -C ort --strip-components=1
+      - name: Set ORT library path
+        run: echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
       - name: Run embedding tests
         run: |
           # Test only the memory crate with embeddings enabled
@@ -127,7 +134,7 @@ jobs:
           brew install idb-companion
       
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release --target aarch64-apple-darwin --no-default-features
       
       - name: Upload binary
         uses: actions/upload-artifact@v4
