@@ -53,9 +53,11 @@ impl MemoryStorage {
         let data_dir = Self::get_data_directory()?;
         let db_path = data_dir.join("memories.db");
 
-        // Debug logging for tests
-        eprintln!("Memory storage: Creating database at {:?}", db_path);
-        eprintln!("Current directory: {:?}", std::env::current_dir());
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Memory storage: Creating database at {:?}", db_path);
+            eprintln!("Current directory: {:?}", std::env::current_dir());
+        }
 
         // Use absolute path for SQLite
         let abs_db_path = std::fs::canonicalize(&db_path).unwrap_or(db_path);

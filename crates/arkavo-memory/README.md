@@ -1,17 +1,18 @@
 # Arkavo Memory
 
-A local-first, privacy-focused memory service for AI agents with fast vector similarity search and Ollama integration. This service is integrated into the main `arkavo` binary and exposed through MCP (Model Context Protocol) tools.
+A local-first, privacy-focused memory service for AI agents with fast vector similarity search and native Rust embeddings. This service is integrated into the main `arkavo` binary and exposed through MCP (Model Context Protocol) tools.
 
 ## Features
 
 - 100% local storage with SQLite persistence
 - Fast semantic search using HNSW (Hierarchical Navigable Small World) algorithm
-- Text embeddings via local Ollama instance
+- Text embeddings via fastembed (Rust-native, no external dependencies)
 - MCP tool integration - no HTTP server needed
 - Automatic memory categorization
 - Flexible metadata support
 - **Zero configuration required** - all settings have sensible defaults
 - **Integrated into arkavo** - no separate server needed
+- **Self-contained** - embedding models are automatically downloaded on first use
 
 ## Architecture
 
@@ -19,16 +20,17 @@ The memory service uses a hybrid approach:
 - **SQLite**: Persistent storage for memory content, metadata, and serialized embeddings
 - **HNSW Index**: In-memory vector index for ultra-fast similarity search
 - **HashMap**: O(1) lookup by memory ID
-- **Ollama**: Local LLM for generating text embeddings
+- **fastembed**: Rust-native library for generating text embeddings
 - **MCP Tools**: Exposed as MCP tools instead of HTTP endpoints
 
 ## Zero Configuration
 
 The service works out of the box with no configuration required:
 - Database is automatically created in `.arkavo/memory_server/` relative to where you run arkavo
-- Ollama is expected to run on `localhost:11434` (standard installation)
-- Uses `nomic-embed-text` model by default
-- Automatically checks for Ollama availability on startup
+- Uses `AllMiniLML6V2` embedding model by default
+- Embedding model is automatically downloaded on first use (~30MB) to `.arkavo/fastembed_cache/`
+- No external services required
+- All data stays in the `.arkavo/` directory
 
 ## Integration with Arkavo
 
@@ -119,10 +121,7 @@ Category: facts (confidence: 0.87)
 
 ## Prerequisites
 
-```bash
-# Install Ollama and pull the embedding model (one-time setup)
-ollama pull nomic-embed-text
-```
+None! The embedding model will be automatically downloaded on first use.
 
 ## Testing
 
@@ -130,4 +129,4 @@ ollama pull nomic-embed-text
 cargo test --package arkavo-memory
 ```
 
-Note: Tests require a running Ollama instance with the embedding model installed.
+Note: Tests are marked as ignored by default. The embedding model will be downloaded during test execution if not already cached.

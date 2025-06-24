@@ -42,16 +42,9 @@ impl MemoryIntegration {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Initializing memory integration...");
 
-        // Check Ollama availability
+        // Initialize embedding service (will download model on first use)
         let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
-        if let Err(e) = embedding_service.ensure_model_available().await {
-            log::warn!("Ollama embedding model not available: {}", e);
-            log::info!("Memory features will be limited. To enable full functionality:");
-            log::info!("  1. Install Ollama from https://ollama.ai");
-            log::info!("  2. Run: ollama pull nomic-embed-text");
-        } else {
-            log::info!("Ollama is ready with embedding model");
-        }
+        log::info!("Using fastembed for text embeddings (model will be downloaded on first use)");
 
         let storage = Arc::new(MemoryStorage::new().await?);
         log::info!(

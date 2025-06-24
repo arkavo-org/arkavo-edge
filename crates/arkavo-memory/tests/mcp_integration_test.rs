@@ -7,7 +7,6 @@ use serde_json::json;
 use std::sync::Arc;
 
 #[tokio::test]
-#[ignore = "requires Ollama to be running"]
 async fn test_memory_lifecycle_via_mcp() {
     let storage = Arc::new(MemoryStorage::new().await.unwrap());
 
@@ -50,7 +49,6 @@ async fn test_memory_lifecycle_via_mcp() {
 }
 
 #[tokio::test]
-#[ignore = "requires Ollama to be running"]
 async fn test_categorization_via_mcp() {
     let storage = Arc::new(MemoryStorage::new().await.unwrap());
 
@@ -83,7 +81,6 @@ async fn test_categorization_via_mcp() {
 }
 
 #[tokio::test]
-#[ignore = "requires Ollama to be running"]
 async fn test_mcp_tool_schemas() {
     let storage = Arc::new(MemoryStorage::new().await.unwrap());
 

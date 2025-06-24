@@ -13,8 +13,13 @@ pub enum MemoryError {
     NotFound,
 
     #[error("Invalid request: {0}")]
-    #[allow(dead_code)]
     BadRequest(String),
+    
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+    
+    #[error("Model not available: {0}")]
+    ModelNotAvailable(String),
 
     #[error("Internal server error: {0}")]
     Internal(#[from] anyhow::Error),

@@ -1,22 +1,27 @@
+//! Embedding service using fastembed for text embeddings
+//! 
+//! This module provides a thread-safe embedding service that lazily initializes
+//! the embedding model on first use. The model is downloaded automatically
+//! and cached locally.
+//! 
+//! # Thread Safety
+//! 
+//! The `EmbeddingService` is thread-safe and can be shared across multiple
+//! async tasks. The actual embedding generation runs in a blocking thread pool
+//! to avoid blocking the async runtime, as fastembed operations are synchronous.
+//! 
+//! Multiple concurrent embedding requests will be serialized through the RwLock,
+//! but the blocking operations won't block other async tasks.
+
 use crate::error::{MemoryError, Result};
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-#[derive(Debug, Serialize)]
-struct EmbeddingRequest {
-    model: String,
-    prompt: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingResponse {
-    embedding: Vec<f32>,
-}
-
+/// Thread-safe embedding service using fastembed
 pub struct EmbeddingService {
-    client: Client,
-    base_url: String,
-    model: String,
+    model: Arc<RwLock<Option<TextEmbedding>>>,
+    model_type: EmbeddingModel,
 }
 
 impl Default for EmbeddingService {
@@ -27,77 +32,95 @@ impl Default for EmbeddingService {
 
 impl EmbeddingService {
     pub fn new() -> Self {
+        // Use AllMiniLML6V2 as the default model
+        Self::with_model(EmbeddingModel::AllMiniLML6V2)
+    }
+
+    pub fn with_model(model_type: EmbeddingModel) -> Self {
         Self {
-            client: Client::new(),
-            base_url: "http://localhost:11434".to_string(),
-            model: "nomic-embed-text".to_string(),
+            model: Arc::new(RwLock::new(None)),
+            model_type,
         }
     }
 
-    pub async fn ensure_model_available(&self) -> Result<()> {
-        let response = self.client
-            .get(format!("{}/api/tags", self.base_url))
-            .send()
-            .await
-            .map_err(|e| MemoryError::Embedding(format!("Failed to connect to Ollama: {}. Please ensure Ollama is running on localhost:11434", e)))?;
-
-        if !response.status().is_success() {
-            return Err(MemoryError::Embedding(
-                "Failed to list Ollama models".to_string(),
-            ));
+    /// Initialize the embedding model lazily
+    async fn ensure_initialized(&self) -> Result<()> {
+        let is_initialized = {
+            let model_guard = self.model.read().await;
+            model_guard.is_some()
+        };
+        
+        if !is_initialized {
+            let mut model_guard = self.model.write().await;
+            // Double-check in case another task initialized it
+            if model_guard.is_none() {
+                log::info!("Initializing embedding model: {:?}", self.model_type);
+                
+                let model_type = self.model_type.clone();
+                
+                // Run initialization in blocking thread since it may download models
+                let text_embedding = tokio::task::spawn_blocking(move || {
+                    // Set cache directory to .arkavo/fastembed_cache
+                    let cache_dir = std::path::PathBuf::from(".arkavo").join("fastembed_cache");
+                    std::fs::create_dir_all(&cache_dir).ok();
+                    
+                    let init_options = InitOptions::new(model_type)
+                        .with_cache_dir(cache_dir)
+                        .with_show_download_progress(true);
+                    
+                    TextEmbedding::try_new(init_options)
+                })
+                .await
+                .map_err(|e| MemoryError::ModelNotAvailable(format!(
+                    "Failed to spawn initialization task: {}", e
+                )))?
+                .map_err(|e| MemoryError::ModelNotAvailable(format!(
+                    "Failed to initialize embedding model: {}", e
+                )))?;
+                
+                *model_guard = Some(text_embedding);
+                log::info!("Embedding model initialized successfully");
+            }
         }
-
-        let body: serde_json::Value = response.json().await.map_err(|e| {
-            MemoryError::Embedding(format!("Failed to parse Ollama response: {}", e))
-        })?;
-
-        let models = body["models"]
-            .as_array()
-            .ok_or_else(|| MemoryError::Embedding("Invalid Ollama response format".to_string()))?;
-
-        let has_model = models
-            .iter()
-            .any(|m| m["name"].as_str().unwrap_or("").contains(&self.model));
-
-        if !has_model {
-            return Err(MemoryError::Embedding(format!(
-                "Embedding model '{}' not found. Please run: ollama pull {}",
-                self.model, self.model
-            )));
-        }
-
         Ok(())
     }
 
+    pub async fn ensure_model_available(&self) -> Result<()> {
+        self.ensure_initialized().await
+    }
+
     pub async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        let request = EmbeddingRequest {
-            model: self.model.clone(),
-            prompt: text.to_string(),
-        };
-
-        let response = self
-            .client
-            .post(format!("{}/api/embeddings", self.base_url))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| MemoryError::Embedding(format!("Failed to send request: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Err(MemoryError::Embedding(format!(
-                "Ollama API error: {} - {}",
-                status, text
-            )));
-        }
-
-        let embedding_response: EmbeddingResponse = response
-            .json()
-            .await
-            .map_err(|e| MemoryError::Embedding(format!("Failed to parse response: {}", e)))?;
-
-        Ok(embedding_response.embedding)
+        // Ensure model is initialized
+        self.ensure_initialized().await?;
+        
+        // Clone the text to move into the blocking task
+        let text = text.to_string();
+        
+        // Clone the model Arc for the blocking task
+        let model_clone = self.model.clone();
+        
+        // Run the blocking embed operation in a separate thread
+        let embeddings = tokio::task::spawn_blocking(move || {
+            let model_guard = model_clone.blocking_read();
+            let model = model_guard.as_ref()
+                .ok_or_else(|| MemoryError::ModelNotAvailable("Model not initialized".to_string()))?;
+            
+            // Generate embeddings
+            let documents = vec![text.as_str()];
+            let embeddings = model.embed(documents, None)
+                .map_err(|e| MemoryError::Embedding(format!("Failed to generate embedding: {}", e)))?;
+            
+            // Extract the first (and only) embedding
+            let embedding = embeddings.into_iter()
+                .next()
+                .ok_or_else(|| MemoryError::Embedding("No embedding generated".to_string()))?;
+            
+            Ok::<Vec<f32>, MemoryError>(embedding)
+        })
+        .await
+        .map_err(|e| MemoryError::Embedding(format!("Task join error: {}", e)))??;
+        
+        Ok(embeddings)
     }
 
     pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -117,4 +140,18 @@ impl EmbeddingService {
 
         dot_product / (norm_a.sqrt() * norm_b.sqrt())
     }
+
+    /// Get embedding dimension for the current model
+    pub fn embedding_dimension(&self) -> usize {
+        // fastembed default model (AllMiniLML6V2) produces 384-dimensional embeddings
+        384
+    }
+}
+
+/// Available embedding models
+pub fn list_available_models() -> Vec<String> {
+    TextEmbedding::list_supported_models()
+        .into_iter()
+        .map(|m| format!("{:?}", m))
+        .collect()
 }
