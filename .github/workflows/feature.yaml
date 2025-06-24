@@ -149,7 +149,7 @@ jobs:
       
       - name: Check binary size
         run: |
-          cargo build --release
+          cargo build --release --no-default-features
           SIZE=$(du -b target/release/arkavo | cut -f1)
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
@@ -162,7 +162,7 @@ jobs:
         run: |
           cargo clean
           BUILD_START=$(date +%s)
-          cargo build --release
+          cargo build --release --no-default-features
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
           
