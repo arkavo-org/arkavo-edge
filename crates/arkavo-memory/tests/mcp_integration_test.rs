@@ -1,8 +1,8 @@
+use arkavo_mcp::Tool;
 use arkavo_memory::{
     mcp_tools::{CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool},
     storage::MemoryStorage,
 };
-use arkavo_mcp::Tool;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -90,29 +90,37 @@ async fn test_mcp_tool_schemas() {
     // Verify tool schemas
     let store_tool = StoreMemoryTool::new(storage.clone());
     assert_eq!(store_tool.schema().name, "store_memory");
-    assert!(store_tool.schema().parameters["required"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("content")));
+    assert!(
+        store_tool.schema().parameters["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("content"))
+    );
 
     let search_tool = SearchMemoryTool::new(storage.clone());
     assert_eq!(search_tool.schema().name, "search_memory");
-    assert!(search_tool.schema().parameters["required"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("query")));
+    assert!(
+        search_tool.schema().parameters["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("query"))
+    );
 
     let get_tool = GetMemoryTool::new(storage.clone());
     assert_eq!(get_tool.schema().name, "get_memory");
-    assert!(get_tool.schema().parameters["required"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("id")));
+    assert!(
+        get_tool.schema().parameters["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("id"))
+    );
 
     let categorize_tool = CategorizeMemoryTool::new(storage);
     assert_eq!(categorize_tool.schema().name, "categorize_memory");
-    assert!(categorize_tool.schema().parameters["required"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("content")));
+    assert!(
+        categorize_tool.schema().parameters["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("content"))
+    );
 }

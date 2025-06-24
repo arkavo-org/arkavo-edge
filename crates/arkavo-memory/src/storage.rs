@@ -2,8 +2,8 @@ use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
 use crate::models::{Memory, SearchResult};
 use hnsw_rs::prelude::*;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -52,11 +52,11 @@ impl MemoryStorage {
     pub async fn with_config(config: HnswConfig) -> Result<Self> {
         let data_dir = Self::get_data_directory()?;
         let db_path = data_dir.join("memories.db");
-        
+
         // Debug logging for tests
         eprintln!("Memory storage: Creating database at {:?}", db_path);
         eprintln!("Current directory: {:?}", std::env::current_dir());
-        
+
         // Use absolute path for SQLite
         let abs_db_path = std::fs::canonicalize(&db_path).unwrap_or(db_path);
         let database_url = format!("sqlite:{}?mode=rwc", abs_db_path.display());

@@ -29,7 +29,8 @@ use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
-use arkavo_mcp::{Tool as McpTool, ToolSchema};
+use arkavo_mcp::Tool as McpTool;
+pub use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -575,9 +576,6 @@ impl McpTestServer {
         result
     }
 }
-
-// Re-export arkavo-mcp types for backward compatibility
-pub use arkavo_mcp::ToolSchema;
 
 // Wrapper trait that adapts McpTool to use TestError
 #[async_trait]

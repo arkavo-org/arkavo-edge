@@ -44,11 +44,18 @@ impl StoreMemoryTool {
 
 #[async_trait]
 impl Tool for StoreMemoryTool {
-    async fn execute(&self, params: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let content = params
             .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(MemoryError::BadRequest("Missing content parameter".to_string())) as Box<dyn std::error::Error + Send + Sync>)?
+            .ok_or_else(|| {
+                Box::new(MemoryError::BadRequest(
+                    "Missing content parameter".to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?
             .to_string();
 
         let metadata = params.get("metadata").cloned();
@@ -68,7 +75,12 @@ impl Tool for StoreMemoryTool {
         let embedding = embedding_service
             .generate_embedding(&request.content)
             .await
-            .map_err(|e| Box::new(MemoryError::Embedding(format!("Failed to generate embedding: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+            .map_err(|e| {
+                Box::new(MemoryError::Embedding(format!(
+                    "Failed to generate embedding: {}",
+                    e
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let memory = Memory {
             id: Uuid::new_v4(),
@@ -83,10 +95,12 @@ impl Tool for StoreMemoryTool {
         let id = memory.id;
         let created_at = memory.created_at;
 
-        self.storage
-            .store(memory)
-            .await
-            .map_err(|e| Box::new(MemoryError::Storage(format!("Failed to store memory: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+        self.storage.store(memory).await.map_err(|e| {
+            Box::new(MemoryError::Storage(format!(
+                "Failed to store memory: {}",
+                e
+            ))) as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
         Ok(serde_json::json!({
             "id": id,
@@ -139,11 +153,18 @@ impl SearchMemoryTool {
 
 #[async_trait]
 impl Tool for SearchMemoryTool {
-    async fn execute(&self, params: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let query = params
             .get("query")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(MemoryError::BadRequest("Missing query parameter".to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(MemoryError::BadRequest(
+                    "Missing query parameter".to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let limit = params
             .get("limit")
@@ -158,7 +179,10 @@ impl Tool for SearchMemoryTool {
             .storage
             .search(query, limit, category)
             .await
-            .map_err(|e| Box::new(MemoryError::Storage(format!("Search failed: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+            .map_err(|e| {
+                Box::new(MemoryError::Storage(format!("Search failed: {}", e)))
+                    as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
         let total = results.len();
         let results_json: Vec<Value> = results
@@ -219,20 +243,24 @@ impl GetMemoryTool {
 
 #[async_trait]
 impl Tool for GetMemoryTool {
-    async fn execute(&self, params: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let id_str = params
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(MemoryError::BadRequest("Missing id parameter".to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let id_str = params.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
+            Box::new(MemoryError::BadRequest("Missing id parameter".to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
-        let id =
-            Uuid::parse_str(id_str).map_err(|e| Box::new(MemoryError::BadRequest(format!("Invalid UUID: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+        let id = Uuid::parse_str(id_str).map_err(|e| {
+            Box::new(MemoryError::BadRequest(format!("Invalid UUID: {}", e)))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
-        let memory = self
-            .storage
-            .get(id)
-            .await
-            .map_err(|e| Box::new(MemoryError::Storage(format!("Failed to get memory: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+        let memory = self.storage.get(id).await.map_err(|e| {
+            Box::new(MemoryError::Storage(format!("Failed to get memory: {}", e)))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
         Ok(serde_json::json!({
             "id": memory.id,
@@ -278,17 +306,25 @@ impl CategorizeMemoryTool {
 
 #[async_trait]
 impl Tool for CategorizeMemoryTool {
-    async fn execute(&self, params: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let content = params
             .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| Box::new(MemoryError::BadRequest("Missing content parameter".to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+            .ok_or_else(|| {
+                Box::new(MemoryError::BadRequest(
+                    "Missing content parameter".to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
 
-        let (category, confidence) = self
-            .storage
-            .categorize(content)
-            .await
-            .map_err(|e| Box::new(MemoryError::Storage(format!("Categorization failed: {}", e))) as Box<dyn std::error::Error + Send + Sync>)?;
+        let (category, confidence) = self.storage.categorize(content).await.map_err(|e| {
+            Box::new(MemoryError::Storage(format!(
+                "Categorization failed: {}",
+                e
+            ))) as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
         Ok(serde_json::json!({
             "category": category,

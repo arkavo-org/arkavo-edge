@@ -11,7 +11,10 @@ pub struct ToolSchema {
 
 #[async_trait]
 pub trait Tool: Send + Sync {
-    async fn execute(&self, params: Value) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
     fn schema(&self) -> &ToolSchema;
 }
 
