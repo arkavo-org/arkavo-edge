@@ -120,7 +120,9 @@ impl HarnessCompiler {
             }));
         }
 
-        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout).trim().to_string();
+        let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
+            .trim()
+            .to_string();
         eprintln!("[AxpHarnessBuilder] Using SDK: {}", sdk_path);
 
         let swift_files = vec![

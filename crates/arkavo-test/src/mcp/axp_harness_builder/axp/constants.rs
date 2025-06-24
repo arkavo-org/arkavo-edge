@@ -45,4 +45,3 @@ pub mod error_codes {
     pub const BETA_COMPILATION_FAILED: &str = "BETA_COMPILATION_FAILED";
     pub const SDK_NOT_FOUND: &str = "SDK_NOT_FOUND";
 }
-

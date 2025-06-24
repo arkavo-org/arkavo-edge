@@ -82,8 +82,8 @@ impl AxpHarnessBuilder {
         let device_id = device.id.clone();
 
         // Parse iOS version
-        let ios_version = axp::version::IosVersion::parse(&device.runtime)
-            .unwrap_or(axp::version::IosVersion {
+        let ios_version =
+            axp::version::IosVersion::parse(&device.runtime).unwrap_or(axp::version::IosVersion {
                 major: 18,
                 minor: 0,
                 patch: None,
@@ -103,7 +103,9 @@ impl AxpHarnessBuilder {
         self.create_source_structure(&build_dir)?;
 
         // Get socket path
-        let socket_path = self.socket_manager.get_socket_path(&device_id, app_bundle_id);
+        let socket_path = self
+            .socket_manager
+            .get_socket_path(&device_id, app_bundle_id);
 
         // Write Swift files based on iOS version
         self.write_swift_files(&build_dir, &socket_path, &ios_version)?;
@@ -116,7 +118,12 @@ impl AxpHarnessBuilder {
 
         // Compile the harness
         let sim_version = ios_version.major.to_string();
-        let compile_result = axp::compilation::HarnessCompiler::compile_with_spm(&build_dir, &plist_path, &sim_version).await?;
+        let compile_result = axp::compilation::HarnessCompiler::compile_with_spm(
+            &build_dir,
+            &plist_path,
+            &sim_version,
+        )
+        .await?;
 
         if !compile_result["success"].as_bool().unwrap_or(false) {
             return Ok(compile_result);
@@ -132,12 +139,7 @@ impl AxpHarnessBuilder {
         }
 
         // Build result with detailed capabilities
-        Ok(self.build_success_response(
-            bundle_path,
-            &socket_path,
-            app_bundle_id,
-            &ios_version,
-        ))
+        Ok(self.build_success_response(bundle_path, &socket_path, app_bundle_id, &ios_version))
     }
 
     fn verify_xcode_tools(&self) -> std::result::Result<(), Value> {
@@ -237,8 +239,9 @@ impl AxpHarnessBuilder {
             eprintln!("[AxpHarnessBuilder] Using minimal runner for iOS 26 beta compatibility");
             let runner_content = templates::ARKAVO_TEST_RUNNER_MINIMAL_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
-            fs::write(&runner_path, runner_content)
-                .map_err(|e| TestError::Mcp(format!("Failed to write minimal test runner: {}", e)))?;
+            fs::write(&runner_path, runner_content).map_err(|e| {
+                TestError::Mcp(format!("Failed to write minimal test runner: {}", e))
+            })?;
         } else {
             let runner_content = templates::ARKAVO_TEST_RUNNER_AXP_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
@@ -293,12 +296,7 @@ let package = Package(
 
     fn install_to_simulator(&self, device_id: &str, bundle_path: &str) -> Result<()> {
         let output = Command::new("xcrun")
-            .args([
-                "simctl",
-                "install",
-                device_id,
-                bundle_path,
-            ])
+            .args(["simctl", "install", device_id, bundle_path])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run xcrun simctl install: {}", e)))?;
 
