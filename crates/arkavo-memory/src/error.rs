@@ -14,10 +14,10 @@ pub enum MemoryError {
 
     #[error("Invalid request: {0}")]
     BadRequest(String),
-    
+
     #[error("Configuration error: {0}")]
     Configuration(String),
-    
+
     #[error("Model not available: {0}")]
     ModelNotAvailable(String),
 

@@ -42,9 +42,7 @@ impl MemoryIntegration {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Initializing memory integration...");
 
-        // Initialize embedding service (will download model on first use)
-        let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
-        log::info!("Using fastembed for text embeddings (model will be downloaded on first use)");
+        log::info!("Using bundled AllMiniLML6V2 model for text embeddings");
 
         let storage = Arc::new(MemoryStorage::new().await?);
         log::info!(

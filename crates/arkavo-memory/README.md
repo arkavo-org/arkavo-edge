@@ -1,18 +1,18 @@
 # Arkavo Memory
 
-A local-first, privacy-focused memory service for AI agents with fast vector similarity search and native Rust embeddings. This service is integrated into the main `arkavo` binary and exposed through MCP (Model Context Protocol) tools.
+A local-first, privacy-focused memory service for AI agents with fast vector similarity search and bundled embeddings. This service is integrated into the main `arkavo` binary and exposed through MCP (Model Context Protocol) tools.
 
 ## Features
 
 - 100% local storage with SQLite persistence
 - Fast semantic search using HNSW (Hierarchical Navigable Small World) algorithm
-- Text embeddings via fastembed (Rust-native, no external dependencies)
+- Text embeddings via bundled AllMiniLML6V2 model (~87MB embedded in binary)
 - MCP tool integration - no HTTP server needed
 - Automatic memory categorization
 - Flexible metadata support
 - **Zero configuration required** - all settings have sensible defaults
 - **Integrated into arkavo** - no separate server needed
-- **Self-contained** - embedding models are automatically downloaded on first use
+- **Fully offline** - model is bundled at compile time, no runtime downloads
 
 ## Architecture
 
@@ -20,16 +20,16 @@ The memory service uses a hybrid approach:
 - **SQLite**: Persistent storage for memory content, metadata, and serialized embeddings
 - **HNSW Index**: In-memory vector index for ultra-fast similarity search
 - **HashMap**: O(1) lookup by memory ID
-- **fastembed**: Rust-native library for generating text embeddings
+- **Bundled Model**: AllMiniLML6V2 ONNX model embedded at compile time
 - **MCP Tools**: Exposed as MCP tools instead of HTTP endpoints
 
 ## Zero Configuration
 
 The service works out of the box with no configuration required:
 - Database is automatically created in `.arkavo/memory_server/` relative to where you run arkavo
-- Uses `AllMiniLML6V2` embedding model by default
-- Embedding model is automatically downloaded on first use (~30MB) to `.arkavo/fastembed_cache/`
-- No external services required
+- Uses bundled `AllMiniLML6V2` embedding model (no downloads needed)
+- Model files are embedded in the binary at compile time
+- No external services or network access required
 - All data stays in the `.arkavo/` directory
 
 ## Integration with Arkavo
@@ -121,7 +121,7 @@ Category: facts (confidence: 0.87)
 
 ## Prerequisites
 
-None! The embedding model will be automatically downloaded on first use.
+None! The embedding model is bundled in the binary.
 
 ## Testing
 
@@ -129,4 +129,4 @@ None! The embedding model will be automatically downloaded on first use.
 cargo test --package arkavo-memory
 ```
 
-Note: Tests are marked as ignored by default. The embedding model will be downloaded during test execution if not already cached.
+All tests work offline using the bundled model.
