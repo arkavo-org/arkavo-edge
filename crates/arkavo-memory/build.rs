@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 const MODEL_FILES: &[(&str, &str)] = &[
     (
@@ -40,19 +41,64 @@ fn main() {
         if !file_path.exists() {
             println!("cargo:warning=Downloading model file: {}", filename);
 
-            // Download the file
-            let response = ureq::get(url)
-                .call()
-                .unwrap_or_else(|e| panic!("Failed to download {}: {}", filename, e));
+            // Try to download using curl (more compatible with various environments)
+            let output = Command::new("curl")
+                .args(&[
+                    "-L", // Follow redirects
+                    "-f", // Fail on HTTP errors
+                    "-s", // Silent mode
+                    "-o",
+                    file_path.to_str().unwrap(),
+                    url,
+                ])
+                .output();
 
-            // Save to file
-            let mut file = fs::File::create(&file_path)
-                .unwrap_or_else(|e| panic!("Failed to create {}: {}", filename, e));
+            match output {
+                Ok(result) => {
+                    if !result.status.success() {
+                        // If curl fails, try wget as fallback
+                        let wget_output = Command::new("wget")
+                            .args(&[
+                                "-q", // Quiet mode
+                                "-O",
+                                file_path.to_str().unwrap(),
+                                url,
+                            ])
+                            .output();
 
-            std::io::copy(&mut response.into_reader(), &mut file)
-                .unwrap_or_else(|e| panic!("Failed to write {}: {}", filename, e));
+                        if wget_output.is_err() || !wget_output.unwrap().status.success() {
+                            panic!(
+                                "Failed to download {} - please ensure curl or wget is available",
+                                filename
+                            );
+                        }
+                    }
+                    println!("cargo:warning=Downloaded: {}", filename);
+                }
+                Err(_) => {
+                    // curl not available, try wget
+                    let wget_output = Command::new("wget")
+                        .args(&[
+                            "-q", // Quiet mode
+                            "-O",
+                            file_path.to_str().unwrap(),
+                            url,
+                        ])
+                        .output();
 
-            println!("cargo:warning=Downloaded: {}", filename);
+                    match wget_output {
+                        Ok(result) if result.status.success() => {
+                            println!("cargo:warning=Downloaded: {}", filename);
+                        }
+                        _ => {
+                            panic!(
+                                "Failed to download {} - please ensure curl or wget is available",
+                                filename
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -99,6 +99,7 @@ The project follows these quality standards:
 - Performance target: ≤50 ms from router response to diff render
 - Dependencies are kept to an absolute minimum (prefer std library solutions when possible)
 - Final binary should be large, fast, and have minimal runtime dependencies
+- **No OpenSSL dependency** - Use rustls for TLS to ensure cross-compilation compatibility (especially for musl targets)
 
 ## Git Workflow
 
