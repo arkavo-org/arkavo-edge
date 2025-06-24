@@ -88,8 +88,10 @@ jobs:
         run: echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
       - name: Run embedding tests
         run: |
-          # Test only the memory crate with embeddings enabled
+          # Test memory crate with embeddings enabled
           cargo test -p arkavo-memory --features embeddings
+          # Test arkavo-test with embeddings enabled
+          cargo test -p arkavo-test --features embeddings --lib
 
   build-linux:
     name: Build Linux (musl)
