@@ -39,6 +39,12 @@ fn main() {
         println!("cargo:warning=Skipping model downloads - embeddings feature not enabled");
         return;
     }
+    
+    // Also skip if we're building tests without the feature
+    if env::var("CARGO_CFG_TEST").is_ok() && env::var("CARGO_FEATURE_EMBEDDINGS").is_err() {
+        println!("cargo:warning=Skipping model downloads - building tests without embeddings");
+        return;
+    }
 
     // Skip downloads if feature flag is set (for CI environments)
     if env::var("CARGO_FEATURE_SKIP_MODEL_DOWNLOAD").is_ok() {

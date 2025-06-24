@@ -49,12 +49,11 @@ jobs:
           shared-key: "test"
       - name: Run tests
         run: |
-          # Run tests without embeddings feature to avoid ONNX Runtime dependency
-          cargo test --workspace --no-default-features
-          # Run specific crates with their required features
-          cargo test -p arkavo-memory --no-default-features
-          cargo test -p arkavo-cli --no-default-features
-          cargo test -p arkavo --no-default-features
+          # Run tests for all workspace members except arkavo-memory (which needs embeddings)
+          cargo test --workspace --exclude arkavo-memory --no-default-features
+          # Run arkavo-memory tests without embeddings (non-embedding tests only)
+          cargo test -p arkavo-memory --no-default-features --lib
+          cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
       
       - name: Install cargo-tarpaulin
         run: |
