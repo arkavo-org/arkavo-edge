@@ -49,11 +49,13 @@ jobs:
           shared-key: "test"
       - name: Run tests
         run: |
-          # Run tests for all workspace members except arkavo-memory (which needs embeddings)
-          cargo test --workspace --exclude arkavo-memory --no-default-features
+          # Run tests for all workspace members except those that need embeddings
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --no-default-features --lib
           cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
+          # Run arkavo-test without embeddings
+          cargo test -p arkavo-test --no-default-features
       
       - name: Install cargo-tarpaulin
         run: |

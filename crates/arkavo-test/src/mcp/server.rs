@@ -29,6 +29,7 @@ use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
 use crate::{Result, TestError};
+#[cfg(feature = "embeddings")]
 use arkavo_mcp::Tool as McpTool;
 pub use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
@@ -109,55 +110,63 @@ impl McpTestServer {
         // Initialize device manager
         let device_manager = Arc::new(DeviceManager::new());
 
-        // Initialize memory tools
-        eprintln!("[McpTestServer] Initializing memory tools...");
-        let runtime = tokio::runtime::Runtime::new()?;
-        let memory_storage = runtime.block_on(async {
-            match arkavo_memory::storage::MemoryStorage::new().await {
-                Ok(storage) => {
-                    eprintln!("[McpTestServer] Memory storage initialized successfully");
-                    Some(Arc::new(storage))
+        // Initialize memory tools if embeddings feature is enabled
+        #[cfg(feature = "embeddings")]
+        {
+            eprintln!("[McpTestServer] Initializing memory tools...");
+            let runtime = tokio::runtime::Runtime::new()?;
+            let memory_storage = runtime.block_on(async {
+                match arkavo_memory::storage::MemoryStorage::new().await {
+                    Ok(storage) => {
+                        eprintln!("[McpTestServer] Memory storage initialized successfully");
+                        Some(Arc::new(storage))
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[McpTestServer] Warning: Failed to initialize memory storage: {}",
+                            e
+                        );
+                        eprintln!("[McpTestServer] Memory tools will not be available");
+                        None
+                    }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[McpTestServer] Warning: Failed to initialize memory storage: {}",
-                        e
-                    );
-                    eprintln!("[McpTestServer] Memory tools will not be available");
-                    None
-                }
-            }
-        });
+            });
 
-        // Add memory tools if storage is available
-        if let Some(storage) = memory_storage {
-            tools.insert(
-                "store_memory".to_string(),
-                Arc::new(McpToolAdapter::new(
-                    arkavo_memory::mcp_tools::StoreMemoryTool::new(storage.clone()),
-                )),
-            );
-            tools.insert(
-                "search_memory".to_string(),
-                Arc::new(McpToolAdapter::new(
-                    arkavo_memory::mcp_tools::SearchMemoryTool::new(storage.clone()),
-                )),
-            );
-            tools.insert(
-                "get_memory".to_string(),
-                Arc::new(McpToolAdapter::new(
-                    arkavo_memory::mcp_tools::GetMemoryTool::new(storage.clone()),
-                )),
-            );
-            tools.insert(
-                "categorize_memory".to_string(),
-                Arc::new(McpToolAdapter::new(
-                    arkavo_memory::mcp_tools::CategorizeMemoryTool::new(storage.clone()),
-                )),
-            );
-            eprintln!(
-                "[McpTestServer] Memory tools registered: store_memory, search_memory, get_memory, categorize_memory"
-            );
+            // Add memory tools if storage is available
+            if let Some(storage) = memory_storage {
+                tools.insert(
+                    "store_memory".to_string(),
+                    Arc::new(McpToolAdapter::new(
+                        arkavo_memory::mcp_tools::StoreMemoryTool::new(storage.clone()),
+                    )),
+                );
+                tools.insert(
+                    "search_memory".to_string(),
+                    Arc::new(McpToolAdapter::new(
+                        arkavo_memory::mcp_tools::SearchMemoryTool::new(storage.clone()),
+                    )),
+                );
+                tools.insert(
+                    "get_memory".to_string(),
+                    Arc::new(McpToolAdapter::new(
+                        arkavo_memory::mcp_tools::GetMemoryTool::new(storage.clone()),
+                    )),
+                );
+                tools.insert(
+                    "categorize_memory".to_string(),
+                    Arc::new(McpToolAdapter::new(
+                        arkavo_memory::mcp_tools::CategorizeMemoryTool::new(storage.clone()),
+                    )),
+                );
+                eprintln!(
+                    "[McpTestServer] Memory tools registered: store_memory, search_memory, get_memory, categorize_memory"
+                );
+            }
+        }
+
+        #[cfg(not(feature = "embeddings"))]
+        {
+            eprintln!("[McpTestServer] Memory tools disabled (embeddings feature not enabled)");
         }
 
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
@@ -585,16 +594,19 @@ pub trait Tool: Send + Sync {
 }
 
 // Adapter that wraps an McpTool to use TestError
+#[cfg(feature = "embeddings")]
 struct McpToolAdapter<T: McpTool> {
     inner: T,
 }
 
+#[cfg(feature = "embeddings")]
 impl<T: McpTool> McpToolAdapter<T> {
     fn new(tool: T) -> Self {
         Self { inner: tool }
     }
 }
 
+#[cfg(feature = "embeddings")]
 #[async_trait]
 impl<T: McpTool> Tool for McpToolAdapter<T> {
     async fn execute(&self, params: Value) -> Result<Value> {
