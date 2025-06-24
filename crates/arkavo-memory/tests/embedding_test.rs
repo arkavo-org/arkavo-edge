@@ -90,4 +90,3 @@ async fn test_embedding_dimension() {
         "Embedding dimension should match expected value"
     );
 }
-

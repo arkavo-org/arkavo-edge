@@ -171,4 +171,3 @@ impl EmbeddingService {
 pub fn list_available_models() -> Vec<String> {
     vec!["AllMiniLML6V2 (bundled)".to_string()]
 }
-
