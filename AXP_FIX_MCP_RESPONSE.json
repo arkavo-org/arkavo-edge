@@ -1,0 +1,73 @@
+{
+  "task": "Fix AXP Harness iOS 26 Beta Compilation",
+  "priority": "high",
+  "context": {
+    "issue": "AXP harness fails to compile on iOS 26 beta",
+    "root_cause": "SDK changes and symbol drift in beta",
+    "impact": "UI automation falls back to slower methods"
+  },
+  "implementation_steps": [
+    {
+      "step": 1,
+      "action": "update_file",
+      "file": "/Users/paul/Projects/arkavo/arkavo-edge/crates/arkavo-test/src/mcp/axp_harness_builder.rs",
+      "description": "Add enhanced SDK detection and fallback compilation",
+      "line_range": [219, 370],
+      "changes": [
+        {
+          "operation": "replace_method",
+          "method_name": "compile_harness",
+          "new_content": "See AXP_HARNESS_FIX_GUIDE.md for full implementation"
+        },
+        {
+          "operation": "add_method",
+          "method_name": "compile_with_sdk",
+          "after_line": 370
+        },
+        {
+          "operation": "add_method", 
+          "method_name": "compile_with_fallback",
+          "after_line": 370
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "action": "update_file",
+      "file": "/Users/paul/Projects/arkavo/arkavo-edge/crates/arkavo-test/templates/ArkavoAXBridge.swift",
+      "description": "Add conditional compilation for XCTest",
+      "changes": [
+        {
+          "operation": "add_imports",
+          "at_line": 1,
+          "content": "#if canImport(XCTest)\nimport XCTest\n#endif"
+        },
+        {
+          "operation": "wrap_method",
+          "method_name": "snapshot",
+          "with": "#if canImport(XCTest) ... #else ... #endif"
+        },
+        {
+          "operation": "wrap_method",
+          "method_name": "fallbackTap", 
+          "with": "#if canImport(XCTest) ... #else ... #endif"
+        }
+      ]
+    }
+  ],
+  "test_commands": [
+    "cargo build",
+    "cargo test axp_harness",
+    "./test_axp_harness_build.sh"
+  ],
+  "success_criteria": [
+    "Compilation succeeds or provides clear fallback message",
+    "No undefined symbol errors",
+    "Socket file created at /tmp/arkavo-axp-*.sock",
+    "UI automation continues working even if AXP fails"
+  ],
+  "rollback_plan": {
+    "if_fails": "Revert to previous version without iOS 26 specific handling",
+    "command": "git checkout HEAD~1 -- crates/arkavo-test/src/mcp/axp_harness_builder.rs"
+  }
+}
