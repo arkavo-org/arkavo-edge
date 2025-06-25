@@ -9,6 +9,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
+// Lightweight struct for database queries that only need partial data
+#[derive(sqlx::FromRow)]
+struct MemoryRow {
+    #[allow(dead_code)]
+    id: String,
+    category: Option<String>,
+    embedding: String,  // JSON-encoded Vec<f32>
+}
+
 pub struct HnswConfig {
     pub max_nb_connection: usize,
     pub ef_construction: usize,
@@ -304,37 +313,43 @@ impl MemoryStorage {
     pub async fn categorize(&self, content: &str) -> Result<(String, f32)> {
         let embedding = self.embedding_service.generate_embedding(content).await?;
 
-        let categories = self.get_categories().await?;
-        if categories.is_empty() {
+        // Get all memories with categories using the lightweight MemoryRow struct
+        let rows: Vec<MemoryRow> = sqlx::query_as(
+            "SELECT id, category, embedding
+             FROM memories
+             WHERE category IS NOT NULL AND embedding IS NOT NULL"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        if rows.is_empty() {
             return Ok(("uncategorized".to_string(), 1.0));
         }
 
         let mut best_category = "uncategorized".to_string();
         let mut best_score = 0.0;
 
-        for category in categories {
-            let category_samples = self
-                .search(content, 5, Some(&category))
-                .await
-                .unwrap_or_default();
-
-            if category_samples.is_empty() {
-                continue;
-            }
-
-            let avg_score: f32 = category_samples
-                .iter()
-                .map(|r| EmbeddingService::cosine_similarity(&embedding, &r.memory.embedding))
-                .sum::<f32>()
-                / category_samples.len() as f32;
-
-            if avg_score > best_score {
-                best_score = avg_score;
-                best_category = category;
+        // Find the memory with the highest similarity
+        for row in rows {
+            if let Some(category) = row.category {
+                // Parse the embedding from JSON
+                let mem_embedding: Vec<f32> = serde_json::from_str(&row.embedding)?;
+                let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
+                
+                if score > best_score {
+                    best_score = score;
+                    best_category = category;
+                }
             }
         }
 
-        Ok((best_category, best_score))
+        // Use a lower threshold to be more accepting of similar content
+        let threshold = 0.4;
+        if best_score > threshold {
+            Ok((best_category, best_score))
+        } else {
+            Ok(("uncategorized".to_string(), best_score))
+        }
     }
 
     async fn get_categories(&self) -> Result<Vec<String>> {

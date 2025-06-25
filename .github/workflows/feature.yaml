@@ -87,6 +87,9 @@ jobs:
       - name: Set ORT library path
         run: echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
       - name: Run embedding tests
+        env:
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
+          ORT_DYLIB_PATH: ${{ github.workspace }}/ort/lib
         run: |
           # Test memory crate with embeddings enabled
           cargo test -p arkavo-memory --features embeddings
