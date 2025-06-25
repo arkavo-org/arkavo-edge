@@ -47,6 +47,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test"
+      - name: Clean test artifacts
+        run: rm -rf .arkavo/memory_server/memories.db
       - name: Run tests
         run: |
           # Run tests for all workspace members except those that need embeddings
@@ -95,6 +97,8 @@ jobs:
           curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/config.json
           curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/special_tokens_map.json
           curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer_config.json
+      - name: Clean test artifacts
+        run: rm -rf .arkavo/memory_server/memories.db
       - name: Run embedding tests
         env:
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
@@ -236,7 +240,6 @@ jobs:
           
       - name: Test binary
         run: |
-          cd arkavo-x86_64-unknown-linux-musl
           chmod +x arkavo
           ./arkavo --version
 
@@ -252,7 +255,6 @@ jobs:
           
       - name: Test binary
         run: |
-          cd arkavo-aarch64-apple-darwin
           chmod +x arkavo
           # Test with bundled ONNX Runtime library
           ./arkavo --version
