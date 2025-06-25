@@ -988,9 +988,7 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
-async fn initialize_llm_client(
-    print_mode: bool,
-) -> Result<LlmClient, Box<dyn std::error::Error>> {
+async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Initialize memory storage to check for saved configuration
     let storage = Arc::new(MemoryStorage::new().await?);
 
