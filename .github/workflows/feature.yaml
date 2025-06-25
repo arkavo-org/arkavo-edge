@@ -47,21 +47,68 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test"
+      # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
-        run: cargo test --workspace
+        run: |
+          # Run tests for all workspace members except those that need embeddings
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
+          # Run arkavo-memory tests without embeddings (non-embedding tests only)
+          cargo test -p arkavo-memory --no-default-features --lib
+          cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
+          # Run arkavo-test without embeddings
+          cargo test -p arkavo-test --no-default-features
       
       - name: Install cargo-tarpaulin
         run: |
           curl -L https://github.com/xd009642/tarpaulin/releases/download/0.31.2/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xzf - -C $HOME/.cargo/bin
           
       - name: Generate test coverage
-        run: cargo tarpaulin --ignore-tests --workspace --out Xml
+        run: cargo tarpaulin --ignore-tests --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features --out Xml
           
       - name: Check test coverage
         run: |
           COVERAGE=$(grep -E 'line-rate="[0-9.]+"' cobertura.xml | head -1 | grep -oE '[0-9.]+')
           COVERAGE_PERCENT=$(awk -v cov="$COVERAGE" 'BEGIN {printf "%.2f", cov * 100}')
           echo "Coverage: $COVERAGE_PERCENT%"
+
+  test-embeddings:
+    name: Test with Embeddings (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-embeddings"
+      - name: Install ONNX Runtime for macOS
+        run: |
+          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          mkdir -p ort
+          tar -xzf ort-osx.tgz -C ort --strip-components=1
+      - name: Set ORT library path
+        run: |
+          echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
+          echo "ORT_LIB_PATH=$PWD/ort/lib" >> $GITHUB_ENV
+      - name: Download embedding model files
+        run: |
+          mkdir -p crates/arkavo-memory/models
+          cd crates/arkavo-memory/models
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/model.onnx
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/config.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/special_tokens_map.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer_config.json
+      # Tests now use isolated databases in temp directory, no cleanup needed
+      - name: Run embedding tests
+        env:
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
+          ORT_DYLIB_PATH: ${{ github.workspace }}/ort/lib
+          ORT_LIB_PATH: ${{ github.workspace }}/ort/lib
+        run: |
+          # Test memory crate with embeddings enabled
+          cargo test -p arkavo-memory --features embeddings
+          # Test arkavo-test with embeddings enabled
+          cargo test -p arkavo-test --features embeddings --lib
 
   build-linux:
     name: Build Linux (musl)
@@ -81,13 +128,21 @@ jobs:
           sudo apt-get install -y musl-tools
       
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features
+      
+      - name: Prepare release artifact
+        run: |
+          mkdir -p release-package
+          cp target/x86_64-unknown-linux-musl/release/arkavo release-package/
+          chmod +x release-package/arkavo
+          # Note: musl builds should use static linking or ship without embeddings
+          # The no-default-features flag disables embeddings for musl compatibility
       
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: arkavo-x86_64-unknown-linux-musl
-          path: target/x86_64-unknown-linux-musl/release/arkavo
+          path: release-package/
           retention-days: 1
 
   build-macos:
@@ -108,13 +163,25 @@ jobs:
           brew install idb-companion
       
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --release --target aarch64-apple-darwin --no-default-features
+      
+      - name: Prepare release artifact with ONNX Runtime
+        run: |
+          mkdir -p release-package
+          cp target/aarch64-apple-darwin/release/arkavo release-package/
+          # Download ONNX Runtime for macOS ARM64
+          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          mkdir -p ort-temp
+          tar -xzf ort-osx.tgz -C ort-temp --strip-components=1
+          # Copy the dylib next to the binary for zero-config
+          cp ort-temp/lib/libonnxruntime*.dylib release-package/
+          chmod +x release-package/arkavo
       
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: arkavo-aarch64-apple-darwin
-          path: target/aarch64-apple-darwin/release/arkavo
+          path: release-package/
           retention-days: 1
 
   # Performance check can run independently
@@ -130,7 +197,7 @@ jobs:
       
       - name: Check binary size
         run: |
-          cargo build --release
+          cargo build --release --no-default-features
           SIZE=$(du -b target/release/arkavo | cut -f1)
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
@@ -143,7 +210,7 @@ jobs:
         run: |
           cargo clean
           BUILD_START=$(date +%s)
-          cargo build --release
+          cargo build --release --no-default-features
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
           
@@ -190,12 +257,13 @@ jobs:
       - name: Test binary
         run: |
           chmod +x arkavo
+          # Test with bundled ONNX Runtime library
           ./arkavo --version
 
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [format, clippy, test, smoke-test-linux, smoke-test-macos, performance-check]
+    needs: [format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -204,6 +272,7 @@ jobs:
           if [[ "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
                 "${{ needs.test.result }}" != "success" || \
+                "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.performance-check.result }}" != "success" ]]; then

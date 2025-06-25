@@ -1,0 +1,37 @@
+[package]
+name = "arkavo-memory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Local-first memory server with vector search for Arkavo"
+build = "build.rs"
+include = ["src/**/*", "models/**/*", "build.rs", "README.md"]
+
+[features]
+default = []
+# Enable embedding support (requires ONNX Runtime)
+embeddings = ["fastembed"]
+# Skip model downloads in build script (for CI environments without curl/wget)
+skip-model-download = []
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+fastembed = { version = "4", optional = true }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
+env_logger = "0.10"
+log = "0.4"
+thiserror = "1.0"
+anyhow = "1.0"
+hnsw_rs = "0.3"
+arkavo-llm = { path = "../arkavo-llm" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+async-trait = "0.1"
+bytemuck = "1.14"
+
+[dev-dependencies]
+tokio-test = "0.4"

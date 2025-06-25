@@ -6,6 +6,13 @@ authors.workspace = true
 license.workspace = true
 description = "Test harness for the Arkavo agentic CLI tool - local test runner adapter for various languages"
 
+[features]
+default = ["memory"]
+# Enable memory tools (works with or without embeddings)
+memory = ["arkavo-memory"]
+# Enable embeddings support for memory tools
+embeddings = ["memory", "arkavo-memory/embeddings"]
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }
@@ -24,6 +31,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # MCP protocol
 arkavo-protocol = { path = "../arkavo-protocol" }
+
+# Memory integration
+arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
+
+# MCP types
+arkavo-mcp = { path = "../arkavo-mcp" }
 
 # Gherkin parsing
 gherkin = "0.14"
