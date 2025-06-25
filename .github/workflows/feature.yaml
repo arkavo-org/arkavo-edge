@@ -86,7 +86,9 @@ jobs:
           mkdir -p ort
           tar -xzf ort-osx.tgz -C ort --strip-components=1
       - name: Set ORT library path
-        run: echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
+        run: |
+          echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
+          echo "ORT_LIB_PATH=$PWD/ort/lib" >> $GITHUB_ENV
       - name: Download embedding model files
         run: |
           mkdir -p crates/arkavo-memory/models
@@ -101,6 +103,7 @@ jobs:
         env:
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
           ORT_DYLIB_PATH: ${{ github.workspace }}/ort/lib
+          ORT_LIB_PATH: ${{ github.workspace }}/ort/lib
         run: |
           # Test memory crate with embeddings enabled
           cargo test -p arkavo-memory --features embeddings

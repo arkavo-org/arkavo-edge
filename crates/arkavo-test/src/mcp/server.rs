@@ -450,17 +450,21 @@ impl McpTestServer {
                 CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool,
             };
             use arkavo_memory::storage::MemoryStorage;
-            
+
             match MemoryStorage::new().await {
                 Ok(storage) => {
                     let storage_arc = Arc::new(storage);
                     self.register_tool(
                         "store_memory".to_string(),
-                        Arc::new(McpToolAdapter::new(StoreMemoryTool::new(storage_arc.clone()))),
+                        Arc::new(McpToolAdapter::new(StoreMemoryTool::new(
+                            storage_arc.clone(),
+                        ))),
                     )?;
                     self.register_tool(
                         "search_memory".to_string(),
-                        Arc::new(McpToolAdapter::new(SearchMemoryTool::new(storage_arc.clone()))),
+                        Arc::new(McpToolAdapter::new(SearchMemoryTool::new(
+                            storage_arc.clone(),
+                        ))),
                     )?;
                     self.register_tool(
                         "get_memory".to_string(),
@@ -475,7 +479,10 @@ impl McpTestServer {
                 }
                 Err(e) => {
                     eprintln!("[McpTestServer] Failed to initialize memory tools: {}", e);
-                    Err(TestError::Mcp(format!("Failed to initialize memory storage: {}", e)))
+                    Err(TestError::Mcp(format!(
+                        "Failed to initialize memory storage: {}",
+                        e
+                    )))
                 }
             }
         }
