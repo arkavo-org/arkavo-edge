@@ -20,7 +20,9 @@ fn test_chat_command() {
                 error_msg.contains("Failed to initialize LLM client")
                     || error_msg.contains("Connection refused")
                     || error_msg.contains("error")
-                    || error_msg.contains("HTTP"),
+                    || error_msg.contains("HTTP")
+                    || error_msg.contains("Ollama is not running locally")
+                    || error_msg.contains("print mode doesn't support interactive prompts"),
                 "Unexpected error: {}",
                 error_msg
             );

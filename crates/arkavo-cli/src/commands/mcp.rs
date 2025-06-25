@@ -236,6 +236,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mcp_server = harness.mcp_server();
 
+    // Initialize memory tools
+    if let Err(e) = mcp_server.initialize_memory_tools().await {
+        eprintln!("Warning: Failed to initialize memory tools: {}", e);
+        // Continue without memory tools rather than failing completely
+    }
+
     eprintln!("Arkavo MCP Server starting with schema validation...");
 
     // Set up panic handler to ensure clean JSON-RPC error on panic

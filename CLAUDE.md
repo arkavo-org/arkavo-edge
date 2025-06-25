@@ -20,8 +20,11 @@ cargo build --release
 # Run the project
 cargo run
 
-# Run chat with prompt
-cargo run --bin arkavo --profile dev -- chat --prompt Hi
+# Run chat with prompt (default, no embeddings)
+cargo run -p arkavo -- chat --prompt Hi
+
+# Run with embeddings (requires ONNX Runtime)
+cargo run -p arkavo --features embeddings -- chat --prompt Hi
 
 # Run tests
 cargo test
@@ -99,6 +102,7 @@ The project follows these quality standards:
 - Performance target: ≤50 ms from router response to diff render
 - Dependencies are kept to an absolute minimum (prefer std library solutions when possible)
 - Final binary should be large, fast, and have minimal runtime dependencies
+- **No OpenSSL dependency** - Use rustls for TLS to ensure cross-compilation compatibility (especially for musl targets)
 
 ## Git Workflow
 
@@ -145,3 +149,4 @@ Avoid hardcoded paths, platform-specific assumptions, or environment-dependent c
     • `xcrun simctl io <device> sendkey` - DOES NOT EXIST
     • Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
     • For UI automation use: IDB, XCTest, or AppleScript - NOT simctl
+- run clippy and cargo fmt before each git push

@@ -36,7 +36,7 @@ cd ../.. && cargo build --release --bin arkavo
 ### 2. Start MCP Inspector
 
 ```bash
-npx @modelcontextprotocol/inspector
+DANGEROUSLY_OMIT_AUTH=true npx @modelcontextprotocol/inspector
 ```
 
 Open http://127.0.0.1:6274 in your browser.

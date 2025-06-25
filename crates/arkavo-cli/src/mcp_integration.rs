@@ -1,3 +1,4 @@
+use crate::memory_integration::MemoryIntegration;
 use arkavo_test::mcp::server::Tool as McpTool;
 use arkavo_test::mcp::{
     device_manager::DeviceManager,
@@ -59,6 +60,17 @@ impl McpConnection {
 
         let ui_query = UiQueryKit::new(device_manager.clone());
         tools.insert(ui_query.schema().name.clone(), Box::new(ui_query));
+
+        // Initialize memory tools
+        eprintln!("Initializing memory tools...");
+        let memory_runtime = runtime.clone();
+        let memory_integration =
+            memory_runtime.block_on(async { MemoryIntegration::new().await })?;
+
+        // Add memory tools
+        for (name, tool) in memory_integration.get_tools() {
+            tools.insert(name, tool);
+        }
 
         Ok(McpConnection::InProcess(InProcessMcp {
             tools: Arc::new(tools),

@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod mcp_client;
 pub mod mcp_integration;
+pub mod memory_integration;
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
