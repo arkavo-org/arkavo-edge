@@ -187,6 +187,7 @@ dependencies = [
  "arkavo-terminal",
  "arkavo-test",
  "async-trait",
+ "chrono",
  "jsonschema",
  "log",
  "regex",
@@ -194,6 +195,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "uuid",
 ]
 
 [[package]]
