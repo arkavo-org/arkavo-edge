@@ -20,6 +20,11 @@ fn test_commit_and_status() {
     manager.init_repo(temp_dir.path()).unwrap();
     let repo = manager.open_repo(temp_dir.path()).unwrap();
 
+    // Set up git config for tests
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+
     fs::write(temp_dir.path().join("test.txt"), "Hello, Git!").unwrap();
 
     let status = manager.status(&repo).unwrap();
@@ -52,6 +57,11 @@ fn test_branch_operations() {
     manager.init_repo(temp_dir.path()).unwrap();
     let repo = manager.open_repo(temp_dir.path()).unwrap();
 
+    // Set up git config for tests
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+
     fs::write(temp_dir.path().join("test.txt"), "content").unwrap();
     manager.add_all(&repo).unwrap();
     manager.commit_changes(&repo, "Initial commit").unwrap();
@@ -81,6 +91,11 @@ fn test_diff() {
     manager.init_repo(temp_dir.path()).unwrap();
     let repo = manager.open_repo(temp_dir.path()).unwrap();
 
+    // Set up git config for tests
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
+
     fs::write(temp_dir.path().join("test.txt"), "line1\nline2\n").unwrap();
     manager.add_all(&repo).unwrap();
     manager.commit_changes(&repo, "Initial commit").unwrap();
@@ -100,6 +115,11 @@ fn test_undo_commit() {
 
     manager.init_repo(temp_dir.path()).unwrap();
     let repo = manager.open_repo(temp_dir.path()).unwrap();
+
+    // Set up git config for tests
+    let mut config = repo.config().unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+    config.set_str("user.email", "test@example.com").unwrap();
 
     fs::write(temp_dir.path().join("file1.txt"), "content1").unwrap();
     manager.add_all(&repo).unwrap();
