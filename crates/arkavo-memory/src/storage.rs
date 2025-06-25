@@ -15,7 +15,7 @@ struct MemoryRow {
     #[allow(dead_code)]
     id: String,
     category: Option<String>,
-    embedding: String,  // JSON-encoded Vec<f32>
+    embedding: String, // JSON-encoded Vec<f32>
 }
 
 pub struct HnswConfig {
@@ -317,7 +317,7 @@ impl MemoryStorage {
         let rows: Vec<MemoryRow> = sqlx::query_as(
             "SELECT id, category, embedding
              FROM memories
-             WHERE category IS NOT NULL AND embedding IS NOT NULL"
+             WHERE category IS NOT NULL AND embedding IS NOT NULL",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -335,7 +335,7 @@ impl MemoryStorage {
                 // Parse the embedding from JSON
                 let mem_embedding: Vec<f32> = serde_json::from_str(&row.embedding)?;
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
-                
+
                 if score > best_score {
                     best_score = score;
                     best_category = category;
@@ -350,19 +350,5 @@ impl MemoryStorage {
         } else {
             Ok(("uncategorized".to_string(), best_score))
         }
-    }
-
-    async fn get_categories(&self) -> Result<Vec<String>> {
-        let rows = sqlx::query("SELECT DISTINCT category FROM memories WHERE category IS NOT NULL")
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut categories = Vec::new();
-        for row in rows {
-            if let Some(category) = row.get::<Option<String>, _>("category") {
-                categories.push(category);
-            }
-        }
-        Ok(categories)
     }
 }
