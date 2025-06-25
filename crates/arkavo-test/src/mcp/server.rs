@@ -609,6 +609,10 @@ impl McpTestServer {
                 | "smart_biometric_handler"
                 | "enrollment_flow"
                 | "idb_management"
+                | "store_memory"
+                | "search_memory"
+                | "get_memory"
+                | "categorize_memory"
         )
     }
 

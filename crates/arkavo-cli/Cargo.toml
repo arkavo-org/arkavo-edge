@@ -7,8 +7,9 @@ license.workspace = true
 description = "CLI Core for the Arkavo agentic CLI tool - command parser and multi-step agent loop"
 
 [features]
-default = []
-embeddings = ["arkavo-memory/embeddings"]
+default = ["memory"]
+memory = ["arkavo-test/memory"]
+embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal" }
