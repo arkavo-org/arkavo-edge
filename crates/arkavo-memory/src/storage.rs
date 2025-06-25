@@ -344,7 +344,7 @@ impl MemoryStorage {
         }
 
         // Use a lower threshold to be more accepting of similar content
-        let threshold = 0.4;
+        let threshold = 0.3; // Lower threshold from 0.4 to 0.3
         if best_score > threshold {
             Ok((best_category, best_score))
         } else {
