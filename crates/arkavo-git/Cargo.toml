@@ -7,3 +7,9 @@ license.workspace = true
 description = "Git integration for the Arkavo agentic CLI tool - handles auto-commit, branch management, and unified-diff previews"
 
 [dependencies]
+git2 = { version = "0.18", default-features = false, features = ["vendored-openssl"] }
+thiserror = "1.0"
+tempfile = "3.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
