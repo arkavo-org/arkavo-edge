@@ -49,6 +49,7 @@ async fn test_memory_lifecycle_via_mcp() {
 }
 
 #[tokio::test]
+#[cfg(feature = "embeddings")]
 async fn test_categorization_via_mcp() {
     let storage = Arc::new(MemoryStorage::new().await.unwrap());
 
@@ -78,6 +79,37 @@ async fn test_categorization_via_mcp() {
     let result = categorize_tool.execute(categorize_params).await.unwrap();
     assert_eq!(result["category"], "programming");
     assert!(result["confidence"].as_f64().unwrap() > 0.0);
+}
+
+#[tokio::test]
+#[cfg(not(feature = "embeddings"))]
+async fn test_categorization_without_embeddings() {
+    let storage = Arc::new(MemoryStorage::new().await.unwrap());
+
+    // Store some memories with categories
+    let store_tool = StoreMemoryTool::new(storage.clone());
+    let memories = vec![
+        ("Learn Rust async programming", "programming"),
+        ("Meeting with team about project deadline", "work"),
+    ];
+
+    for (content, category) in memories {
+        let params = json!({
+            "content": content,
+            "category": category
+        });
+        store_tool.execute(params).await.unwrap();
+    }
+
+    // Test categorization - should return "uncategorized" when embeddings are disabled
+    let categorize_tool = CategorizeMemoryTool::new(storage.clone());
+    let categorize_params = json!({
+        "content": "Fix the bug in the authentication system"
+    });
+
+    let result = categorize_tool.execute(categorize_params).await.unwrap();
+    assert_eq!(result["category"], "uncategorized");
+    assert_eq!(result["confidence"].as_f64().unwrap(), 0.0);
 }
 
 #[tokio::test]
