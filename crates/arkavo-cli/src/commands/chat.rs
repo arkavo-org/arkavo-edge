@@ -45,7 +45,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = Runtime::new()?;
 
     // Initialize LLM client with fallback to prompt for remote server
-    let client = runtime.block_on(initialize_llm_client(&runtime, print_mode))?;
+    let client = runtime.block_on(initialize_llm_client(print_mode))?;
 
     if !print_mode {
         println!("Starting UI testing chat session...");
@@ -989,7 +989,6 @@ fn list_files(path: &str) -> Option<String> {
 }
 
 async fn initialize_llm_client(
-    runtime: &Runtime,
     print_mode: bool,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Initialize memory storage to check for saved configuration
@@ -1034,19 +1033,18 @@ async fn initialize_llm_client(
                 Ok(_) => Ok(client),
                 Err(_) => {
                     // Connection failed, prompt for remote server
-                    prompt_for_remote_ollama(runtime, print_mode, storage).await
+                    prompt_for_remote_ollama(print_mode, storage).await
                 }
             }
         }
         Err(_) => {
             // Failed to initialize, likely no Ollama
-            prompt_for_remote_ollama(runtime, print_mode, storage).await
+            prompt_for_remote_ollama(print_mode, storage).await
         }
     }
 }
 
 async fn prompt_for_remote_ollama(
-    runtime: &Runtime,
     print_mode: bool,
     storage: Arc<MemoryStorage>,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
@@ -1108,7 +1106,7 @@ async fn prompt_for_remote_ollama(
         Ok(client) => {
             // Test connection with a minimal request
             let test_message = vec![Message::user("ping")];
-            match runtime.block_on(client.complete(test_message)) {
+            match client.complete(test_message).await {
                 Ok(_) => {
                     eprintln!("✓ Connected to Ollama at {}", base_url);
 
