@@ -3,7 +3,7 @@ use arkavo_test::mcp::server::Tool as McpTool;
 use arkavo_test::mcp::{
     device_manager::DeviceManager,
     device_tools::DeviceManagementKit,
-    git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitStatusKit},
+    git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit},
     ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit},
     simulator_tools::SimulatorControl,
 };
@@ -77,6 +77,9 @@ impl McpConnection {
 
         let git_log = GitLogKit::new();
         tools.insert(git_log.schema().name.clone(), Box::new(git_log));
+
+        let git_remote = GitRemoteKit::new();
+        tools.insert(git_remote.schema().name.clone(), Box::new(git_remote));
 
         // Initialize memory tools
         eprintln!("Initializing memory tools...");

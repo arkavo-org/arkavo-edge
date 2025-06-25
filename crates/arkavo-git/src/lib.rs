@@ -1,7 +1,10 @@
 pub mod backend;
+pub mod commit_message;
+pub mod remote_fallback;
+pub mod safety;
 
 use backend::{Git2Backend, GitBackend, GitError, Result};
-use git2::{Oid, Repository};
+pub use git2::{Oid, Repository};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -98,6 +101,24 @@ impl GitManager {
     pub fn publish(&self, repo: &Repository) -> Result<()> {
         let branch = self.get_current_branch(repo)?;
         self.backend.push(repo, "origin", &branch)
+    }
+
+    /// Commit changes with an auto-generated message
+    pub fn auto_commit(&self, repo: &Repository) -> Result<Oid> {
+        use crate::commit_message::CommitMessageGenerator;
+
+        // Stage all changes
+        self.add_all(repo)?;
+
+        // Generate commit message
+        let generator = CommitMessageGenerator::new();
+        let message = generator.generate(repo)?;
+
+        // Add AI-generated suffix
+        let full_message = format!("{}\n\n[AI-generated]", message);
+
+        // Create commit
+        self.commit_changes(repo, &full_message)
     }
 }
 

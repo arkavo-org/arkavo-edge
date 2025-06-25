@@ -1,9 +1,44 @@
 use crate::mcp::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
+use arkavo_git::safety::sanitize_repo_path;
 use arkavo_git::{DiffOptions, GitManager};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::env;
 use std::path::Path;
+
+/// Safely open a repository with path sanitization
+fn safe_open_repo(
+    git_manager: &GitManager,
+    requested_path: &str,
+) -> Result<arkavo_git::Repository> {
+    let requested = Path::new(requested_path);
+
+    // If the path is absolute and exists, use it directly (for tests)
+    // Otherwise, treat it relative to current directory
+    let base_path = if requested.is_absolute() && requested.exists() {
+        requested.to_path_buf()
+    } else {
+        let current_dir = env::current_dir()
+            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+        current_dir.join(requested)
+    };
+
+    // For absolute paths that exist (like temp directories in tests),
+    // we trust them. For relative paths, we sanitize.
+    let final_path = if requested.is_absolute() && requested.exists() {
+        base_path
+    } else {
+        let current_dir = env::current_dir()
+            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+        sanitize_repo_path(&current_dir, &base_path)
+            .map_err(|e| TestError::Mcp(format!("Path validation failed: {}", e)))?
+    };
+
+    git_manager
+        .open_repo(&final_path)
+        .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))
+}
 
 pub struct GitStatusKit {
     schema: ToolSchema,
@@ -41,10 +76,7 @@ impl Default for GitStatusKit {
 impl Tool for GitStatusKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         let path = params["path"].as_str().unwrap_or(".");
-        let repo = self
-            .git_manager
-            .open_repo(Path::new(path))
-            .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))?;
+        let repo = safe_open_repo(&self.git_manager, path)?;
         let status = self
             .git_manager
             .status(&repo)
@@ -119,10 +151,7 @@ impl Tool for GitDiffKit {
         let staged = params["staged"].as_bool().unwrap_or(false);
         let cached = params["cached"].as_bool().unwrap_or(false);
 
-        let repo = self
-            .git_manager
-            .open_repo(Path::new(path))
-            .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))?;
+        let repo = safe_open_repo(&self.git_manager, path)?;
         let diff_options = DiffOptions {
             staged,
             unstaged: !staged && !cached,
@@ -195,10 +224,7 @@ impl Tool for GitCommitKit {
             .as_str()
             .ok_or_else(|| TestError::Mcp("Commit message is required".to_string()))?;
 
-        let repo = self
-            .git_manager
-            .open_repo(Path::new(path))
-            .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))?;
+        let repo = safe_open_repo(&self.git_manager, path)?;
 
         // Stage all changes
         self.git_manager
@@ -273,10 +299,7 @@ impl Tool for GitBranchKit {
             .as_str()
             .ok_or_else(|| TestError::Mcp("Action is required".to_string()))?;
 
-        let repo = self
-            .git_manager
-            .open_repo(Path::new(path))
-            .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))?;
+        let repo = safe_open_repo(&self.git_manager, path)?;
 
         match action {
             "list" => {
@@ -371,10 +394,7 @@ impl Tool for GitLogKit {
         let path = params["path"].as_str().unwrap_or(".");
         let limit = params["limit"].as_u64().unwrap_or(10) as usize;
 
-        let repo = self
-            .git_manager
-            .open_repo(Path::new(path))
-            .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))?;
+        let repo = safe_open_repo(&self.git_manager, path)?;
 
         let mut revwalk = repo
             .revwalk()
@@ -406,6 +426,136 @@ impl Tool for GitLogKit {
         Ok(json!({
             "commits": commits
         }))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        &self.schema
+    }
+}
+
+pub struct GitRemoteKit {
+    schema: ToolSchema,
+    git_manager: GitManager,
+}
+
+impl GitRemoteKit {
+    pub fn new() -> Self {
+        Self {
+            schema: ToolSchema {
+                name: "git_remote".to_string(),
+                description: "Manage remote repository operations (fetch, pull, push)".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Repository path (defaults to current directory)",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["fetch", "pull", "push", "sync"],
+                            "description": "Remote operation to perform"
+                        },
+                        "remote": {
+                            "type": "string",
+                            "description": "Remote name (defaults to 'origin')",
+                            "default": "origin"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Branch name (defaults to current branch)"
+                        }
+                    },
+                    "required": ["action"]
+                }),
+            },
+            git_manager: GitManager::new(),
+        }
+    }
+}
+
+impl Default for GitRemoteKit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for GitRemoteKit {
+    async fn execute(&self, params: Value) -> Result<Value> {
+        let path = params["path"].as_str().unwrap_or(".");
+        let action = params["action"]
+            .as_str()
+            .ok_or_else(|| TestError::Mcp("Action is required".to_string()))?;
+        let remote = params["remote"].as_str().unwrap_or("origin");
+
+        let repo = safe_open_repo(&self.git_manager, path)?;
+
+        // Get current branch if not specified
+        let branch = match params["branch"].as_str() {
+            Some(b) => b.to_string(),
+            None => self
+                .git_manager
+                .get_current_branch(&repo)
+                .map_err(|e| TestError::Mcp(format!("Failed to get current branch: {}", e)))?,
+        };
+
+        match action {
+            "fetch" => {
+                self.git_manager
+                    .fetch(&repo, remote)
+                    .map_err(|e| TestError::Mcp(format!("Failed to fetch: {}", e)))?;
+                Ok(json!({
+                    "success": true,
+                    "action": "fetch",
+                    "remote": remote,
+                    "message": format!("Successfully fetched from {}", remote)
+                }))
+            }
+            "pull" => {
+                self.git_manager
+                    .pull(&repo, remote, &branch)
+                    .map_err(|e| TestError::Mcp(format!("Failed to pull: {}", e)))?;
+                Ok(json!({
+                    "success": true,
+                    "action": "pull",
+                    "remote": remote,
+                    "branch": branch,
+                    "message": format!("Successfully pulled {} from {}", branch, remote)
+                }))
+            }
+            "push" => {
+                self.git_manager
+                    .push(&repo, remote, &branch)
+                    .map_err(|e| TestError::Mcp(format!("Failed to push: {}", e)))?;
+                Ok(json!({
+                    "success": true,
+                    "action": "push",
+                    "remote": remote,
+                    "branch": branch,
+                    "message": format!("Successfully pushed {} to {}", branch, remote)
+                }))
+            }
+            "sync" => {
+                // sync = pull then push
+                self.git_manager
+                    .sync_upstream(&repo)
+                    .map_err(|e| TestError::Mcp(format!("Failed to sync upstream: {}", e)))?;
+                self.git_manager
+                    .publish(&repo)
+                    .map_err(|e| TestError::Mcp(format!("Failed to publish: {}", e)))?;
+                Ok(json!({
+                    "success": true,
+                    "action": "sync",
+                    "remote": remote,
+                    "branch": branch,
+                    "message": format!("Successfully synced {} with {}", branch, remote)
+                }))
+            }
+            _ => Err(TestError::Mcp(
+                "Invalid action. Use 'fetch', 'pull', 'push', or 'sync'".to_string(),
+            )),
+        }
     }
 
     fn schema(&self) -> &ToolSchema {

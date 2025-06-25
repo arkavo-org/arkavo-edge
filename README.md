@@ -20,6 +20,12 @@ AI-powered developer toolkit for secure, intelligent code transformation and tes
 - Local-first with Edge Vault storage
 - No data leaves your control
 
+### 🔀 Git Integration
+- Native Git operations without OpenSSL dependency
+- Auto-commit with AI-generated messages
+- Safe operations with automatic rollback
+- MCP tools for version control
+
 ## MCP Server for Claude Code
 
 When downloaded to the project folder:

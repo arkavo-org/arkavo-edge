@@ -88,7 +88,12 @@ impl Default for Git2Backend {
 
 impl GitBackend for Git2Backend {
     fn init(&self, path: &Path) -> Result<Repository> {
-        Ok(Repository::init(path)?)
+        let repo = Repository::init(path)?;
+
+        // Set default branch to "main"
+        repo.config()?.set_str("init.defaultBranch", "main")?;
+
+        Ok(repo)
     }
 
     fn open(&self, path: &Path) -> Result<Repository> {
@@ -221,18 +226,63 @@ impl GitBackend for Git2Backend {
     }
 
     fn fetch(&self, repo: &Repository, remote: &str) -> Result<()> {
+        // Check if we need to use fallback for HTTPS
+        if let Ok(remote_obj) = repo.find_remote(remote) {
+            if let Some(url) = remote_obj.url() {
+                if crate::remote_fallback::is_https_url(url)
+                    || crate::remote_fallback::is_ssh_url(url)
+                {
+                    // Use system git for HTTPS/SSH operations
+                    if let Some(workdir) = repo.workdir() {
+                        return crate::remote_fallback::git_fallback_fetch(workdir, remote);
+                    }
+                }
+            }
+        }
+
+        // Try native git2 fetch (will work for local/file URLs)
         let mut remote = repo.find_remote(remote)?;
         remote.fetch(&[] as &[&str], None, None)?;
         Ok(())
     }
 
     fn push(&self, repo: &Repository, remote: &str, branch: &str) -> Result<()> {
+        // Check if we need to use fallback for HTTPS
+        if let Ok(remote_obj) = repo.find_remote(remote) {
+            if let Some(url) = remote_obj.url() {
+                if crate::remote_fallback::is_https_url(url)
+                    || crate::remote_fallback::is_ssh_url(url)
+                {
+                    // Use system git for HTTPS/SSH operations
+                    if let Some(workdir) = repo.workdir() {
+                        return crate::remote_fallback::git_fallback_push(workdir, remote, branch);
+                    }
+                }
+            }
+        }
+
+        // Try native git2 push (will work for local/file URLs)
         let mut remote = repo.find_remote(remote)?;
         remote.push(&[format!("refs/heads/{}", branch)], None)?;
         Ok(())
     }
 
     fn pull(&self, repo: &Repository, remote: &str, branch: &str) -> Result<()> {
+        // Check if we need to use fallback for HTTPS
+        if let Ok(remote_obj) = repo.find_remote(remote) {
+            if let Some(url) = remote_obj.url() {
+                if crate::remote_fallback::is_https_url(url)
+                    || crate::remote_fallback::is_ssh_url(url)
+                {
+                    // Use system git for HTTPS/SSH operations
+                    if let Some(workdir) = repo.workdir() {
+                        return crate::remote_fallback::git_fallback_pull(workdir, remote, branch);
+                    }
+                }
+            }
+        }
+
+        // Native implementation for local/file URLs
         self.fetch(repo, remote)?;
 
         let fetch_head = repo.find_reference("FETCH_HEAD")?;

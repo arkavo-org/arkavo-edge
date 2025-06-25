@@ -414,6 +414,10 @@ impl McpTestServer {
             "git_log".to_string(),
             Arc::new(super::git_tools::GitLogKit::new()),
         );
+        tools.insert(
+            "git_remote".to_string(),
+            Arc::new(super::git_tools::GitRemoteKit::new()),
+        );
 
         let state_store = Arc::new(StateStore::new());
 
@@ -640,6 +644,7 @@ impl McpTestServer {
                 | "git_commit"
                 | "git_branch"
                 | "git_log"
+                | "git_remote"
         )
     }
 
