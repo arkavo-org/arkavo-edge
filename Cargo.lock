@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "arkavo-cli",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -200,11 +200,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "arkavo-git"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "assert_cmd",
  "curl",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -265,19 +265,19 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "arkavo-repo"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "arkavo-test"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "arrayvec"
