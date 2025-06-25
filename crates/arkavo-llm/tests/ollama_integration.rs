@@ -1,8 +1,14 @@
 use arkavo_llm::{LlmClient, Message};
+use serial_test::serial;
 use std::env;
 
 #[tokio::test]
+#[serial]
 async fn test_ollama_client_creation() {
+    // Save original environment variables
+    let old_provider = env::var("LLM_PROVIDER").ok();
+    let old_base_url = env::var("OLLAMA_BASE_URL").ok();
+    let old_model = env::var("OLLAMA_MODEL").ok();
     unsafe {
         env::set_var("LLM_PROVIDER", "ollama");
         env::set_var("OLLAMA_BASE_URL", "http://localhost:11434");
@@ -11,6 +17,22 @@ async fn test_ollama_client_creation() {
 
     let client = LlmClient::from_env().expect("Failed to create client");
     assert_eq!(client.provider_name(), "ollama");
+
+    // Restore original environment variables
+    unsafe {
+        match old_provider {
+            Some(val) => env::set_var("LLM_PROVIDER", val),
+            None => env::remove_var("LLM_PROVIDER"),
+        }
+        match old_base_url {
+            Some(val) => env::set_var("OLLAMA_BASE_URL", val),
+            None => env::remove_var("OLLAMA_BASE_URL"),
+        }
+        match old_model {
+            Some(val) => env::set_var("OLLAMA_MODEL", val),
+            None => env::remove_var("OLLAMA_MODEL"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -73,7 +95,10 @@ async fn test_ollama_streaming() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_ollama_error_handling() {
+    // Save original environment variables
+    let old_base_url = env::var("OLLAMA_BASE_URL").ok();
     // Test with invalid URL - use a non-routable IP to ensure failure
     unsafe {
         env::set_var(
@@ -111,10 +136,23 @@ async fn test_ollama_error_handling() {
             // Timeout is also an acceptable failure mode
         }
     }
+
+    // Restore original environment variable
+    unsafe {
+        match old_base_url {
+            Some(val) => env::set_var("OLLAMA_BASE_URL", val),
+            None => env::remove_var("OLLAMA_BASE_URL"),
+        }
+    }
 }
 
 #[tokio::test]
+#[serial]
 async fn test_environment_configuration() {
+    // Save original environment variables
+    let old_provider = env::var("LLM_PROVIDER").ok();
+    let old_base_url = env::var("OLLAMA_BASE_URL").ok();
+    let old_model = env::var("OLLAMA_MODEL").ok();
     // Test default configuration
     unsafe {
         env::remove_var("LLM_PROVIDER");
@@ -131,4 +169,20 @@ async fn test_environment_configuration() {
     }
     let result = LlmClient::from_env();
     assert!(result.is_err());
+
+    // Restore original environment variables
+    unsafe {
+        match old_provider {
+            Some(val) => env::set_var("LLM_PROVIDER", val),
+            None => env::remove_var("LLM_PROVIDER"),
+        }
+        match old_base_url {
+            Some(val) => env::set_var("OLLAMA_BASE_URL", val),
+            None => env::remove_var("OLLAMA_BASE_URL"),
+        }
+        match old_model {
+            Some(val) => env::set_var("OLLAMA_MODEL", val),
+            None => env::remove_var("OLLAMA_MODEL"),
+        }
+    }
 }
