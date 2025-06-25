@@ -86,6 +86,15 @@ jobs:
           tar -xzf ort-osx.tgz -C ort --strip-components=1
       - name: Set ORT library path
         run: echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
+      - name: Download embedding model files
+        run: |
+          mkdir -p crates/arkavo-memory/models
+          cd crates/arkavo-memory/models
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/model.onnx
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/config.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/special_tokens_map.json
+          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer_config.json
       - name: Run embedding tests
         env:
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
