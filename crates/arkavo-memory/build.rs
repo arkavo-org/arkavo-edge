@@ -34,6 +34,23 @@ fn main() {
         return;
     }
 
+    // Add rpath settings for zero-config ONNX Runtime loading
+    #[cfg(feature = "embeddings")]
+    {
+        let target = env::var("TARGET").unwrap_or_default();
+
+        if target.contains("apple") {
+            // macOS: Look for dylibs relative to the executable
+            println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
+            println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path");
+        } else if target.contains("linux") && !target.contains("musl") {
+            // Linux glibc: Use $ORIGIN for relative paths
+            println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+            println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+        }
+        // For musl targets, we rely on static linking via ORT_STRATEGY=system-static
+    }
+
     // Skip downloads if embeddings feature is not enabled
     if env::var("CARGO_FEATURE_EMBEDDINGS").is_err() {
         println!("cargo:warning=Skipping model downloads - embeddings feature not enabled");

@@ -9,7 +9,7 @@ build = "build.rs"
 include = ["src/**/*", "models/**/*", "build.rs", "README.md"]
 
 [features]
-default = ["embeddings"]
+default = []
 # Enable embedding support (requires ONNX Runtime)
 embeddings = ["fastembed"]
 # Skip model downloads in build script (for CI environments without curl/wget)
@@ -31,6 +31,7 @@ hnsw_rs = "0.3"
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = "0.1"
+bytemuck = "1.14"
 
 [dev-dependencies]
 tokio-test = "0.4"

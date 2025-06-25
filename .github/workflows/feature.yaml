@@ -125,11 +125,19 @@ jobs:
       - name: Build
         run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features
       
+      - name: Prepare release artifact
+        run: |
+          mkdir -p release-package
+          cp target/x86_64-unknown-linux-musl/release/arkavo release-package/
+          chmod +x release-package/arkavo
+          # Note: musl builds should use static linking or ship without embeddings
+          # The no-default-features flag disables embeddings for musl compatibility
+      
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: arkavo-x86_64-unknown-linux-musl
-          path: target/x86_64-unknown-linux-musl/release/arkavo
+          path: release-package/
           retention-days: 1
 
   build-macos:
@@ -152,11 +160,23 @@ jobs:
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin --no-default-features
       
+      - name: Prepare release artifact with ONNX Runtime
+        run: |
+          mkdir -p release-package
+          cp target/aarch64-apple-darwin/release/arkavo release-package/
+          # Download ONNX Runtime for macOS ARM64
+          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
+          mkdir -p ort-temp
+          tar -xzf ort-osx.tgz -C ort-temp --strip-components=1
+          # Copy the dylib next to the binary for zero-config
+          cp ort-temp/lib/libonnxruntime*.dylib release-package/
+          chmod +x release-package/arkavo
+      
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: arkavo-aarch64-apple-darwin
-          path: target/aarch64-apple-darwin/release/arkavo
+          path: release-package/
           retention-days: 1
 
   # Performance check can run independently
@@ -216,6 +236,7 @@ jobs:
           
       - name: Test binary
         run: |
+          cd arkavo-x86_64-unknown-linux-musl
           chmod +x arkavo
           ./arkavo --version
 
@@ -231,7 +252,9 @@ jobs:
           
       - name: Test binary
         run: |
+          cd arkavo-aarch64-apple-darwin
           chmod +x arkavo
+          # Test with bundled ONNX Runtime library
           ./arkavo --version
 
   # Final check that depends on all critical jobs

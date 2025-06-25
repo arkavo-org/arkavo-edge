@@ -239,6 +239,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "async-trait",
+ "bytemuck",
  "chrono",
  "env_logger 0.10.2",
  "fastembed",

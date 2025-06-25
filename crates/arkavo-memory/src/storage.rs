@@ -15,7 +15,7 @@ struct MemoryRow {
     #[allow(dead_code)]
     id: String,
     category: Option<String>,
-    embedding: String, // JSON-encoded Vec<f32>
+    embedding_blob: Vec<u8>, // Binary blob, more efficient than JSON
 }
 
 pub struct HnswConfig {
@@ -103,7 +103,7 @@ impl MemoryStorage {
                 content TEXT NOT NULL,
                 metadata TEXT,
                 category TEXT,
-                embedding TEXT NOT NULL,
+                embedding_blob BLOB NOT NULL,
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             )
@@ -142,7 +142,7 @@ impl MemoryStorage {
     }
 
     async fn load_embeddings_from_db(&mut self) -> Result<()> {
-        let rows = sqlx::query("SELECT id, embedding FROM memories")
+        let rows = sqlx::query("SELECT id, embedding_blob FROM memories")
             .fetch_all(&self.pool)
             .await?;
 
@@ -152,12 +152,11 @@ impl MemoryStorage {
 
         for (idx, row) in rows.iter().enumerate() {
             let id_str: String = row.get("id");
-            let embedding_str: String = row.get("embedding");
+            let embedding_blob: Vec<u8> = row.get("embedding_blob");
 
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {}", e)))?;
-            let embedding: Vec<f32> = serde_json::from_str(&embedding_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid embedding data: {}", e)))?;
+            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
 
             embeddings.insert(id, embedding.clone());
             id_mapping.insert(idx, id);
@@ -177,7 +176,7 @@ impl MemoryStorage {
 
     pub async fn store(&self, memory: Memory) -> Result<()> {
         let id_str = memory.id.to_string();
-        let embedding_json = serde_json::to_string(&memory.embedding)?;
+        let embedding_blob: Vec<u8> = bytemuck::cast_slice(&memory.embedding).to_vec();
         let metadata_json = memory
             .metadata
             .as_ref()
@@ -186,7 +185,7 @@ impl MemoryStorage {
 
         sqlx::query(
             r#"
-            INSERT INTO memories (id, content, metadata, category, embedding, created_at, updated_at)
+            INSERT INTO memories (id, content, metadata, category, embedding_blob, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#
         )
@@ -194,7 +193,7 @@ impl MemoryStorage {
         .bind(&memory.content)
         .bind(&metadata_json)
         .bind(&memory.category)
-        .bind(&embedding_json)
+        .bind(&embedding_blob)
         .bind(memory.created_at.to_rfc3339())
         .bind(memory.updated_at.to_rfc3339())
         .execute(&self.pool)
@@ -230,8 +229,8 @@ impl MemoryStorage {
             .await?
             .ok_or(MemoryError::NotFound)?;
 
-        let embedding_str: String = row.get("embedding");
-        let embedding: Vec<f32> = serde_json::from_str(&embedding_str)?;
+        let embedding_blob: Vec<u8> = row.get("embedding_blob");
+        let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
 
         let metadata_str: Option<String> = row.get("metadata");
         let metadata = metadata_str
@@ -314,10 +313,11 @@ impl MemoryStorage {
         let embedding = self.embedding_service.generate_embedding(content).await?;
 
         // Get all memories with categories using the lightweight MemoryRow struct
-        let rows: Vec<MemoryRow> = sqlx::query_as(
-            "SELECT id, category, embedding
+        // TODO: Use query_as! macro once sqlx-data.json is prepared
+        let rows: Vec<MemoryRow> = sqlx::query_as::<_, MemoryRow>(
+            "SELECT id, category, embedding_blob
              FROM memories
-             WHERE category IS NOT NULL AND embedding IS NOT NULL",
+             WHERE category IS NOT NULL AND embedding_blob IS NOT NULL",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -332,8 +332,8 @@ impl MemoryStorage {
         // Find the memory with the highest similarity
         for row in rows {
             if let Some(category) = row.category {
-                // Parse the embedding from JSON
-                let mem_embedding: Vec<f32> = serde_json::from_str(&row.embedding)?;
+                // Convert binary blob to f32 vector
+                let mem_embedding: Vec<f32> = bytemuck::cast_slice(&row.embedding_blob).to_vec();
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
 
                 if score > best_score {
