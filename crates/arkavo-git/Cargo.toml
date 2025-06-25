@@ -5,5 +5,23 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Git integration for the Arkavo agentic CLI tool - handles auto-commit, branch management, and unified-diff previews"
+build = "build.rs"
 
 [dependencies]
+# Turn off all git2 defaults (ssh, https, vendored-libgit2, etc.)
+# Note: We can't use the "https" feature as it forces OpenSSL
+# Instead, we'll handle HTTPS through the system git binary as a fallback
+git2 = { version = "0.20", default-features = false }
+
+# Override the transitive curl dependency so it links with rustls not openssl
+curl = { version = "0.4", default-features = false, features = ["rustls"] }
+
+thiserror = "1.0"
+tempfile = "3.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+
+[features]
+# Optional: make openssl an opt-in feature for people who still need SSH
+ssh = ["git2/ssh"]

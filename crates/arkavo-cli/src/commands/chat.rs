@@ -1,4 +1,5 @@
 use crate::mcp_integration::McpConnection;
+use arkavo_git::GitManager;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use chrono;
@@ -533,18 +534,39 @@ fn get_repository_context() -> String {
     // Get basic repository info
     context.push_str(&format!("Working directory: {}\n", current_dir.display()));
 
-    // Check if it's a git repository
-    if Path::new(".git").exists() {
+    // Check if it's a git repository using our Git library
+    let git_manager = GitManager::new();
+    if let Ok(repo) = git_manager.open_repo(&current_dir) {
         context.push_str("Git repository: Yes\n");
 
         // Get current branch
-        if let Ok(output) = std::process::Command::new("git")
-            .args(["branch", "--show-current"])
-            .output()
-        {
-            if output.status.success() {
-                let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                context.push_str(&format!("Current branch: {}\n", branch));
+        if let Ok(branch) = git_manager.get_current_branch(&repo) {
+            context.push_str(&format!("Current branch: {}\n", branch));
+        }
+
+        // Get repository status
+        if let Ok(status) = git_manager.status(&repo) {
+            let total_changes = status.modified.len()
+                + status.added.len()
+                + status.deleted.len()
+                + status.untracked.len();
+
+            if total_changes > 0 {
+                context.push_str("\nGit status:\n");
+                if !status.modified.is_empty() {
+                    context.push_str(&format!("  Modified: {} files\n", status.modified.len()));
+                }
+                if !status.added.is_empty() {
+                    context.push_str(&format!("  Added: {} files\n", status.added.len()));
+                }
+                if !status.deleted.is_empty() {
+                    context.push_str(&format!("  Deleted: {} files\n", status.deleted.len()));
+                }
+                if !status.untracked.is_empty() {
+                    context.push_str(&format!("  Untracked: {} files\n", status.untracked.len()));
+                }
+            } else {
+                context.push_str("Git status: Working tree clean\n");
             }
         }
     } else {

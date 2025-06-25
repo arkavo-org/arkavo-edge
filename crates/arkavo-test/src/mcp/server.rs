@@ -393,6 +393,32 @@ impl McpTestServer {
             )),
         );
 
+        // Add Git tools
+        tools.insert(
+            "git_status".to_string(),
+            Arc::new(super::git_tools::GitStatusKit::new()),
+        );
+        tools.insert(
+            "git_diff".to_string(),
+            Arc::new(super::git_tools::GitDiffKit::new()),
+        );
+        tools.insert(
+            "git_commit".to_string(),
+            Arc::new(super::git_tools::GitCommitKit::new()),
+        );
+        tools.insert(
+            "git_branch".to_string(),
+            Arc::new(super::git_tools::GitBranchKit::new()),
+        );
+        tools.insert(
+            "git_log".to_string(),
+            Arc::new(super::git_tools::GitLogKit::new()),
+        );
+        tools.insert(
+            "git_remote".to_string(),
+            Arc::new(super::git_tools::GitRemoteKit::new()),
+        );
+
         let state_store = Arc::new(StateStore::new());
 
         // Memory tools initialization will be done after creating the server instance
@@ -613,6 +639,12 @@ impl McpTestServer {
                 | "search_memory"
                 | "get_memory"
                 | "categorize_memory"
+                | "git_status"
+                | "git_diff"
+                | "git_commit"
+                | "git_branch"
+                | "git_log"
+                | "git_remote"
         )
     }
 
