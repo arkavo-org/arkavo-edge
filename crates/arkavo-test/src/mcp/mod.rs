@@ -22,6 +22,7 @@ pub mod enrollment_flow_handler;
 pub mod face_id_control;
 #[cfg(target_os = "macos")]
 pub mod frameworks_data;
+pub mod git_tools;
 #[cfg(target_os = "macos")]
 pub mod idb_companion_health;
 #[cfg(target_os = "macos")]
