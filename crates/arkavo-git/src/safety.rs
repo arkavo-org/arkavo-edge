@@ -201,6 +201,11 @@ mod tests {
     fn test_repo_guard_rollback() {
         let temp_dir = TempDir::new().unwrap();
         let repo = Repository::init(temp_dir.path()).unwrap();
+        
+        // Set up git config for tests
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
 
         // Create initial commit
         fs::write(temp_dir.path().join("file1.txt"), "content").unwrap();
