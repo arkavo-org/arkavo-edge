@@ -7,9 +7,11 @@ license.workspace = true
 description = "Test harness for the Arkavo agentic CLI tool - local test runner adapter for various languages"
 
 [features]
-default = []
-# Enable memory tools with embeddings support
-embeddings = ["arkavo-memory", "arkavo-memory/embeddings"]
+default = ["memory"]
+# Enable memory tools (works with or without embeddings)
+memory = ["arkavo-memory"]
+# Enable embeddings support for memory tools
+embeddings = ["memory", "arkavo-memory/embeddings"]
 
 [dependencies]
 # Async runtime
