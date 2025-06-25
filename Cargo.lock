@@ -279,6 +279,7 @@ name = "arkavo-test"
 version = "0.11.0"
 dependencies = [
  "anyhow",
+ "arkavo-git",
  "arkavo-mcp",
  "arkavo-memory",
  "arkavo-protocol",
