@@ -49,6 +49,23 @@ impl MemoryStorage {
         Self::with_config(HnswConfig::default()).await
     }
 
+    /// Creates a new test instance with a unique database path.
+    /// This should only be used in tests to ensure test isolation.
+    pub async fn new_test() -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let test_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("arkavo_test_{}_{}.db", timestamp, test_id));
+
+        Self::with_path(db_path, HnswConfig::default()).await
+    }
+
     pub fn get_data_directory() -> Result<PathBuf> {
         let data_dir = PathBuf::from(".arkavo").join("memory_server");
 
@@ -61,11 +78,21 @@ impl MemoryStorage {
     pub async fn with_config(config: HnswConfig) -> Result<Self> {
         let data_dir = Self::get_data_directory()?;
         let db_path = data_dir.join("memories.db");
+        Self::with_path(db_path, config).await
+    }
 
+    pub async fn with_path(db_path: PathBuf, config: HnswConfig) -> Result<Self> {
         #[cfg(debug_assertions)]
         {
             eprintln!("Memory storage: Creating database at {:?}", db_path);
             eprintln!("Current directory: {:?}", std::env::current_dir());
+        }
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                MemoryError::Storage(format!("Failed to create database directory: {}", e))
+            })?;
         }
 
         // Use absolute path for SQLite

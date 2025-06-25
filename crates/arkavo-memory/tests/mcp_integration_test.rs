@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn test_memory_lifecycle_via_mcp() {
-    let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
 
     // Test storing a memory
     let store_tool = StoreMemoryTool::new(storage.clone());
@@ -51,7 +51,7 @@ async fn test_memory_lifecycle_via_mcp() {
 #[tokio::test]
 #[cfg(feature = "embeddings")]
 async fn test_categorization_via_mcp() {
-    let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
 
     // Store some memories with categories
     let store_tool = StoreMemoryTool::new(storage.clone());
@@ -84,7 +84,7 @@ async fn test_categorization_via_mcp() {
 #[tokio::test]
 #[cfg(not(feature = "embeddings"))]
 async fn test_categorization_without_embeddings() {
-    let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
 
     // Store some memories with categories
     let store_tool = StoreMemoryTool::new(storage.clone());
@@ -114,7 +114,7 @@ async fn test_categorization_without_embeddings() {
 
 #[tokio::test]
 async fn test_mcp_tool_schemas() {
-    let storage = Arc::new(MemoryStorage::new().await.unwrap());
+    let storage = Arc::new(MemoryStorage::new_test().await.unwrap());
 
     // Verify tool schemas
     let store_tool = StoreMemoryTool::new(storage.clone());
