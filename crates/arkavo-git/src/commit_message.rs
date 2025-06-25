@@ -202,7 +202,7 @@ mod tests {
         // Initialize repo
         manager.init_repo(temp_dir.path()).unwrap();
         let repo = manager.open_repo(temp_dir.path()).unwrap();
-        
+
         // Set up git config for tests
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "Test User").unwrap();
