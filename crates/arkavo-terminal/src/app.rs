@@ -103,14 +103,11 @@ impl App {
 
             // Check for LLM responses
             if let Some(ref mut llm_rx) = self.llm_rx {
-                match llm_rx.try_recv() {
-                    Ok(response) => {
-                        // Finish any streaming message and add the complete response
-                        self.chat_view.finish_streaming();
-                        self.chat_view
-                            .add_message(crate::ui::chat::MessageRole::Assistant, response);
-                    }
-                    Err(_) => {}
+                if let Ok(response) = llm_rx.try_recv() {
+                    // Finish any streaming message and add the complete response
+                    self.chat_view.finish_streaming();
+                    self.chat_view
+                        .add_message(crate::ui::chat::MessageRole::Assistant, response);
                 }
             }
 
