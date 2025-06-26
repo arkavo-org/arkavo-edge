@@ -242,7 +242,7 @@ impl Renderable for ChatView {
         } else {
             "Chat".to_string()
         };
-        
+
         let messages_block = Block::default()
             .title(title)
             .borders(Borders::ALL)
@@ -272,7 +272,7 @@ impl Renderable for ChatView {
             // Need to scroll - show the bottom messages when scroll_offset is 0
             let mut current_height = 0;
             let mut start_idx = items.len();
-            
+
             // When scroll_offset is 0, we want to show the bottom (most recent) messages
             // Find the starting index that fills the visible area from bottom
             for (i, item) in items.iter().enumerate().rev() {
@@ -284,10 +284,7 @@ impl Renderable for ChatView {
             }
 
             // Take only the visible items
-            let visible_items: Vec<ListItem> = items
-                .into_iter()
-                .skip(start_idx)
-                .collect();
+            let visible_items: Vec<ListItem> = items.into_iter().skip(start_idx).collect();
 
             let list = List::new(visible_items)
                 .block(messages_block)

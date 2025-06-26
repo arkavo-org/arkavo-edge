@@ -61,7 +61,7 @@ impl DebugView {
             max_logs: 10000,
             needs_redraw: true,
         };
-        
+
         view.add_log(LogLevel::Info, "Debug view initialized".to_string());
         view
     }
@@ -72,13 +72,13 @@ impl DebugView {
             level,
             message,
         };
-        
+
         self.logs.push_back(entry);
-        
+
         if self.logs.len() > self.max_logs {
             self.logs.pop_front();
         }
-        
+
         self.needs_redraw = true;
         self.scroll_to_bottom();
     }
@@ -146,14 +146,14 @@ impl Renderable for DebugView {
         } else {
             "Debug Logs (c: clear)".to_string()
         };
-        
+
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
 
         let inner_area = block.inner(area);
-        
+
         // Convert logs to list items
         let items: Vec<ListItem> = self
             .logs
@@ -165,10 +165,7 @@ impl Renderable for DebugView {
                         format!("[{}] ", timestamp),
                         Style::default().fg(Color::DarkGray),
                     ),
-                    Span::styled(
-                        format!("{:5} ", log.level.prefix()),
-                        log.level.style(),
-                    ),
+                    Span::styled(format!("{:5} ", log.level.prefix()), log.level.style()),
                     Span::raw(log.message.clone()),
                 ]);
                 ListItem::new(line)
@@ -178,7 +175,7 @@ impl Renderable for DebugView {
         // Calculate visible range
         let total_logs = items.len();
         let visible_height = inner_area.height as usize;
-        
+
         if total_logs <= visible_height {
             // All logs fit
             let list = List::new(items)
@@ -192,13 +189,13 @@ impl Renderable for DebugView {
             } else {
                 total_logs.saturating_sub(visible_height + self.scroll_offset as usize)
             };
-            
+
             let visible_items: Vec<ListItem> = items
                 .into_iter()
                 .skip(start_idx)
                 .take(visible_height)
                 .collect();
-                
+
             let list = List::new(visible_items)
                 .block(block)
                 .style(Style::default().fg(Color::White));

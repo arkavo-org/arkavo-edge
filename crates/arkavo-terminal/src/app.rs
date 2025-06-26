@@ -163,21 +163,33 @@ impl App {
                 while let Ok(response) = llm_rx.try_recv() {
                     if response == "<<STREAM_START>>" {
                         // Start streaming a new assistant message
-                        debug_messages.push((crate::ui::debug::LogLevel::Info, "[UI] Started streaming response".to_string()));
+                        debug_messages.push((
+                            crate::ui::debug::LogLevel::Info,
+                            "[UI] Started streaming response".to_string(),
+                        ));
                         self.chat_view
                             .start_streaming_message(crate::ui::chat::MessageRole::Assistant);
                     } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
                         // Append chunk to streaming message
-                        debug_messages.push((crate::ui::debug::LogLevel::Debug, format!("[UI] Received chunk: {} chars", chunk.len())));
+                        debug_messages.push((
+                            crate::ui::debug::LogLevel::Debug,
+                            format!("[UI] Received chunk: {} chars", chunk.len()),
+                        ));
                         self.chat_view.append_to_streaming(chunk);
                     } else if response == "<<STREAM_END>>" {
                         // Finish streaming
-                        debug_messages.push((crate::ui::debug::LogLevel::Info, "[UI] Finished streaming response".to_string()));
+                        debug_messages.push((
+                            crate::ui::debug::LogLevel::Info,
+                            "[UI] Finished streaming response".to_string(),
+                        ));
                         self.chat_view.finish_streaming();
                         self.telemetry.track_message_received();
                     } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
                         // Handle streaming error
-                        debug_messages.push((crate::ui::debug::LogLevel::Error, format!("[UI] Streaming error: {}", error_msg)));
+                        debug_messages.push((
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[UI] Streaming error: {}", error_msg),
+                        ));
                         self.chat_view.finish_streaming();
                         self.chat_view.add_message(
                             crate::ui::chat::MessageRole::System,
@@ -185,7 +197,13 @@ impl App {
                         );
                     } else {
                         // Fallback for non-streaming messages
-                        debug_messages.push((crate::ui::debug::LogLevel::Info, format!("[UI] Received non-streaming response: {} chars", response.len())));
+                        debug_messages.push((
+                            crate::ui::debug::LogLevel::Info,
+                            format!(
+                                "[UI] Received non-streaming response: {} chars",
+                                response.len()
+                            ),
+                        ));
                         self.chat_view.finish_streaming();
                         self.chat_view
                             .add_message(crate::ui::chat::MessageRole::Assistant, response);
@@ -193,7 +211,7 @@ impl App {
                     }
                 }
             }
-            
+
             // Add collected debug messages
             for (level, message) in debug_messages {
                 self.add_debug_log(level, message);
@@ -239,10 +257,16 @@ impl App {
                                 // Send to LLM if channel is available
                                 if let Some(ref ui_tx) = self.ui_tx {
                                     let send_result = ui_tx.try_send(input.clone());
-                                    self.add_debug_log(crate::ui::debug::LogLevel::Debug, format!("[UI] Sending message: {}", input));
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Debug,
+                                        format!("[UI] Sending message: {}", input),
+                                    );
                                     match send_result {
                                         Ok(_) => {
-                                            self.add_debug_log(crate::ui::debug::LogLevel::Info, "[UI] Message sent successfully".to_string());
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Info,
+                                                "[UI] Message sent successfully".to_string(),
+                                            );
                                             // Add user message to chat
                                             self.chat_view.add_message(
                                                 crate::ui::chat::MessageRole::User,
