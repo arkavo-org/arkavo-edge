@@ -69,13 +69,43 @@ brew install idb-companion
 ## Commands
 
 ### Chat
+
+The chat command now launches with a Terminal UI (TUI) by default for an enhanced interactive experience.
+
 ```bash
-# Interactive mode
+# Interactive mode with Terminal UI (default)
 arkavo chat
 
-# Single query
+# Disable Terminal UI for classic CLI mode
+arkavo chat --no-tui
+
+# Single query (automatically uses CLI mode)
 arkavo chat --prompt "Explain this codebase"
+
+# Analyze an image
+arkavo chat --prompt "What's in this screenshot?" --image screenshot.png
 ```
+
+#### Terminal UI Keybindings
+
+When using the Terminal UI mode:
+
+- **Tab** - Switch between Chat/Code/Diff views
+- **q** - Quit the application
+- **↑/↓** - Scroll up/down in the current view
+- **PageUp/PageDown** - Scroll by page
+- **Home/End** - Jump to top/bottom
+- **m** - Toggle between unified/side-by-side diff view (in Diff view)
+- **n** - Toggle line numbers (in Code view)
+- **n/p** - Next/Previous hunk (in Diff view)
+
+The Terminal UI provides:
+- **120fps Rendering**: Smooth, responsive UI with 8ms frame budget
+- **Chat View**: Conversation history with color-coded roles
+- **Code View**: Syntax-highlighted code with line numbers
+- **Diff View**: Unified or side-by-side diff preview
+- **Progress Indicators**: Visual feedback for long operations
+- **Multi-Terminal Support**: Spawn additional terminals for parallel tasks (experimental)
 
 AI-powered conversational interface with streaming responses and repository context. Uses Ollama with `devstral` model by default.
 

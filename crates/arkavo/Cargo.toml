@@ -14,6 +14,7 @@ embeddings = ["memory", "arkavo-cli/embeddings"]
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
 anyhow = "1.0"
+atty = "0.2"
 
 [build-dependencies]
 

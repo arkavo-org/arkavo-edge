@@ -3,6 +3,7 @@ use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::env;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -78,7 +79,10 @@ impl LogStreamKit {
         let stream_id = format!("{}_{}", device_id, chrono::Utc::now().timestamp());
 
         // Create log output file
-        let log_file_path = format!("/tmp/arkavo_logs_{}.txt", stream_id);
+        let log_file_path = env::temp_dir()
+            .join(format!("arkavo_logs_{}.txt", stream_id))
+            .display()
+            .to_string();
 
         // Start the log stream process
         let mut cmd = AsyncCommand::new("xcrun");
@@ -191,10 +195,13 @@ impl LogStreamKit {
         limit: Option<usize>,
     ) -> Result<Value> {
         let log_file_path = if let Some(id) = stream_id {
-            format!("/tmp/arkavo_logs_{}.txt", id)
+            env::temp_dir()
+                .join(format!("arkavo_logs_{}.txt", id))
+                .display()
+                .to_string()
         } else {
             // Find most recent log file
-            let entries = std::fs::read_dir("/tmp/")
+            let entries = std::fs::read_dir(env::temp_dir())
                 .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {}", e)))?;
 
             let mut log_files: Vec<_> = entries

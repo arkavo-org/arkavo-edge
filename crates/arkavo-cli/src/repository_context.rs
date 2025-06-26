@@ -82,7 +82,7 @@ impl RepositoryContextManager {
         progress.set_style(
             ProgressStyle::default_spinner()
                 .template("{spinner:.green} {msg}")
-                .unwrap(),
+                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
         );
         progress.set_message("Building repository context...");
 

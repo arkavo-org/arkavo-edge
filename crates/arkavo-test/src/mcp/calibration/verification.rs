@@ -1,5 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -92,7 +93,7 @@ impl VerificationReader {
             // App's documents directory via simctl
             self.get_app_documents_path(),
             // Fallback to temp directory
-            PathBuf::from("/tmp").join(format!("calibration_{}.json", self.device_id)),
+            env::temp_dir().join(format!("calibration_{}.json", self.device_id)),
         ];
 
         eprintln!("[VerificationReader] Looking for calibration results...");
@@ -188,7 +189,7 @@ impl VerificationReader {
             }
         }
 
-        PathBuf::from("/tmp/calibration_not_found.json")
+        env::temp_dir().join("calibration_not_found.json")
     }
 }
 

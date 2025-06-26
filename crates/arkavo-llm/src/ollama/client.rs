@@ -29,7 +29,7 @@ impl OllamaClient {
         Self {
             client: Client::new(),
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
-            model: model.unwrap_or_else(|| "devstral".to_string()),
+            model: model.unwrap_or_default(), // Empty default, will be selected dynamically
         }
     }
 
@@ -39,7 +39,7 @@ impl OllamaClient {
         Ok(Self::new(base_url, model))
     }
 
-    async fn list_models(&self) -> Result<Vec<String>> {
+    pub async fn list_models(&self) -> Result<Vec<String>> {
         debug!("Fetching available models from Ollama");
         let response = self
             .client
@@ -57,6 +57,11 @@ impl OllamaClient {
     }
 
     async fn select_model(&self, messages: &[Message]) -> Result<String> {
+        // If a specific model is set via env var, use it
+        if !self.model.is_empty() {
+            return Ok(self.model.clone());
+        }
+
         let has_images = messages
             .iter()
             .any(|msg| msg.images.as_ref().is_some_and(|imgs| !imgs.is_empty()));
@@ -109,6 +114,13 @@ impl OllamaClient {
         }
 
         let general_models = [
+            "qwen3:0.6b", // Specifically prefer the 0.6b model
+            "qwen3:latest",
+            "qwen3",
+            "qwen2.5:latest",
+            "qwen2.5",
+            "qwen:latest",
+            "qwen",
             "devstral:latest",
             "devstral",
             "llama3.2:latest",
@@ -118,14 +130,30 @@ impl OllamaClient {
         ];
 
         for model in &general_models {
-            if available_models.iter().any(|m| m.contains(model)) {
-                debug!("Selected general model: {}", model);
-                return Ok(model.to_string());
+            // For specific version tags like "qwen3:0.6b", do exact matching
+            if model.contains(':') {
+                if available_models.iter().any(|m| m == model) {
+                    debug!("Selected general model: {}", model);
+                    return Ok(model.to_string());
+                }
+            } else {
+                // For general model names, use contains matching
+                if available_models.iter().any(|m| m.contains(model)) {
+                    debug!("Selected general model: {}", model);
+                    return Ok(model.to_string());
+                }
             }
         }
 
-        debug!("Using default model: {}", self.model);
-        Ok(self.model.clone())
+        // If no preferred model found, use the first available model
+        if let Some(first_model) = available_models.first() {
+            debug!("Using first available model: {}", first_model);
+            Ok(first_model.clone())
+        } else {
+            Err(crate::Error::Provider(
+                "No models available. Please run 'ollama pull' to download a model.".to_string(),
+            ))
+        }
     }
 }
 

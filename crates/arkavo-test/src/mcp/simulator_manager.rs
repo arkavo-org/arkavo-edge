@@ -308,7 +308,7 @@ impl SimulatorManager {
         let container_path = if remote_path.starts_with('/') {
             remote_path.to_string()
         } else {
-            format!("/tmp/{}", remote_path)
+            std::env::temp_dir().join(remote_path).display().to_string()
         };
 
         let output = Command::new("xcrun")
