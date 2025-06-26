@@ -220,6 +220,7 @@ impl MultiTerminalManager {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // Some variants are platform-specific
 enum TerminalApp {
     MacTerminal,
     ITerm2,
