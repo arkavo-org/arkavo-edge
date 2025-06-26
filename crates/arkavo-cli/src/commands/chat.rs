@@ -130,7 +130,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     progress.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .unwrap(),
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
     );
     progress.set_message("Building repository context...");
 
@@ -551,7 +551,7 @@ async fn process_message(
     progress.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .unwrap(),
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
     );
     progress.set_message("Thinking...");
 

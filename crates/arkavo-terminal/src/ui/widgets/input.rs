@@ -39,17 +39,19 @@ impl InputField {
     pub fn delete_char(&mut self) {
         if self.cursor_position > 0 {
             let index = self.byte_index();
-            let ch = self.value.chars().nth(self.cursor_position - 1).unwrap();
-            self.value.remove(index - ch.len_utf8());
-            self.move_cursor_left();
+            if let Some(ch) = self.value.chars().nth(self.cursor_position - 1) {
+                self.value.remove(index - ch.len_utf8());
+                self.move_cursor_left();
+            }
         }
     }
 
     pub fn delete_char_forward(&mut self) {
         if self.cursor_position < self.value.chars().count() {
             let index = self.byte_index();
-            let ch = self.value.chars().nth(self.cursor_position).unwrap();
-            self.value.drain(index..index + ch.len_utf8());
+            if let Some(ch) = self.value.chars().nth(self.cursor_position) {
+                self.value.drain(index..index + ch.len_utf8());
+            }
         }
     }
 
