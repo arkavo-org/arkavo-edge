@@ -82,9 +82,6 @@ warp = "0.3"
 [build-dependencies]
 cc = "1.0"
 
-[[bin]]
-name = "arkavo-test-mcp"
-path = "src/bin/arkavo-test-mcp.rs"
 
 [dev-dependencies]
 criterion = "0.5"
