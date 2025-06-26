@@ -195,6 +195,22 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
          - Suggest appropriate UI interactions based on the content
 
 \
+         GIT REPOSITORY ANALYSIS:\
+         When asked to perform a \"full analysis\", \"repository analysis\", or comprehensive Git analysis:\
+         1. MUST call @git_status {{}} to get working tree status\
+         2. MUST call @git_log {{\"limit\": 20}} to get recent commits\
+         3. MUST call @git_diff {{}} to get unstaged changes\
+         4. MUST call @git_diff {{\"staged\": true}} to get staged changes\
+         5. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
+         6. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
+         \
+         After collecting all responses:\
+         - Generate a structured report with sections for each data type\
+         - Use ONLY actual data from tool responses - DO NOT fabricate any information\
+         - If a tool fails, note the failure in the report\
+         - Store the complete analysis in memory using @store_memory
+
+\
          Repository context:
 {}{}",
         repo_context, mcp_info
