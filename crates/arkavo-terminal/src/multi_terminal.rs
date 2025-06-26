@@ -14,15 +14,18 @@ pub struct TerminalSpawnConfig {
 impl TerminalSpawnConfig {
     pub fn validate(&self) -> Result<()> {
         // Validate task_id doesn't contain shell-unsafe characters
-        if self.task_id.contains(|c: char| c.is_whitespace() || "$`\"'\\|<>&;(){}".contains(c)) {
+        if self
+            .task_id
+            .contains(|c: char| c.is_whitespace() || "$`\"'\\|<>&;(){}".contains(c))
+        {
             return Err(anyhow!("Invalid task_id: contains unsafe characters"));
         }
-        
+
         // Validate title doesn't contain unsafe characters
-        if self.title.contains(|c: char| c == '\n' || c == '\r' || c == '\0') {
+        if self.title.contains(['\n', '\r', '\0']) {
             return Err(anyhow!("Invalid title: contains unsafe characters"));
         }
-        
+
         Ok(())
     }
 }
@@ -63,7 +66,7 @@ impl MultiTerminalManager {
     pub fn spawn_terminal(&self, config: TerminalSpawnConfig) -> Result<()> {
         // Validate config to prevent injection attacks
         config.validate()?;
-        
+
         let terminal_app = self.detect_terminal()?;
 
         match terminal_app {
@@ -197,9 +200,9 @@ impl MultiTerminalManager {
                 .arg("--task")
                 .arg(&config.task_id)
                 .arg("--session")
-                .arg(&config.session_id.to_string())
+                .arg(config.session_id.to_string())
                 .spawn();
-                
+
             if result.is_ok() {
                 return Ok(());
             }
@@ -207,10 +210,12 @@ impl MultiTerminalManager {
 
         Err(anyhow!("Could not find a suitable terminal emulator"))
     }
-    
+
     #[cfg(not(unix))]
     fn spawn_generic_terminal(&self, _config: &TerminalSpawnConfig) -> Result<()> {
-        Err(anyhow!("Multi-terminal spawning not yet implemented for Windows"))
+        Err(anyhow!(
+            "Multi-terminal spawning not yet implemented for Windows"
+        ))
     }
 }
 

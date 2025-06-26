@@ -45,7 +45,7 @@ impl App {
 
         // Setup terminal
         self.setup_terminal()?;
-        
+
         // Run app with panic recovery
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // We need to block on the async operation since catch_unwind doesn't work with async
@@ -64,7 +64,7 @@ impl App {
             }
         }
     }
-    
+
     fn setup_terminal(&self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(
@@ -74,7 +74,7 @@ impl App {
         )?;
         Ok(())
     }
-    
+
     fn restore_terminal(&self) -> Result<()> {
         // Ignore errors during cleanup to ensure we try all steps
         let _ = crossterm::terminal::disable_raw_mode();

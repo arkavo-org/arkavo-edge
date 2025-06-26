@@ -301,9 +301,8 @@ impl DiffView {
                     }
                     DiffLineType::Header => {
                         // Header appears on both sides
-                        let header_line = Line::from(vec![
-                            Span::styled(&line.content, line.line_type.style())
-                        ]);
+                        let header_line =
+                            Line::from(vec![Span::styled(&line.content, line.line_type.style())]);
                         old_lines.push(header_line.clone());
                         new_lines.push(header_line);
                     }
@@ -333,10 +332,10 @@ impl DiffView {
             frame.render_widget(new_list, new_inner);
         }
     }
-    
+
     fn format_line_for_side<'a>(&self, line: &'a DiffLine, is_old_side: bool) -> Line<'a> {
         let mut spans = vec![];
-        
+
         // Line number
         if is_old_side {
             if let Some(num) = line.old_line_num {
@@ -347,25 +346,20 @@ impl DiffView {
             } else {
                 spans.push(Span::raw("    "));
             }
+        } else if let Some(num) = line.new_line_num {
+            spans.push(Span::styled(
+                format!("{:4}", num),
+                Style::default().fg(Color::DarkGray),
+            ));
         } else {
-            if let Some(num) = line.new_line_num {
-                spans.push(Span::styled(
-                    format!("{:4}", num),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            } else {
-                spans.push(Span::raw("    "));
-            }
+            spans.push(Span::raw("    "));
         }
-        
+
         spans.push(Span::raw(" │ "));
-        
+
         // Content with appropriate styling
-        spans.push(Span::styled(
-            line.content.clone(),
-            line.line_type.style(),
-        ));
-        
+        spans.push(Span::styled(line.content.clone(), line.line_type.style()));
+
         Line::from(spans)
     }
 
