@@ -80,7 +80,10 @@ impl DebugView {
         }
         
         self.needs_redraw = true;
-        self.scroll_to_bottom();
+        // Only auto-scroll if user is at the bottom (not manually scrolling)
+        if self.scroll_offset == 0 {
+            self.scroll_to_bottom();
+        }
     }
 
     fn scroll_to_bottom(&mut self) {
@@ -126,6 +129,11 @@ impl DebugView {
                     self.scroll_offset = 0;
                     self.needs_redraw = true;
                 }
+                KeyCode::Char('b') => {
+                    // Jump to bottom (latest logs)
+                    self.scroll_offset = 0;
+                    self.needs_redraw = true;
+                }
                 _ => {}
             }
         }
@@ -142,9 +150,9 @@ impl Default for DebugView {
 impl Renderable for DebugView {
     fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let title = if self.scroll_offset > 0 {
-            format!("Debug Logs [↑ {} more] (c: clear)", self.scroll_offset)
+            format!("Debug Logs [↑ {} more] (b: bottom, c: clear)", self.scroll_offset)
         } else {
-            "Debug Logs (c: clear)".to_string()
+            "Debug Logs (b: bottom, c: clear)".to_string()
         };
         
         let block = Block::default()
