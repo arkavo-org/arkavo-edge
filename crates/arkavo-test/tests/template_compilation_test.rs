@@ -24,7 +24,8 @@ fn test_xctest_template_compiles() {
         fs::read_to_string(&template_path).expect("Failed to read Swift template");
 
     // Replace template variable with a test socket path
-    let swift_content = template_content.replace("{{SOCKET_PATH}}", "/tmp/test.sock");
+    let test_socket_path = temp_dir.join("test.sock").display().to_string();
+    let swift_content = template_content.replace("{{SOCKET_PATH}}", &test_socket_path);
 
     // Write to a temporary Swift file
     let swift_file = temp_dir.join("ArkavoTestRunner.swift");
