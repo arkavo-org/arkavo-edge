@@ -1,8 +1,12 @@
 pub mod app;
+pub mod benchmark;
 pub mod event;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod ui;
+
+#[cfg(test)]
+mod tests;
 
 use anyhow::Result;
 

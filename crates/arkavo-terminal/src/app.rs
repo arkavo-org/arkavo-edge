@@ -43,24 +43,47 @@ impl App {
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
 
+        // Setup terminal
+        self.setup_terminal()?;
+        
+        // Run app with panic recovery
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // We need to block on the async operation since catch_unwind doesn't work with async
+            let runtime = tokio::runtime::Handle::current();
+            runtime.block_on(self.run_app(&mut terminal))
+        }));
+
+        // Always restore terminal state, even on panic
+        self.restore_terminal()?;
+
+        match res {
+            Ok(result) => result,
+            Err(panic) => {
+                eprintln!("Terminal UI panicked! Terminal state has been restored.");
+                std::panic::resume_unwind(panic);
+            }
+        }
+    }
+    
+    fn setup_terminal(&self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(
             io::stdout(),
             crossterm::terminal::EnterAlternateScreen,
             crossterm::event::EnableMouseCapture
         )?;
-
-        let res = self.run_app(&mut terminal).await;
-
-        crossterm::terminal::disable_raw_mode()?;
-        crossterm::execute!(
+        Ok(())
+    }
+    
+    fn restore_terminal(&self) -> Result<()> {
+        // Ignore errors during cleanup to ensure we try all steps
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
             io::stdout(),
             crossterm::terminal::LeaveAlternateScreen,
             crossterm::event::DisableMouseCapture
-        )?;
-        terminal.show_cursor()?;
-
-        res
+        );
+        Ok(())
     }
 
     async fn run_app<B: ratatui::backend::Backend>(

@@ -45,11 +45,11 @@ impl MessageRole {
 }
 
 pub struct ChatView {
-    messages: VecDeque<ChatMessage>,
-    scroll_offset: u16,
-    input_buffer: String,
-    needs_redraw: bool,
-    max_messages: usize,
+    pub(crate) messages: VecDeque<ChatMessage>,
+    pub(crate) scroll_offset: u16,
+    pub(crate) input_buffer: String,
+    pub(crate) needs_redraw: bool,
+    pub(crate) max_messages: usize,
 }
 
 impl ChatView {
@@ -117,7 +117,7 @@ impl ChatView {
         }
     }
 
-    fn scroll_to_bottom(&mut self) {
+    pub(crate) fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
     }
 
@@ -257,7 +257,7 @@ impl Renderable for ChatView {
 }
 
 // Helper for text wrapping
-mod textwrap {
+pub(crate) mod textwrap {
     pub fn wrap(text: &str, width: usize) -> Vec<String> {
         let mut result = Vec::new();
         let mut current_line = String::new();

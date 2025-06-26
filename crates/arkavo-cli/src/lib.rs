@@ -44,8 +44,8 @@ fn print_usage() {
     println!("    arkavo <COMMAND> [OPTIONS]");
     println!();
     println!("COMMANDS:");
-    println!("    chat      Start conversational agent with repository context");
-    println!("              Options: --tui (terminal UI), --prompt <text>, --image <path>");
+    println!("    chat      Start conversational agent with repository context (Terminal UI by default)");
+    println!("              Options: --no-tui (disable TUI), --prompt <text>, --image <path>");
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run intelligent tests (use --help for modes)");

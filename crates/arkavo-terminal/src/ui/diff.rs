@@ -64,12 +64,12 @@ pub enum DiffViewMode {
 }
 
 pub struct DiffView {
-    file_path: String,
-    hunks: Vec<DiffHunk>,
-    scroll_offset: u16,
-    view_mode: DiffViewMode,
-    needs_redraw: bool,
-    current_hunk: usize,
+    pub(crate) file_path: String,
+    pub(crate) hunks: Vec<DiffHunk>,
+    pub(crate) scroll_offset: u16,
+    pub(crate) view_mode: DiffViewMode,
+    pub(crate) needs_redraw: bool,
+    pub(crate) current_hunk: usize,
 }
 
 impl DiffView {
@@ -263,19 +263,110 @@ impl DiffView {
 
         // Left side (old)
         let old_block = Block::default()
-            .title("Old")
+            .title(format!("Old: {}", self.file_path))
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Red));
+        let old_inner = old_block.inner(chunks[0]);
         frame.render_widget(old_block, chunks[0]);
 
         // Right side (new)
         let new_block = Block::default()
-            .title("New")
+            .title(format!("New: {}", self.file_path))
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Green));
+        let new_inner = new_block.inner(chunks[1]);
         frame.render_widget(new_block, chunks[1]);
 
-        // TODO: Implement side-by-side rendering logic
+        // Collect old and new lines separately
+        let mut old_lines = Vec::new();
+        let mut new_lines = Vec::new();
+
+        for hunk in &self.hunks {
+            for line in &hunk.lines {
+                match line.line_type {
+                    DiffLineType::Context => {
+                        // Context lines appear on both sides
+                        old_lines.push(self.format_line_for_side(line, true));
+                        new_lines.push(self.format_line_for_side(line, false));
+                    }
+                    DiffLineType::Deletion => {
+                        // Deletions only on old side
+                        old_lines.push(self.format_line_for_side(line, true));
+                        new_lines.push(Line::from(vec![Span::raw("")])); // Empty line on new side
+                    }
+                    DiffLineType::Addition => {
+                        // Additions only on new side
+                        old_lines.push(Line::from(vec![Span::raw("")])); // Empty line on old side
+                        new_lines.push(self.format_line_for_side(line, false));
+                    }
+                    DiffLineType::Header => {
+                        // Header appears on both sides
+                        let header_line = Line::from(vec![
+                            Span::styled(&line.content, line.line_type.style())
+                        ]);
+                        old_lines.push(header_line.clone());
+                        new_lines.push(header_line);
+                    }
+                }
+            }
+        }
+
+        // Apply scroll offset
+        let visible_height = old_inner.height as usize;
+        let start = self.scroll_offset as usize;
+        let end = (start + visible_height).min(old_lines.len());
+
+        if start < old_lines.len() {
+            let old_visible: Vec<ListItem> = old_lines[start..end]
+                .iter()
+                .map(|line| ListItem::new(line.clone()))
+                .collect();
+            let new_visible: Vec<ListItem> = new_lines[start..end]
+                .iter()
+                .map(|line| ListItem::new(line.clone()))
+                .collect();
+
+            let old_list = List::new(old_visible);
+            let new_list = List::new(new_visible);
+
+            frame.render_widget(old_list, old_inner);
+            frame.render_widget(new_list, new_inner);
+        }
+    }
+    
+    fn format_line_for_side<'a>(&self, line: &'a DiffLine, is_old_side: bool) -> Line<'a> {
+        let mut spans = vec![];
+        
+        // Line number
+        if is_old_side {
+            if let Some(num) = line.old_line_num {
+                spans.push(Span::styled(
+                    format!("{:4}", num),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                spans.push(Span::raw("    "));
+            }
+        } else {
+            if let Some(num) = line.new_line_num {
+                spans.push(Span::styled(
+                    format!("{:4}", num),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            } else {
+                spans.push(Span::raw("    "));
+            }
+        }
+        
+        spans.push(Span::raw(" │ "));
+        
+        // Content with appropriate styling
+        spans.push(Span::styled(
+            line.content.clone(),
+            line.line_type.style(),
+        ));
+        
+        Line::from(spans)
     }
 
     pub fn handle_event(&mut self, event: AppEvent) -> Result<()> {
@@ -335,7 +426,7 @@ impl Renderable for DiffView {
     }
 }
 
-fn parse_range(range: &str) -> (usize, usize) {
+pub fn parse_range(range: &str) -> (usize, usize) {
     let parts: Vec<&str> = range.split(',').collect();
     let start = parts[0].parse::<usize>().unwrap_or(1);
     let count = if parts.len() > 1 {

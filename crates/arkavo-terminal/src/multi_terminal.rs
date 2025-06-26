@@ -11,6 +11,22 @@ pub struct TerminalSpawnConfig {
     pub title: String,
 }
 
+impl TerminalSpawnConfig {
+    pub fn validate(&self) -> Result<()> {
+        // Validate task_id doesn't contain shell-unsafe characters
+        if self.task_id.contains(|c: char| c.is_whitespace() || "$`\"'\\|<>&;(){}".contains(c)) {
+            return Err(anyhow!("Invalid task_id: contains unsafe characters"));
+        }
+        
+        // Validate title doesn't contain unsafe characters
+        if self.title.contains(|c: char| c == '\n' || c == '\r' || c == '\0') {
+            return Err(anyhow!("Invalid title: contains unsafe characters"));
+        }
+        
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TaskType {
     ChainOfThought,
@@ -45,6 +61,9 @@ impl MultiTerminalManager {
     }
 
     pub fn spawn_terminal(&self, config: TerminalSpawnConfig) -> Result<()> {
+        // Validate config to prevent injection attacks
+        config.validate()?;
+        
         let terminal_app = self.detect_terminal()?;
 
         match terminal_app {
@@ -124,13 +143,19 @@ impl MultiTerminalManager {
     }
 
     fn spawn_tmux_pane(&self, config: &TerminalSpawnConfig) -> Result<()> {
-        let command = format!(
-            "{} view --task {} --session {}",
-            self.executable_path, config.task_id, config.session_id
-        );
-
         Command::new("tmux")
-            .args(["split-window", "-h", "-p", "50", &command])
+            .args([
+                "split-window",
+                "-h",
+                "-p",
+                "50",
+                &self.executable_path,
+                "view",
+                "--task",
+                &config.task_id,
+                "--session",
+                &config.session_id.to_string(),
+            ])
             .spawn()?;
 
         Ok(())
@@ -159,27 +184,33 @@ impl MultiTerminalManager {
         Ok(())
     }
 
+    #[cfg(unix)]
     fn spawn_generic_terminal(&self, config: &TerminalSpawnConfig) -> Result<()> {
         // Try common terminal emulators
         let terminals = ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"];
 
         for terminal in &terminals {
-            let command = format!(
-                "{} view --task {} --session {}",
-                self.executable_path, config.task_id, config.session_id
-            );
-
-            if Command::new(terminal)
+            let result = Command::new(terminal)
                 .arg("-e")
-                .arg(&command)
-                .spawn()
-                .is_ok()
-            {
+                .arg(&self.executable_path)
+                .arg("view")
+                .arg("--task")
+                .arg(&config.task_id)
+                .arg("--session")
+                .arg(&config.session_id.to_string())
+                .spawn();
+                
+            if result.is_ok() {
                 return Ok(());
             }
         }
 
         Err(anyhow!("Could not find a suitable terminal emulator"))
+    }
+    
+    #[cfg(not(unix))]
+    fn spawn_generic_terminal(&self, _config: &TerminalSpawnConfig) -> Result<()> {
+        Err(anyhow!("Multi-terminal spawning not yet implemented for Windows"))
     }
 }
 
