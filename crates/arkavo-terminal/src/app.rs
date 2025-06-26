@@ -12,12 +12,13 @@ use tokio::sync::mpsc;
 use crate::event::{AppEvent, EventHandler};
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{chat::ChatView, code::CodeView, diff::DiffView};
+use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
 
 pub enum ViewMode {
     Chat,
     Code,
     Diff,
+    Debug,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -40,6 +41,7 @@ pub struct App {
     pub chat_view: ChatView,
     pub code_view: CodeView,
     pub diff_view: DiffView,
+    pub debug_view: DebugView,
     pub thinking_view: ChatView, // Reuse ChatView for chain-of-thought display
     pub event_handler: EventHandler,
     pub ui_tx: Option<mpsc::Sender<String>>,
@@ -66,6 +68,7 @@ impl App {
             chat_view: ChatView::new(),
             code_view: CodeView::new(),
             diff_view: DiffView::new(),
+            debug_view: DebugView::new(),
             thinking_view,
             event_handler: EventHandler::new(),
             ui_tx: None,
@@ -92,6 +95,7 @@ impl App {
             chat_view: ChatView::new(),
             code_view: CodeView::new(),
             diff_view: DiffView::new(),
+            debug_view: DebugView::new(),
             thinking_view,
             event_handler: EventHandler::new(),
             ui_tx: Some(ui_tx),
@@ -153,22 +157,27 @@ impl App {
 
         loop {
             // Check for LLM responses - drain all available messages
+            let mut debug_messages = Vec::new();
             if let Some(ref mut llm_rx) = self.llm_rx {
                 // Process all available messages to prevent message loss
                 while let Ok(response) = llm_rx.try_recv() {
                     if response == "<<STREAM_START>>" {
                         // Start streaming a new assistant message
+                        debug_messages.push((crate::ui::debug::LogLevel::Info, "[UI] Started streaming response".to_string()));
                         self.chat_view
                             .start_streaming_message(crate::ui::chat::MessageRole::Assistant);
                     } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
                         // Append chunk to streaming message
+                        debug_messages.push((crate::ui::debug::LogLevel::Debug, format!("[UI] Received chunk: {} chars", chunk.len())));
                         self.chat_view.append_to_streaming(chunk);
                     } else if response == "<<STREAM_END>>" {
                         // Finish streaming
+                        debug_messages.push((crate::ui::debug::LogLevel::Info, "[UI] Finished streaming response".to_string()));
                         self.chat_view.finish_streaming();
                         self.telemetry.track_message_received();
                     } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
                         // Handle streaming error
+                        debug_messages.push((crate::ui::debug::LogLevel::Error, format!("[UI] Streaming error: {}", error_msg)));
                         self.chat_view.finish_streaming();
                         self.chat_view.add_message(
                             crate::ui::chat::MessageRole::System,
@@ -176,12 +185,18 @@ impl App {
                         );
                     } else {
                         // Fallback for non-streaming messages
+                        debug_messages.push((crate::ui::debug::LogLevel::Info, format!("[UI] Received non-streaming response: {} chars", response.len())));
                         self.chat_view.finish_streaming();
                         self.chat_view
                             .add_message(crate::ui::chat::MessageRole::Assistant, response);
                         self.telemetry.track_message_received();
                     }
                 }
+            }
+            
+            // Add collected debug messages
+            for (level, message) in debug_messages {
+                self.add_debug_log(level, message);
             }
 
             // Check for thinking/chain-of-thought updates
@@ -223,8 +238,11 @@ impl App {
 
                                 // Send to LLM if channel is available
                                 if let Some(ref ui_tx) = self.ui_tx {
-                                    match ui_tx.try_send(input.clone()) {
+                                    let send_result = ui_tx.try_send(input.clone());
+                                    self.add_debug_log(crate::ui::debug::LogLevel::Debug, format!("[UI] Sending message: {}", input));
+                                    match send_result {
                                         Ok(_) => {
+                                            self.add_debug_log(crate::ui::debug::LogLevel::Info, "[UI] Message sent successfully".to_string());
                                             // Add user message to chat
                                             self.chat_view.add_message(
                                                 crate::ui::chat::MessageRole::User,
@@ -331,6 +349,7 @@ impl App {
             ViewMode::Chat => self.chat_view.render(frame, chunks[1]),
             ViewMode::Code => self.code_view.render(frame, chunks[1]),
             ViewMode::Diff => self.diff_view.render(frame, chunks[1]),
+            ViewMode::Debug => self.debug_view.render(frame, chunks[1]),
         }
 
         // Render performance metrics
@@ -409,7 +428,8 @@ impl App {
         self.view_mode = match self.view_mode {
             ViewMode::Chat => ViewMode::Code,
             ViewMode::Code => ViewMode::Diff,
-            ViewMode::Diff => ViewMode::Chat,
+            ViewMode::Diff => ViewMode::Debug,
+            ViewMode::Debug => ViewMode::Chat,
         };
     }
 
@@ -419,6 +439,7 @@ impl App {
                 ViewMode::Chat => self.chat_view.handle_event(event),
                 ViewMode::Code => self.code_view.handle_event(event),
                 ViewMode::Diff => self.diff_view.handle_event(event),
+                ViewMode::Debug => self.debug_view.handle_event(event),
             },
             LayoutMode::Portrait => match self.focused_pane {
                 FocusedPane::Chat => self.chat_view.handle_event(event),
@@ -621,6 +642,7 @@ impl App {
             ViewMode::Chat => "Chat",
             ViewMode::Code => "Code",
             ViewMode::Diff => "Diff",
+            ViewMode::Debug => "Debug",
         };
 
         let status = format!(" {} | Tab: Switch View | q: Quit ", mode_text);
@@ -687,6 +709,10 @@ impl App {
             .block(Block::default().borders(Borders::NONE));
 
         frame.render_widget(paragraph, area);
+    }
+
+    pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {
+        self.debug_view.add_log(level, message);
     }
 }
 

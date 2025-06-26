@@ -328,7 +328,9 @@ Repository details:
 
         // Spawn LLM processing task
         let llm_handle = runtime.spawn(async move {
+            eprintln!("[LLM Task] Started, waiting for messages...");
             while let Some(user_input) = ui_rx.recv().await {
+                eprintln!("[LLM Task] Received user input: {}", user_input);
                 // Process the user input with LLM
                 let user_message = Message::user(user_input.clone());
                 messages_clone.push(user_message);
@@ -364,14 +366,18 @@ Repository details:
                         let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
 
                         // Save the complete message
-                        let assistant_message = Message::assistant(full_response);
+                        let assistant_message = Message::assistant(full_response.clone());
                         messages_clone.push(assistant_message);
+                        eprintln!("[LLM Task] Response complete, {} chars. Messages in context: {}", full_response.len(), messages_clone.len());
                     }
                     Err(e) => {
+                        eprintln!("[LLM Task] Error: {}", e);
                         let _ = llm_tx.send(format!("Error: {}", e)).await;
                     }
                 }
+                eprintln!("[LLM Task] Waiting for next message...");
             }
+            eprintln!("[LLM Task] Channel closed, exiting...");
         });
 
         // Run the Terminal UI with communication channels
