@@ -150,3 +150,4 @@ Avoid hardcoded paths, platform-specific assumptions, or environment-dependent c
     • Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
     • For UI automation use: IDB, XCTest, or AppleScript - NOT simctl
 - run clippy and cargo fmt before each git push
+- ProTip! Add .patch or .diff to the end of URLs for Git's plaintext views.
