@@ -204,6 +204,29 @@ impl ChatView {
                     self.scroll_offset = 0;
                     self.needs_redraw = true;
                 }
+                KeyCode::Char(c) => {
+                    self.input_buffer.push(c);
+                    self.needs_redraw = true;
+                }
+                KeyCode::Backspace => {
+                    self.input_buffer.pop();
+                    self.needs_redraw = true;
+                }
+                KeyCode::Enter => {
+                    if !self.input_buffer.is_empty() {
+                        // Add user message
+                        self.add_message(MessageRole::User, self.input_buffer.clone());
+                        
+                        // Simulate assistant response for now
+                        self.add_message(
+                            MessageRole::Assistant,
+                            format!("You said: {}", self.input_buffer),
+                        );
+                        
+                        self.input_buffer.clear();
+                        self.needs_redraw = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -247,11 +270,13 @@ impl Renderable for ChatView {
 
         // Render input area
         let input_block = Block::default()
-            .title("Input")
+            .title("Input (Press Enter to send)")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
 
-        let input_text = Paragraph::new(self.input_buffer.as_str())
+        // Add cursor indicator
+        let input_with_cursor = format!("{}_", self.input_buffer);
+        let input_text = Paragraph::new(input_with_cursor)
             .style(Style::default().fg(Color::White))
             .wrap(Wrap { trim: false })
             .block(input_block);
