@@ -27,6 +27,9 @@ macro_rules! debug_println {
 }
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if --tui flag is present for terminal UI mode
+    let use_tui = args.contains(&"--tui".to_string());
+
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
         .windows(2)
@@ -310,6 +313,14 @@ Repository details:
             ))?;
         }
         return Ok(());
+    }
+
+    // Launch Terminal UI if requested
+    if use_tui && !print_mode {
+        // Create and run TUI app with all the initialized components
+        let tui_result = runtime.block_on(async { arkavo_terminal::run().await });
+
+        return tui_result.map_err(|e| e.into());
     }
 
     // Interactive chat loop

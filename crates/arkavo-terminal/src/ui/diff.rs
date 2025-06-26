@@ -1,0 +1,347 @@
+use anyhow::Result;
+use ratatui::{
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem},
+};
+
+use crate::event::AppEvent;
+use crate::renderer::Renderable;
+
+#[derive(Debug, Clone)]
+pub struct DiffHunk {
+    pub old_start: usize,
+    pub old_lines: usize,
+    pub new_start: usize,
+    pub new_lines: usize,
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffLine {
+    pub line_type: DiffLineType,
+    pub old_line_num: Option<usize>,
+    pub new_line_num: Option<usize>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DiffLineType {
+    Context,
+    Addition,
+    Deletion,
+    Header,
+}
+
+impl DiffLineType {
+    pub fn style(&self) -> Style {
+        match self {
+            DiffLineType::Context => Style::default().fg(Color::White),
+            DiffLineType::Addition => Style::default().fg(Color::Green),
+            DiffLineType::Deletion => Style::default().fg(Color::Red),
+            DiffLineType::Header => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        }
+    }
+
+    pub fn prefix(&self) -> &str {
+        match self {
+            DiffLineType::Context => " ",
+            DiffLineType::Addition => "+",
+            DiffLineType::Deletion => "-",
+            DiffLineType::Header => "@",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DiffViewMode {
+    Unified,
+    SideBySide,
+}
+
+pub struct DiffView {
+    file_path: String,
+    hunks: Vec<DiffHunk>,
+    scroll_offset: u16,
+    view_mode: DiffViewMode,
+    needs_redraw: bool,
+    current_hunk: usize,
+}
+
+impl DiffView {
+    pub fn new() -> Self {
+        Self {
+            file_path: String::new(),
+            hunks: Vec::new(),
+            scroll_offset: 0,
+            view_mode: DiffViewMode::Unified,
+            needs_redraw: true,
+            current_hunk: 0,
+        }
+    }
+}
+
+impl Default for DiffView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DiffView {
+    pub fn set_diff(&mut self, file_path: String, hunks: Vec<DiffHunk>) {
+        self.file_path = file_path;
+        self.hunks = hunks;
+        self.scroll_offset = 0;
+        self.current_hunk = 0;
+        self.needs_redraw = true;
+    }
+
+    pub fn parse_unified_diff(&mut self, diff_text: &str) {
+        let mut hunks = Vec::new();
+        let mut current_hunk: Option<DiffHunk> = None;
+        let mut old_line = 0;
+        let mut new_line = 0;
+
+        for line in diff_text.lines() {
+            if line.starts_with("+++") || line.starts_with("---") {
+                // File headers - extract filename
+                if line.starts_with("+++") {
+                    self.file_path = line[4..].split('\t').next().unwrap_or("").to_string();
+                }
+            } else if line.starts_with("@@") {
+                // Hunk header
+                if let Some(hunk) = current_hunk.take() {
+                    hunks.push(hunk);
+                }
+
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let old_range = parts[1].trim_start_matches('-');
+                    let new_range = parts[2].trim_start_matches('+');
+
+                    let (old_start, old_count) = parse_range(old_range);
+                    let (new_start, new_count) = parse_range(new_range);
+
+                    old_line = old_start;
+                    new_line = new_start;
+
+                    current_hunk = Some(DiffHunk {
+                        old_start,
+                        old_lines: old_count,
+                        new_start,
+                        new_lines: new_count,
+                        header: line.to_string(),
+                        lines: vec![DiffLine {
+                            line_type: DiffLineType::Header,
+                            old_line_num: None,
+                            new_line_num: None,
+                            content: line.to_string(),
+                        }],
+                    });
+                }
+            } else if let Some(ref mut hunk) = current_hunk {
+                // Diff content
+                let (line_type, content) = if let Some(stripped) = line.strip_prefix('+') {
+                    (DiffLineType::Addition, stripped)
+                } else if let Some(stripped) = line.strip_prefix('-') {
+                    (DiffLineType::Deletion, stripped)
+                } else if let Some(stripped) = line.strip_prefix(' ') {
+                    (DiffLineType::Context, stripped)
+                } else {
+                    (DiffLineType::Context, line)
+                };
+
+                let diff_line = match line_type {
+                    DiffLineType::Addition => {
+                        let l = DiffLine {
+                            line_type,
+                            old_line_num: None,
+                            new_line_num: Some(new_line),
+                            content: content.to_string(),
+                        };
+                        new_line += 1;
+                        l
+                    }
+                    DiffLineType::Deletion => {
+                        let l = DiffLine {
+                            line_type,
+                            old_line_num: Some(old_line),
+                            new_line_num: None,
+                            content: content.to_string(),
+                        };
+                        old_line += 1;
+                        l
+                    }
+                    DiffLineType::Context => {
+                        let l = DiffLine {
+                            line_type,
+                            old_line_num: Some(old_line),
+                            new_line_num: Some(new_line),
+                            content: content.to_string(),
+                        };
+                        old_line += 1;
+                        new_line += 1;
+                        l
+                    }
+                    _ => continue,
+                };
+
+                hunk.lines.push(diff_line);
+            }
+        }
+
+        if let Some(hunk) = current_hunk {
+            hunks.push(hunk);
+        }
+
+        self.hunks = hunks;
+        self.needs_redraw = true;
+    }
+
+    fn render_unified(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let block = Block::default()
+            .title(format!("Diff: {} [Unified]", self.file_path))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::White));
+
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
+
+        let mut items = Vec::new();
+
+        for hunk in &self.hunks {
+            for line in &hunk.lines {
+                let mut spans = vec![];
+
+                // Line numbers
+                if let Some(old_num) = line.old_line_num {
+                    spans.push(Span::styled(
+                        format!("{:4}", old_num),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                } else {
+                    spans.push(Span::raw("    "));
+                }
+
+                spans.push(Span::raw(" "));
+
+                if let Some(new_num) = line.new_line_num {
+                    spans.push(Span::styled(
+                        format!("{:4}", new_num),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                } else {
+                    spans.push(Span::raw("    "));
+                }
+
+                spans.push(Span::raw(" │ "));
+
+                // Diff marker and content
+                spans.push(Span::styled(
+                    line.line_type.prefix(),
+                    line.line_type.style(),
+                ));
+                spans.push(Span::styled(line.content.clone(), line.line_type.style()));
+
+                items.push(ListItem::new(Line::from(spans)));
+            }
+        }
+
+        let list = List::new(items);
+        frame.render_widget(list, inner_area);
+    }
+
+    fn render_side_by_side(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+
+        // Left side (old)
+        let old_block = Block::default()
+            .title("Old")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Red));
+        frame.render_widget(old_block, chunks[0]);
+
+        // Right side (new)
+        let new_block = Block::default()
+            .title("New")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Green));
+        frame.render_widget(new_block, chunks[1]);
+
+        // TODO: Implement side-by-side rendering logic
+    }
+
+    pub fn handle_event(&mut self, event: AppEvent) -> Result<()> {
+        if let AppEvent::KeyPress(key) = event {
+            use crossterm::event::KeyCode;
+            match key.code {
+                KeyCode::Char('m') => {
+                    self.view_mode = match self.view_mode {
+                        DiffViewMode::Unified => DiffViewMode::SideBySide,
+                        DiffViewMode::SideBySide => DiffViewMode::Unified,
+                    };
+                    self.needs_redraw = true;
+                }
+                KeyCode::Up => {
+                    if self.scroll_offset > 0 {
+                        self.scroll_offset -= 1;
+                        self.needs_redraw = true;
+                    }
+                }
+                KeyCode::Down => {
+                    self.scroll_offset += 1;
+                    self.needs_redraw = true;
+                }
+                KeyCode::Char('n') => {
+                    // Next hunk
+                    if self.current_hunk < self.hunks.len() - 1 {
+                        self.current_hunk += 1;
+                        self.needs_redraw = true;
+                    }
+                }
+                KeyCode::Char('p') => {
+                    // Previous hunk
+                    if self.current_hunk > 0 {
+                        self.current_hunk -= 1;
+                        self.needs_redraw = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Renderable for DiffView {
+    fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        match self.view_mode {
+            DiffViewMode::Unified => self.render_unified(frame, area),
+            DiffViewMode::SideBySide => self.render_side_by_side(frame, area),
+        }
+
+        self.needs_redraw = false;
+    }
+
+    fn needs_redraw(&self) -> bool {
+        self.needs_redraw
+    }
+}
+
+fn parse_range(range: &str) -> (usize, usize) {
+    let parts: Vec<&str> = range.split(',').collect();
+    let start = parts[0].parse::<usize>().unwrap_or(1);
+    let count = if parts.len() > 1 {
+        parts[1].parse::<usize>().unwrap_or(1)
+    } else {
+        1
+    };
+    (start, count)
+}
