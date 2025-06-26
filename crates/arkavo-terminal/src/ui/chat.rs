@@ -117,6 +117,7 @@ impl ChatView {
             if last_msg.is_streaming {
                 last_msg.content.push_str(text);
                 self.needs_redraw = true;
+                self.scroll_to_bottom(); // Auto-scroll to show new content
             }
         }
     }
@@ -215,7 +216,8 @@ impl ChatView {
                 }
                 KeyCode::Enter => {
                     // Enter is handled by the App now for LLM integration
-                    // Just do nothing here
+                    // Return early to prevent double handling
+                    return Ok(());
                 }
                 _ => {}
             }
@@ -234,9 +236,15 @@ impl Renderable for ChatView {
             ])
             .split(area);
 
-        // Render messages
+        // Render messages with scroll indicator
+        let title = if self.scroll_offset > 0 {
+            format!("Chat [↑ {} more]", self.scroll_offset)
+        } else {
+            "Chat".to_string()
+        };
+        
         let messages_block = Block::default()
-            .title("Chat")
+            .title(title)
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
 
@@ -250,13 +258,39 @@ impl Renderable for ChatView {
             .map(|msg| self.render_message(msg, inner_area.width))
             .collect();
 
-        // Calculate visible range based on scroll
-        let _total_height: usize = items.iter().map(|item| item.height()).sum();
-        let _visible_height = inner_area.height as usize;
+        // Calculate total height and scrolling
+        let total_height: usize = items.iter().map(|item| item.height()).sum();
+        let visible_height = inner_area.height as usize;
 
-        let list = List::new(items).style(Style::default().fg(Color::White));
+        // Implement proper scrolling
+        if total_height <= visible_height {
+            // All messages fit, no scrolling needed
+            let list = List::new(items).style(Style::default().fg(Color::White));
+            frame.render_widget(list, inner_area);
+        } else {
+            // Need to scroll - show the bottom messages when scroll_offset is 0
+            let mut current_height = 0;
+            let mut start_idx = items.len();
+            
+            // When scroll_offset is 0, we want to show the bottom (most recent) messages
+            // Find the starting index that fills the visible area from bottom
+            for (i, item) in items.iter().enumerate().rev() {
+                current_height += item.height();
+                if current_height >= visible_height + self.scroll_offset as usize {
+                    start_idx = i;
+                    break;
+                }
+            }
 
-        frame.render_widget(list, inner_area);
+            // Take only the visible items
+            let visible_items: Vec<ListItem> = items
+                .into_iter()
+                .skip(start_idx)
+                .collect();
+
+            let list = List::new(visible_items).style(Style::default().fg(Color::White));
+            frame.render_widget(list, inner_area);
+        }
 
         // Render input area
         let input_block = Block::default()
