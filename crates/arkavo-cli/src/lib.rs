@@ -5,8 +5,8 @@ pub mod memory_integration;
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
-        print_usage();
-        return Err("No command provided".into());
+        // No command provided, default to chat
+        return commands::chat::execute(&[]);
     }
 
     match args[0].as_str() {
