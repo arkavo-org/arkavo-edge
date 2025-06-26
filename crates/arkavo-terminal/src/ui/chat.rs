@@ -55,15 +55,16 @@ pub struct ChatView {
 impl ChatView {
     pub fn new() -> Self {
         let mut messages = VecDeque::new();
-        
+
         // Add welcome message
         messages.push_back(ChatMessage {
             role: MessageRole::System,
-            content: "Welcome to Arkavo Terminal UI! Press Tab to switch views, q to quit.".to_string(),
+            content: "Welcome to Arkavo Terminal UI! Press Tab to switch views, q to quit."
+                .to_string(),
             timestamp: Utc::now(),
             is_streaming: false,
         });
-        
+
         Self {
             messages,
             scroll_offset: 0,
@@ -216,13 +217,13 @@ impl ChatView {
                     if !self.input_buffer.is_empty() {
                         // Add user message
                         self.add_message(MessageRole::User, self.input_buffer.clone());
-                        
+
                         // Simulate assistant response for now
                         self.add_message(
                             MessageRole::Assistant,
                             format!("You said: {}", self.input_buffer),
                         );
-                        
+
                         self.input_buffer.clear();
                         self.needs_redraw = true;
                     }

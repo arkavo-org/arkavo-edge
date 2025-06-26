@@ -26,17 +26,17 @@ pub async fn run() -> Result<()> {
             crossterm::terminal::LeaveAlternateScreen,
             crossterm::event::DisableMouseCapture
         );
-        
+
         // Call the original panic hook
         original_hook(panic_info);
     }));
-    
+
     let mut app = App::new();
     let result = app.run().await;
-    
+
     // Restore original panic hook
     let _ = std::panic::take_hook();
-    
+
     result
 }
 
