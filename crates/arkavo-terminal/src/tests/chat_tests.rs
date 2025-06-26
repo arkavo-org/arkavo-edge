@@ -4,15 +4,19 @@ use crate::ui::chat::{ChatView, MessageRole};
 fn test_chat_message_storage() {
     let mut chat = ChatView::new();
 
+    // ChatView now starts with a welcome message
+    assert_eq!(chat.messages.len(), 1);
+    assert_eq!(chat.messages[0].role, MessageRole::System);
+
     // Add some messages
     chat.add_message(MessageRole::User, "Hello".to_string());
     chat.add_message(MessageRole::Assistant, "Hi there!".to_string());
 
-    assert_eq!(chat.messages.len(), 2);
-    assert_eq!(chat.messages[0].role, MessageRole::User);
-    assert_eq!(chat.messages[0].content, "Hello");
-    assert_eq!(chat.messages[1].role, MessageRole::Assistant);
-    assert_eq!(chat.messages[1].content, "Hi there!");
+    assert_eq!(chat.messages.len(), 3);
+    assert_eq!(chat.messages[1].role, MessageRole::User);
+    assert_eq!(chat.messages[1].content, "Hello");
+    assert_eq!(chat.messages[2].role, MessageRole::Assistant);
+    assert_eq!(chat.messages[2].content, "Hi there!");
 }
 
 #[test]
@@ -34,9 +38,12 @@ fn test_chat_max_messages() {
 fn test_streaming_message() {
     let mut chat = ChatView::new();
 
+    // ChatView starts with 1 welcome message
+    assert_eq!(chat.messages.len(), 1);
+
     // Start streaming
     chat.start_streaming_message(MessageRole::Assistant);
-    assert_eq!(chat.messages.len(), 1);
+    assert_eq!(chat.messages.len(), 2);
     assert!(chat.messages.back().unwrap().is_streaming);
     assert_eq!(chat.messages.back().unwrap().content, "");
 

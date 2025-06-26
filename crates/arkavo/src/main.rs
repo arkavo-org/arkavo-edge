@@ -29,17 +29,17 @@ fn main() {
 #[cfg(target_os = "macos")]
 fn maybe_relaunch_in_terminal() {
     use std::process::Command;
-    
+
     // Check if we're already in a TTY
     if atty::is(atty::Stream::Stdout) {
         return; // Already in terminal
     }
-    
+
     // Check if we've already been relaunched
     if env::var_os("ARKAVO_LAUNCHED").is_some() {
         return; // Avoid infinite loop
     }
-    
+
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
         // Launch in Terminal.app
@@ -48,13 +48,13 @@ fn maybe_relaunch_in_terminal() {
             .arg("Terminal")
             .arg(&exe)
             .env("ARKAVO_LAUNCHED", "1");
-            
+
         // Pass through all arguments
         let args: Vec<String> = env::args().skip(1).collect();
         if !args.is_empty() {
             cmd.args(&args);
         }
-        
+
         // Spawn and exit
         let _ = cmd.spawn();
         process::exit(0);

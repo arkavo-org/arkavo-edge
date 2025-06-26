@@ -4,7 +4,7 @@ use arkavo_test::mcp::calibration::server::{
     CalibrationRequest, CalibrationResponse, CalibrationServer,
 };
 use std::env;
-use std::path::PathBuf;
+// use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_calibration_workflow() {
