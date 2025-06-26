@@ -19,40 +19,48 @@ pub fn run_performance_benchmark() {
 
     // Benchmark chat rendering
     let chat_start = Instant::now();
-    for _ in 0..10 {
+    for _ in 0..100 {
         render_chat_to_buffer(&mut chat_view, &mut buffer, area);
     }
-    let chat_avg = chat_start.elapsed().as_millis() / 10;
+    let chat_avg_us = chat_start.elapsed().as_micros() / 100;
 
     // Benchmark diff rendering
     let diff_start = Instant::now();
-    for _ in 0..10 {
+    for _ in 0..100 {
         render_diff_to_buffer(&mut diff_view, &mut buffer, area);
     }
-    let diff_avg = diff_start.elapsed().as_millis() / 10;
+    let diff_avg_us = diff_start.elapsed().as_micros() / 100;
 
     // Combined worst-case
     let combined_start = Instant::now();
     render_chat_to_buffer(&mut chat_view, &mut buffer, Rect::new(0, 0, 60, 40));
     render_diff_to_buffer(&mut diff_view, &mut buffer, Rect::new(60, 0, 60, 40));
-    let combined_time = combined_start.elapsed();
+    let combined_time_us = combined_start.elapsed().as_micros();
 
     // Report results
     println!("Performance Benchmark Results:");
     println!("==============================");
-    println!("Chat View (100 messages):     {}ms avg", chat_avg);
-    println!("Diff View (1000 lines):       {}ms avg", diff_avg);
     println!(
-        "Combined worst-case:          {}ms",
-        combined_time.as_millis()
+        "Chat View (100 messages):     {:.2}ms avg",
+        chat_avg_us as f64 / 1000.0
     );
-    println!("Target frame budget:          50ms");
+    println!(
+        "Diff View (1000 lines):       {:.2}ms avg",
+        diff_avg_us as f64 / 1000.0
+    );
+    println!(
+        "Combined worst-case:          {:.2}ms",
+        combined_time_us as f64 / 1000.0
+    );
+    println!("Target frame budget:          8.33ms (120fps)");
     println!();
 
-    if combined_time.as_millis() <= 50 {
-        println!("✅ PASS: Rendering within 50ms frame budget");
+    if combined_time_us <= 8333 {
+        println!("✅ PASS: Rendering within 8.33ms frame budget (120fps)");
+    } else if combined_time_us <= 16666 {
+        println!("⚠️  WARNING: Rendering within 16.67ms (60fps) but not 8.33ms (120fps)");
     } else {
-        println!("❌ FAIL: Rendering exceeds 50ms frame budget");
+        println!("❌ FAIL: Rendering exceeds 16.67ms frame budget");
         std::process::exit(1);
     }
 }

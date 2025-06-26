@@ -333,12 +333,39 @@ Repository details:
                 let user_message = Message::user(user_input.clone());
                 messages_clone.push(user_message);
 
-                // Get response from LLM
-                match client_clone.complete(messages_clone.clone()).await {
-                    Ok(response) => {
-                        let assistant_message = Message::assistant(response.clone());
+                // Get streaming response from LLM
+                match client_clone.stream(messages_clone.clone()).await {
+                    Ok(mut stream) => {
+                        let mut full_response = String::new();
+
+                        // Send start streaming signal
+                        let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
+
+                        while let Some(chunk_result) = stream.next().await {
+                            match chunk_result {
+                                Ok(chunk) => {
+                                    if !chunk.content.is_empty() {
+                                        full_response.push_str(&chunk.content);
+                                        // Send each chunk as it arrives
+                                        let _ = llm_tx
+                                            .send(format!("<<STREAM_CHUNK>>{}", chunk.content))
+                                            .await;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ =
+                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {}", e)).await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Send end streaming signal
+                        let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
+
+                        // Save the complete message
+                        let assistant_message = Message::assistant(full_response);
                         messages_clone.push(assistant_message);
-                        let _ = llm_tx.send(response).await;
                     }
                     Err(e) => {
                         let _ = llm_tx.send(format!("Error: {}", e)).await;

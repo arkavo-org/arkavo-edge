@@ -3,6 +3,7 @@ pub mod benchmark;
 pub mod event;
 pub mod multi_terminal;
 pub mod renderer;
+pub mod telemetry;
 pub mod ui;
 
 #[cfg(test)]
@@ -85,10 +86,10 @@ pub struct TerminalConfig {
 impl Default for TerminalConfig {
     fn default() -> Self {
         Self {
-            frame_budget_ms: 50, // Target <50ms render time
+            frame_budget_ms: 8, // Target <8ms render time for 120fps
             enable_mouse: true,
             enable_alternate_screen: true,
-            max_fps: 60,
+            max_fps: 120,
         }
     }
 }

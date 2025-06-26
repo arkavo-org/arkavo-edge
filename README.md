@@ -100,6 +100,7 @@ When using the Terminal UI mode:
 - **n/p** - Next/Previous hunk (in Diff view)
 
 The Terminal UI provides:
+- **120fps Rendering**: Smooth, responsive UI with 8ms frame budget
 - **Chat View**: Conversation history with color-coded roles
 - **Code View**: Syntax-highlighted code with line numbers
 - **Diff View**: Unified or side-by-side diff preview
