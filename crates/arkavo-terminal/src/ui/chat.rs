@@ -117,10 +117,7 @@ impl ChatView {
             if last_msg.is_streaming {
                 last_msg.content.push_str(text);
                 self.needs_redraw = true;
-                // Only auto-scroll if user is at the bottom (not manually scrolling)
-                if self.scroll_offset == 0 {
-                    self.scroll_to_bottom();
-                }
+                self.scroll_to_bottom(); // Auto-scroll to show new content
             }
         }
     }
