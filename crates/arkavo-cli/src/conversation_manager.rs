@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tiktoken_rs::{CoreBPE, cl100k_base};
 use uuid::Uuid;
 
-const MAX_CONTEXT_MESSAGES: usize = 10;  // Conservative default for Ollama
-const MAX_CONTEXT_TOKENS: usize = 1500;  // Conservative default for Ollama
+const MAX_CONTEXT_MESSAGES: usize = 10; // Conservative default for Ollama
+const MAX_CONTEXT_TOKENS: usize = 1500; // Conservative default for Ollama
 const SUMMARY_TRIGGER_MESSAGES: usize = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

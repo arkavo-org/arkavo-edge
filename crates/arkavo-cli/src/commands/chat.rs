@@ -689,7 +689,6 @@ fn get_current_directory() -> String {
     }
 }
 
-
 fn handle_command(
     input: &str,
     mcp_client: &Option<McpConnection>,

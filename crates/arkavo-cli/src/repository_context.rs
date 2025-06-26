@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tiktoken_rs::{CoreBPE, cl100k_base};
 use tokio::sync::Mutex;
 
-const MAX_CONTEXT_TOKENS: usize = 2000;  // Conservative default for Ollama
+const MAX_CONTEXT_TOKENS: usize = 2000; // Conservative default for Ollama
 const CACHE_SIZE: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
