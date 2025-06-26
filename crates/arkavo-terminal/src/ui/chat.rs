@@ -54,8 +54,18 @@ pub struct ChatView {
 
 impl ChatView {
     pub fn new() -> Self {
+        let mut messages = VecDeque::new();
+        
+        // Add welcome message
+        messages.push_back(ChatMessage {
+            role: MessageRole::System,
+            content: "Welcome to Arkavo Terminal UI! Press Tab to switch views, q to quit.".to_string(),
+            timestamp: Utc::now(),
+            is_streaming: false,
+        });
+        
         Self {
-            messages: VecDeque::new(),
+            messages,
             scroll_offset: 0,
             input_buffer: String::new(),
             needs_redraw: true,

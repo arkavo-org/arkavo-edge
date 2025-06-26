@@ -16,8 +16,28 @@ pub use multi_terminal::{MultiTerminalManager, TaskType, TerminalSpawnConfig};
 pub use renderer::{DiffRenderer, RenderMetrics, Renderable};
 
 pub async fn run() -> Result<()> {
+    // Install panic hook to restore terminal on panic
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Restore terminal state
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        );
+        
+        // Call the original panic hook
+        original_hook(panic_info);
+    }));
+    
     let mut app = App::new();
-    app.run().await
+    let result = app.run().await;
+    
+    // Restore original panic hook
+    let _ = std::panic::take_hook();
+    
+    result
 }
 
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {

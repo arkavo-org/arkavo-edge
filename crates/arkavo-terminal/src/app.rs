@@ -46,23 +46,13 @@ impl App {
         // Setup terminal
         self.setup_terminal()?;
 
-        // Run app with panic recovery
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // We need to block on the async operation since catch_unwind doesn't work with async
-            let runtime = tokio::runtime::Handle::current();
-            runtime.block_on(self.run_app(&mut terminal))
-        }));
+        // Run the app
+        let result = self.run_app(&mut terminal).await;
 
-        // Always restore terminal state, even on panic
+        // Always restore terminal state
         self.restore_terminal()?;
 
-        match res {
-            Ok(result) => result,
-            Err(panic) => {
-                eprintln!("Terminal UI panicked! Terminal state has been restored.");
-                std::panic::resume_unwind(panic);
-            }
-        }
+        result
     }
 
     fn setup_terminal(&self) -> Result<()> {
