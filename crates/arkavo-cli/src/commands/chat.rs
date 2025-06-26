@@ -1,8 +1,10 @@
+use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
-use arkavo_git::GitManager;
+use crate::repository_context::RepositoryContextManager;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use chrono;
+use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -45,6 +47,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Create runtime for async operations
     let runtime = Runtime::new()?;
 
+    // Initialize memory storage
+    let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
+
+    // Initialize conversation manager
+    let mut conversation_manager =
+        runtime.block_on(ConversationManager::new(memory_storage.clone()))?;
+
+    // Initialize repository context manager
+    let repo_context_manager =
+        runtime.block_on(RepositoryContextManager::new(memory_storage.clone()))?;
+
     // Initialize LLM client with fallback to prompt for remote server
     let client = runtime.block_on(initialize_llm_client(print_mode))?;
 
@@ -52,8 +65,23 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Starting UI testing chat session...");
         println!("Repository context: {}", get_current_directory());
         println!("LLM Provider: {}", client.provider_name());
+
+        // Try to restore last session
+        if let Ok(Some(session_id)) = runtime.block_on(conversation_manager.restore_last_session())
+        {
+            println!(
+                "Restored previous conversation (session: {})",
+                &session_id.to_string()[..8]
+            );
+        } else {
+            // Start new session
+            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+        }
+
         println!("Type '/exit' or '/quit' to end the session.");
-        println!("Commands: /read <file>, /list [path], /test, /run <test_name>, /tools");
+        println!(
+            "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools, /switch <session>"
+        );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
@@ -94,8 +122,34 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!();
     }
 
+    // Build enhanced repository context
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    progress.set_message("Building repository context...");
+
+    let repo_context = runtime.block_on(repo_context_manager.build_context())?;
+    let repo_context_str = format!(
+        "Working directory: {}\n\
+         Git repository: {}\n\
+         Current branch: {}\n\
+         Project type: {}\n\
+         Total files: {}\n\
+         Token count: {}",
+        repo_context.working_directory,
+        repo_context.is_git_repo,
+        repo_context.current_branch.as_deref().unwrap_or("N/A"),
+        repo_context.project_type.as_deref().unwrap_or("Unknown"),
+        repo_context.project_files.len(),
+        repo_context.token_count
+    );
+
+    progress.finish_and_clear();
+
     // Initialize conversation with system message including repository context
-    let repo_context = get_repository_context();
     let mcp_info = if mcp_client.is_some() {
         // List available tools
         if let Some(ref client) = mcp_client {
@@ -195,11 +249,38 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
          - Suggest appropriate UI interactions based on the content
 
 \
+         GIT REPOSITORY ANALYSIS:\
+         When asked to perform a \"full analysis\", \"repository analysis\", or comprehensive Git analysis:\
+         1. MUST call @git_status {{}} to get working tree status\
+         2. MUST call @git_log {{\"limit\": 20}} to get recent commits\
+         3. MUST call @git_diff {{}} to get unstaged changes\
+         4. MUST call @git_diff {{\"staged\": true}} to get staged changes\
+         5. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
+         6. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
+         \
+         After collecting all responses:\
+         - Generate a structured report with sections for each data type\
+         - Use ONLY actual data from tool responses - DO NOT fabricate any information\
+         - If a tool fails, note the failure in the report\
+         - Store the complete analysis in memory using @store_memory
+
+\
          Repository context:
-{}{}",
-        repo_context, mcp_info
+{}
+
+Repository details:
+{}
+
+{}",
+        repo_context_str,
+        serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
+        mcp_info
     );
-    let mut messages = vec![Message::system(&system_prompt)];
+
+    // Get conversation context with system message
+    let system_message = Message::system(&system_prompt);
+    let mut messages = runtime
+        .block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?;
 
     // If prompt provided via command line, process it and exit
     if let Some(prompt_text) = prompt {
@@ -221,7 +302,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if print_mode {
             runtime.block_on(process_message_print(&client, &messages, &mcp_client))?;
         } else {
-            runtime.block_on(process_message(&client, &messages, &mcp_client))?;
+            runtime.block_on(process_message(
+                &client,
+                &messages,
+                &mcp_client,
+                &conversation_manager,
+            ))?;
         }
         return Ok(());
     }
@@ -246,9 +332,53 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if input == "clear" {
-            // Keep only system message
-            messages.truncate(1);
-            println!("Conversation cleared.");
+            // Start new session
+            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+            messages = runtime.block_on(
+                conversation_manager.get_context_messages(Some(system_message.clone())),
+            )?;
+            println!("Conversation cleared. New session started.");
+            continue;
+        }
+
+        // Handle /switch command
+        if input.starts_with("/switch") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() < 2 {
+                // List available sessions
+                match runtime.block_on(conversation_manager.list_sessions()) {
+                    Ok(sessions) => {
+                        println!("Available sessions:");
+                        for session in sessions.iter().take(10) {
+                            println!(
+                                "  {} - {} ({})",
+                                &session.id.to_string()[..8],
+                                session.created_at.format("%Y-%m-%d %H:%M"),
+                                session.model
+                            );
+                        }
+                        println!("\nUsage: /switch <session-id>");
+                    }
+                    Err(e) => eprintln!("Error listing sessions: {}", e),
+                }
+            } else {
+                // Switch to specified session
+                let session_id_str = parts[1];
+                if let Ok(session_id) = uuid::Uuid::parse_str(session_id_str) {
+                    match runtime.block_on(conversation_manager.switch_session(session_id)) {
+                        Ok(_) => {
+                            messages = runtime.block_on(
+                                conversation_manager
+                                    .get_context_messages(Some(system_message.clone())),
+                            )?;
+                            println!("Switched to session: {}", &session_id.to_string()[..8]);
+                        }
+                        Err(e) => eprintln!("Error switching session: {}", e),
+                    }
+                } else {
+                    eprintln!("Invalid session ID format");
+                }
+            }
             continue;
         }
 
@@ -278,11 +408,15 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             println!();
 
                             // Add to conversation context
-                            messages.push(Message::user(input));
-                            messages.push(Message::assistant(format!(
+                            let user_msg = Message::user(input);
+                            let tool_msg = Message::assistant(format!(
                                 "Tool {} executed. Result: {}",
                                 tool_name, result
-                            )));
+                            ));
+                            runtime.block_on(conversation_manager.add_message(&user_msg))?;
+                            runtime.block_on(conversation_manager.add_message(&tool_msg))?;
+                            messages.push(user_msg);
+                            messages.push(tool_msg);
                         }
                         Err(e) => {
                             eprintln!("Tool execution failed: {}", e);
@@ -327,7 +461,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features."
                         };
-                        messages.push(Message::user_with_images(prompt, vec![encoded_image]));
+                        let msg = Message::user_with_images(prompt, vec![encoded_image]);
+                        runtime.block_on(conversation_manager.add_message(&msg))?;
+                        messages.push(msg);
                     }
                     Err(e) => {
                         eprintln!("Error loading screenshot: {}", e);
@@ -348,20 +484,31 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             if !img_path.is_empty() {
                 // Convert to "@analyze_screenshot path" syntax
                 let converted_input = format!("@analyze_screenshot {}", img_path);
-                messages.push(Message::user(&converted_input));
+                let msg = Message::user(&converted_input);
+                runtime.block_on(conversation_manager.add_message(&msg))?;
+                messages.push(msg);
             } else {
                 eprintln!("Usage: analyze_screenshot on <path>");
                 continue;
             }
         } else {
             // Add regular user message
-            messages.push(Message::user(input));
+            let msg = Message::user(input);
+            runtime.block_on(conversation_manager.add_message(&msg))?;
+            messages.push(msg);
         }
 
         // Process with LLM
-        match runtime.block_on(process_message(&client, &messages, &mcp_client)) {
+        match runtime.block_on(process_message(
+            &client,
+            &messages,
+            &mcp_client,
+            &conversation_manager,
+        )) {
             Ok(response) => {
-                messages.push(Message::assistant(&response));
+                let assistant_msg = Message::assistant(&response);
+                runtime.block_on(conversation_manager.add_message(&assistant_msg))?;
+                messages.push(assistant_msg);
 
                 // If the response contains tool execution results, we might need to continue the conversation
                 if response.contains("[Tool execution completed. Results shown above.]") {
@@ -383,17 +530,31 @@ async fn process_message(
     client: &LlmClient,
     messages: &[Message],
     mcp_client: &Option<McpConnection>,
+    _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
     io::stdout().flush()?;
 
     // Use streaming for better UX
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    progress.set_message("Thinking...");
+
     let mut stream = client.stream(messages.to_vec()).await?;
     let mut full_response = String::new();
+    let mut first_token = true;
 
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(response) => {
+                if first_token {
+                    progress.finish_and_clear();
+                    first_token = false;
+                }
                 print!("{}", response.content);
                 io::stdout().flush()?;
                 full_response.push_str(&response.content);
@@ -403,6 +564,7 @@ async fn process_message(
                 }
             }
             Err(e) => {
+                progress.finish_and_clear();
                 return Err(format!("Stream error: {}", e).into());
             }
         }
@@ -525,87 +687,6 @@ fn get_current_directory() -> String {
         Ok(path) => path.display().to_string(),
         Err(_) => String::from("Unknown"),
     }
-}
-
-fn get_repository_context() -> String {
-    let current_dir = env::current_dir().unwrap_or_default();
-    let mut context = String::new();
-
-    // Get basic repository info
-    context.push_str(&format!("Working directory: {}\n", current_dir.display()));
-
-    // Check if it's a git repository using our Git library
-    let git_manager = GitManager::new();
-    if let Ok(repo) = git_manager.open_repo(&current_dir) {
-        context.push_str("Git repository: Yes\n");
-
-        // Get current branch
-        if let Ok(branch) = git_manager.get_current_branch(&repo) {
-            context.push_str(&format!("Current branch: {}\n", branch));
-        }
-
-        // Get repository status
-        if let Ok(status) = git_manager.status(&repo) {
-            let total_changes = status.modified.len()
-                + status.added.len()
-                + status.deleted.len()
-                + status.untracked.len();
-
-            if total_changes > 0 {
-                context.push_str("\nGit status:\n");
-                if !status.modified.is_empty() {
-                    context.push_str(&format!("  Modified: {} files\n", status.modified.len()));
-                }
-                if !status.added.is_empty() {
-                    context.push_str(&format!("  Added: {} files\n", status.added.len()));
-                }
-                if !status.deleted.is_empty() {
-                    context.push_str(&format!("  Deleted: {} files\n", status.deleted.len()));
-                }
-                if !status.untracked.is_empty() {
-                    context.push_str(&format!("  Untracked: {} files\n", status.untracked.len()));
-                }
-            } else {
-                context.push_str("Git status: Working tree clean\n");
-            }
-        }
-    } else {
-        context.push_str("Git repository: No\n");
-    }
-
-    // List key project files
-    context.push_str("\nProject structure:\n");
-    if let Ok(entries) = fs::read_dir(&current_dir) {
-        let mut files: Vec<String> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().to_string())
-            .collect();
-        files.sort();
-
-        for file in files.iter().take(20) {
-            context.push_str(&format!("  - {}\n", file));
-        }
-
-        if files.len() > 20 {
-            context.push_str(&format!("  ... and {} more files\n", files.len() - 20));
-        }
-    }
-
-    // Check for common project files
-    let project_files = vec![
-        "Cargo.toml",
-        "package.json",
-        "README.md",
-        "requirements.txt",
-    ];
-    for file in project_files {
-        if Path::new(file).exists() {
-            context.push_str(&format!("\nDetected project type: {}\n", file));
-            break;
-        }
-    }
-
-    context
 }
 
 fn handle_command(

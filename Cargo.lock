@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "arkavo-cli",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -188,11 +188,16 @@ dependencies = [
  "arkavo-test",
  "async-trait",
  "chrono",
+ "ignore",
+ "indicatif",
  "jsonschema",
  "log",
+ "lru",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
+ "tiktoken-rs",
  "tokio",
  "tokio-stream",
  "uuid",
@@ -200,11 +205,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.12.2"
+version = "0.12.3"
 
 [[package]]
 name = "arkavo-git"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "assert_cmd",
  "curl",
@@ -215,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -234,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -243,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -266,19 +271,19 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.12.2"
+version = "0.12.3"
 
 [[package]]
 name = "arkavo-repo"
-version = "0.12.2"
+version = "0.12.3"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.12.2"
+version = "0.12.3"
 
 [[package]]
 name = "arkavo-test"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -313,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.12.2"
+version = "0.12.3"
 
 [[package]]
 name = "arrayvec"
@@ -494,7 +499,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -510,12 +515,27 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+dependencies = [
+ "bit-vec 0.6.3",
+]
+
+[[package]]
+name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
- "bit-vec",
+ "bit-vec 0.8.0",
 ]
+
+[[package]]
+name = "bit-vec"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
 name = "bit-vec"
@@ -1338,11 +1358,22 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
+dependencies = [
+ "bit-set 0.5.3",
+ "regex-automata 0.4.9",
+ "regex-syntax 0.8.5",
+]
+
+[[package]]
+name = "fancy-regex"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
 dependencies = [
- "bit-set",
+ "bit-set 0.8.0",
  "regex-automata 0.4.9",
  "regex-syntax 0.8.5",
 ]
@@ -1663,6 +1694,19 @@ name = "glob"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
+
+[[package]]
+name = "globset"
+version = "0.4.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54a1028dfc5f5df5da8a56a73e6c153c9a9708ec57232470703592a3f18e49f5"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata 0.4.9",
+ "regex-syntax 0.8.5",
+]
 
 [[package]]
 name = "h2"
@@ -2184,6 +2228,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignore"
+version = "0.4.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata 0.4.9",
+ "same-file",
+ "walkdir",
+ "winapi-util",
+]
+
+[[package]]
 name = "image"
 version = "0.25.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2404,7 +2464,7 @@ dependencies = [
  "base64 0.22.1",
  "bytecount",
  "email_address",
- "fancy-regex",
+ "fancy-regex 0.14.0",
  "fraction",
  "idna",
  "itoa",
@@ -2574,6 +2634,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
+]
+
+[[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown",
 ]
 
 [[package]]
@@ -3437,8 +3506,8 @@ version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fcdab19deb5195a31cf7726a210015ff1496ba1464fd42cb4f537b8b01b471f"
 dependencies = [
- "bit-set",
- "bit-vec",
+ "bit-set 0.8.0",
+ "bit-vec 0.8.0",
  "bitflags 2.9.1",
  "lazy_static",
  "num-traits",
@@ -4767,6 +4836,22 @@ dependencies = [
  "flate2",
  "jpeg-decoder",
  "weezl",
+]
+
+[[package]]
+name = "tiktoken-rs"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44075987ee2486402f0808505dd65692163d243a337fc54363d49afac41087f6"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bstr",
+ "fancy-regex 0.13.0",
+ "lazy_static",
+ "parking_lot",
+ "regex",
+ "rustc-hash 1.1.0",
 ]
 
 [[package]]
