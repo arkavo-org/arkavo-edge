@@ -214,19 +214,8 @@ impl ChatView {
                     self.needs_redraw = true;
                 }
                 KeyCode::Enter => {
-                    if !self.input_buffer.is_empty() {
-                        // Add user message
-                        self.add_message(MessageRole::User, self.input_buffer.clone());
-
-                        // Simulate assistant response for now
-                        self.add_message(
-                            MessageRole::Assistant,
-                            format!("You said: {}", self.input_buffer),
-                        );
-
-                        self.input_buffer.clear();
-                        self.needs_redraw = true;
-                    }
+                    // Enter is handled by the App now for LLM integration
+                    // Just do nothing here
                 }
                 _ => {}
             }

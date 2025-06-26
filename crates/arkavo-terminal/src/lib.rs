@@ -9,13 +9,37 @@ pub mod ui;
 mod tests;
 
 use anyhow::Result;
+use tokio::sync::mpsc;
 
 pub use app::App;
 pub use event::{AppEvent, EventHandler};
 pub use multi_terminal::{MultiTerminalManager, TaskType, TerminalSpawnConfig};
 pub use renderer::{DiffRenderer, RenderMetrics, Renderable};
 
+#[derive(Debug, Clone)]
+pub enum ChatMessage {
+    UserInput(String),
+    AssistantResponse(String),
+    SystemMessage(String),
+    Error(String),
+}
+
+pub struct TerminalContext {
+    pub message_tx: mpsc::Sender<ChatMessage>,
+    pub message_rx: mpsc::Receiver<ChatMessage>,
+}
+
 pub async fn run() -> Result<()> {
+    // Create dummy channels for standalone mode
+    let (_tx, rx) = mpsc::channel::<String>(1);
+    let (tx, _rx) = mpsc::channel::<String>(1);
+    run_with_channels(tx, rx).await
+}
+
+pub async fn run_with_channels(
+    ui_tx: mpsc::Sender<String>,
+    llm_rx: mpsc::Receiver<String>,
+) -> Result<()> {
     // Install panic hook to restore terminal on panic
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -31,7 +55,7 @@ pub async fn run() -> Result<()> {
         original_hook(panic_info);
     }));
 
-    let mut app = App::new();
+    let mut app = App::new_with_channels(ui_tx, llm_rx);
     let result = app.run().await;
 
     // Restore original panic hook

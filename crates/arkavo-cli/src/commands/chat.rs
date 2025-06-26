@@ -317,8 +317,42 @@ Repository details:
 
     // Launch Terminal UI if requested
     if use_tui && !print_mode {
-        // Create and run TUI app with all the initialized components
-        let tui_result = runtime.block_on(async { arkavo_terminal::run().await });
+        // Create channels for communication between TUI and LLM
+        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
+        let (llm_tx, llm_rx) = tokio::sync::mpsc::channel::<String>(100);
+
+        // Clone necessary components for the TUI task
+        let client = Arc::new(client);
+        let client_clone = Arc::clone(&client);
+        let mut messages_clone = messages.clone();
+
+        // Spawn LLM processing task
+        let llm_handle = runtime.spawn(async move {
+            while let Some(user_input) = ui_rx.recv().await {
+                // Process the user input with LLM
+                let user_message = Message::user(user_input.clone());
+                messages_clone.push(user_message);
+
+                // Get response from LLM
+                match client_clone.complete(messages_clone.clone()).await {
+                    Ok(response) => {
+                        let assistant_message = Message::assistant(response.clone());
+                        messages_clone.push(assistant_message);
+                        let _ = llm_tx.send(response).await;
+                    }
+                    Err(e) => {
+                        let _ = llm_tx.send(format!("Error: {}", e)).await;
+                    }
+                }
+            }
+        });
+
+        // Run the Terminal UI with communication channels
+        let tui_result =
+            runtime.block_on(async { arkavo_terminal::run_with_channels(ui_tx, llm_rx).await });
+
+        // Clean up
+        llm_handle.abort();
 
         return tui_result.map_err(|e| e.into());
     }

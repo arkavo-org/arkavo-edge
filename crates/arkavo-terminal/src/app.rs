@@ -7,6 +7,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 use crate::event::{AppEvent, EventHandler};
 use crate::renderer::Renderable;
@@ -25,6 +26,8 @@ pub struct App {
     pub code_view: CodeView,
     pub diff_view: DiffView,
     pub event_handler: EventHandler,
+    pub ui_tx: Option<mpsc::Sender<String>>,
+    pub llm_rx: Option<mpsc::Receiver<String>>,
 }
 
 impl App {
@@ -36,6 +39,21 @@ impl App {
             code_view: CodeView::new(),
             diff_view: DiffView::new(),
             event_handler: EventHandler::new(),
+            ui_tx: None,
+            llm_rx: None,
+        }
+    }
+
+    pub fn new_with_channels(ui_tx: mpsc::Sender<String>, llm_rx: mpsc::Receiver<String>) -> Self {
+        Self {
+            should_quit: false,
+            view_mode: ViewMode::Chat,
+            chat_view: ChatView::new(),
+            code_view: CodeView::new(),
+            diff_view: DiffView::new(),
+            event_handler: EventHandler::new(),
+            ui_tx: Some(ui_tx),
+            llm_rx: Some(llm_rx),
         }
     }
 
@@ -83,11 +101,51 @@ impl App {
         loop {
             terminal.draw(|f| self.render(f))?;
 
+            // Check for LLM responses
+            if let Some(ref mut llm_rx) = self.llm_rx {
+                match llm_rx.try_recv() {
+                    Ok(response) => {
+                        // Finish any streaming message and add the complete response
+                        self.chat_view.finish_streaming();
+                        self.chat_view
+                            .add_message(crate::ui::chat::MessageRole::Assistant, response);
+                    }
+                    Err(_) => {}
+                }
+            }
+
             if event::poll(Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
                     match key.code {
                         KeyCode::Char('q') => self.should_quit = true,
                         KeyCode::Tab => self.switch_view(),
+                        KeyCode::Enter => {
+                            // Handle Enter key specially for chat view
+                            if matches!(self.view_mode, ViewMode::Chat)
+                                && !self.chat_view.input_buffer.is_empty()
+                            {
+                                let input = self.chat_view.input_buffer.clone();
+
+                                // Send to LLM if channel is available
+                                if let Some(ref ui_tx) = self.ui_tx {
+                                    let _ = ui_tx.try_send(input.clone());
+
+                                    // Add user message to chat
+                                    self.chat_view
+                                        .add_message(crate::ui::chat::MessageRole::User, input);
+                                    self.chat_view.input_buffer.clear();
+
+                                    // Add "thinking" message
+                                    self.chat_view.start_streaming_message(
+                                        crate::ui::chat::MessageRole::Assistant,
+                                    );
+                                } else {
+                                    // Fallback to echo mode if no channel
+                                    let event = AppEvent::from_crossterm_event(Event::Key(key));
+                                    self.handle_event(event)?;
+                                }
+                            }
+                        }
                         _ => {
                             let event = AppEvent::from_crossterm_event(Event::Key(key));
                             self.handle_event(event)?;
