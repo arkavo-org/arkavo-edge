@@ -27,8 +27,8 @@ macro_rules! debug_println {
 }
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Terminal UI is now the default, use --no-tui to disable
-    let use_tui = !args.contains(&"--no-tui".to_string());
+    // Regular CLI is now the default, use --tui to enable Terminal UI
+    let use_tui = args.contains(&"--tui".to_string());
 
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
@@ -368,7 +368,11 @@ Repository details:
                         // Save the complete message
                         let assistant_message = Message::assistant(full_response.clone());
                         messages_clone.push(assistant_message);
-                        eprintln!("[LLM Task] Response complete, {} chars. Messages in context: {}", full_response.len(), messages_clone.len());
+                        eprintln!(
+                            "[LLM Task] Response complete, {} chars. Messages in context: {}",
+                            full_response.len(),
+                            messages_clone.len()
+                        );
                     }
                     Err(e) => {
                         eprintln!("[LLM Task] Error: {}", e);
