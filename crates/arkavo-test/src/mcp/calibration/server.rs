@@ -893,7 +893,12 @@ impl CalibrationServer {
             eprintln!("Calibration: Waiting for verification results...");
             eprintln!("Calibration: Looking for results at:");
             eprintln!("  - App Documents: via simctl get_app_container");
-            eprintln!("  - Temp file: /tmp/calibration_{}.json", device_id);
+            eprintln!(
+                "  - Temp file: {}",
+                std::env::temp_dir()
+                    .join(format!("calibration_{}.json", device_id))
+                    .display()
+            );
 
             match verification_reader.wait_for_results(10) {
                 Ok(results) => {

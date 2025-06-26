@@ -1,4 +1,5 @@
 use crate::{Result, TestError};
+use std::env;
 use std::net::TcpStream;
 use std::process::Command;
 use std::sync::Arc;
@@ -99,10 +100,8 @@ impl IdbRecovery {
             }
 
             // Clear any IDB-related lock files
-            let _ = Command::new("rm")
-                .arg("-f")
-                .arg("/tmp/idb_companion.lock")
-                .output();
+            let lock_file = env::temp_dir().join("idb_companion.lock");
+            let _ = Command::new("rm").arg("-f").arg(lock_file).output();
 
             eprintln!("[IdbRecovery] Cleaned up IDB processes and lock files");
 
@@ -162,12 +161,16 @@ impl IdbRecovery {
         // Step 2: Clear IDB companion cache and state
         #[cfg(target_os = "macos")]
         {
-            let cache_paths = [
-                "~/Library/Caches/com.facebook.idb",
-                "/tmp/idb*",
-                "/var/folders/*/*/T/idb*",
-                "/tmp/idb_companion.lock",
-                "/tmp/notifier*",
+            let temp_dir_str = env::temp_dir().display().to_string();
+            let cache_paths = vec![
+                "~/Library/Caches/com.facebook.idb".to_string(),
+                format!("{}/idb*", temp_dir_str),
+                "/var/folders/*/*/T/idb*".to_string(),
+                env::temp_dir()
+                    .join("idb_companion.lock")
+                    .display()
+                    .to_string(),
+                format!("{}/notifier*", temp_dir_str),
             ];
 
             for path in &cache_paths {
@@ -404,10 +407,17 @@ impl IdbRecovery {
             }
 
             // Step 6: Clear temp files and locks
-            let temp_paths = [
-                "/tmp/idb_companion.lock",
-                "/tmp/idb_companion.sock",
-                "/tmp/notifier*",
+            let temp_dir_str = env::temp_dir().display().to_string();
+            let temp_paths = vec![
+                env::temp_dir()
+                    .join("idb_companion.lock")
+                    .display()
+                    .to_string(),
+                env::temp_dir()
+                    .join("idb_companion.sock")
+                    .display()
+                    .to_string(),
+                format!("{}/notifier*", temp_dir_str),
             ];
 
             for path in &temp_paths {

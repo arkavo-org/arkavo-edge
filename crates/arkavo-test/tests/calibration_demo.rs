@@ -3,7 +3,8 @@
 use arkavo_test::mcp::calibration::server::{
     CalibrationRequest, CalibrationResponse, CalibrationServer,
 };
-use std::path::PathBuf;
+use std::env;
+// use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_calibration_workflow() {
@@ -11,7 +12,7 @@ async fn test_calibration_workflow() {
 
     // Step 1: Initialize calibration server
     println!("1. Initializing calibration server...");
-    let storage_path = PathBuf::from("/tmp/arkavo_calibration_demo");
+    let storage_path = env::temp_dir().join("arkavo_calibration_demo");
     let server = CalibrationServer::new(storage_path).expect("Failed to create calibration server");
 
     // Step 2: List currently calibrated devices (should be empty initially)
@@ -154,7 +155,7 @@ async fn test_calibration_with_real_simulator() {
         println!("Found booted simulator: {}", device_id);
 
         // Initialize server and run calibration
-        let storage_path = PathBuf::from("/tmp/arkavo_calibration_real");
+        let storage_path = env::temp_dir().join("arkavo_calibration_real");
         let server =
             CalibrationServer::new(storage_path).expect("Failed to create calibration server");
 

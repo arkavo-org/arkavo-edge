@@ -1,3 +1,4 @@
+#[cfg(feature = "embeddings")]
 use arkavo_memory::embeddings::EmbeddingService;
 
 #[tokio::test]

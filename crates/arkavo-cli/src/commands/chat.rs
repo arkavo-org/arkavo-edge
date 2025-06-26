@@ -27,6 +27,9 @@ macro_rules! debug_println {
 }
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Regular CLI is now the default, use --tui to enable Terminal UI
+    let use_tui = args.contains(&"--tui".to_string());
+
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
         .windows(2)
@@ -127,7 +130,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     progress.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .unwrap(),
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
     );
     progress.set_message("Building repository context...");
 
@@ -310,6 +313,85 @@ Repository details:
             ))?;
         }
         return Ok(());
+    }
+
+    // Launch Terminal UI if requested
+    if use_tui && !print_mode {
+        // Create channels for communication between TUI and LLM
+        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
+        let (llm_tx, llm_rx) = tokio::sync::mpsc::channel::<String>(100);
+
+        // Clone necessary components for the TUI task
+        let client = Arc::new(client);
+        let client_clone = Arc::clone(&client);
+        let mut messages_clone = messages.clone();
+
+        // Spawn LLM processing task
+        let llm_handle = runtime.spawn(async move {
+            eprintln!("[LLM Task] Started, waiting for messages...");
+            while let Some(user_input) = ui_rx.recv().await {
+                eprintln!("[LLM Task] Received user input: {}", user_input);
+                // Process the user input with LLM
+                let user_message = Message::user(user_input.clone());
+                messages_clone.push(user_message);
+
+                // Get streaming response from LLM
+                match client_clone.stream(messages_clone.clone()).await {
+                    Ok(mut stream) => {
+                        let mut full_response = String::new();
+
+                        // Send start streaming signal
+                        let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
+
+                        while let Some(chunk_result) = stream.next().await {
+                            match chunk_result {
+                                Ok(chunk) => {
+                                    if !chunk.content.is_empty() {
+                                        full_response.push_str(&chunk.content);
+                                        // Send each chunk as it arrives
+                                        let _ = llm_tx
+                                            .send(format!("<<STREAM_CHUNK>>{}", chunk.content))
+                                            .await;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ =
+                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {}", e)).await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Send end streaming signal
+                        let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
+
+                        // Save the complete message
+                        let assistant_message = Message::assistant(full_response.clone());
+                        messages_clone.push(assistant_message);
+                        eprintln!(
+                            "[LLM Task] Response complete, {} chars. Messages in context: {}",
+                            full_response.len(),
+                            messages_clone.len()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[LLM Task] Error: {}", e);
+                        let _ = llm_tx.send(format!("Error: {}", e)).await;
+                    }
+                }
+                eprintln!("[LLM Task] Waiting for next message...");
+            }
+            eprintln!("[LLM Task] Channel closed, exiting...");
+        });
+
+        // Run the Terminal UI with communication channels
+        let tui_result =
+            runtime.block_on(async { arkavo_terminal::run_with_channels(ui_tx, llm_rx).await });
+
+        // Clean up
+        llm_handle.abort();
+
+        return tui_result.map_err(|e| e.into());
     }
 
     // Interactive chat loop
@@ -540,7 +622,7 @@ async fn process_message(
     progress.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .unwrap(),
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
     );
     progress.set_message("Thinking...");
 

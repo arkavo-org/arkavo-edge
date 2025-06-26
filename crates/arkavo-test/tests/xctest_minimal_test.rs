@@ -1,5 +1,6 @@
 //! Minimal test for XCTest socket communication
 
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::thread;
@@ -11,7 +12,8 @@ fn test_basic_unix_socket() {
     println!("\n=== Basic Unix Socket Test ===\n");
 
     // Create a simple socket path
-    let socket_path = "/tmp/test-socket.sock";
+    let socket_path_buf = env::temp_dir().join("test-socket.sock");
+    let socket_path = socket_path_buf.to_str().unwrap();
 
     // Remove old socket if exists
     let _ = std::fs::remove_file(socket_path);
