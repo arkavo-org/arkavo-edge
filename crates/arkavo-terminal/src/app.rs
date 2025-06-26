@@ -487,7 +487,7 @@ impl App {
 
                 let mut selected = false;
                 for (i, model) in models.iter().enumerate() {
-                    let model_name = model.split(' ').next().unwrap_or(model);
+                    let model_name = model.split_whitespace().next().unwrap_or(model);
 
                     // Check if this is a preferred model and the first one found
                     let is_preferred = !selected

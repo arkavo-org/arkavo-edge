@@ -249,7 +249,6 @@ impl Renderable for ChatView {
             .style(Style::default().fg(Color::White));
 
         let inner_area = messages_block.inner(chunks[0]);
-        frame.render_widget(messages_block, chunks[0]);
 
         // Convert messages to list items
         let items: Vec<ListItem> = self
@@ -265,8 +264,10 @@ impl Renderable for ChatView {
         // Implement proper scrolling
         if total_height <= visible_height {
             // All messages fit, no scrolling needed
-            let list = List::new(items).style(Style::default().fg(Color::White));
-            frame.render_widget(list, inner_area);
+            let list = List::new(items)
+                .block(messages_block)
+                .style(Style::default().fg(Color::White));
+            frame.render_widget(list, chunks[0]);
         } else {
             // Need to scroll - show the bottom messages when scroll_offset is 0
             let mut current_height = 0;
@@ -288,8 +289,10 @@ impl Renderable for ChatView {
                 .skip(start_idx)
                 .collect();
 
-            let list = List::new(visible_items).style(Style::default().fg(Color::White));
-            frame.render_widget(list, inner_area);
+            let list = List::new(visible_items)
+                .block(messages_block)
+                .style(Style::default().fg(Color::White));
+            frame.render_widget(list, chunks[0]);
         }
 
         // Render input area
