@@ -24,8 +24,7 @@ impl ImageFormat {
             "jpg" | "jpeg" => Ok(ImageFormat::Jpeg),
             "webp" => Ok(ImageFormat::WebP),
             _ => Err(Error::InvalidImageFormat(format!(
-                "Unsupported image format: {}",
-                extension
+                "Unsupported image format: {extension}"
             ))),
         }
     }
@@ -50,20 +49,19 @@ pub fn encode_image_file(path: impl AsRef<Path>) -> Result<String> {
     let path = path.as_ref();
 
     if !path.exists() {
+        let path_str = path.display();
         return Err(Error::InvalidImagePath(format!(
-            "Image file not found: {}",
-            path.display()
+            "Image file not found: {path_str}"
         )));
     }
 
     let bytes = fs::read(path)
-        .map_err(|e| Error::InvalidImagePath(format!("Failed to read image file: {}", e)))?;
+        .map_err(|e| Error::InvalidImagePath(format!("Failed to read image file: {e}")))?;
 
     if bytes.len() > MAX_IMAGE_SIZE {
+        let size = bytes.len();
         return Err(Error::InvalidImageFormat(format!(
-            "Image too large: {} bytes (max: {} bytes)",
-            bytes.len(),
-            MAX_IMAGE_SIZE
+            "Image too large: {size} bytes (max: {MAX_IMAGE_SIZE} bytes)"
         )));
     }
 
@@ -74,10 +72,9 @@ pub fn encode_image_file(path: impl AsRef<Path>) -> Result<String> {
 
 pub fn encode_image_bytes(bytes: &[u8]) -> Result<String> {
     if bytes.len() > MAX_IMAGE_SIZE {
+        let size = bytes.len();
         return Err(Error::InvalidImageFormat(format!(
-            "Image too large: {} bytes (max: {} bytes)",
-            bytes.len(),
-            MAX_IMAGE_SIZE
+            "Image too large: {size} bytes (max: {MAX_IMAGE_SIZE} bytes)"
         )));
     }
 
@@ -88,7 +85,7 @@ pub fn encode_image_bytes(bytes: &[u8]) -> Result<String> {
 pub fn decode_image(encoded: &str) -> Result<Vec<u8>> {
     let bytes = BASE64_STANDARD
         .decode(encoded)
-        .map_err(|e| Error::InvalidImageFormat(format!("Invalid base64: {}", e)))?;
+        .map_err(|e| Error::InvalidImageFormat(format!("Invalid base64: {e}")))?;
 
     ImageFormat::validate_bytes(&bytes)?;
     Ok(bytes)

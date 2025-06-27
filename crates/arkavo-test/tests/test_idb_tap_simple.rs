@@ -1,6 +1,20 @@
 #![cfg(target_os = "macos")]
 
 use arkavo_test::mcp::idb_wrapper::IdbWrapper;
+use std::process::Child;
+
+// Helper struct for RAII-style cleanup
+struct CompanionGuard(Option<Child>);
+
+impl Drop for CompanionGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+        }
+        // As a fallback, kill all companions
+        IdbWrapper::kill_all_companions();
+    }
+}
 
 #[tokio::test]
 async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,8 +47,11 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
         "\n3. Ensuring IDB companion is running for device {}...",
         device_id
     );
-    match IdbWrapper::ensure_companion_running(device_id).await {
-        Ok(_) => println!("   ✓ IDB companion is ready"),
+    let companion_process = match IdbWrapper::ensure_companion_running(device_id).await {
+        Ok(child) => {
+            println!("   ✓ IDB companion is ready");
+            Some(child)
+        }
         Err(e) => {
             println!("   ✗ Failed to ensure companion: {}", e);
 
@@ -49,7 +66,9 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
 
             return Err(e.into());
         }
-    }
+    };
+
+    let _guard = CompanionGuard(companion_process);
 
     // Test tap at center of screen
     println!("\n4. Testing tap at (200, 400)...");

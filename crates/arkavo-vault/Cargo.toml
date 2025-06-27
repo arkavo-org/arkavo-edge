@@ -7,3 +7,5 @@ license.workspace = true
 description = "Edge Vault CE for the Arkavo agentic CLI tool - Web UI, CRUD APIs, and SQLite driver"
 
 [dependencies]
+[lints]
+workspace = true

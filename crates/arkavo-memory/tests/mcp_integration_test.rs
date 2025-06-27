@@ -45,7 +45,7 @@ async fn test_memory_lifecycle_via_mcp() {
 
     let search_result = search_tool.execute(search_params).await.unwrap();
     assert!(search_result["total"].as_u64().unwrap() > 0);
-    assert!(search_result["results"].as_array().unwrap().len() > 0);
+    assert!(!search_result["results"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

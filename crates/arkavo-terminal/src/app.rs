@@ -1,5 +1,9 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyModifiers},
+    terminal,
+};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -10,9 +14,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::event::{AppEvent, EventHandler};
+use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
+use crate::ui::{TaskManager, chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
+use crate::vim::VimState;
+use crate::{LlmRequest, LlmResponse};
 
 pub enum ViewMode {
     Chat,
@@ -44,12 +51,23 @@ pub struct App {
     pub debug_view: DebugView,
     pub thinking_view: ChatView, // Reuse ChatView for chain-of-thought display
     pub event_handler: EventHandler,
-    pub ui_tx: Option<mpsc::Sender<String>>,
-    pub llm_rx: Option<mpsc::Receiver<String>>,
+    pub ui_tx: Option<mpsc::Sender<LlmRequest>>,
+    pub llm_rx: Option<mpsc::Receiver<LlmResponse>>,
     pub thinking_rx: Option<mpsc::Receiver<String>>, // For chain-of-thought updates
     pub telemetry: UITelemetry,
     pub last_frame_time: Instant,
     pub frame_times: Vec<Duration>,
+    pub vim_state: VimState,
+    pub vim_enabled: bool,
+    pub helix_editor: Option<HelixEditor>,
+    pub task_manager: TaskManager,
+    pub input_buffer: String,
+    pub available_models: Vec<String>,
+    pub selected_model: usize,
+    pub input_focused: bool,
+    pub last_quit_attempt: Option<Instant>,
+    pub active_model: Option<String>, // The actual model being used
+    pub main_task_id: Option<uuid::Uuid>, // ID of the main conversation task
 }
 
 impl App {
@@ -77,10 +95,30 @@ impl App {
             telemetry: UITelemetry::new(),
             last_frame_time: Instant::now(),
             frame_times: Vec::with_capacity(120), // Track last 120 frames (1 second at 120fps)
+            vim_state: VimState::new(),
+            vim_enabled: false, // Default to disabled for now
+            helix_editor: HelixEditor::new().ok(),
+            task_manager: TaskManager::new(),
+            input_buffer: String::new(),
+            available_models: vec![
+                "llava:7b".to_string(),
+                "devstral:latest".to_string(),
+                "deepseek-r1:14b".to_string(),
+                "qwen3:0.6b".to_string(),
+                "dolphin3:latest".to_string(),
+            ],
+            selected_model: 0,
+            input_focused: true,
+            last_quit_attempt: None,
+            active_model: Some("devstral:latest".to_string()),
+            main_task_id: None,
         }
     }
 
-    pub fn new_with_channels(ui_tx: mpsc::Sender<String>, llm_rx: mpsc::Receiver<String>) -> Self {
+    pub fn new_with_channels(
+        ui_tx: mpsc::Sender<LlmRequest>,
+        llm_rx: mpsc::Receiver<LlmResponse>,
+    ) -> Self {
         let mut thinking_view = ChatView::new();
         thinking_view.add_message(
             crate::ui::chat::MessageRole::System,
@@ -104,6 +142,23 @@ impl App {
             telemetry: UITelemetry::new(),
             last_frame_time: Instant::now(),
             frame_times: Vec::with_capacity(120),
+            vim_state: VimState::new(),
+            vim_enabled: false, // Default to disabled for now
+            helix_editor: HelixEditor::new().ok(),
+            task_manager: TaskManager::new(),
+            input_buffer: String::new(),
+            available_models: vec![
+                "llava:7b".to_string(),
+                "devstral:latest".to_string(),
+                "deepseek-r1:14b".to_string(),
+                "qwen3:0.6b".to_string(),
+                "dolphin3:latest".to_string(),
+            ],
+            selected_model: 0,
+            input_focused: true,
+            last_quit_attempt: None,
+            active_model: Some("devstral:latest".to_string()),
+            main_task_id: None,
         }
     }
 
@@ -114,9 +169,7 @@ impl App {
         // Setup terminal
         self.setup_terminal()?;
 
-        // Configure Ollama from saved settings and fetch models on startup
-        self.configure_ollama_from_memory().await;
-        self.fetch_ollama_models().await;
+        // Ollama configuration is handled by arkavo chat command
 
         // Run the app
         let result = self.run_app(&mut terminal).await;
@@ -155,66 +208,93 @@ impl App {
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
 
+        // Don't auto-launch Helix to prevent blank screen on startup
+        // User can press 'e' when ready
+
         loop {
             // Check for LLM responses - drain all available messages
-            let mut debug_messages = Vec::new();
+            let mut responses_to_process = Vec::new();
             if let Some(ref mut llm_rx) = self.llm_rx {
-                // Process all available messages to prevent message loss
+                // Collect all available responses first
                 while let Ok(response) = llm_rx.try_recv() {
-                    if response == "<<STREAM_START>>" {
-                        // Start streaming a new assistant message
-                        debug_messages.push((
-                            crate::ui::debug::LogLevel::Info,
-                            "[UI] Started streaming response".to_string(),
-                        ));
-                        self.chat_view
-                            .start_streaming_message(crate::ui::chat::MessageRole::Assistant);
-                    } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
-                        // Append chunk to streaming message
-                        debug_messages.push((
-                            crate::ui::debug::LogLevel::Debug,
-                            format!("[UI] Received chunk: {} chars", chunk.len()),
-                        ));
-                        self.chat_view.append_to_streaming(chunk);
-                    } else if response == "<<STREAM_END>>" {
-                        // Finish streaming
-                        debug_messages.push((
-                            crate::ui::debug::LogLevel::Info,
-                            "[UI] Finished streaming response".to_string(),
-                        ));
-                        self.chat_view.finish_streaming();
-                        self.telemetry.track_message_received();
-                    } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
-                        // Handle streaming error
-                        debug_messages.push((
-                            crate::ui::debug::LogLevel::Error,
-                            format!("[UI] Streaming error: {}", error_msg),
-                        ));
-                        self.chat_view.finish_streaming();
-                        self.chat_view.add_message(
-                            crate::ui::chat::MessageRole::System,
-                            error_msg.to_string(),
-                        );
-                    } else {
-                        // Fallback for non-streaming messages
-                        debug_messages.push((
-                            crate::ui::debug::LogLevel::Info,
-                            format!(
-                                "[UI] Received non-streaming response: {} chars",
-                                response.len()
-                            ),
-                        ));
-                        self.chat_view.finish_streaming();
-                        self.chat_view
-                            .add_message(crate::ui::chat::MessageRole::Assistant, response);
-                        self.telemetry.track_message_received();
-                    }
+                    responses_to_process.push(response);
                 }
             }
 
-            // Add collected debug messages
-            for (level, message) in debug_messages {
-                self.add_debug_log(level, message);
+            // Process collected responses
+            for response in responses_to_process {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Debug,
+                    format!(
+                        "[UI] Received response for task {} from {}",
+                        response.task_id, response.model_name
+                    ),
+                );
+
+                // Find the task by ID
+                if let Some(task) = self.task_manager.find_task_by_id_mut(response.task_id) {
+                    if let Some(error) = response.error {
+                        // Handle error
+                        task.set_status(crate::ui::task_window::TaskStatus::Error);
+                        task.add_message(
+                            crate::ui::task_window::MessageRole::System,
+                            format!("Error: {}", error),
+                        );
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[UI] LLM error for task {}: {}", response.task_id, error),
+                        );
+                    } else if response.is_streaming && !response.is_complete {
+                        // Handle streaming chunk
+                        task.set_status(crate::ui::task_window::TaskStatus::Streaming);
+
+                        // Check if we need to start a new assistant message
+                        if task
+                            .messages
+                            .back()
+                            .map(|m| m.role != crate::ui::task_window::MessageRole::Assistant)
+                            .unwrap_or(true)
+                        {
+                            task.add_message(
+                                crate::ui::task_window::MessageRole::Assistant,
+                                response.content,
+                            );
+                        } else {
+                            // Append to existing assistant message
+                            if let Some(last_msg) = task.messages.back_mut() {
+                                last_msg.content.push_str(&response.content);
+                            }
+                        }
+                    } else if response.is_complete {
+                        // Handle complete response
+                        task.set_status(crate::ui::task_window::TaskStatus::Complete);
+
+                        if response.is_streaming {
+                            // Streaming is complete, message should already exist
+                            self.telemetry.track_message_received();
+                        } else {
+                            // Non-streaming complete response
+                            task.add_message(
+                                crate::ui::task_window::MessageRole::Assistant,
+                                response.content,
+                            );
+                            self.telemetry.track_message_received();
+                        }
+
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!("[UI] Completed response for task {}", response.task_id),
+                        );
+                    }
+                } else {
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Warning,
+                        format!(
+                            "[UI] Received response for unknown task {}",
+                            response.task_id
+                        ),
+                    );
+                }
             }
 
             // Check for thinking/chain-of-thought updates
@@ -225,86 +305,238 @@ impl App {
                 }
             }
 
-            // Reduce polling interval for better responsiveness
-            if event::poll(Duration::from_millis(8))? {
-                // ~120fps for smooth updates
-                if let Event::Key(key) = event::read()? {
-                    self.telemetry.track_key_event();
-                    match key.code {
-                        KeyCode::Char('q') => self.should_quit = true,
-                        KeyCode::Tab => match self.layout_mode {
-                            LayoutMode::Tabbed => self.switch_view(),
-                            LayoutMode::Portrait => self.next_pane(),
-                        },
-                        KeyCode::BackTab => {
-                            if matches!(self.layout_mode, LayoutMode::Portrait) {
-                                self.prev_pane();
+            // Always check for events but don't block
+            if event::poll(Duration::from_millis(16))? {
+                // ~60fps for smooth updates
+                match event::read()? {
+                    Event::Key(key) => {
+                        self.telemetry.track_key_event();
+                        match key.code {
+                            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.should_quit = true;
                             }
-                        }
-                        KeyCode::Esc => {
-                            // Jump back to chat input in portrait mode
-                            if matches!(self.layout_mode, LayoutMode::Portrait) {
-                                self.focused_pane = FocusedPane::Chat;
+                            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
+                                self.vim_enabled = !self.vim_enabled;
+                                self.add_debug_log(
+                                    crate::ui::debug::LogLevel::Info,
+                                    format!(
+                                        "[UI] Vim mode {}",
+                                        if self.vim_enabled {
+                                            "enabled"
+                                        } else {
+                                            "disabled"
+                                        }
+                                    ),
+                                );
                             }
-                        }
-                        KeyCode::Enter => {
-                            // Handle Enter key specially for chat view
-                            if matches!(self.view_mode, ViewMode::Chat)
-                                && !self.chat_view.input_buffer.is_empty()
+                            KeyCode::Char('e')
+                                if self.input_focused
+                                    && key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
-                                let input = self.chat_view.input_buffer.clone();
-
-                                // Send to LLM if channel is available
-                                if let Some(ref ui_tx) = self.ui_tx {
-                                    let send_result = ui_tx.try_send(input.clone());
-                                    self.add_debug_log(
-                                        crate::ui::debug::LogLevel::Debug,
-                                        format!("[UI] Sending message: {}", input),
-                                    );
-                                    match send_result {
-                                        Ok(_) => {
-                                            self.add_debug_log(
-                                                crate::ui::debug::LogLevel::Info,
-                                                "[UI] Message sent successfully".to_string(),
-                                            );
-                                            // Add user message to chat
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::User,
-                                                input,
-                                            );
-                                            self.chat_view.input_buffer.clear();
-
-                                            self.telemetry.track_message_sent();
-                                        }
-                                        Err(mpsc::error::TrySendError::Full(_)) => {
-                                            // Channel is full, show error to user
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::System,
-                                                "Error: System is busy. Please try again."
-                                                    .to_string(),
-                                            );
-                                        }
-                                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                                            // Channel is closed, show error to user
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::System,
-                                                "Error: Connection lost. Please restart."
-                                                    .to_string(),
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    // Fallback to echo mode if no channel
-                                    let event = AppEvent::from_crossterm_event(Event::Key(key));
-                                    self.handle_event(event)?;
+                                // Ctrl+E launches Helix editor
+                                self.launch_helix_editor().await;
+                                // Force immediate redraw after Helix
+                                terminal.draw(|f| self.render(f))?;
+                            }
+                            KeyCode::Tab => {
+                                // Tab key disabled - model switching not yet implemented
+                                // See issue #86 for multi-model support
+                            }
+                            KeyCode::BackTab => {
+                                if matches!(self.layout_mode, LayoutMode::Portrait) {
+                                    self.prev_pane();
                                 }
                             }
-                        }
-                        _ => {
-                            let event = AppEvent::from_crossterm_event(Event::Key(key));
-                            self.handle_event(event)?;
+                            KeyCode::Esc => {
+                                // Jump back to chat input in portrait mode
+                                if matches!(self.layout_mode, LayoutMode::Portrait) {
+                                    self.focused_pane = FocusedPane::Chat;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if self.input_focused {
+                                    // Send message to the single conversation window
+                                    if !self.input_buffer.is_empty() {
+                                        // Use the actual model being used (from the LLM client)
+                                        let displayed_model =
+                                            if let Some(ref active) = self.active_model {
+                                                active.clone()
+                                            } else {
+                                                "devstral:latest".to_string()
+                                            };
+
+                                        // Check if we have a main task, if not create one
+                                        let task_id = if let Some(id) = self.main_task_id {
+                                            id
+                                        } else {
+                                            let id = uuid::Uuid::new_v4();
+                                            let task = self.task_manager.create_task(
+                                                "LLM Conversation".to_string(),
+                                                displayed_model.clone(),
+                                            );
+                                            task.id = id;
+                                            self.main_task_id = Some(id);
+                                            self.task_manager.active_task = Some(0); // Make it the active task
+                                            id
+                                        };
+
+                                        // Add user message to the task
+                                        if let Some(task) =
+                                            self.task_manager.find_task_by_id_mut(task_id)
+                                        {
+                                            task.add_message(
+                                                crate::ui::task_window::MessageRole::User,
+                                                self.input_buffer.clone(),
+                                            );
+                                            task.set_status(
+                                                crate::ui::task_window::TaskStatus::Processing,
+                                            );
+                                        }
+
+                                        // Send to LLM if channel is available
+                                        if let Some(ref ui_tx) = self.ui_tx {
+                                            // Always send with the same model name for now
+                                            // The actual model is determined by the chat command
+                                            let request = LlmRequest {
+                                                task_id,
+                                                model_name: displayed_model.clone(),
+                                                prompt: self.input_buffer.clone(),
+                                            };
+
+                                            match ui_tx.try_send(request) {
+                                                Ok(_) => {
+                                                    self.add_debug_log(
+                                                        crate::ui::debug::LogLevel::Info,
+                                                        format!(
+                                                            "[UI] Sent request for task {}",
+                                                            task_id
+                                                        ),
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    self.add_debug_log(
+                                                        crate::ui::debug::LogLevel::Error,
+                                                        format!(
+                                                            "[UI] Failed to send to LLM: {}",
+                                                            e
+                                                        ),
+                                                    );
+                                                    if let Some(task) = self
+                                                        .task_manager
+                                                        .find_task_by_id_mut(task_id)
+                                                    {
+                                                        task.set_status(crate::ui::task_window::TaskStatus::Error);
+                                                        task.add_message(
+                                                            crate::ui::task_window::MessageRole::System,
+                                                            format!("Failed to send request: {}", e),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Warning,
+                                                "[UI] No LLM channel available".to_string(),
+                                            );
+                                            if let Some(task) =
+                                                self.task_manager.find_task_by_id_mut(task_id)
+                                            {
+                                                task.set_status(
+                                                    crate::ui::task_window::TaskStatus::Error,
+                                                );
+                                                task.add_message(
+                                                    crate::ui::task_window::MessageRole::System,
+                                                    "No LLM connection available".to_string(),
+                                                );
+                                            }
+                                        }
+
+                                        self.input_buffer.clear();
+                                        self.telemetry.track_message_sent();
+
+                                        // Keep focus on input field for continuous input
+                                        self.input_focused = true;
+                                    }
+                                }
+                            }
+                            // Arrow keys and hjkl for navigation
+                            KeyCode::Left | KeyCode::Char('h') if !self.input_focused => {
+                                self.task_manager.prev_task();
+                            }
+                            KeyCode::Right | KeyCode::Char('l') if !self.input_focused => {
+                                self.task_manager.next_task();
+                            }
+                            KeyCode::Up | KeyCode::Char('k') if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    task.scroll_up();
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    task.scroll_down();
+                                }
+                            }
+                            KeyCode::PageUp if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    // Scroll up by 10 lines
+                                    for _ in 0..10 {
+                                        task.scroll_up();
+                                    }
+                                }
+                            }
+                            KeyCode::PageDown if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    // Scroll down by 10 lines
+                                    for _ in 0..10 {
+                                        task.scroll_down();
+                                    }
+                                }
+                            }
+                            KeyCode::Home if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    task.scroll_offset = 0;
+                                }
+                            }
+                            KeyCode::End if !self.input_focused => {
+                                if let Some(task) = self.task_manager.get_active_task() {
+                                    // Scroll to bottom - set a large offset, render will clamp it
+                                    task.scroll_offset = u16::MAX;
+                                }
+                            }
+                            // Press Ctrl+I to toggle input/scroll mode
+                            KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.input_focused = !self.input_focused;
+                            }
+                            // Number keys for quick jump (1-9)
+                            KeyCode::Char(c) if !self.input_focused && c.is_ascii_digit() => {
+                                if let Some(digit) = c.to_digit(10) {
+                                    let index = (digit as usize).saturating_sub(1);
+                                    if index < self.task_manager.tasks.len() {
+                                        self.task_manager.active_task = Some(index);
+                                    }
+                                }
+                            }
+                            KeyCode::Char(c) if self.input_focused => {
+                                // Add character to input buffer only when focused
+                                // Prevent buffer overflow by limiting input length
+                                if self.input_buffer.len() < 500 {
+                                    self.input_buffer.push(c);
+                                }
+                            }
+                            KeyCode::Backspace if self.input_focused => {
+                                // Remove last character from input buffer
+                                self.input_buffer.pop();
+                            }
+                            _ => {
+                                let event = AppEvent::from_crossterm_event(Event::Key(key));
+                                self.handle_event(event)?;
+                            }
                         }
                     }
+                    Event::Resize(_, _) => {
+                        // Terminal will be redrawn in the main loop
+                    }
+                    _ => {}
                 }
             }
 
@@ -312,8 +544,17 @@ impl App {
                 break;
             }
 
-            // Render after processing events/messages
-            terminal.draw(|f| self.render(f))?;
+            // Always render to ensure UI stays consistent
+            // Force full redraw when input is focused to prevent artifacts
+            if self.input_focused {
+                terminal.draw(|f| {
+                    // Clear the entire frame first when input is active
+                    f.render_widget(ratatui::widgets::Clear, f.area());
+                    self.render(f);
+                })?;
+            } else {
+                terminal.draw(|f| self.render(f))?;
+            }
 
             // Track frame timing
             let now = Instant::now();
@@ -331,31 +572,220 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
-        // Detect portrait mode
-        let portrait = frame.area().height > frame.area().width;
-
-        // Auto-switch to portrait layout if detected
-        let prev_mode = self.layout_mode;
-        if portrait && matches!(self.layout_mode, LayoutMode::Tabbed) {
-            self.layout_mode = LayoutMode::Portrait;
-        } else if !portrait && matches!(self.layout_mode, LayoutMode::Portrait) {
-            self.layout_mode = LayoutMode::Tabbed;
-        }
-
-        // Track layout switch if changed
-        if !matches!(
-            (prev_mode, &self.layout_mode),
-            (LayoutMode::Tabbed, LayoutMode::Tabbed) | (LayoutMode::Portrait, LayoutMode::Portrait)
-        ) {
-            self.telemetry.track_layout_switch(portrait);
-        }
-
-        match self.layout_mode {
-            LayoutMode::Tabbed => self.render_tabbed_layout(frame),
-            LayoutMode::Portrait => self.render_portrait_layout(frame),
-        }
+        // Always use the new task-based layout
+        self.render_task_layout(frame);
     }
 
+    fn render_task_layout(&mut self, frame: &mut ratatui::Frame) {
+        use ratatui::style::{Color, Style};
+        use ratatui::widgets::{Block, Borders, Paragraph};
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Input area at top
+                Constraint::Length(3), // Model selector
+                Constraint::Min(10),   // Task windows
+                Constraint::Length(1), // Status bar
+            ])
+            .split(frame.area());
+
+        // Render input area at the top
+        let input_title = if self.input_focused {
+            " Input (Press Ctrl+E for Helix) "
+        } else {
+            " Input (Press 'i' to focus) "
+        };
+
+        let input_block = Block::default()
+            .title(input_title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(if self.input_focused {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            }));
+        let input_inner = input_block.inner(chunks[0]);
+        frame.render_widget(input_block, chunks[0]);
+
+        // Calculate visible portion of input buffer for scrolling
+        let visible_width = input_inner.width.saturating_sub(1) as usize;
+        let buffer_len = self.input_buffer.len();
+
+        let (input_text, is_placeholder) = if self.input_buffer.is_empty() {
+            (
+                "Type your prompt here or press Ctrl+E to open Helix editor...".to_string(),
+                true,
+            )
+        } else {
+            // Show only the visible portion of the input buffer with horizontal scrolling
+            let scroll_offset = buffer_len.saturating_sub(visible_width);
+            (
+                self.input_buffer
+                    .chars()
+                    .skip(scroll_offset)
+                    .collect::<String>(),
+                false,
+            )
+        };
+
+        let input_paragraph = Paragraph::new(input_text).style(if is_placeholder {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default()
+        });
+        frame.render_widget(input_paragraph, input_inner);
+
+        // Handle cursor visibility and position
+        if self.input_focused {
+            // Calculate visible portion of input buffer
+            let visible_width = input_inner.width.saturating_sub(1) as usize;
+            let buffer_len = self.input_buffer.len();
+
+            // Calculate scroll offset to keep cursor visible
+            let scroll_offset = buffer_len.saturating_sub(visible_width);
+
+            // Calculate cursor position within visible area
+            let cursor_offset = buffer_len.saturating_sub(scroll_offset);
+            let cursor_x = (input_inner.x + cursor_offset as u16)
+                .min(input_inner.x + input_inner.width.saturating_sub(1));
+            let cursor_y = input_inner.y;
+
+            // Show the cursor
+            let _ = crossterm::execute!(io::stdout(), cursor::Show);
+            frame.set_cursor_position((cursor_x, cursor_y));
+        } else {
+            // Hide cursor when not focused on input
+            let _ = crossterm::execute!(io::stdout(), cursor::Hide);
+        }
+
+        // Render model selector with indication of actual model
+        let active_model_display = if let Some(ref active) = self.active_model {
+            format!("Active Model: {}", active)
+        } else {
+            "Active Model: devstral:latest".to_string()
+        };
+
+        // Create a block for the model selector area
+        let model_selector_block = Block::default()
+            .borders(Borders::ALL)
+            .title(active_model_display)
+            .border_style(Style::default().fg(Color::Yellow));
+
+        let model_inner = model_selector_block.inner(chunks[1]);
+        frame.render_widget(model_selector_block, chunks[1]);
+
+        // Add info text about model selection
+        let info_text = "Model selection coming soon (see issue #86)";
+        let info_paragraph = Paragraph::new(info_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(info_paragraph, model_inner);
+
+        // Render task windows
+        if self.task_manager.tasks.is_empty() {
+            let help_text = r#"
+Welcome to Arkavo Terminal UI
+
+• Type your prompt and press Enter to start a conversation
+• Press Ctrl+E to open Helix editor
+• Press Ctrl+I to toggle input/scroll mode
+• Press Ctrl+Q to quit
+
+Scrolling (when in scroll mode):
+• Arrow Up/Down or j/k to scroll line by line
+• Page Up/Down to scroll by pages
+• Home/End to jump to top/bottom
+            "#;
+
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(Color::DarkGray))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Getting Started "),
+                );
+
+            frame.render_widget(help_paragraph, chunks[2]);
+        } else {
+            // Render active tasks in a grid (cap at 9 visible)
+            let task_count = self.task_manager.tasks.len();
+            let visible_count = task_count.min(9);
+            let cols = ((visible_count as f32).sqrt().ceil() as usize).clamp(1, 3);
+            let rows = visible_count.div_ceil(cols).min(3);
+
+            // If there are more than 9 tasks, show a pager
+            if task_count > 9 {
+                let pager_text = format!(
+                    " Showing 1-9 of {} tasks (use 1-9 keys to jump) ",
+                    task_count
+                );
+                let pager_area = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .split(chunks[2])[0];
+
+                let pager = Paragraph::new(pager_text)
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(Block::default().borders(Borders::NONE));
+                frame.render_widget(pager, pager_area);
+
+                // Adjust area for task grid
+                let task_area = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .split(chunks[2])[1];
+
+                let row_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
+                    .split(task_area);
+
+                let mut task_idx = 0;
+                for row_chunk in row_chunks.iter() {
+                    let col_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
+                        .split(*row_chunk);
+
+                    for col_chunk in col_chunks.iter() {
+                        if task_idx < visible_count {
+                            let is_active = self.task_manager.active_task == Some(task_idx);
+                            self.task_manager.tasks[task_idx].render(frame, *col_chunk, is_active);
+                            task_idx += 1;
+                        }
+                    }
+                }
+            } else {
+                // Normal grid for 9 or fewer tasks
+                let row_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
+                    .split(chunks[2]);
+
+                let mut task_idx = 0;
+                for row_chunk in row_chunks.iter() {
+                    let col_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
+                        .split(*row_chunk);
+
+                    for col_chunk in col_chunks.iter() {
+                        if task_idx < self.task_manager.tasks.len() {
+                            let is_active = self.task_manager.active_task == Some(task_idx);
+                            self.task_manager.tasks[task_idx].render(frame, *col_chunk, is_active);
+                            task_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Render status bar
+        self.render_status_bar(frame, chunks[3]);
+    }
+
+    #[allow(dead_code)]
     fn render_tabbed_layout(&mut self, frame: &mut ratatui::Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -380,6 +810,7 @@ impl App {
         self.render_performance_bar(frame, chunks[2]);
     }
 
+    #[allow(dead_code)]
     fn render_portrait_layout(&mut self, frame: &mut ratatui::Frame) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders};
@@ -448,6 +879,7 @@ impl App {
         self.chat_view.render(frame, chat_area);
     }
 
+    #[allow(dead_code)]
     fn switch_view(&mut self) {
         self.view_mode = match self.view_mode {
             ViewMode::Chat => ViewMode::Code,
@@ -476,6 +908,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     fn next_pane(&mut self) {
         self.focused_pane = match self.focused_pane {
             FocusedPane::Diff => FocusedPane::Thinking,
@@ -494,182 +927,26 @@ impl App {
         self.telemetry.track_pane_focus_change();
     }
 
-    async fn fetch_ollama_models(&mut self) {
-        // Show loading message
-        self.chat_view.add_message(
-            crate::ui::chat::MessageRole::System,
-            "Fetching available Ollama models...".to_string(),
-        );
-
-        // Try to fetch models from Ollama
-        match self.list_ollama_models().await {
-            Ok(models) if !models.is_empty() => {
-                // Get the URL we're connected to
-                let base_url = self
-                    .get_saved_ollama_url()
-                    .await
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
-
-                let mut message =
-                    format!("Connected to Ollama at {}\nAvailable models:\n", base_url);
-
-                // Show models with indication of which will be selected
-                let preferred_order = [
-                    "qwen3:0.6b", // Specifically prefer the 0.6b model
-                    "qwen3",
-                    "qwen2.5",
-                    "qwen",
-                    "llama3.2",
-                    "llama3.1",
-                    "llama3",
-                    "devstral",
-                    "mistral",
-                    "codestral",
-                    "phi3",
-                    "gemma",
-                    "deepseek",
-                ];
-
-                let mut selected = false;
-                for (i, model) in models.iter().enumerate() {
-                    let model_name = model.split_whitespace().next().unwrap_or(model);
-
-                    // Check if this is a preferred model and the first one found
-                    let is_preferred = !selected
-                        && preferred_order.iter().any(|&pref| {
-                            if pref.contains(':') {
-                                // Exact match for specific versions like "qwen3:0.6b"
-                                model_name == pref
-                            } else {
-                                // Contains match for general model names
-                                model_name.contains(pref)
-                            }
-                        });
-
-                    if is_preferred || (!selected && i == 0) {
-                        message.push_str(&format!("  • {} ← will be used\n", model));
-                        selected = true;
-                    } else {
-                        message.push_str(&format!("  • {}\n", model));
-                    }
-                }
-
-                self.chat_view
-                    .add_message(crate::ui::chat::MessageRole::System, message);
-            }
-            Ok(_) => {
-                self.chat_view.add_message(
-                    crate::ui::chat::MessageRole::System,
-                    "No Ollama models found. Make sure Ollama is running.".to_string(),
-                );
-            }
-            Err(e) => {
-                // Try to get the actual URL we attempted to use
-                let base_url = self
-                    .get_saved_ollama_url()
-                    .await
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
-
-                self.chat_view.add_message(
-                    crate::ui::chat::MessageRole::System,
-                    format!("Failed to list models from Ollama at {}: {}", base_url, e),
-                );
-            }
-        }
-    }
-
-    async fn list_ollama_models(&self) -> Result<Vec<String>> {
-        use serde::Deserialize;
-
-        #[derive(Debug, Deserialize)]
-        struct ModelInfo {
-            name: String,
-            #[serde(default)]
-            size: u64,
-        }
-
-        #[derive(Debug, Deserialize)]
-        struct ModelsResponse {
-            models: Vec<ModelInfo>,
-        }
-
-        // Get saved Ollama server configuration from memory
-        let base_url = match self.get_saved_ollama_url().await {
-            Ok(saved_url) => saved_url,
-            Err(_) => "http://localhost:11434".to_string(), // Default to localhost only if no saved config
-        };
-
-        let client = reqwest::Client::new();
-
-        let response = client.get(format!("{}/api/tags", base_url)).send().await?;
-
-        if !response.status().is_success() {
-            return Ok(vec![]);
-        }
-
-        let models_response: ModelsResponse = response.json().await?;
-        Ok(models_response
-            .models
-            .into_iter()
-            .map(|m| {
-                if m.size > 0 {
-                    let size_gb = m.size as f64 / 1_073_741_824.0; // Convert bytes to GB
-                    format!("{} ({:.1} GB)", m.name, size_gb)
-                } else {
-                    m.name
-                }
-            })
-            .collect())
-    }
-
-    async fn configure_ollama_from_memory(&self) {
-        if let Ok(saved_url) = self.get_saved_ollama_url().await {
-            // Set the environment variable for compatibility with LlmClient::from_env()
-            unsafe {
-                std::env::set_var("OLLAMA_BASE_URL", &saved_url);
-            }
-        }
-    }
-
-    async fn get_saved_ollama_url(&self) -> Result<String> {
-        // Check if arkavo-memory with memory feature is available
-        #[cfg(feature = "memory")]
-        {
-            use arkavo_memory::storage::MemoryStorage;
-            use std::sync::Arc;
-
-            // Initialize memory storage to check for saved configuration
-            let storage = Arc::new(MemoryStorage::new().await?);
-
-            // Try to find saved Ollama server configuration
-            let saved_config = storage
-                .search("arkavo_ollama_server_config", 10, Some("config"))
-                .await?;
-
-            // Find a valid configuration (not cleared)
-            if let Some(config) = saved_config
-                .into_iter()
-                .find(|c| c.memory.content != "CLEARED" && c.memory.content.starts_with("http"))
-            {
-                return Ok(config.memory.content);
-            }
-        }
-
-        Err(anyhow::anyhow!("No saved Ollama configuration found"))
-    }
-
     fn render_status_bar(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
-        let mode_text = match self.view_mode {
-            ViewMode::Chat => "Chat",
-            ViewMode::Code => "Code",
-            ViewMode::Diff => "Diff",
-            ViewMode::Debug => "Debug",
+        let active_model = if let Some(ref model) = self.active_model {
+            model.clone()
+        } else {
+            "devstral:latest".to_string()
         };
 
-        let status = format!(" {} | Tab: Switch View | q: Quit ", mode_text);
+        let mode_indicator = if self.input_focused {
+            "INPUT MODE"
+        } else {
+            "SCROLL MODE (↑↓/jk/PgUp/PgDn/Home/End)"
+        };
+
+        let status = format!(
+            " {} | Model: {} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit ",
+            mode_indicator, active_model
+        );
 
         let paragraph = Paragraph::new(status)
             .style(Style::default().fg(Color::White).bg(Color::DarkGray))
@@ -678,6 +955,7 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
+    #[allow(dead_code)]
     fn render_performance_bar(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
@@ -733,6 +1011,65 @@ impl App {
             .block(Block::default().borders(Borders::NONE));
 
         frame.render_widget(paragraph, area);
+    }
+
+    async fn launch_helix_editor(&mut self) {
+        if let Some(ref helix) = self.helix_editor {
+            // Save terminal state
+            let _ = crossterm::execute!(io::stdout(), cursor::SavePosition);
+
+            // Suspend the terminal temporarily
+            let _ = terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                terminal::LeaveAlternateScreen,
+                cursor::Show
+            );
+
+            // Get current input buffer content
+            let initial_content = self.input_buffer.clone();
+
+            // Launch helix and get the edited content
+            match helix.launch_with_content(&initial_content) {
+                Ok(edited_content) => {
+                    // Update the input buffer with edited content
+                    self.input_buffer = edited_content.trim_end().to_string();
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Info,
+                        format!(
+                            "[UI] Helix editor: {} chars pasted",
+                            self.input_buffer.len()
+                        ),
+                    );
+                }
+                Err(e) => {
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Error,
+                        format!("[UI] Helix editor error: {}", e),
+                    );
+                }
+            }
+
+            // Restore terminal with proper cleanup
+            let _ = terminal::enable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                terminal::EnterAlternateScreen,
+                terminal::Clear(terminal::ClearType::All),
+                cursor::Hide,
+                cursor::RestorePosition
+            );
+
+            // Add a small delay for terminal to stabilize
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+            // No need to manually clear - the next render cycle will handle it
+        } else {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Error,
+                "[UI] Helix unavailable—install helix or check logs".to_string(),
+            );
+        }
     }
 
     pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {

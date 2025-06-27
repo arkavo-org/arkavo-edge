@@ -1,3 +1,4 @@
+use crate::vim::{VimCommand, VimMode};
 use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone)]
@@ -6,6 +7,8 @@ pub enum AppEvent {
     MouseClick(u16, u16),
     Resize(u16, u16),
     Tick,
+    VimCommand(VimCommand),
+    VimModeChange(VimMode),
 }
 
 impl AppEvent {

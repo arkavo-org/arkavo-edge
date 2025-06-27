@@ -72,6 +72,7 @@ impl MultiTerminalManager {
         match terminal_app {
             TerminalApp::MacTerminal => self.spawn_mac_terminal(&config),
             TerminalApp::ITerm2 => self.spawn_iterm2(&config),
+            TerminalApp::WezTerm => self.spawn_wezterm(&config),
             TerminalApp::Tmux => self.spawn_tmux_pane(&config),
             TerminalApp::Zellij => self.spawn_zellij_pane(&config),
             TerminalApp::Generic => self.spawn_generic_terminal(&config),
@@ -91,6 +92,10 @@ impl MultiTerminalManager {
         // Check for specific terminals on macOS
         #[cfg(target_os = "macos")]
         {
+            if env::var("TERM_PROGRAM").ok().as_deref() == Some("WezTerm") {
+                return Ok(TerminalApp::WezTerm);
+            }
+
             if env::var("TERM_PROGRAM").ok().as_deref() == Some("iTerm.app") {
                 return Ok(TerminalApp::ITerm2);
             }
@@ -145,6 +150,19 @@ impl MultiTerminalManager {
         Ok(())
     }
 
+    fn spawn_wezterm(&self, config: &TerminalSpawnConfig) -> Result<()> {
+        let command = format!(
+            "{} view --task {} --session {}",
+            self.executable_path, config.task_id, config.session_id
+        );
+
+        Command::new("wezterm")
+            .args(["cli", "spawn", "--", "sh", "-c", &command])
+            .spawn()?;
+
+        Ok(())
+    }
+
     fn spawn_tmux_pane(&self, config: &TerminalSpawnConfig) -> Result<()> {
         Command::new("tmux")
             .args([
@@ -189,19 +207,40 @@ impl MultiTerminalManager {
 
     #[cfg(unix)]
     fn spawn_generic_terminal(&self, config: &TerminalSpawnConfig) -> Result<()> {
-        // Try common terminal emulators
-        let terminals = ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"];
+        // Try common terminal emulators (WezTerm first)
+        let terminals = [
+            "wezterm",
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "xterm",
+        ];
 
         for terminal in &terminals {
-            let result = Command::new(terminal)
-                .arg("-e")
-                .arg(&self.executable_path)
-                .arg("view")
-                .arg("--task")
-                .arg(&config.task_id)
-                .arg("--session")
-                .arg(config.session_id.to_string())
-                .spawn();
+            let result = if terminal == &"wezterm" {
+                // WezTerm uses different syntax
+                Command::new(terminal)
+                    .arg("start")
+                    .arg("--")
+                    .arg(&self.executable_path)
+                    .arg("view")
+                    .arg("--task")
+                    .arg(&config.task_id)
+                    .arg("--session")
+                    .arg(config.session_id.to_string())
+                    .spawn()
+            } else {
+                // Other terminals use -e flag
+                Command::new(terminal)
+                    .arg("-e")
+                    .arg(&self.executable_path)
+                    .arg("view")
+                    .arg("--task")
+                    .arg(&config.task_id)
+                    .arg("--session")
+                    .arg(config.session_id.to_string())
+                    .spawn()
+            };
 
             if result.is_ok() {
                 return Ok(());
@@ -224,6 +263,7 @@ impl MultiTerminalManager {
 enum TerminalApp {
     MacTerminal,
     ITerm2,
+    WezTerm,
     Tmux,
     Zellij,
     Generic,

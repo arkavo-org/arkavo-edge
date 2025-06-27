@@ -61,10 +61,8 @@ async fn test_idb_extracts_to_arkavo_directory() -> Result<()> {
         // List some framework contents
         if let Ok(entries) = fs::read_dir(&frameworks_dir) {
             println!("\nFrameworks found:");
-            for entry in entries.take(5) {
-                if let Ok(entry) = entry {
-                    println!("  - {}", entry.file_name().to_string_lossy());
-                }
+            for entry in entries.take(5).flatten() {
+                println!("  - {}", entry.file_name().to_string_lossy());
             }
         }
     }

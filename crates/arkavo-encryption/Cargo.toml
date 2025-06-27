@@ -7,3 +7,5 @@ license.workspace = true
 description = "Encryption for the Arkavo agentic CLI tool - OpenTDF wrapping with local KMS support"
 
 [dependencies]
+[lints]
+workspace = true

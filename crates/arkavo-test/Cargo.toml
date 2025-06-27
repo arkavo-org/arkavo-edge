@@ -87,3 +87,5 @@ cc = "1.0"
 criterion = "0.5"
 proptest = "1.6"
 tempfile = "3.14"
+[lints]
+workspace = true
