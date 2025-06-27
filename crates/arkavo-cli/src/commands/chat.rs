@@ -27,8 +27,8 @@ macro_rules! debug_println {
 }
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Regular CLI is now the default, use --tui to enable Terminal UI
-    let use_tui = args.contains(&"--tui".to_string());
+    // Terminal UI is now the default, use --no-tui to disable it
+    let use_tui = !args.contains(&"--no-tui".to_string());
 
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args

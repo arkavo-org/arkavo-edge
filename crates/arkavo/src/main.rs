@@ -18,9 +18,9 @@ fn main() {
         return;
     }
 
-    // If launched without arguments (e.g., via `open`), default to chat mode with TUI
+    // If launched without arguments (e.g., via `open`), default to chat mode
     let command_args = if args.len() <= 1 {
-        vec!["chat".to_string(), "--tui".to_string()]
+        vec!["chat".to_string()]
     } else {
         args.get(1..).unwrap_or_default().to_vec()
     };
@@ -50,7 +50,7 @@ fn maybe_relaunch_in_terminal() {
         // Build command with arguments
         let args: Vec<String> = env::args().skip(1).collect();
         let arg_string = if args.is_empty() {
-            "chat --tui".to_string()
+            "chat".to_string()
         } else {
             args.join(" ")
         };
