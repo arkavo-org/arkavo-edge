@@ -42,18 +42,18 @@ fn maybe_relaunch_in_terminal() {
 
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
-        // Launch in WezTerm
-        let mut cmd = Command::new("open");
-        cmd.arg("-a")
-            .arg("WezTerm")
-            .arg(&exe)
-            .env("ARKAVO_LAUNCHED", "1");
-
-        // Pass through all arguments
+        // Launch in WezTerm using wezterm CLI
+        let mut cmd = Command::new("wezterm");
+        
+        // Build the command with arguments
+        let mut full_command = vec![exe.to_string_lossy().to_string()];
         let args: Vec<String> = env::args().skip(1).collect();
-        if !args.is_empty() {
-            cmd.args(&args);
-        }
+        full_command.extend(args);
+        
+        cmd.arg("start")
+            .arg("--")
+            .args(&full_command)
+            .env("ARKAVO_LAUNCHED", "1");
 
         // Spawn and exit
         let _ = cmd.spawn();
