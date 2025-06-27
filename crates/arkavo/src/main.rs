@@ -55,11 +55,11 @@ fn maybe_relaunch_in_terminal() {
             args.join(" ")
         };
         
-        // Launch in Terminal.app using AppleScript
+        // Launch in Terminal.app using AppleScript with environment variable
         let script = format!(
             r#"tell application "Terminal"
                 activate
-                do script "{} {}"
+                do script "ARKAVO_LAUNCHED=1 {} {}"
             end tell"#,
             exe.to_string_lossy(),
             arg_string
@@ -67,8 +67,7 @@ fn maybe_relaunch_in_terminal() {
         
         let mut cmd = Command::new("osascript");
         cmd.arg("-e")
-            .arg(script)
-            .env("ARKAVO_LAUNCHED", "1");
+            .arg(script);
 
         // Spawn and exit
         let _ = cmd.spawn();

@@ -50,6 +50,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Create runtime for async operations
     let runtime = Runtime::new()?;
 
+    // Launch Terminal UI early if requested and not in print mode
+    if use_tui && !print_mode {
+        // For TUI mode, we'll initialize everything inside the TUI
+        return launch_terminal_ui(runtime);
+    }
+
     // Initialize memory storage
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
 
@@ -1327,4 +1333,13 @@ async fn prompt_for_remote_ollama(
         }
         Err(e) => Err(format!("Failed to create client for {}: {}", base_url, e).into()),
     }
+}
+
+fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
+    // For TUI mode, we bypass all the initialization and go straight to the UI
+    // The UI will handle its own initialization
+    runtime.block_on(async {
+        arkavo_terminal::run().await
+    })?;
+    Ok(())
 }
