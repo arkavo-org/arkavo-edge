@@ -391,8 +391,8 @@ Repository details:
         });
 
         // Run the Terminal UI with communication channels
-        let tui_result =
-            runtime.block_on(async { arkavo_terminal::run_with_channels(ui_tx, llm_rx).await });
+        let tui_result = runtime
+            .block_on(async { arkavo_terminal::run_with_string_channels(ui_tx, llm_rx).await });
 
         // Clean up
         llm_handle.abort();

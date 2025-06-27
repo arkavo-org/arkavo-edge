@@ -32,7 +32,7 @@ fn test_commit_and_status() {
         "Status: untracked={:?}, added={:?}, modified={:?}",
         status.untracked, status.added, status.modified
     );
-    assert!(status.untracked.len() > 0 || status.added.len() > 0);
+    assert!(!status.untracked.is_empty() || !status.added.is_empty());
     assert!(
         status.untracked.iter().any(|f| f == "test.txt")
             || status.added.iter().any(|f| f == "test.txt")
@@ -42,8 +42,8 @@ fn test_commit_and_status() {
     let oid = manager.commit_changes(&repo, "Initial commit").unwrap();
 
     let status = manager.status(&repo).unwrap();
-    assert_eq!(status.untracked.len(), 0);
-    assert_eq!(status.modified.len(), 0);
+    assert!(status.untracked.is_empty());
+    assert!(status.modified.is_empty());
 
     let head = repo.head().unwrap().target().unwrap();
     assert_eq!(head, oid);
