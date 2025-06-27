@@ -17,7 +17,7 @@ use crate::event::{AppEvent, EventHandler};
 use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
+use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView, TaskManager};
 use crate::vim::VimState;
 
 pub enum ViewMode {
@@ -59,6 +59,10 @@ pub struct App {
     pub vim_state: VimState,
     pub vim_enabled: bool,
     pub helix_editor: Option<HelixEditor>,
+    pub task_manager: TaskManager,
+    pub input_buffer: String,
+    pub available_models: Vec<String>,
+    pub selected_model: usize,
 }
 
 impl App {
@@ -89,6 +93,16 @@ impl App {
             vim_state: VimState::new(),
             vim_enabled: false, // Default to disabled for now
             helix_editor: HelixEditor::new().ok(),
+            task_manager: TaskManager::new(),
+            input_buffer: String::new(),
+            available_models: vec![
+                "llava:7b".to_string(),
+                "devstral:latest".to_string(),
+                "deepseek-r1:14b".to_string(),
+                "qwen3:0.6b".to_string(),
+                "dolphin3:latest".to_string(),
+            ],
+            selected_model: 0,
         }
     }
 
@@ -119,6 +133,16 @@ impl App {
             vim_state: VimState::new(),
             vim_enabled: false, // Default to disabled for now
             helix_editor: HelixEditor::new().ok(),
+            task_manager: TaskManager::new(),
+            input_buffer: String::new(),
+            available_models: vec![
+                "llava:7b".to_string(),
+                "devstral:latest".to_string(),
+                "deepseek-r1:14b".to_string(),
+                "qwen3:0.6b".to_string(),
+                "dolphin3:latest".to_string(),
+            ],
+            selected_model: 0,
         }
     }
 
@@ -264,10 +288,14 @@ impl App {
                             // Simple 'e' key launches Helix on macOS
                             self.launch_helix_editor().await;
                         }
-                        KeyCode::Tab => match self.layout_mode {
-                            LayoutMode::Tabbed => self.switch_view(),
-                            LayoutMode::Portrait => self.next_pane(),
-                        },
+                        KeyCode::Tab => {
+                            // Tab switches to next model/agent
+                            self.selected_model = (self.selected_model + 1) % self.available_models.len();
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Info,
+                                format!("[UI] Selected model: {}", self.available_models[self.selected_model]),
+                            );
+                        }
                         KeyCode::BackTab => {
                             if matches!(self.layout_mode, LayoutMode::Portrait) {
                                 self.prev_pane();
@@ -280,57 +308,36 @@ impl App {
                             }
                         }
                         KeyCode::Enter => {
-                            // Handle Enter key specially for chat view
-                            if matches!(self.view_mode, ViewMode::Chat)
-                                && !self.chat_view.input_buffer.is_empty()
-                            {
-                                let input = self.chat_view.input_buffer.clone();
-
+                            // Create a new task with the input buffer content
+                            if !self.input_buffer.is_empty() {
+                                let model_name = self.available_models[self.selected_model].clone();
+                                let task = self.task_manager.create_task(
+                                    "LLM Agent".to_string(),
+                                    model_name.clone()
+                                );
+                                
+                                task.add_message(
+                                    crate::ui::task_window::MessageRole::User,
+                                    self.input_buffer.clone()
+                                );
+                                task.set_status(crate::ui::task_window::TaskStatus::Processing);
+                                
                                 // Send to LLM if channel is available
                                 if let Some(ref ui_tx) = self.ui_tx {
-                                    let send_result = ui_tx.try_send(input.clone());
-                                    self.add_debug_log(
-                                        crate::ui::debug::LogLevel::Debug,
-                                        format!("[UI] Sending message: {}", input),
-                                    );
-                                    match send_result {
-                                        Ok(_) => {
-                                            self.add_debug_log(
-                                                crate::ui::debug::LogLevel::Info,
-                                                "[UI] Message sent successfully".to_string(),
-                                            );
-                                            // Add user message to chat
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::User,
-                                                input,
-                                            );
-                                            self.chat_view.input_buffer.clear();
-
-                                            self.telemetry.track_message_sent();
-                                        }
-                                        Err(mpsc::error::TrySendError::Full(_)) => {
-                                            // Channel is full, show error to user
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::System,
-                                                "Error: System is busy. Please try again."
-                                                    .to_string(),
-                                            );
-                                        }
-                                        Err(mpsc::error::TrySendError::Closed(_)) => {
-                                            // Channel is closed, show error to user
-                                            self.chat_view.add_message(
-                                                crate::ui::chat::MessageRole::System,
-                                                "Error: Connection lost. Please restart."
-                                                    .to_string(),
-                                            );
-                                        }
-                                    }
-                                } else {
-                                    // Fallback to echo mode if no channel
-                                    let event = AppEvent::from_crossterm_event(Event::Key(key));
-                                    self.handle_event(event)?;
+                                    let _ = ui_tx.try_send(self.input_buffer.clone());
                                 }
+                                
+                                self.input_buffer.clear();
+                                self.telemetry.track_message_sent();
                             }
+                        }
+                        KeyCode::Char(c) => {
+                            // Add character to input buffer
+                            self.input_buffer.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            // Remove last character from input buffer
+                            self.input_buffer.pop();
                         }
                         _ => {
                             let event = AppEvent::from_crossterm_event(Event::Key(key));
@@ -363,29 +370,119 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
-        // Detect portrait mode
-        let portrait = frame.area().height > frame.area().width;
+        // Always use the new task-based layout
+        self.render_task_layout(frame);
+    }
 
-        // Auto-switch to portrait layout if detected
-        let prev_mode = self.layout_mode;
-        if portrait && matches!(self.layout_mode, LayoutMode::Tabbed) {
-            self.layout_mode = LayoutMode::Portrait;
-        } else if !portrait && matches!(self.layout_mode, LayoutMode::Portrait) {
-            self.layout_mode = LayoutMode::Tabbed;
+    fn render_task_layout(&mut self, frame: &mut ratatui::Frame) {
+        use ratatui::style::{Color, Style};
+        use ratatui::widgets::{Block, Borders, Paragraph};
+        
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),  // Input area at top
+                Constraint::Length(3),  // Model selector
+                Constraint::Min(10),    // Task windows
+                Constraint::Length(1),  // Status bar
+            ])
+            .split(frame.area());
+
+        // Render input area at the top
+        let input_block = Block::default()
+            .title(" Input (Press 'e' for Helix) ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+        let input_inner = input_block.inner(chunks[0]);
+        frame.render_widget(input_block, chunks[0]);
+        
+        let input_text = if self.input_buffer.is_empty() {
+            "Type your prompt here or press 'e' to open Helix editor..."
+        } else {
+            &self.input_buffer
+        };
+        
+        let input_paragraph = Paragraph::new(input_text)
+            .style(if self.input_buffer.is_empty() {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+            });
+        frame.render_widget(input_paragraph, input_inner);
+
+        // Render model selector
+        let model_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(
+                self.available_models
+                    .iter()
+                    .map(|_| Constraint::Percentage((100 / self.available_models.len()) as u16))
+                    .collect::<Vec<_>>()
+            )
+            .split(chunks[1]);
+            
+        for (i, (model, area)) in self.available_models.iter().zip(model_chunks.iter()).enumerate() {
+            let is_selected = i == self.selected_model;
+            let model_block = Block::default()
+                .borders(if is_selected { Borders::ALL } else { Borders::NONE })
+                .border_style(Style::default().fg(if is_selected { Color::Cyan } else { Color::DarkGray }));
+            
+            let model_text = Paragraph::new(model.as_str())
+                .style(if is_selected {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                })
+                .block(model_block);
+            
+            frame.render_widget(model_text, *area);
         }
 
-        // Track layout switch if changed
-        if !matches!(
-            (prev_mode, &self.layout_mode),
-            (LayoutMode::Tabbed, LayoutMode::Tabbed) | (LayoutMode::Portrait, LayoutMode::Portrait)
-        ) {
-            self.telemetry.track_layout_switch(portrait);
+        // Render task windows
+        if self.task_manager.tasks.is_empty() {
+            let help_text = r#"
+Welcome to Arkavo Terminal UI
+
+• Press 'e' to open Helix editor
+• Type your prompt and press Enter to start a task
+• Press Tab to switch between models
+• Press 'q' to quit
+            "#;
+            
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(Color::DarkGray))
+                .block(Block::default().borders(Borders::ALL).title(" Getting Started "));
+            
+            frame.render_widget(help_paragraph, chunks[2]);
+        } else {
+            // Render active tasks in a grid
+            let task_count = self.task_manager.tasks.len();
+            let cols = ((task_count as f32).sqrt().ceil() as usize).max(1);
+            let rows = (task_count + cols - 1) / cols;
+            
+            let row_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
+                .split(chunks[2]);
+                
+            let mut task_idx = 0;
+            for row_chunk in row_chunks.iter() {
+                let col_chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
+                    .split(*row_chunk);
+                    
+                for col_chunk in col_chunks.iter() {
+                    if task_idx < self.task_manager.tasks.len() {
+                        self.task_manager.tasks[task_idx].render(frame, *col_chunk);
+                        task_idx += 1;
+                    }
+                }
+            }
         }
 
-        match self.layout_mode {
-            LayoutMode::Tabbed => self.render_tabbed_layout(frame),
-            LayoutMode::Portrait => self.render_portrait_layout(frame),
-        }
+        // Render status bar
+        self.render_status_bar(frame, chunks[3]);
     }
 
     fn render_tabbed_layout(&mut self, frame: &mut ratatui::Frame) {
@@ -694,28 +791,10 @@ impl App {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
-        let mode_text = match self.view_mode {
-            ViewMode::Chat => "Chat",
-            ViewMode::Code => "Code",
-            ViewMode::Diff => "Diff",
-            ViewMode::Debug => "Debug",
-        };
-
-        let vim_mode_text = if self.vim_enabled {
-            format!(" [{}] |", self.vim_state.mode)
-        } else {
-            String::new()
-        };
-
-        let helix_status = if self.helix_editor.is_some() {
-            " | e: Helix"
-        } else {
-            ""
-        };
-
         let status = format!(
-            " {}{} | Tab: Switch View{} | q: Quit ",
-            mode_text, vim_mode_text, helix_status
+            " Tasks: {} | Model: {} | Tab: Switch Model | e: Helix | Enter: Send | q: Quit ",
+            self.task_manager.tasks.len(),
+            self.available_models[self.selected_model]
         );
 
         let paragraph = Paragraph::new(status)
@@ -793,25 +872,17 @@ impl App {
             );
             
             // Get current input buffer content
-            let initial_content = match self.view_mode {
-                ViewMode::Chat => self.chat_view.input_buffer.clone(),
-                _ => String::new(),
-            };
+            let initial_content = self.input_buffer.clone();
             
             // Launch helix and get the edited content
             match helix.launch_with_content(&initial_content) {
                 Ok(edited_content) => {
                     // Update the input buffer with edited content
-                    match self.view_mode {
-                        ViewMode::Chat => {
-                            self.chat_view.input_buffer = edited_content.trim_end().to_string();
-                            self.add_debug_log(
-                                crate::ui::debug::LogLevel::Info,
-                                format!("[UI] Helix editor: {} chars pasted", self.chat_view.input_buffer.len()),
-                            );
-                        }
-                        _ => {}
-                    }
+                    self.input_buffer = edited_content.trim_end().to_string();
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Info,
+                        format!("[UI] Helix editor: {} chars pasted", self.input_buffer.len()),
+                    );
                 }
                 Err(e) => {
                     self.add_debug_log(
