@@ -169,6 +169,12 @@ impl App {
     ) -> Result<()> {
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
+        
+        // Auto-launch Helix editor on startup
+        if self.helix_editor.is_some() {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            self.launch_helix_editor().await;
+        }
 
         loop {
             // Check for LLM responses - drain all available messages
@@ -254,8 +260,8 @@ impl App {
                                 format!("[UI] Vim mode {}", if self.vim_enabled { "enabled" } else { "disabled" }),
                             );
                         }
-                        KeyCode::Char('e') | KeyCode::Char('E') 
-                            if key.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                        KeyCode::Char('e') => {
+                            // Simple 'e' key launches Helix on macOS
                             self.launch_helix_editor().await;
                         }
                         KeyCode::Tab => match self.layout_mode {
@@ -702,13 +708,13 @@ impl App {
         };
 
         let helix_status = if self.helix_editor.is_some() {
-            " | Ctrl-Shift-E: Helix"
+            " | e: Helix"
         } else {
             ""
         };
 
         let status = format!(
-            " {}{} | Tab: Switch View | Alt-V: Toggle Vim{} | q: Quit ",
+            " {}{} | Tab: Switch View{} | q: Quit ",
             mode_text, vim_mode_text, helix_status
         );
 
