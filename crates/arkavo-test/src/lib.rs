@@ -1,4 +1,5 @@
 #![deny(clippy::all)]
+#![allow(clippy::uninlined_format_args)]
 
 pub mod ai;
 pub mod bridge;

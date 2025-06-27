@@ -179,8 +179,7 @@ impl Provider for OllamaClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             return Err(Error::Provider(format!(
-                "Ollama API error: {} - {}",
-                status, text
+                "Ollama API error: {status} - {text}"
             )));
         }
 
@@ -211,8 +210,7 @@ impl Provider for OllamaClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             return Err(Error::Provider(format!(
-                "Ollama API error: {} - {}",
-                status, text
+                "Ollama API error: {status} - {text}"
             )));
         }
 

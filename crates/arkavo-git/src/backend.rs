@@ -180,9 +180,9 @@ impl GitBackend for Git2Backend {
     }
 
     fn checkout(&self, repo: &Repository, name: &str) -> Result<()> {
-        let obj = repo.revparse_single(&format!("refs/heads/{}", name))?;
+        let obj = repo.revparse_single(&format!("refs/heads/{name}"))?;
         repo.checkout_tree(&obj, None)?;
-        repo.set_head(&format!("refs/heads/{}", name))?;
+        repo.set_head(&format!("refs/heads/{name}"))?;
         Ok(())
     }
 
@@ -263,7 +263,7 @@ impl GitBackend for Git2Backend {
 
         // Try native git2 push (will work for local/file URLs)
         let mut remote = repo.find_remote(remote)?;
-        remote.push(&[format!("refs/heads/{}", branch)], None)?;
+        remote.push(&[format!("refs/heads/{branch}")], None)?;
         Ok(())
     }
 
@@ -292,7 +292,7 @@ impl GitBackend for Git2Backend {
         if analysis.0.is_up_to_date() {
             return Ok(());
         } else if analysis.0.is_fast_forward() {
-            let refname = format!("refs/heads/{}", branch);
+            let refname = format!("refs/heads/{branch}");
             let mut reference = repo.find_reference(&refname)?;
             reference.set_target(fetch_commit.id(), "Fast-forward")?;
             repo.set_head(&refname)?;

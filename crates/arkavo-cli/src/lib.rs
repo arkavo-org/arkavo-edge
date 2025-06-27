@@ -45,9 +45,11 @@ fn print_usage() {
     println!();
     println!("COMMANDS:");
     println!(
-        "    chat      Start conversational agent with repository context (regular CLI by default)"
+        "    chat      Start conversational agent with repository context (Terminal UI by default)"
     );
-    println!("              Options: --tui (enable Terminal UI), --prompt <text>, --image <path>");
+    println!(
+        "              Options: --no-tui (disable Terminal UI), --prompt <text>, --image <path>"
+    );
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run intelligent tests (use --help for modes)");

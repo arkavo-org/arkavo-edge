@@ -32,8 +32,8 @@ cargo test
 # Run specific test
 cargo test test_name
 
-# Code quality
-cargo clippy -- -D warnings
+# Code quality  
+cargo clippy -- -A clippy::uninlined_format_args -D warnings
 
 # Format code
 cargo fmt

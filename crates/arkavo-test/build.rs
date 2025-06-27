@@ -79,7 +79,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
         .expect("Failed to execute curl");
 
     if !status.success() {
-        panic!("Failed to download idb_companion from {}", download_url);
+        panic!("Failed to download idb_companion from {download_url}");
     }
 
     // Extract the tarball

@@ -27,8 +27,8 @@ macro_rules! debug_println {
 }
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Regular CLI is now the default, use --tui to enable Terminal UI
-    let use_tui = args.contains(&"--tui".to_string());
+    // Terminal UI is now the default, use --no-tui to disable it
+    let use_tui = !args.contains(&"--no-tui".to_string());
 
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
@@ -49,6 +49,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Create runtime for async operations
     let runtime = Runtime::new()?;
+
+    // Launch Terminal UI early if requested and not in print mode
+    if use_tui && !print_mode {
+        // For TUI mode, we'll initialize everything inside the TUI
+        return launch_terminal_ui(runtime);
+    }
 
     // Initialize memory storage
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
@@ -385,8 +391,8 @@ Repository details:
         });
 
         // Run the Terminal UI with communication channels
-        let tui_result =
-            runtime.block_on(async { arkavo_terminal::run_with_channels(ui_tx, llm_rx).await });
+        let tui_result = runtime
+            .block_on(async { arkavo_terminal::run_with_string_channels(ui_tx, llm_rx).await });
 
         // Clean up
         llm_handle.abort();
@@ -1327,4 +1333,11 @@ async fn prompt_for_remote_ollama(
         }
         Err(e) => Err(format!("Failed to create client for {}: {}", base_url, e).into()),
     }
+}
+
+fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
+    // For TUI mode, we bypass all the initialization and go straight to the UI
+    // The UI will handle its own initialization
+    runtime.block_on(async { arkavo_terminal::run().await })?;
+    Ok(())
 }

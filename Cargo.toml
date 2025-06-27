@@ -16,9 +16,12 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.14.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/arkavo/arkavo-edge"
 description = "Developer-centric agentic CLI tool for AI-agent development and framework maintenance"
+
+[workspace.lints.clippy]
+uninlined_format_args = "allow"

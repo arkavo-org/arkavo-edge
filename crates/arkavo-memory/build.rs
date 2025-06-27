@@ -86,7 +86,7 @@ fn main() {
         let file_path = models_dir.join(filename);
 
         if !file_path.exists() {
-            println!("cargo:warning=Downloading model file: {}", filename);
+            println!("cargo:warning=Downloading model file: {filename}");
 
             // Try to download using curl (more compatible with various environments)
             let curl_result = Command::new("curl")
@@ -103,14 +103,14 @@ fn main() {
             match curl_result {
                 Ok(result) => {
                     if result.status.success() {
-                        println!("cargo:warning=Downloaded via curl: {}", filename);
+                        println!("cargo:warning=Downloaded via curl: {filename}");
                     } else {
                         // Try wget as fallback
                         try_wget(&file_path, url, filename);
                     }
                 }
                 Err(e) => {
-                    println!("cargo:warning=curl not available: {}", e);
+                    println!("cargo:warning=curl not available: {e}");
                     // Try wget as fallback
                     try_wget(&file_path, url, filename);
                 }
@@ -120,16 +120,14 @@ fn main() {
             if !file_path.exists() {
                 if is_ci {
                     panic!(
-                        "Failed to download {} in CI environment. \
+                        "Failed to download {filename} in CI environment. \
                          Please ensure curl or wget is available in the build image, \
-                         or pre-download model files and cache them.",
-                        filename
+                         or pre-download model files and cache them."
                     );
                 } else {
                     panic!(
-                        "Failed to download {}. Please ensure curl or wget is available, \
-                         or manually download from: {}",
-                        filename, url
+                        "Failed to download {filename}. Please ensure curl or wget is available, \
+                         or manually download from: {url}"
                     );
                 }
             }
@@ -140,13 +138,15 @@ fn main() {
     for (filename, _) in MODEL_FILES {
         let file_path = models_dir.join(filename);
         if !file_path.exists() {
-            panic!("Required model file '{}' not found", file_path.display());
+            let path = file_path.display();
+            panic!("Required model file '{path}' not found");
         }
 
         // Check file is not empty
         let metadata = fs::metadata(&file_path).expect("Failed to read file metadata");
         if metadata.len() == 0 {
-            panic!("Model file '{}' is empty", file_path.display());
+            let path = file_path.display();
+            panic!("Model file '{path}' is empty");
         }
     }
 }
@@ -163,19 +163,18 @@ fn try_wget(file_path: &Path, url: &str, filename: &str) {
 
     match wget_result {
         Ok(result) if result.status.success() => {
-            println!("cargo:warning=Downloaded via wget: {}", filename);
+            println!("cargo:warning=Downloaded via wget: {filename}");
         }
         Ok(result) => {
-            println!("cargo:warning=wget failed with status: {}", result.status);
+            let status = result.status;
+            println!("cargo:warning=wget failed with status: {status}");
             if !result.stderr.is_empty() {
-                println!(
-                    "cargo:warning=wget stderr: {}",
-                    String::from_utf8_lossy(&result.stderr)
-                );
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                println!("cargo:warning=wget stderr: {stderr}");
             }
         }
         Err(e) => {
-            println!("cargo:warning=wget not available: {}", e);
+            println!("cargo:warning=wget not available: {e}");
         }
     }
 }

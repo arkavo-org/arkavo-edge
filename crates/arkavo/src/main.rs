@@ -2,11 +2,14 @@ use std::env;
 use std::process;
 
 fn main() {
-    // Check if we need to relaunch in Terminal (macOS only)
-    #[cfg(target_os = "macos")]
-    maybe_relaunch_in_terminal();
-
     let args: Vec<String> = env::args().collect();
+
+    // Check if we need to relaunch in Terminal (macOS only)
+    // Skip for serve command which needs to stay in current process
+    #[cfg(target_os = "macos")]
+    if !args.get(1).map(|s| s == "serve").unwrap_or(false) {
+        maybe_relaunch_in_terminal();
+    }
 
     // Handle version with git commit hash
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
@@ -18,7 +21,12 @@ fn main() {
         return;
     }
 
-    let command_args = args.get(1..).unwrap_or_default().to_vec();
+    // If launched without arguments (e.g., via `open`), default to chat mode
+    let command_args = if args.len() <= 1 {
+        vec!["chat".to_string()]
+    } else {
+        args.get(1..).unwrap_or_default().to_vec()
+    };
 
     if let Err(err) = arkavo_cli::run(&command_args) {
         eprintln!("Error: {}", err);
@@ -42,18 +50,26 @@ fn maybe_relaunch_in_terminal() {
 
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
-        // Launch in Terminal.app
-        let mut cmd = Command::new("open");
-        cmd.arg("-a")
-            .arg("Terminal")
-            .arg(&exe)
-            .env("ARKAVO_LAUNCHED", "1");
-
-        // Pass through all arguments
+        // Build command with arguments
         let args: Vec<String> = env::args().skip(1).collect();
-        if !args.is_empty() {
-            cmd.args(&args);
-        }
+        let arg_string = if args.is_empty() {
+            "chat".to_string()
+        } else {
+            args.join(" ")
+        };
+
+        // Launch in Terminal.app using AppleScript with environment variable
+        let script = format!(
+            r#"tell application "Terminal"
+                activate
+                do script "ARKAVO_LAUNCHED=1 {} {}"
+            end tell"#,
+            exe.to_string_lossy(),
+            arg_string
+        );
+
+        let mut cmd = Command::new("osascript");
+        cmd.arg("-e").arg(script);
 
         // Spawn and exit
         let _ = cmd.spawn();

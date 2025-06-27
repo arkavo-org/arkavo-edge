@@ -443,7 +443,7 @@ impl IdbWrapper {
     }
 
     /// Ensure the companion server is running for a specific device
-    pub async fn ensure_companion_running(device_id: &str) -> Result<()> {
+    pub async fn ensure_companion_running(device_id: &str) -> Result<std::process::Child> {
         use once_cell::sync::Lazy;
         use std::sync::Mutex;
 
@@ -452,7 +452,7 @@ impl IdbWrapper {
             Lazy::new(|| Mutex::new(HashMap::new()));
 
         // Check and start companion in a separate scope to release the lock before await
-        let device_id_owned = device_id.to_string();
+        let _device_id_owned = device_id.to_string();
         let needs_start = {
             let mut processes = COMPANION_PROCESSES.lock().unwrap();
 
@@ -461,8 +461,9 @@ impl IdbWrapper {
                 // Check if it's still running
                 match child.try_wait() {
                     Ok(None) => {
-                        // Still running
-                        return Ok(());
+                        // Still running - we can't return the child handle as it's owned by the map
+                        // This is a limitation of the current design. For tests, we'll rely on kill_all_companions
+                        return Err(TestError::Mcp("Companion already running".to_string()));
                     }
                     Ok(Some(_)) => {
                         // Process exited, remove it
@@ -710,12 +711,8 @@ impl IdbWrapper {
                         Ok(None) => {
                             // Still running - good
                             eprintln!("[IdbWrapper] Companion process started successfully");
-
-                            // Store the process
-                            {
-                                let mut processes = COMPANION_PROCESSES.lock().unwrap();
-                                processes.insert(device_id_owned, child);
-                            }
+                            // Return the child so the caller can manage it
+                            return Ok(child);
                         }
                         Err(e) => {
                             eprintln!(
@@ -734,17 +731,15 @@ impl IdbWrapper {
                     return Err(TestError::Mcp(format!("Failed to start companion: {}", e)));
                 }
             }
-
-            // Wait for it to initialize
-            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-            eprintln!(
-                "[IdbWrapper] Companion server started for device {}",
-                device_id
-            );
         }
 
-        Ok(())
+        Err(TestError::Mcp("Should not reach here".to_string()))
+    }
+
+    pub fn kill_all_companions() {
+        let mut command = Command::new("pkill");
+        command.arg("-f").arg("idb_companion");
+        let _ = command.status();
     }
 
     /// Connect to a device if not already connected
