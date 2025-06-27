@@ -2,11 +2,14 @@ use std::env;
 use std::process;
 
 fn main() {
-    // Check if we need to relaunch in Terminal (macOS only)
-    #[cfg(target_os = "macos")]
-    maybe_relaunch_in_terminal();
-
     let args: Vec<String> = env::args().collect();
+    
+    // Check if we need to relaunch in Terminal (macOS only)
+    // Skip for serve command which needs to stay in current process
+    #[cfg(target_os = "macos")]
+    if !args.get(1).map(|s| s == "serve").unwrap_or(false) {
+        maybe_relaunch_in_terminal();
+    }
 
     // Handle version with git commit hash
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-v") {
