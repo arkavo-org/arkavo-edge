@@ -35,3 +35,5 @@ ignore = "0.4"
 indicatif = "0.17"
 tiktoken-rs = "0.6"
 sha2 = "0.10"
+[lints]
+workspace = true

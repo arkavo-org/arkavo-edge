@@ -15,6 +15,6 @@ impl Client {
     }
 
     pub fn send_message(&self, message: &str) -> Result<String, Box<dyn std::error::Error>> {
-        Ok(format!("Response to: {}", message))
+        Ok(format!("Response to: {message}"))
     }
 }

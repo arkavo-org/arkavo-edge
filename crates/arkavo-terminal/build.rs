@@ -12,8 +12,9 @@ fn main() {
     // Only show warnings in development/verbose mode
     if env::var("ARKAVO_DEV").is_ok() || env::var("CARGO_VERBOSE").is_ok() {
         println!("cargo:warning=Helix binary bundling not yet implemented");
-        println!("cargo:warning=Target: {}-{}", target_os, target_arch);
-        println!("cargo:warning=Would download to: {}", out_dir.display());
+        println!("cargo:warning=Target: {target_os}-{target_arch}");
+        let out_path = out_dir.display();
+        println!("cargo:warning=Would download to: {out_path}");
     }
 
     // In a full implementation, this would:

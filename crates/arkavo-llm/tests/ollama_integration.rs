@@ -48,10 +48,10 @@ async fn test_ollama_completion() {
     match client.complete(messages).await {
         Ok(response) => {
             assert!(!response.is_empty());
-            println!("Response: {}", response);
+            println!("Response: {response}");
         }
         Err(e) => {
-            println!("Expected error when Ollama not running: {}", e);
+            println!("Expected error when Ollama not running: {e}");
         }
     }
 }
@@ -80,16 +80,16 @@ async fn test_ollama_streaming() {
                         }
                     }
                     Err(e) => {
-                        println!("Stream error: {}", e);
+                        println!("Stream error: {e}");
                         break;
                     }
                 }
             }
-            println!("Full streamed response: {}", full_response);
+            println!("Full streamed response: {full_response}");
             assert!(!full_response.is_empty());
         }
         Err(e) => {
-            println!("Expected error when Ollama not running: {}", e);
+            println!("Expected error when Ollama not running: {e}");
         }
     }
 }
@@ -119,7 +119,7 @@ async fn test_ollama_error_handling() {
     match result {
         Ok(Ok(_)) => panic!("Expected an error but got success"),
         Ok(Err(e)) => {
-            println!("Got expected error: {}", e);
+            println!("Got expected error: {e}");
             // Verify it's a network/connection error
             let error_str = e.to_string().to_lowercase();
             assert!(
@@ -127,8 +127,7 @@ async fn test_ollama_error_handling() {
                     || error_str.contains("failed")
                     || error_str.contains("connection")
                     || error_str.contains("timeout"),
-                "Unexpected error message: {}",
-                e
+                "Unexpected error message: {e}"
             );
         }
         Err(_) => {

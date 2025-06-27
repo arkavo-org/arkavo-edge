@@ -21,10 +21,7 @@ impl LlmClient {
         let provider: Box<dyn Provider> = match provider_name.as_str() {
             "ollama" => Box::new(OllamaClient::from_env()?),
             _ => {
-                return Err(Error::Config(format!(
-                    "Unknown provider: {}",
-                    provider_name
-                )));
+                return Err(Error::Config(format!("Unknown provider: {provider_name}")));
             }
         };
 

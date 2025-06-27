@@ -36,3 +36,5 @@ tempfile = "3.14"
 [[bin]]
 name = "tui-benchmark"
 path = "src/bin/benchmark.rs"
+[lints]
+workspace = true

@@ -7,3 +7,5 @@ license.workspace = true
 description = "Repository mapper for the Arkavo agentic CLI tool - builds semantic map of repositories and tracks changed files"
 
 [dependencies]
+[lints]
+workspace = true

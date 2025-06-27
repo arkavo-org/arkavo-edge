@@ -21,3 +21,5 @@ atty = "0.2"
 [[bin]]
 name = "arkavo"
 path = "src/main.rs"
+[lints]
+workspace = true
