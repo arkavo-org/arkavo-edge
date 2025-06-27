@@ -18,7 +18,12 @@ fn main() {
         return;
     }
 
-    let command_args = args.get(1..).unwrap_or_default().to_vec();
+    // If launched without arguments (e.g., via `open`), default to chat mode with TUI
+    let command_args = if args.len() <= 1 {
+        vec!["chat".to_string(), "--tui".to_string()]
+    } else {
+        args.get(1..).unwrap_or_default().to_vec()
+    };
 
     if let Err(err) = arkavo_cli::run(&command_args) {
         eprintln!("Error: {}", err);
@@ -42,17 +47,27 @@ fn maybe_relaunch_in_terminal() {
 
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
-        // Launch in WezTerm using wezterm CLI
-        let mut cmd = Command::new("wezterm");
-        
-        // Build the command with arguments
-        let mut full_command = vec![exe.to_string_lossy().to_string()];
+        // Build command with arguments
         let args: Vec<String> = env::args().skip(1).collect();
-        full_command.extend(args);
+        let arg_string = if args.is_empty() {
+            "chat --tui".to_string()
+        } else {
+            args.join(" ")
+        };
         
-        cmd.arg("start")
-            .arg("--")
-            .args(&full_command)
+        // Launch in Terminal.app using AppleScript
+        let script = format!(
+            r#"tell application "Terminal"
+                activate
+                do script "{} {}"
+            end tell"#,
+            exe.to_string_lossy(),
+            arg_string
+        );
+        
+        let mut cmd = Command::new("osascript");
+        cmd.arg("-e")
+            .arg(script)
             .env("ARKAVO_LAUNCHED", "1");
 
         // Spawn and exit
