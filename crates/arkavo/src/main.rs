@@ -3,7 +3,7 @@ use std::process;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     // Check if we need to relaunch in Terminal (macOS only)
     // Skip for serve command which needs to stay in current process
     #[cfg(target_os = "macos")]
@@ -57,7 +57,7 @@ fn maybe_relaunch_in_terminal() {
         } else {
             args.join(" ")
         };
-        
+
         // Launch in Terminal.app using AppleScript with environment variable
         let script = format!(
             r#"tell application "Terminal"
@@ -67,10 +67,9 @@ fn maybe_relaunch_in_terminal() {
             exe.to_string_lossy(),
             arg_string
         );
-        
+
         let mut cmd = Command::new("osascript");
-        cmd.arg("-e")
-            .arg(script);
+        cmd.arg("-e").arg(script);
 
         // Spawn and exit
         let _ = cmd.spawn();

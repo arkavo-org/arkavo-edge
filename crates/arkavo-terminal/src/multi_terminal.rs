@@ -208,7 +208,13 @@ impl MultiTerminalManager {
     #[cfg(unix)]
     fn spawn_generic_terminal(&self, config: &TerminalSpawnConfig) -> Result<()> {
         // Try common terminal emulators (WezTerm first)
-        let terminals = ["wezterm", "x-terminal-emulator", "gnome-terminal", "konsole", "xterm"];
+        let terminals = [
+            "wezterm",
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "xterm",
+        ];
 
         for terminal in &terminals {
             let result = if terminal == &"wezterm" {

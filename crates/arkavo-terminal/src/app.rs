@@ -17,7 +17,7 @@ use crate::event::{AppEvent, EventHandler};
 use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView, TaskManager};
+use crate::ui::{TaskManager, chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
 use crate::vim::VimState;
 
 pub enum ViewMode {
@@ -63,6 +63,8 @@ pub struct App {
     pub input_buffer: String,
     pub available_models: Vec<String>,
     pub selected_model: usize,
+    pub input_focused: bool,
+    pub last_quit_attempt: Option<Instant>,
 }
 
 impl App {
@@ -103,6 +105,8 @@ impl App {
                 "dolphin3:latest".to_string(),
             ],
             selected_model: 0,
+            input_focused: true,
+            last_quit_attempt: None,
         }
     }
 
@@ -143,6 +147,8 @@ impl App {
                 "dolphin3:latest".to_string(),
             ],
             selected_model: 0,
+            input_focused: true,
+            last_quit_attempt: None,
         }
     }
 
@@ -193,12 +199,9 @@ impl App {
     ) -> Result<()> {
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
-        
-        // Auto-launch Helix editor on startup
-        if self.helix_editor.is_some() {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            self.launch_helix_editor().await;
-        }
+
+        // Don't auto-launch Helix to prevent blank screen on startup
+        // User can press 'e' when ready
 
         loop {
             // Check for LLM responses - drain all available messages
@@ -212,6 +215,12 @@ impl App {
                             crate::ui::debug::LogLevel::Info,
                             "[UI] Started streaming response".to_string(),
                         ));
+
+                        // Update active task status to Streaming
+                        if let Some(task) = self.task_manager.get_active_task() {
+                            task.set_status(crate::ui::task_window::TaskStatus::Streaming);
+                        }
+
                         self.chat_view
                             .start_streaming_message(crate::ui::chat::MessageRole::Assistant);
                     } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
@@ -220,6 +229,28 @@ impl App {
                             crate::ui::debug::LogLevel::Debug,
                             format!("[UI] Received chunk: {} chars", chunk.len()),
                         ));
+
+                        // Add chunk to active task
+                        if let Some(task) = self.task_manager.get_active_task() {
+                            // If this is the first chunk, create a new assistant message
+                            if task
+                                .messages
+                                .back()
+                                .map(|m| m.role != crate::ui::task_window::MessageRole::Assistant)
+                                .unwrap_or(true)
+                            {
+                                task.add_message(
+                                    crate::ui::task_window::MessageRole::Assistant,
+                                    chunk.to_string(),
+                                );
+                            } else {
+                                // Append to existing assistant message
+                                if let Some(last_msg) = task.messages.back_mut() {
+                                    last_msg.content.push_str(chunk);
+                                }
+                            }
+                        }
+
                         self.chat_view.append_to_streaming(chunk);
                     } else if response == "<<STREAM_END>>" {
                         // Finish streaming
@@ -227,6 +258,12 @@ impl App {
                             crate::ui::debug::LogLevel::Info,
                             "[UI] Finished streaming response".to_string(),
                         ));
+
+                        // Update active task status to Complete
+                        if let Some(task) = self.task_manager.get_active_task() {
+                            task.set_status(crate::ui::task_window::TaskStatus::Complete);
+                        }
+
                         self.chat_view.finish_streaming();
                         self.telemetry.track_message_received();
                     } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
@@ -235,6 +272,16 @@ impl App {
                             crate::ui::debug::LogLevel::Error,
                             format!("[UI] Streaming error: {}", error_msg),
                         ));
+
+                        // Update active task status to Error
+                        if let Some(task) = self.task_manager.get_active_task() {
+                            task.set_status(crate::ui::task_window::TaskStatus::Error);
+                            task.add_message(
+                                crate::ui::task_window::MessageRole::System,
+                                error_msg.to_string(),
+                            );
+                        }
+
                         self.chat_view.finish_streaming();
                         self.chat_view.add_message(
                             crate::ui::chat::MessageRole::System,
@@ -249,6 +296,16 @@ impl App {
                                 response.len()
                             ),
                         ));
+
+                        // Add complete message to active task
+                        if let Some(task) = self.task_manager.get_active_task() {
+                            task.add_message(
+                                crate::ui::task_window::MessageRole::Assistant,
+                                response.clone(),
+                            );
+                            task.set_status(crate::ui::task_window::TaskStatus::Complete);
+                        }
+
                         self.chat_view.finish_streaming();
                         self.chat_view
                             .add_message(crate::ui::chat::MessageRole::Assistant, response);
@@ -270,30 +327,78 @@ impl App {
                 }
             }
 
-            // Reduce polling interval for better responsiveness
-            if event::poll(Duration::from_millis(8))? {
-                // ~120fps for smooth updates
-                if let Event::Key(key) = event::read()? {
-                    self.telemetry.track_key_event();
-                    match key.code {
-                        KeyCode::Char('q') => self.should_quit = true,
+            // Always check for events but don't block
+            if event::poll(Duration::from_millis(16))? {
+                // ~60fps for smooth updates
+                match event::read()? {
+                    Event::Key(key) => {
+                        self.telemetry.track_key_event();
+                        match key.code {
+                        KeyCode::Char('q') => {
+                            // Check if there are active tasks
+                            let active_tasks = self
+                                .task_manager
+                                .tasks
+                                .iter()
+                                .filter(|t| {
+                                    matches!(
+                                        t.status,
+                                        crate::ui::task_window::TaskStatus::Processing
+                                            | crate::ui::task_window::TaskStatus::Streaming
+                                    )
+                                })
+                                .count();
+
+                            if active_tasks > 0 {
+                                // Ask for confirmation
+                                self.add_debug_log(
+                                    crate::ui::debug::LogLevel::Warning,
+                                    format!("[UI] {} active tasks still running. Press 'q' again to force quit.", active_tasks),
+                                );
+                                // Simple double-tap to quit mechanism
+                                if self
+                                    .last_quit_attempt
+                                    .map(|t| t.elapsed() < Duration::from_secs(2))
+                                    .unwrap_or(false)
+                                {
+                                    self.should_quit = true;
+                                } else {
+                                    self.last_quit_attempt = Some(Instant::now());
+                                }
+                            } else {
+                                self.should_quit = true;
+                            }
+                        }
                         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                             self.vim_enabled = !self.vim_enabled;
                             self.add_debug_log(
                                 crate::ui::debug::LogLevel::Info,
-                                format!("[UI] Vim mode {}", if self.vim_enabled { "enabled" } else { "disabled" }),
+                                format!(
+                                    "[UI] Vim mode {}",
+                                    if self.vim_enabled {
+                                        "enabled"
+                                    } else {
+                                        "disabled"
+                                    }
+                                ),
                             );
                         }
-                        KeyCode::Char('e') => {
-                            // Simple 'e' key launches Helix on macOS
+                        KeyCode::Char('e') if self.input_focused => {
+                            // Simple 'e' key launches Helix on macOS only when input is focused
                             self.launch_helix_editor().await;
+                            // Force immediate redraw after Helix
+                            terminal.draw(|f| self.render(f))?;
                         }
                         KeyCode::Tab => {
                             // Tab switches to next model/agent
-                            self.selected_model = (self.selected_model + 1) % self.available_models.len();
+                            self.selected_model =
+                                (self.selected_model + 1) % self.available_models.len();
                             self.add_debug_log(
                                 crate::ui::debug::LogLevel::Info,
-                                format!("[UI] Selected model: {}", self.available_models[self.selected_model]),
+                                format!(
+                                    "[UI] Selected model: {}",
+                                    self.available_models[self.selected_model]
+                                ),
                             );
                         }
                         KeyCode::BackTab => {
@@ -308,34 +413,75 @@ impl App {
                             }
                         }
                         KeyCode::Enter => {
-                            // Create a new task with the input buffer content
-                            if !self.input_buffer.is_empty() {
-                                let model_name = self.available_models[self.selected_model].clone();
-                                let task = self.task_manager.create_task(
-                                    "LLM Agent".to_string(),
-                                    model_name.clone()
-                                );
-                                
-                                task.add_message(
-                                    crate::ui::task_window::MessageRole::User,
-                                    self.input_buffer.clone()
-                                );
-                                task.set_status(crate::ui::task_window::TaskStatus::Processing);
-                                
-                                // Send to LLM if channel is available
-                                if let Some(ref ui_tx) = self.ui_tx {
-                                    let _ = ui_tx.try_send(self.input_buffer.clone());
+                            if self.input_focused {
+                                // Create a new task with the input buffer content
+                                if !self.input_buffer.is_empty() {
+                                    let model_name =
+                                        self.available_models[self.selected_model].clone();
+                                    let task = self
+                                        .task_manager
+                                        .create_task("LLM Agent".to_string(), model_name.clone());
+
+                                    task.add_message(
+                                        crate::ui::task_window::MessageRole::User,
+                                        self.input_buffer.clone(),
+                                    );
+                                    task.set_status(crate::ui::task_window::TaskStatus::Processing);
+
+                                    // Send to LLM if channel is available
+                                    if let Some(ref ui_tx) = self.ui_tx {
+                                        let _ = ui_tx.try_send(self.input_buffer.clone());
+                                    }
+
+                                    self.input_buffer.clear();
+                                    self.telemetry.track_message_sent();
+
+                                    // Keep focus on input field for continuous input
+                                    self.input_focused = true;
                                 }
-                                
-                                self.input_buffer.clear();
-                                self.telemetry.track_message_sent();
                             }
                         }
-                        KeyCode::Char(c) => {
-                            // Add character to input buffer
-                            self.input_buffer.push(c);
+                        // Arrow keys and hjkl for navigation
+                        KeyCode::Left | KeyCode::Char('h') if !self.input_focused => {
+                            self.task_manager.prev_task();
                         }
-                        KeyCode::Backspace => {
+                        KeyCode::Right | KeyCode::Char('l') if !self.input_focused => {
+                            self.task_manager.next_task();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') if !self.input_focused => {
+                            if let Some(task) = self.task_manager.get_active_task() {
+                                task.scroll_up();
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') if !self.input_focused => {
+                            if let Some(task) = self.task_manager.get_active_task() {
+                                task.scroll_down();
+                            }
+                        }
+                        // Press 'i' to go back to input mode
+                        KeyCode::Char('i') if !self.input_focused => {
+                            self.input_focused = true;
+                        }
+                        // Number keys for quick jump (1-9)
+                        KeyCode::Char(c) if !self.input_focused && c.is_ascii_digit() => {
+                            if let Some(digit) = c.to_digit(10) {
+                                let index = (digit as usize).saturating_sub(1);
+                                if index < self.task_manager.tasks.len() {
+                                    self.task_manager.active_task = Some(index);
+                                }
+                            }
+                        }
+                        KeyCode::Char('e') if !self.input_focused => {
+                            // Do nothing - 'e' only works when input is focused
+                        }
+                        KeyCode::Char(c) if self.input_focused => {
+                            // Add character to input buffer only when focused
+                            // Prevent buffer overflow by limiting input length
+                            if self.input_buffer.len() < 500 {
+                                self.input_buffer.push(c);
+                            }
+                        }
+                        KeyCode::Backspace if self.input_focused => {
                             // Remove last character from input buffer
                             self.input_buffer.pop();
                         }
@@ -344,6 +490,11 @@ impl App {
                             self.handle_event(event)?;
                         }
                     }
+                    }
+                    Event::Resize(_, _) => {
+                        // Terminal will be redrawn in the main loop
+                    }
+                    _ => {}
                 }
             }
 
@@ -351,7 +502,7 @@ impl App {
                 break;
             }
 
-            // Render after processing events/messages
+            // Always render to ensure UI stays consistent
             terminal.draw(|f| self.render(f))?;
 
             // Track frame timing
@@ -377,38 +528,59 @@ impl App {
     fn render_task_layout(&mut self, frame: &mut ratatui::Frame) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
-        
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Input area at top
-                Constraint::Length(3),  // Model selector
-                Constraint::Min(10),    // Task windows
-                Constraint::Length(1),  // Status bar
+                Constraint::Length(3), // Input area at top
+                Constraint::Length(3), // Model selector
+                Constraint::Min(10),   // Task windows
+                Constraint::Length(1), // Status bar
             ])
             .split(frame.area());
 
         // Render input area at the top
+        let input_title = if self.input_focused {
+            " Input (Press 'e' for Helix) "
+        } else {
+            " Input (Press 'i' to focus) "
+        };
+
         let input_block = Block::default()
-            .title(" Input (Press 'e' for Helix) ")
+            .title(input_title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(if self.input_focused {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            }));
         let input_inner = input_block.inner(chunks[0]);
         frame.render_widget(input_block, chunks[0]);
-        
+
         let input_text = if self.input_buffer.is_empty() {
             "Type your prompt here or press 'e' to open Helix editor..."
         } else {
             &self.input_buffer
         };
-        
-        let input_paragraph = Paragraph::new(input_text)
-            .style(if self.input_buffer.is_empty() {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default()
-            });
+
+        let input_paragraph = Paragraph::new(input_text).style(if self.input_buffer.is_empty() {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default()
+        });
         frame.render_widget(input_paragraph, input_inner);
+
+        // Handle cursor visibility and position
+        if self.input_focused {
+            // Ensure cursor position doesn't exceed terminal bounds
+            let cursor_x = if self.input_buffer.is_empty() {
+                input_inner.x
+            } else {
+                (input_inner.x + self.input_buffer.len() as u16).min(input_inner.x + input_inner.width.saturating_sub(1))
+            };
+            let cursor_y = input_inner.y;
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
 
         // Render model selector
         let model_chunks = Layout::default()
@@ -417,16 +589,29 @@ impl App {
                 self.available_models
                     .iter()
                     .map(|_| Constraint::Percentage((100 / self.available_models.len()) as u16))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
             .split(chunks[1]);
-            
-        for (i, (model, area)) in self.available_models.iter().zip(model_chunks.iter()).enumerate() {
+
+        for (i, (model, area)) in self
+            .available_models
+            .iter()
+            .zip(model_chunks.iter())
+            .enumerate()
+        {
             let is_selected = i == self.selected_model;
             let model_block = Block::default()
-                .borders(if is_selected { Borders::ALL } else { Borders::NONE })
-                .border_style(Style::default().fg(if is_selected { Color::Cyan } else { Color::DarkGray }));
-            
+                .borders(if is_selected {
+                    Borders::ALL
+                } else {
+                    Borders::NONE
+                })
+                .border_style(Style::default().fg(if is_selected {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                }));
+
             let model_text = Paragraph::new(model.as_str())
                 .style(if is_selected {
                     Style::default().fg(Color::Cyan)
@@ -434,7 +619,7 @@ impl App {
                     Style::default().fg(Color::DarkGray)
                 })
                 .block(model_block);
-            
+
             frame.render_widget(model_text, *area);
         }
 
@@ -448,34 +633,85 @@ Welcome to Arkavo Terminal UI
 • Press Tab to switch between models
 • Press 'q' to quit
             "#;
-            
+
             let help_paragraph = Paragraph::new(help_text)
                 .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::ALL).title(" Getting Started "));
-            
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Getting Started "),
+                );
+
             frame.render_widget(help_paragraph, chunks[2]);
         } else {
-            // Render active tasks in a grid
+            // Render active tasks in a grid (cap at 9 visible)
             let task_count = self.task_manager.tasks.len();
-            let cols = ((task_count as f32).sqrt().ceil() as usize).max(1);
-            let rows = (task_count + cols - 1) / cols;
-            
-            let row_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
-                .split(chunks[2]);
-                
-            let mut task_idx = 0;
-            for row_chunk in row_chunks.iter() {
-                let col_chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
-                    .split(*row_chunk);
-                    
-                for col_chunk in col_chunks.iter() {
-                    if task_idx < self.task_manager.tasks.len() {
-                        self.task_manager.tasks[task_idx].render(frame, *col_chunk);
-                        task_idx += 1;
+            let visible_count = task_count.min(9);
+            let cols = ((visible_count as f32).sqrt().ceil() as usize).clamp(1, 3);
+            let rows = visible_count.div_ceil(cols).min(3);
+
+            // If there are more than 9 tasks, show a pager
+            if task_count > 9 {
+                let pager_text = format!(
+                    " Showing 1-9 of {} tasks (use 1-9 keys to jump) ",
+                    task_count
+                );
+                let pager_area = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .split(chunks[2])[0];
+
+                let pager = Paragraph::new(pager_text)
+                    .style(Style::default().fg(Color::Yellow))
+                    .block(Block::default().borders(Borders::NONE));
+                frame.render_widget(pager, pager_area);
+
+                // Adjust area for task grid
+                let task_area = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .split(chunks[2])[1];
+
+                let row_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
+                    .split(task_area);
+
+                let mut task_idx = 0;
+                for row_chunk in row_chunks.iter() {
+                    let col_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
+                        .split(*row_chunk);
+
+                    for col_chunk in col_chunks.iter() {
+                        if task_idx < visible_count {
+                            let is_active = self.task_manager.active_task == Some(task_idx);
+                            self.task_manager.tasks[task_idx].render(frame, *col_chunk, is_active);
+                            task_idx += 1;
+                        }
+                    }
+                }
+            } else {
+                // Normal grid for 9 or fewer tasks
+                let row_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![Constraint::Percentage((100 / rows) as u16); rows])
+                    .split(chunks[2]);
+
+                let mut task_idx = 0;
+                for row_chunk in row_chunks.iter() {
+                    let col_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Percentage((100 / cols) as u16); cols])
+                        .split(*row_chunk);
+
+                    for col_chunk in col_chunks.iter() {
+                        if task_idx < self.task_manager.tasks.len() {
+                            let is_active = self.task_manager.active_task == Some(task_idx);
+                            self.task_manager.tasks[task_idx].render(frame, *col_chunk, is_active);
+                            task_idx += 1;
+                        }
                     }
                 }
             }
@@ -485,6 +721,7 @@ Welcome to Arkavo Terminal UI
         self.render_status_bar(frame, chunks[3]);
     }
 
+    #[allow(dead_code)]
     fn render_tabbed_layout(&mut self, frame: &mut ratatui::Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -509,6 +746,7 @@ Welcome to Arkavo Terminal UI
         self.render_performance_bar(frame, chunks[2]);
     }
 
+    #[allow(dead_code)]
     fn render_portrait_layout(&mut self, frame: &mut ratatui::Frame) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders};
@@ -577,6 +815,7 @@ Welcome to Arkavo Terminal UI
         self.chat_view.render(frame, chat_area);
     }
 
+    #[allow(dead_code)]
     fn switch_view(&mut self) {
         self.view_mode = match self.view_mode {
             ViewMode::Chat => ViewMode::Code,
@@ -605,6 +844,7 @@ Welcome to Arkavo Terminal UI
         }
     }
 
+    #[allow(dead_code)]
     fn next_pane(&mut self) {
         self.focused_pane = match self.focused_pane {
             FocusedPane::Diff => FocusedPane::Thinking,
@@ -804,6 +1044,7 @@ Welcome to Arkavo Terminal UI
         frame.render_widget(paragraph, area);
     }
 
+    #[allow(dead_code)]
     fn render_performance_bar(&self, frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
@@ -870,10 +1111,10 @@ Welcome to Arkavo Terminal UI
                 terminal::LeaveAlternateScreen,
                 cursor::Show
             );
-            
+
             // Get current input buffer content
             let initial_content = self.input_buffer.clone();
-            
+
             // Launch helix and get the edited content
             match helix.launch_with_content(&initial_content) {
                 Ok(edited_content) => {
@@ -881,7 +1122,10 @@ Welcome to Arkavo Terminal UI
                     self.input_buffer = edited_content.trim_end().to_string();
                     self.add_debug_log(
                         crate::ui::debug::LogLevel::Info,
-                        format!("[UI] Helix editor: {} chars pasted", self.input_buffer.len()),
+                        format!(
+                            "[UI] Helix editor: {} chars pasted",
+                            self.input_buffer.len()
+                        ),
                     );
                 }
                 Err(e) => {
@@ -891,15 +1135,16 @@ Welcome to Arkavo Terminal UI
                     );
                 }
             }
+
+            // Restore terminal - with a small delay to ensure proper restoration
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             
-            // Restore terminal
             let _ = terminal::enable_raw_mode();
             let _ = crossterm::execute!(
                 std::io::stdout(),
-                terminal::EnterAlternateScreen,
-                cursor::Hide
+                terminal::EnterAlternateScreen
             );
-            
+
             // Force redraw
             self.chat_view.needs_redraw = true;
         } else {

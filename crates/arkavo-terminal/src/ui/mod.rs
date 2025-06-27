@@ -9,4 +9,4 @@ pub use chat::ChatView;
 pub use code::CodeView;
 pub use debug::DebugView;
 pub use diff::DiffView;
-pub use task_window::{TaskWindow, TaskManager};
+pub use task_window::{TaskManager, TaskWindow};

@@ -67,7 +67,15 @@ impl TaskWindow {
         self.status = status;
     }
 
-    pub fn render(&self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn scroll_up(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_add(1);
+    }
+
+    pub fn render(&self, frame: &mut ratatui::Frame, area: Rect, is_active: bool) {
         let status_color = match self.status {
             TaskStatus::Idle => Color::Gray,
             TaskStatus::Processing => Color::Yellow,
@@ -86,29 +94,28 @@ impl TaskWindow {
 
         let title = format!(
             " {} {} - {} ",
-            status_text,
-            self.agent_name,
-            self.model_name
+            status_text, self.agent_name, self.model_name
         );
 
         let block = Block::default()
             .title(title)
             .title_style(Style::default().fg(status_color))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(
-                if self.status == TaskStatus::Processing || self.status == TaskStatus::Streaming {
-                    Color::Cyan
-                } else {
-                    Color::DarkGray
-                }
-            ));
+            .border_style(Style::default().fg(if is_active {
+                Color::Cyan
+            } else if self.status == TaskStatus::Processing || self.status == TaskStatus::Streaming
+            {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
         // Render messages
         let mut lines: Vec<Line> = Vec::new();
-        
+
         for msg in &self.messages {
             let role_style = match msg.role {
                 MessageRole::User => Style::default().fg(Color::Cyan),
@@ -132,7 +139,7 @@ impl TaskWindow {
         let paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .scroll((self.scroll_offset, 0));
-        
+
         frame.render_widget(paragraph, inner);
     }
 }
@@ -167,15 +174,38 @@ impl TaskManager {
             self.active_task = Some(
                 self.active_task
                     .map(|idx| (idx + 1) % self.tasks.len())
-                    .unwrap_or(0)
+                    .unwrap_or(0),
+            );
+        }
+    }
+
+    pub fn prev_task(&mut self) {
+        if !self.tasks.is_empty() {
+            self.active_task = Some(
+                self.active_task
+                    .map(|idx| {
+                        if idx == 0 {
+                            self.tasks.len() - 1
+                        } else {
+                            idx - 1
+                        }
+                    })
+                    .unwrap_or(0),
             );
         }
     }
 
     pub fn remove_completed_tasks(&mut self) {
-        self.tasks.retain(|task| task.status != TaskStatus::Complete);
+        self.tasks
+            .retain(|task| task.status != TaskStatus::Complete);
         if self.active_task.is_some() && self.tasks.is_empty() {
             self.active_task = None;
         }
+    }
+}
+
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
