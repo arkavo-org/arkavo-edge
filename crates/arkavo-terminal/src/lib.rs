@@ -12,6 +12,7 @@ pub mod vim;
 mod tests;
 
 use anyhow::Result;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub use app::App;
@@ -27,21 +28,289 @@ pub enum ChatMessage {
     Error(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmRequest {
+    pub task_id: uuid::Uuid,
+    pub model_name: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LlmResponse {
+    pub task_id: uuid::Uuid,
+    pub model_name: String,
+    pub content: String,
+    pub is_streaming: bool,
+    pub is_complete: bool,
+    pub error: Option<String>,
+}
+
 pub struct TerminalContext {
     pub message_tx: mpsc::Sender<ChatMessage>,
     pub message_rx: mpsc::Receiver<ChatMessage>,
 }
 
 pub async fn run() -> Result<()> {
-    // Create dummy channels for standalone mode
-    let (_tx, rx) = mpsc::channel::<String>(1);
-    let (tx, _rx) = mpsc::channel::<String>(1);
-    run_with_channels(tx, rx).await
+    // Create channels for LLM communication
+    let (ui_tx, mut ui_rx) = mpsc::channel::<LlmRequest>(100);
+    let (llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
+
+    // Spawn LLM handler task with proper Ollama integration
+    tokio::spawn(async move {
+        use arkavo_llm::Message;
+        use tokio_stream::StreamExt;
+
+        // Initialize LLM client using the same logic as chat command
+        let client = match initialize_llm_client().await {
+            Ok(client) => std::sync::Arc::new(client),
+            Err(e) => {
+                eprintln!("Failed to initialize LLM client: {}", e);
+                return;
+            }
+        };
+
+        eprintln!(
+            "Terminal UI connected to LLM provider: {}",
+            client.provider_name()
+        );
+
+        // Keep conversation context
+        let mut messages = Vec::new();
+
+        while let Some(request) = ui_rx.recv().await {
+            let llm_tx = llm_tx.clone();
+            let client = client.clone();
+            let mut messages_clone = messages.clone();
+
+            // Add user message to context
+            let user_message = Message::user(&request.prompt);
+            messages_clone.push(user_message.clone());
+
+            // Spawn a task for each request
+            tokio::spawn(async move {
+                // Get streaming response from LLM
+                match client.stream(messages_clone.clone()).await {
+                    Ok(mut stream) => {
+                        let mut full_response = String::new();
+
+                        // Send start streaming signal
+                        let _ = llm_tx
+                            .send(LlmResponse {
+                                task_id: request.task_id,
+                                model_name: request.model_name.clone(),
+                                content: String::new(),
+                                is_streaming: true,
+                                is_complete: false,
+                                error: None,
+                            })
+                            .await;
+
+                        while let Some(chunk_result) = stream.next().await {
+                            match chunk_result {
+                                Ok(chunk) => {
+                                    if !chunk.content.is_empty() {
+                                        full_response.push_str(&chunk.content);
+                                        // Send each chunk as it arrives
+                                        let _ = llm_tx
+                                            .send(LlmResponse {
+                                                task_id: request.task_id,
+                                                model_name: request.model_name.clone(),
+                                                content: chunk.content,
+                                                is_streaming: true,
+                                                is_complete: false,
+                                                error: None,
+                                            })
+                                            .await;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = llm_tx
+                                        .send(LlmResponse {
+                                            task_id: request.task_id,
+                                            model_name: request.model_name.clone(),
+                                            content: String::new(),
+                                            is_streaming: false,
+                                            is_complete: true,
+                                            error: Some(format!("Stream error: {}", e)),
+                                        })
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Send completion signal
+                        let _ = llm_tx
+                            .send(LlmResponse {
+                                task_id: request.task_id,
+                                model_name: request.model_name,
+                                content: String::new(),
+                                is_streaming: true,
+                                is_complete: true,
+                                error: None,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = llm_tx
+                            .send(LlmResponse {
+                                task_id: request.task_id,
+                                model_name: request.model_name,
+                                content: String::new(),
+                                is_streaming: false,
+                                is_complete: true,
+                                error: Some(format!("Failed to get LLM response: {}", e)),
+                            })
+                            .await;
+                    }
+                }
+            });
+
+            // Update context
+            messages.push(user_message);
+        }
+    });
+
+    run_with_channels(ui_tx, llm_rx).await
+}
+
+async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
+    use arkavo_llm::{LlmClient, Message};
+    use arkavo_memory::storage::MemoryStorage;
+    use std::sync::Arc;
+
+    // Initialize memory storage to check for saved configuration
+    let storage = Arc::new(MemoryStorage::new().await?);
+
+    // Try to find saved Ollama server configuration
+    let saved_config = storage
+        .search("arkavo_ollama_server_config", 10, Some("config"))
+        .await?;
+
+    // Find a valid configuration (not cleared)
+    let valid_config = saved_config
+        .into_iter()
+        .find(|c| c.memory.content != "CLEARED" && c.memory.content.starts_with("http"));
+
+    if let Some(config) = valid_config {
+        // Use saved configuration
+        let server_url = &config.memory.content;
+        unsafe {
+            std::env::set_var("OLLAMA_BASE_URL", server_url);
+        }
+
+        // Try to connect with saved URL
+        if let Ok(client) = LlmClient::from_env() {
+            let test_message = vec![Message::user("ping")];
+            if client.complete(test_message).await.is_ok() {
+                eprintln!("✓ Connected to saved Ollama server at {}", server_url);
+                return Ok(client);
+            }
+        }
+    }
+
+    // Try default localhost first
+    match LlmClient::from_env() {
+        Ok(client) => {
+            // Test if the client can connect
+            let test_message = vec![Message::user("ping")];
+            match client.complete(test_message).await {
+                Ok(_) => Ok(client),
+                Err(_) => {
+                    // Prompt for configuration
+                    prompt_for_ollama_config(storage).await
+                }
+            }
+        }
+        Err(_) => {
+            // Prompt for configuration
+            prompt_for_ollama_config(storage).await
+        }
+    }
+}
+
+async fn prompt_for_ollama_config(
+    storage: Arc<arkavo_memory::storage::MemoryStorage>,
+) -> Result<arkavo_llm::LlmClient> {
+    use arkavo_llm::{LlmClient, Message};
+    use std::io::{self, Write};
+
+    eprintln!("⚠️  Could not connect to Ollama at localhost:11434");
+    eprintln!("Please ensure Ollama is running or provide a remote server address.");
+    eprintln!();
+    print!("Enter Ollama server address (e.g., 192.168.1.100:11434) or press Enter to exit: ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Err(anyhow::anyhow!("No Ollama server configured"));
+    }
+
+    // Ensure the URL has the correct format
+    let base_url = if input.starts_with("http://") || input.starts_with("https://") {
+        input.to_string()
+    } else {
+        format!("http://{}", input)
+    };
+
+    // Set the environment variable
+    unsafe {
+        std::env::set_var("OLLAMA_BASE_URL", &base_url);
+    }
+
+    // Try to create client and test it
+    match LlmClient::from_env() {
+        Ok(client) => {
+            let test_message = vec![Message::user("ping")];
+            match client.complete(test_message).await {
+                Ok(_) => {
+                    eprintln!("✓ Connected to Ollama at {}", base_url);
+
+                    // Save configuration for future use
+                    let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
+                    let embedding = match embedding_service.generate_embedding(&base_url).await {
+                        Ok(e) => e,
+                        Err(_) => vec![0.0; 384], // Default embedding size
+                    };
+
+                    let memory = arkavo_memory::models::Memory {
+                        id: uuid::Uuid::new_v4(),
+                        content: base_url.clone(),
+                        metadata: Some(serde_json::json!({
+                            "type": "arkavo_ollama_server_config",
+                            "timestamp": chrono::Utc::now().to_rfc3339()
+                        })),
+                        category: Some("config".to_string()),
+                        embedding,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    };
+
+                    if let Err(e) = storage.store(memory).await {
+                        eprintln!("Warning: Could not save configuration: {}", e);
+                    } else {
+                        eprintln!("✓ Saved configuration for future use");
+                    }
+
+                    Ok(client)
+                }
+                Err(e) => Err(anyhow::anyhow!(
+                    "Failed to connect to Ollama at {}: {}",
+                    base_url,
+                    e
+                )),
+            }
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to create client: {}", e)),
+    }
 }
 
 pub async fn run_with_channels(
-    ui_tx: mpsc::Sender<String>,
-    llm_rx: mpsc::Receiver<String>,
+    ui_tx: mpsc::Sender<LlmRequest>,
+    llm_rx: mpsc::Receiver<LlmResponse>,
 ) -> Result<()> {
     // Install panic hook to restore terminal on panic
     let original_hook = std::panic::take_hook();
@@ -65,6 +334,151 @@ pub async fn run_with_channels(
     let _ = std::panic::take_hook();
 
     result
+}
+
+// Compatibility layer for existing string-based interface
+pub async fn run_with_string_channels(
+    ui_tx: mpsc::Sender<String>,
+    mut llm_rx: mpsc::Receiver<String>,
+) -> Result<()> {
+    // Create adapter channels
+    let (new_ui_tx, mut new_ui_rx) = mpsc::channel::<LlmRequest>(100);
+    let (new_llm_tx, new_llm_rx) = mpsc::channel::<LlmResponse>(100);
+
+    // Track pending requests for timeout handling
+    let mut pending_requests = std::collections::HashMap::new();
+    // Track order of requests since current protocol doesn't include task IDs
+    let mut request_queue = std::collections::VecDeque::new();
+
+    // Spawn adapter task to convert messages
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                // Convert outgoing LlmRequest to String
+                Some(request) = new_ui_rx.recv() => {
+                    // Store the pending request
+                    pending_requests.insert(request.task_id, (request.model_name.clone(), tokio::time::Instant::now()));
+                    request_queue.push_back((request.task_id, request.model_name.clone()));
+
+                    // For compatibility, just send the prompt (without model prefix for now)
+                    // TODO: The architecture needs to be updated to support dynamic model selection
+                    match ui_tx.try_send(request.prompt.clone()) {
+                        Ok(_) => {
+                            // Set a timeout for response
+                            let task_id = request.task_id;
+                            let model_name = request.model_name.clone();
+                            let tx_clone = new_llm_tx.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                // Check if still pending after timeout
+                                let timeout_response = LlmResponse {
+                                    task_id,
+                                    model_name: model_name.clone(),
+                                    content: String::new(),
+                                    is_streaming: false,
+                                    is_complete: true,
+                                    error: Some(format!("Request timeout after 30s. Model '{}' may not be available.", model_name)),
+                                };
+                                let _ = tx_clone.send(timeout_response).await;
+                            });
+                        },
+                        Err(e) => {
+                            // If channel is full or closed, send error response back
+                            let error_response = LlmResponse {
+                                task_id: request.task_id,
+                                model_name: request.model_name,
+                                content: String::new(),
+                                is_streaming: false,
+                                is_complete: true,
+                                error: Some(format!("Channel error: {}", e)),
+                            };
+                            let _ = new_llm_tx.send(error_response).await;
+                            pending_requests.remove(&request.task_id);
+                        }
+                    }
+                }
+
+                // Convert incoming String to LlmResponse
+                Some(response) = llm_rx.recv() => {
+                    // Get the current task from the queue
+                    let (task_id, model_name) = if let Some(task_info) = request_queue.front() {
+                        task_info.clone()
+                    } else {
+                        // No pending request, skip
+                        continue;
+                    };
+
+                    // Parse the string-based protocol
+                    let llm_response = if response == "<<STREAM_START>>" {
+                        // Starting a new streaming response
+                        LlmResponse {
+                            task_id,
+                            model_name,
+                            content: String::new(),
+                            is_streaming: true,
+                            is_complete: false,
+                            error: None,
+                        }
+                    } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
+                        LlmResponse {
+                            task_id,
+                            model_name,
+                            content: chunk.to_string(),
+                            is_streaming: true,
+                            is_complete: false,
+                            error: None,
+                        }
+                    } else if response == "<<STREAM_END>>" {
+                        // Remove from queue and pending when complete
+                        request_queue.pop_front();
+                        pending_requests.remove(&task_id);
+
+                        LlmResponse {
+                            task_id,
+                            model_name,
+                            content: String::new(),
+                            is_streaming: true,
+                            is_complete: true,
+                            error: None,
+                        }
+                    } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
+                        // Remove from queue and pending on error
+                        request_queue.pop_front();
+                        pending_requests.remove(&task_id);
+
+                        LlmResponse {
+                            task_id,
+                            model_name,
+                            content: String::new(),
+                            is_streaming: false,
+                            is_complete: true,
+                            error: Some(error_msg.to_string()),
+                        }
+                    } else {
+                        // Regular complete response
+                        request_queue.pop_front();
+                        pending_requests.remove(&task_id);
+
+                        LlmResponse {
+                            task_id,
+                            model_name,
+                            content: response,
+                            is_streaming: false,
+                            is_complete: true,
+                            error: None,
+                        }
+                    };
+
+                    let _ = new_llm_tx.send(llm_response).await;
+                }
+
+                else => break,
+            }
+        }
+    });
+
+    // Run with the adapted channels
+    run_with_channels(new_ui_tx, new_llm_rx).await
 }
 
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {

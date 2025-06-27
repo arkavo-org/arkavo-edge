@@ -61,6 +61,8 @@ impl TaskWindow {
             content,
             timestamp: Utc::now(),
         });
+        // Auto-scroll to bottom when new message arrives
+        self.scroll_offset = u16::MAX;
     }
 
     pub fn set_status(&mut self, status: TaskStatus) {
@@ -76,6 +78,11 @@ impl TaskWindow {
     }
 
     pub fn render(&self, frame: &mut ratatui::Frame, area: Rect, is_active: bool) {
+        // Add animation frames for processing status
+        let animation_frames = ["⟳", "⟲", "⟱", "⟰"];
+        let animation_index =
+            (chrono::Utc::now().timestamp_millis() / 250) as usize % animation_frames.len();
+
         let status_color = match self.status {
             TaskStatus::Idle => Color::Gray,
             TaskStatus::Processing => Color::Yellow,
@@ -86,8 +93,8 @@ impl TaskWindow {
 
         let status_text = match self.status {
             TaskStatus::Idle => "●",
-            TaskStatus::Processing => "◐",
-            TaskStatus::Streaming => "◉",
+            TaskStatus::Processing => animation_frames[animation_index],
+            TaskStatus::Streaming => "▶",
             TaskStatus::Error => "✗",
             TaskStatus::Complete => "✓",
         };
@@ -129,16 +136,33 @@ impl TaskWindow {
                 MessageRole::System => "System",
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(format!("[{}] ", role_prefix), role_style),
-                Span::raw(&msg.content),
-            ]));
+            // Split content into lines for proper wrapping calculation
+            for line in msg.content.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("[{}] ", role_prefix), role_style),
+                    Span::raw(line),
+                ]));
+            }
             lines.push(Line::from(""));
         }
 
+        // Calculate total content height accounting for wrapping
+        let content_height = lines.len() as u16;
+        let visible_height = inner.height;
+
+        // Calculate effective scroll offset
+        let effective_scroll = if self.scroll_offset == u16::MAX {
+            // Auto-scroll to bottom
+            content_height.saturating_sub(visible_height)
+        } else {
+            // Use manual scroll position, clamped to valid range
+            let max_scroll = content_height.saturating_sub(visible_height);
+            self.scroll_offset.min(max_scroll)
+        };
+
         let paragraph = Paragraph::new(lines)
             .wrap(Wrap { trim: true })
-            .scroll((self.scroll_offset, 0));
+            .scroll((effective_scroll, 0));
 
         frame.render_widget(paragraph, inner);
     }
@@ -201,6 +225,10 @@ impl TaskManager {
         if self.active_task.is_some() && self.tasks.is_empty() {
             self.active_task = None;
         }
+    }
+
+    pub fn find_task_by_id_mut(&mut self, id: Uuid) -> Option<&mut TaskWindow> {
+        self.tasks.iter_mut().find(|task| task.id == id)
     }
 }
 
