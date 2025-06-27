@@ -42,10 +42,10 @@ fn maybe_relaunch_in_terminal() {
 
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
-        // Launch in Terminal.app
+        // Launch in WezTerm
         let mut cmd = Command::new("open");
         cmd.arg("-a")
-            .arg("Terminal")
+            .arg("WezTerm")
             .arg(&exe)
             .env("ARKAVO_LAUNCHED", "1");
 
