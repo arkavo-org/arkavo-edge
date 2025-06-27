@@ -1,6 +1,7 @@
 pub mod app;
 pub mod benchmark;
 pub mod event;
+pub mod helix;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;

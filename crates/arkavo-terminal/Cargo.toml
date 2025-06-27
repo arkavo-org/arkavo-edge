@@ -28,6 +28,9 @@ arkavo-memory = { path = "../arkavo-memory", optional = true, default-features =
 # For multi-terminal support
 uuid = { version = "1.11", features = ["v4", "serde"] }
 
+# For Helix editor integration
+tempfile = "3.14"
+
 [[bin]]
 name = "tui-benchmark"
 path = "src/bin/benchmark.rs"

@@ -1,5 +1,9 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyModifiers},
+    terminal,
+};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -10,6 +14,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::event::{AppEvent, EventHandler};
+use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
 use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
@@ -53,6 +58,7 @@ pub struct App {
     pub frame_times: Vec<Duration>,
     pub vim_state: VimState,
     pub vim_enabled: bool,
+    pub helix_editor: Option<HelixEditor>,
 }
 
 impl App {
@@ -82,6 +88,7 @@ impl App {
             frame_times: Vec::with_capacity(120), // Track last 120 frames (1 second at 120fps)
             vim_state: VimState::new(),
             vim_enabled: false, // Default to disabled for now
+            helix_editor: HelixEditor::new().ok(),
         }
     }
 
@@ -111,6 +118,7 @@ impl App {
             frame_times: Vec::with_capacity(120),
             vim_state: VimState::new(),
             vim_enabled: false, // Default to disabled for now
+            helix_editor: HelixEditor::new().ok(),
         }
     }
 
@@ -245,6 +253,10 @@ impl App {
                                 crate::ui::debug::LogLevel::Info,
                                 format!("[UI] Vim mode {}", if self.vim_enabled { "enabled" } else { "disabled" }),
                             );
+                        }
+                        KeyCode::Char('e') | KeyCode::Char('E') 
+                            if key.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                            self.launch_helix_editor().await;
                         }
                         KeyCode::Tab => match self.layout_mode {
                             LayoutMode::Tabbed => self.switch_view(),
@@ -689,9 +701,15 @@ impl App {
             String::new()
         };
 
+        let helix_status = if self.helix_editor.is_some() {
+            " | Ctrl-Shift-E: Helix"
+        } else {
+            ""
+        };
+
         let status = format!(
-            " {}{} | Tab: Switch View | Alt-V: Toggle Vim | q: Quit ",
-            mode_text, vim_mode_text
+            " {}{} | Tab: Switch View | Alt-V: Toggle Vim{} | q: Quit ",
+            mode_text, vim_mode_text, helix_status
         );
 
         let paragraph = Paragraph::new(status)
@@ -756,6 +774,63 @@ impl App {
             .block(Block::default().borders(Borders::NONE));
 
         frame.render_widget(paragraph, area);
+    }
+
+    async fn launch_helix_editor(&mut self) {
+        if let Some(ref helix) = self.helix_editor {
+            // Suspend the terminal temporarily
+            let _ = terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                terminal::LeaveAlternateScreen,
+                cursor::Show
+            );
+            
+            // Get current input buffer content
+            let initial_content = match self.view_mode {
+                ViewMode::Chat => self.chat_view.input_buffer.clone(),
+                _ => String::new(),
+            };
+            
+            // Launch helix and get the edited content
+            match helix.launch_with_content(&initial_content) {
+                Ok(edited_content) => {
+                    // Update the input buffer with edited content
+                    match self.view_mode {
+                        ViewMode::Chat => {
+                            self.chat_view.input_buffer = edited_content.trim_end().to_string();
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Info,
+                                format!("[UI] Helix editor: {} chars pasted", self.chat_view.input_buffer.len()),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                Err(e) => {
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Error,
+                        format!("[UI] Helix editor error: {}", e),
+                    );
+                }
+            }
+            
+            // Restore terminal
+            let _ = terminal::enable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                terminal::EnterAlternateScreen,
+                cursor::Hide
+            );
+            
+            // Force redraw
+            self.chat_view.needs_redraw = true;
+        } else {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Error,
+                "[UI] Helix unavailable—install helix or check logs".to_string(),
+            );
+        }
     }
 
     pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {
