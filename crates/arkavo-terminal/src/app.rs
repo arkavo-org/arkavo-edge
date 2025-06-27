@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
@@ -13,6 +13,7 @@ use crate::event::{AppEvent, EventHandler};
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
 use crate::ui::{chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
+use crate::vim::VimState;
 
 pub enum ViewMode {
     Chat,
@@ -50,6 +51,8 @@ pub struct App {
     pub telemetry: UITelemetry,
     pub last_frame_time: Instant,
     pub frame_times: Vec<Duration>,
+    pub vim_state: VimState,
+    pub vim_enabled: bool,
 }
 
 impl App {
@@ -77,6 +80,8 @@ impl App {
             telemetry: UITelemetry::new(),
             last_frame_time: Instant::now(),
             frame_times: Vec::with_capacity(120), // Track last 120 frames (1 second at 120fps)
+            vim_state: VimState::new(),
+            vim_enabled: false, // Default to disabled for now
         }
     }
 
@@ -104,6 +109,8 @@ impl App {
             telemetry: UITelemetry::new(),
             last_frame_time: Instant::now(),
             frame_times: Vec::with_capacity(120),
+            vim_state: VimState::new(),
+            vim_enabled: false, // Default to disabled for now
         }
     }
 
@@ -232,6 +239,13 @@ impl App {
                     self.telemetry.track_key_event();
                     match key.code {
                         KeyCode::Char('q') => self.should_quit = true,
+                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
+                            self.vim_enabled = !self.vim_enabled;
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Info,
+                                format!("[UI] Vim mode {}", if self.vim_enabled { "enabled" } else { "disabled" }),
+                            );
+                        }
                         KeyCode::Tab => match self.layout_mode {
                             LayoutMode::Tabbed => self.switch_view(),
                             LayoutMode::Portrait => self.next_pane(),
@@ -669,7 +683,16 @@ impl App {
             ViewMode::Debug => "Debug",
         };
 
-        let status = format!(" {} | Tab: Switch View | q: Quit ", mode_text);
+        let vim_mode_text = if self.vim_enabled {
+            format!(" [{}] |", self.vim_state.mode)
+        } else {
+            String::new()
+        };
+
+        let status = format!(
+            " {}{} | Tab: Switch View | Alt-V: Toggle Vim | q: Quit ",
+            mode_text, vim_mode_text
+        );
 
         let paragraph = Paragraph::new(status)
             .style(Style::default().fg(Color::White).bg(Color::DarkGray))

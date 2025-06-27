@@ -5,6 +5,7 @@ pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;
 pub mod ui;
+pub mod vim;
 
 #[cfg(test)]
 mod tests;
