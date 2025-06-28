@@ -381,9 +381,7 @@ impl TestExecutor {
                     .arg(test_name)
                     .current_dir(&self.working_dir)
                     .output()
-                    .map_err(|e| {
-                        TestError::Execution(format!("Failed to run Python test: {e}"))
-                    })?
+                    .map_err(|e| TestError::Execution(format!("Failed to run Python test: {e}")))?
             }
         };
 

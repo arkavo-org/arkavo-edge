@@ -203,9 +203,7 @@ impl Tool for UrlDialogHandler {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(2);
 
-                eprintln!(
-                    "[UrlDialogHandler] Waiting {wait_timeout}s for URL dialog to appear..."
-                );
+                eprintln!("[UrlDialogHandler] Waiting {wait_timeout}s for URL dialog to appear...");
                 thread::sleep(Duration::from_secs(wait_timeout));
 
                 // Tap the Open button

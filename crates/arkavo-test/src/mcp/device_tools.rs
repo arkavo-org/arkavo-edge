@@ -272,9 +272,7 @@ impl Tool for DeviceManagementKit {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
-                eprintln!(
-                    "[DeviceManagement] Running cleanup_unhealthy (dry_run: {dry_run})"
-                );
+                eprintln!("[DeviceManagement] Running cleanup_unhealthy (dry_run: {dry_run})");
 
                 // First try the built-in simctl command
                 if !dry_run {

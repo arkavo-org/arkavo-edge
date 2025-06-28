@@ -90,9 +90,7 @@ impl DeviceBootManager {
 
         if !status.ui_ready {
             // UI might still be loading, but basic services are ready
-            eprintln!(
-                "Warning: UI services may not be fully ready on device {device_id}"
-            );
+            eprintln!("Warning: UI services may not be fully ready on device {device_id}");
         }
 
         status.current_state = BootState::Ready;

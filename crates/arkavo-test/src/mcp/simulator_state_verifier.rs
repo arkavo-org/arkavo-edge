@@ -27,9 +27,7 @@ impl SimulatorStateVerifier {
         device_id: &str,
         app_bundle_id: Option<&str>,
     ) -> Result<SimulatorState> {
-        eprintln!(
-            "[SimulatorStateVerifier] Checking state for device {device_id}"
-        );
+        eprintln!("[SimulatorStateVerifier] Checking state for device {device_id}");
 
         let mut state = SimulatorState {
             device_id: device_id.to_string(),
@@ -75,9 +73,7 @@ impl SimulatorStateVerifier {
         if let Some(bundle_id) = app_bundle_id {
             state.app_is_foreground = Self::check_app_foreground(device_id, bundle_id).await?;
             if !state.app_is_foreground {
-                eprintln!(
-                    "[SimulatorStateVerifier] App {bundle_id} is not in foreground"
-                );
+                eprintln!("[SimulatorStateVerifier] App {bundle_id} is not in foreground");
             }
         }
 
@@ -250,9 +246,7 @@ impl SimulatorStateVerifier {
         device_id: &str,
         app_bundle_id: Option<&str>,
     ) -> Result<()> {
-        eprintln!(
-            "[SimulatorStateVerifier] Preparing device {device_id} for interaction"
-        );
+        eprintln!("[SimulatorStateVerifier] Preparing device {device_id} for interaction");
 
         // 1. Verify state
         let state = Self::verify_ready_for_interaction(device_id, app_bundle_id).await?;

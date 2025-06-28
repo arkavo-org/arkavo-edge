@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "MCP (Model Context Protocol) trait definitions and types for Arkavo"
+repository.workspace = true
+readme = "README.md"
+keywords = ["cli", "ai", "agent", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
+
 
 [dependencies]
 async-trait = "0.1"

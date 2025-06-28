@@ -89,9 +89,7 @@ impl Tool for XCTestSetupKit {
 
         // Check if XCUITest is already available and functional
         if !force_reinstall {
-            eprintln!(
-                "[XCTestSetupKit] Checking XCTest status for device {device_id}..."
-            );
+            eprintln!("[XCTestSetupKit] Checking XCTest status for device {device_id}...");
             let verification_status = XCTestVerifier::verify_device(&device_id).await?;
 
             if verification_status.is_functional {

@@ -36,9 +36,7 @@ impl IdbPortManager {
 
     /// Kill any existing IDB companion process on a port
     pub fn kill_idb_on_port(port: u16) -> Result<()> {
-        eprintln!(
-            "[IdbPortManager] Checking for IDB companion on port {port}..."
-        );
+        eprintln!("[IdbPortManager] Checking for IDB companion on port {port}...");
 
         // First try lsof to find the process
         let lsof_output = Command::new("lsof")

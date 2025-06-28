@@ -22,7 +22,7 @@ async fn test_idb_recovery_stuck_companion() {
         eprintln!("Detected stuck IDB companion, attempting recovery...");
 
         match recovery.recover_stuck_companion().await {
-            Ok(_) => {
+            Ok(()) => {
                 eprintln!("Recovery completed successfully");
 
                 // Wait a bit for things to stabilize
@@ -65,7 +65,7 @@ async fn test_force_reconnect_device() {
     let device_id = "test-device-123";
 
     match recovery.force_reconnect_device(device_id).await {
-        Ok(_) => {
+        Ok(()) => {
             eprintln!("Force reconnect completed for device {device_id}");
         }
         Err(e) => {

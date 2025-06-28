@@ -277,9 +277,7 @@ impl Tool for AppManagement {
                 };
 
                 // Log the launch attempt
-                eprintln!(
-                    "MCP: Attempting to launch app {bundle_id} on device {device_id}"
-                );
+                eprintln!("MCP: Attempting to launch app {bundle_id} on device {device_id}");
 
                 match manager.launch_app(device_id, bundle_id, &args) {
                     Ok(pid) => {

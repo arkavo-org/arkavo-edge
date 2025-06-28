@@ -255,9 +255,8 @@ Example:
             );
 
             let response = self.claude.complete(&exploration_prompt).await?;
-            let decision: ExplorationDecision = serde_json::from_str(&response).map_err(|e| {
-                TestError::Ai(format!("Failed to parse exploration decision: {e}"))
-            })?;
+            let decision: ExplorationDecision = serde_json::from_str(&response)
+                .map_err(|e| TestError::Ai(format!("Failed to parse exploration decision: {e}")))?;
 
             if decision.stop_exploration {
                 break;

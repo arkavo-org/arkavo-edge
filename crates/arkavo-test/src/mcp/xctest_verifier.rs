@@ -151,9 +151,7 @@ impl XCTestVerifier {
             }
             Err(e) => {
                 // If the standard approach fails, just check if we can run any xctest
-                eprintln!(
-                    "Standard XCTest launch failed: {e}, trying minimal verification"
-                );
+                eprintln!("Standard XCTest launch failed: {e}, trying minimal verification");
 
                 // Check if device can run tests at all
                 let verify_output = Command::new("xcrun")

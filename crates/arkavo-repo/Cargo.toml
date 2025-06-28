@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Repository mapper for the Arkavo agentic CLI tool - builds semantic map of repositories and tracks changed files"
+repository.workspace = true
+readme = "README.md"
+keywords = ["cli", "ai", "agent", "repository"]
+categories = ["command-line-utilities", "development-tools"]
+
 
 [dependencies]
 [lints]

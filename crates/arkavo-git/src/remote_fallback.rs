@@ -9,7 +9,7 @@ pub fn is_https_url(url: &str) -> bool {
 
 /// Check if a URL is SSH
 pub fn is_ssh_url(url: &str) -> bool {
-    url.starts_with("ssh://") || url.starts_with("git@") || url.contains(":")
+    return url.starts_with("ssh://") || url.starts_with("git@") || url.contains(':');
 }
 
 /// Fallback to system git for remote operations when HTTPS support is not compiled in

@@ -97,9 +97,7 @@ impl UiInteractionKit {
             let cache = self.axp_socket_cache.lock().await;
             if let Some((cached_device_id, socket_path)) = cache.as_ref() {
                 if cached_device_id == &device_id {
-                    eprintln!(
-                        "[AXP] Using cached socket for device {device_id}: {socket_path}"
-                    );
+                    eprintln!("[AXP] Using cached socket for device {device_id}: {socket_path}");
                     return Some((socket_path.clone(), true));
                 }
             }
@@ -335,8 +333,8 @@ impl UiInteractionKit {
                                                 dtype["screenHeight"].as_f64(),
                                             ) {
                                                 eprintln!(
-                            "Found device dimensions from simctl: {width}x{height}"
-                        );
+                                                    "Found device dimensions from simctl: {width}x{height}"
+                                                );
                                                 return Some((width, height));
                                             }
                                         }
@@ -704,9 +702,7 @@ impl Tool for UiInteractionKit {
                             match self.send_axp_tap(socket_path, x, y).await {
                                 Ok(result) => return Ok(result),
                                 Err(e) => {
-                                    eprintln!(
-                                        "[ui_interaction] AXP tap failed: {e}, falling back"
-                                    );
+                                    eprintln!("[ui_interaction] AXP tap failed: {e}, falling back");
                                     // Continue to other methods
                                 }
                             }
@@ -2154,9 +2150,7 @@ impl Tool for UiQueryKit {
                 "alternative": "Use screen_capture tool and analyze text in the screenshot image",
                 "note": "Direct text extraction requires XCTest. Screenshots can be analyzed for text content."
             })),
-            _ => Err(TestError::Mcp(format!(
-                "Unknown query type: {query_type}"
-            ))),
+            _ => Err(TestError::Mcp(format!("Unknown query type: {query_type}"))),
         }
     }
 

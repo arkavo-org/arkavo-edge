@@ -175,9 +175,7 @@ impl VerificationReader {
         {
             if output.status.success() {
                 let container_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                eprintln!(
-                    "[VerificationReader] App container path: {container_path}"
-                );
+                eprintln!("[VerificationReader] App container path: {container_path}");
                 return PathBuf::from(container_path).join("Documents/calibration_results.json");
             } else {
                 eprintln!(

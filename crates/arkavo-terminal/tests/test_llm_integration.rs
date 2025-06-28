@@ -50,7 +50,7 @@ mod llm_integration_tests {
         let response3 = LlmResponse {
             task_id,
             model_name: "test-model".to_string(),
-            content: "".to_string(),
+            content: String::new(),
             is_streaming: true,
             is_complete: true,
             error: None,

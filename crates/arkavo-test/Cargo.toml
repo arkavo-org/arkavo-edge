@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Test harness for the Arkavo agentic CLI tool - local test runner adapter for various languages"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+readme = "README.md"
+keywords = ["testing", "test-harness", "automation", "ios", "xctest"]
+categories = ["development-tools::testing", "development-tools"]
 
 [features]
 default = ["memory"]

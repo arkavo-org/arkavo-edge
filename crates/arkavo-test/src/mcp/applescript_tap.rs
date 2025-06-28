@@ -10,9 +10,7 @@ pub struct AppleScriptTap;
 impl AppleScriptTap {
     /// Perform a tap using AppleScript and System Events
     pub async fn tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
-        eprintln!(
-            "[AppleScriptTap] Performing tap at ({x}, {y}) for device {device_id}"
-        );
+        eprintln!("[AppleScriptTap] Performing tap at ({x}, {y}) for device {device_id}");
 
         // First, get the simulator window position
         let window_bounds = Self::get_simulator_window_bounds(device_id).await?;
@@ -69,9 +67,7 @@ impl AppleScriptTap {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[AppleScriptTap] Tap failed: {stderr}");
-            Err(TestError::Mcp(format!(
-                "AppleScript tap failed: {stderr}"
-            )))
+            Err(TestError::Mcp(format!("AppleScript tap failed: {stderr}")))
         }
     }
 
@@ -115,9 +111,7 @@ impl AppleScriptTap {
                 let width = parts[2].parse::<f64>().unwrap_or(400.0);
                 let height = parts[3].parse::<f64>().unwrap_or(800.0);
 
-                eprintln!(
-                    "[AppleScriptTap] Window bounds: x={x}, y={y}, w={width}, h={height}"
-                );
+                eprintln!("[AppleScriptTap] Window bounds: x={x}, y={y}, w={width}, h={height}");
                 Ok((x, y, width, height))
             } else {
                 eprintln!("[AppleScriptTap] Using default window bounds");

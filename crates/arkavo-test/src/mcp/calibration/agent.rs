@@ -135,9 +135,7 @@ impl CalibrationAgentImpl {
                     );
                 }
                 Ok(Err(e)) => {
-                    eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {e}"
-                    );
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {e}");
                     return Err(CalibrationError::InteractionFailed(format!(
                         "Failed to tap at ({x}, {y}): {e}"
                     )));
@@ -341,8 +339,8 @@ impl CalibrationAgent for CalibrationAgentImpl {
                         let elements = self.discover_ui_elements()?;
                         let element = elements.iter().find(|e| e.id == *id).ok_or_else(|| {
                             CalibrationError::InteractionFailed(format!(
-                            "Element with ID '{id}' not found"
-                        ))
+                                "Element with ID '{id}' not found"
+                            ))
                         })?;
 
                         let center_x = element.frame.x + element.frame.width / 2.0;
@@ -357,8 +355,8 @@ impl CalibrationAgent for CalibrationAgentImpl {
                             .find(|e| e.accessibility_id.as_ref() == Some(acc_id))
                             .ok_or_else(|| {
                                 CalibrationError::InteractionFailed(format!(
-                            "Element with accessibility ID '{acc_id}' not found"
-                        ))
+                                    "Element with accessibility ID '{acc_id}' not found"
+                                ))
                             })?;
 
                         let center_x = element.frame.x + element.frame.width / 2.0;

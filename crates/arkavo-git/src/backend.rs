@@ -75,7 +75,7 @@ pub trait GitBackend: Send + Sync {
 pub struct Git2Backend;
 
 impl Git2Backend {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 }

@@ -14,9 +14,7 @@ async fn test_xctest_quick_verify() {
             }
         }
         Err(e) => {
-            println!(
-                "XCTest verification error: {e} - this is expected in CI environments"
-            );
+            println!("XCTest verification error: {e} - this is expected in CI environments");
         }
     }
 }

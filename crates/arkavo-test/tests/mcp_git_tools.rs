@@ -57,10 +57,10 @@ async fn test_git_status_tool() {
 
     // The file might be either untracked or added depending on git state
     assert!(!untracked.is_empty() || !added.is_empty());
-    if !untracked.is_empty() {
-        assert!(untracked[0].as_str().unwrap().contains("new_file.txt"));
-    } else {
+    if untracked.is_empty() {
         assert!(added[0].as_str().unwrap().contains("new_file.txt"));
+    } else {
+        assert!(untracked[0].as_str().unwrap().contains("new_file.txt"));
     }
 }
 

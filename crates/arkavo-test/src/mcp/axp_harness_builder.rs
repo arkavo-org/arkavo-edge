@@ -51,9 +51,7 @@ impl AxpHarnessBuilder {
     }
 
     async fn build_axp_harness(&self, app_bundle_id: &str) -> Result<Value> {
-        eprintln!(
-            "[AxpHarnessBuilder] Building generic AXP harness for {app_bundle_id}"
-        );
+        eprintln!("[AxpHarnessBuilder] Building generic AXP harness for {app_bundle_id}");
 
         // Pre-flight checks
         if let Err(response) = self.verify_xcode_tools() {
@@ -238,9 +236,8 @@ impl AxpHarnessBuilder {
             eprintln!("[AxpHarnessBuilder] Using minimal runner for iOS 26 beta compatibility");
             let runner_content = templates::ARKAVO_TEST_RUNNER_MINIMAL_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
-            fs::write(&runner_path, runner_content).map_err(|e| {
-                TestError::Mcp(format!("Failed to write minimal test runner: {e}"))
-            })?;
+            fs::write(&runner_path, runner_content)
+                .map_err(|e| TestError::Mcp(format!("Failed to write minimal test runner: {e}")))?;
         } else {
             let runner_content = templates::ARKAVO_TEST_RUNNER_AXP_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());

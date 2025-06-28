@@ -99,9 +99,9 @@ impl StateManager {
             .read()
             .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {e}")))?;
 
-        let parent = snapshots.get(from_id).ok_or_else(|| {
-            TestError::Execution(format!("Parent snapshot not found: {from_id}"))
-        })?;
+        let parent = snapshots
+            .get(from_id)
+            .ok_or_else(|| TestError::Execution(format!("Parent snapshot not found: {from_id}")))?;
 
         let new_snapshot = StateSnapshot {
             id: Uuid::new_v4().to_string(),

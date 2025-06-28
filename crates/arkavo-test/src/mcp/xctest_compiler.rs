@@ -213,9 +213,7 @@ let package = Package(
             .trim()
             .to_string();
         let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
-        eprintln!(
-            "[XCTestCompiler] XCTest framework path: {xctest_framework_path}"
-        );
+        eprintln!("[XCTestCompiler] XCTest framework path: {xctest_framework_path}");
 
         // Verify XCTest framework exists
         if !std::path::Path::new(&format!("{xctest_framework_path}/XCTest.framework")).exists() {
@@ -363,9 +361,7 @@ Note: Only ARM64 simulators are supported."
 
     /// Install the XCTest bundle to a simulator
     pub fn install_to_simulator(&self, device_id: &str, bundle_path: &Path) -> Result<()> {
-        eprintln!(
-            "[XCTestCompiler] Installing XCTest bundle to simulator {device_id}..."
-        );
+        eprintln!("[XCTestCompiler] Installing XCTest bundle to simulator {device_id}...");
 
         // For XCTest bundles, we need to copy them to the simulator's app support directory
         // instead of using simctl install which is for regular apps
@@ -389,9 +385,8 @@ Note: Only ARM64 simulators are supported."
             sim_data_path.join("Library/Developer/Xcode/DerivedData/TestBundles");
 
         // Create the directory if it doesn't exist
-        fs::create_dir_all(&test_bundles_dir).map_err(|e| {
-            TestError::Mcp(format!("Failed to create test bundles directory: {e}"))
-        })?;
+        fs::create_dir_all(&test_bundles_dir)
+            .map_err(|e| TestError::Mcp(format!("Failed to create test bundles directory: {e}")))?;
 
         // Copy the bundle
         let dest_path = test_bundles_dir.join(bundle_path.file_name().unwrap());
@@ -999,9 +994,7 @@ int main(int argc, char * argv[]) {
         device_id: &str,
         target_app_bundle_id: Option<&str>,
     ) -> Result<()> {
-        eprintln!(
-            "[XCTestCompiler] Launching test host app on device: {device_id}"
-        );
+        eprintln!("[XCTestCompiler] Launching test host app on device: {device_id}");
         eprintln!(
             "[XCTestCompiler] Socket path: {}",
             self.socket_path.display()

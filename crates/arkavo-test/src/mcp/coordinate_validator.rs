@@ -80,9 +80,7 @@ impl CoordinateValidator {
             issues.push(format!("X coordinate {x} exceeds screen width {width}"));
         }
         if y >= height {
-            issues.push(format!(
-                "Y coordinate {y} exceeds screen height {height}"
-            ));
+            issues.push(format!("Y coordinate {y} exceeds screen height {height}"));
         }
 
         let is_valid = issues.is_empty();

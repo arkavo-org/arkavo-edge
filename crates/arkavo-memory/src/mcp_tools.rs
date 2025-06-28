@@ -95,9 +95,8 @@ impl Tool for StoreMemoryTool {
         let created_at = memory.created_at;
 
         self.storage.store(memory).await.map_err(|e| {
-            Box::new(MemoryError::Storage(format!(
-                "Failed to store memory: {e}"
-            ))) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(MemoryError::Storage(format!("Failed to store memory: {e}")))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         Ok(serde_json::json!({
@@ -318,9 +317,8 @@ impl Tool for CategorizeMemoryTool {
             })?;
 
         let (category, confidence) = self.storage.categorize(content).await.map_err(|e| {
-            Box::new(MemoryError::Storage(format!(
-                "Categorization failed: {e}"
-            ))) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(MemoryError::Storage(format!("Categorization failed: {e}")))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         Ok(serde_json::json!({

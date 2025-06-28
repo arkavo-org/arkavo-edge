@@ -208,9 +208,7 @@ impl IdbRecovery {
 
             // Force re-initialization by clearing the static path
             if let Err(e) = IdbWrapper::initialize_with_preference(false) {
-                eprintln!(
-                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}"
-                );
+                eprintln!("[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}");
             }
         }
 
@@ -264,9 +262,7 @@ impl IdbRecovery {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
             // Step 4: Force a new connection by using IDB's connect command
-            eprintln!(
-                "[IdbRecovery] Forcing new connection to device {device_id}..."
-            );
+            eprintln!("[IdbRecovery] Forcing new connection to device {device_id}...");
 
             // Initialize IDB if needed
             IdbWrapper::initialize()?;
@@ -336,9 +332,7 @@ impl IdbRecovery {
                 let mut devices = CONNECTED_DEVICES.lock().unwrap();
                 let device_count = devices.len();
                 devices.clear();
-                eprintln!(
-                    "[IdbRecovery] Cleared {device_count} devices from connection tracking"
-                );
+                eprintln!("[IdbRecovery] Cleared {device_count} devices from connection tracking");
             }
 
             // Step 2: Get the IDB companion PID(s)
@@ -389,9 +383,7 @@ impl IdbRecovery {
                     let pids = String::from_utf8_lossy(&output.stdout);
                     for pid in pids.lines() {
                         if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                            eprintln!(
-                            "[IdbRecovery] Killing process {pid_num} holding port 10882"
-                        );
+                            eprintln!("[IdbRecovery] Killing process {pid_num} holding port 10882");
                             let _ = Command::new("kill")
                                 .arg("-9")
                                 .arg(pid_num.to_string())
@@ -423,9 +415,7 @@ impl IdbRecovery {
             // Step 7: Force re-initialization of IDB wrapper
             eprintln!("[IdbRecovery] Re-initializing IDB wrapper with embedded binary...");
             if let Err(e) = IdbWrapper::initialize_with_preference(false) {
-                eprintln!(
-                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}"
-                );
+                eprintln!("[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}");
 
                 // Try again with system IDB as fallback
                 eprintln!("[IdbRecovery] Trying with system IDB as fallback...");

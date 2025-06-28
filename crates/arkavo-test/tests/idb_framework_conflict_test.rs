@@ -8,7 +8,7 @@ async fn test_idb_initialization_with_system_preference() {
     let result = IdbWrapper::initialize_with_preference(true);
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             eprintln!("IDB initialized successfully");
 
             // Try to list targets to verify it works
@@ -23,9 +23,7 @@ async fn test_idb_initialization_with_system_preference() {
             }
         }
         Err(e) => {
-            eprintln!(
-                "IDB initialization failed (expected if IDB not installed): {e}"
-            );
+            eprintln!("IDB initialization failed (expected if IDB not installed): {e}");
             // This is acceptable - the test passes either way to show error handling works
         }
     }
@@ -41,7 +39,7 @@ async fn test_idb_framework_conflict_handling() {
     let result = IdbWrapper::initialize();
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             eprintln!("IDB initialized with ARKAVO_USE_SYSTEM_IDB=1");
         }
         Err(e) => {

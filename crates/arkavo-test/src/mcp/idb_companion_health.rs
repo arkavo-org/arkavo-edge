@@ -58,9 +58,7 @@ pub struct IdbCompanionHealth;
 impl IdbCompanionHealth {
     /// Check if IDB companion is healthy for a device
     pub async fn check_health(device_id: &str) -> Result<bool> {
-        eprintln!(
-            "[IdbCompanionHealth] Checking health for device {device_id}"
-        );
+        eprintln!("[IdbCompanionHealth] Checking health for device {device_id}");
 
         // Initial health check state
         let mut is_healthy = true;
@@ -75,9 +73,7 @@ impl IdbCompanionHealth {
             // Check if companion process is running
             if let Some(pid) = metrics.companion_pid {
                 if !Self::is_process_running(pid) {
-                    eprintln!(
-                        "[IdbCompanionHealth] Companion process {pid} is not running"
-                    );
+                    eprintln!("[IdbCompanionHealth] Companion process {pid} is not running");
                     metrics.companion_pid = None;
                     is_healthy = false;
                 }
@@ -195,9 +191,7 @@ impl IdbCompanionHealth {
         if let Some(metrics) = health_map.get_mut(device_id) {
             metrics.consecutive_failures = 0;
             metrics.last_failed_tap = None;
-            eprintln!(
-                "[IdbCompanionHealth] Reset metrics for device {device_id}"
-            );
+            eprintln!("[IdbCompanionHealth] Reset metrics for device {device_id}");
         }
     }
 
@@ -252,9 +246,7 @@ impl IdbCompanionHealth {
 
     /// Perform recovery for unhealthy companion
     pub async fn recover_companion(device_id: &str) -> Result<()> {
-        eprintln!(
-            "[IdbCompanionHealth] Starting recovery for device {device_id}"
-        );
+        eprintln!("[IdbCompanionHealth] Starting recovery for device {device_id}");
 
         #[cfg(target_os = "macos")]
         {
@@ -286,9 +278,7 @@ impl IdbCompanionHealth {
             // 6. Reset health metrics
             Self::reset_metrics(device_id);
 
-            eprintln!(
-                "[IdbCompanionHealth] Recovery completed for device {device_id}"
-            );
+            eprintln!("[IdbCompanionHealth] Recovery completed for device {device_id}");
         }
 
         Ok(())

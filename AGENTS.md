@@ -33,7 +33,7 @@ cargo test
 cargo test test_name
 
 # Code quality  
-cargo clippy -- -D warnings
+cargo clippy
 
 # Format code
 cargo fmt

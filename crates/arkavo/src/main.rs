@@ -7,7 +7,7 @@ fn main() {
     // Check if we need to relaunch in Terminal (macOS only)
     // Skip for serve command which needs to stay in current process
     #[cfg(target_os = "macos")]
-    if !args.get(1).map(|s| s == "serve").unwrap_or(false) {
+    if !args.get(1).is_some_and(|s| s == "serve") {
         maybe_relaunch_in_terminal();
     }
 

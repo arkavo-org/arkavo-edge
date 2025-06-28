@@ -11,7 +11,7 @@ mod test_idb_connection {
 
         // Initialize IDB
         match IdbWrapper::initialize() {
-            Ok(_) => eprintln!("✓ IDB initialized successfully"),
+            Ok(()) => eprintln!("✓ IDB initialized successfully"),
             Err(e) => {
                 eprintln!("✗ IDB initialization failed: {e}");
                 return;

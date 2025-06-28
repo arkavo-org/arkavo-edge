@@ -29,9 +29,7 @@ impl XCTestSimpleRunner {
 
     /// Create and run a simple Swift executable on the simulator
     pub fn run_on_simulator(&self, device_id: &str) -> Result<()> {
-        eprintln!(
-            "[SimpleRunner] Creating Swift executable for device {device_id}"
-        );
+        eprintln!("[SimpleRunner] Creating Swift executable for device {device_id}");
 
         // Create a Swift program with UI automation capabilities
         let swift_source = format!(

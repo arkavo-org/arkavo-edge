@@ -111,16 +111,12 @@ impl SnapshotManager {
 
         let source = nodes
             .get(source_id)
-            .ok_or_else(|| {
-                TestError::Execution(format!("Source snapshot not found: {source_id}"))
-            })?
+            .ok_or_else(|| TestError::Execution(format!("Source snapshot not found: {source_id}")))?
             .clone();
 
         let target = nodes
             .get(target_id)
-            .ok_or_else(|| {
-                TestError::Execution(format!("Target snapshot not found: {target_id}"))
-            })?
+            .ok_or_else(|| TestError::Execution(format!("Target snapshot not found: {target_id}")))?
             .clone();
 
         drop(nodes);

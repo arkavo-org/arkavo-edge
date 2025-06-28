@@ -108,7 +108,10 @@ async fn test_calibration_workflow() {
     println!("\n7. Enabling auto-monitoring...");
     let monitor_request = CalibrationRequest::EnableAutoMonitoring { enabled: true };
 
-    if let CalibrationResponse::Success = server.handle_request(monitor_request).await {
+    if matches!(
+        server.handle_request(monitor_request).await,
+        CalibrationResponse::Success
+    ) {
         println!("   ✓ Auto-monitoring enabled");
         println!("   System will automatically recalibrate devices when needed");
     }

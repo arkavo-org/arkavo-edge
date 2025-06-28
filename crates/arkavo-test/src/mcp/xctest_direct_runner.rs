@@ -29,9 +29,7 @@ impl XCTestDirectRunner {
 
     /// Compile and run XCTest code directly
     pub fn run_on_simulator(&self, device_id: &str) -> Result<()> {
-        eprintln!(
-            "[DirectRunner] Creating XCTest executable for device {device_id}"
-        );
+        eprintln!("[DirectRunner] Creating XCTest executable for device {device_id}");
 
         // Create Swift code that uses XCTest but runs as a regular executable
         let swift_source = format!(

@@ -666,9 +666,7 @@ impl CalibrationTool {
         }
 
         // Install to simulator
-        eprintln!(
-            "[CalibrationTool] Installing app to simulator {device_id}..."
-        );
+        eprintln!("[CalibrationTool] Installing app to simulator {device_id}...");
         let install_output = Command::new("xcrun")
             .args(["simctl", "install", device_id, app_path.to_str().unwrap()])
             .output()
@@ -699,9 +697,7 @@ impl CalibrationTool {
 
         if !launch_output.status.success() {
             let error_msg = String::from_utf8_lossy(&launch_output.stderr);
-            eprintln!(
-                "[CalibrationTool] Warning: Failed to launch app: {error_msg}"
-            );
+            eprintln!("[CalibrationTool] Warning: Failed to launch app: {error_msg}");
             // Don't fail the operation, just warn
         } else {
             eprintln!("[CalibrationTool] Successfully launched ArkavoReference app");

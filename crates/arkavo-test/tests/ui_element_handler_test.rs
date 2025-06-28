@@ -17,27 +17,24 @@ async fn test_tap_checkbox() {
         }
     });
 
-    match handler.execute(params).await {
-        Ok(result) => {
-            // In test environment, we expect errors
-            if let Some(error) = result.get("error") {
-                let error_code = error["code"].as_str().unwrap_or("");
-                assert!(
-                    error_code == "DEVICE_ERROR" || error_code == "CHECKBOX_TAP_FAILED",
-                    "Unexpected error code: {error_code}"
-                );
-                return;
-            }
+    if let Ok(result) = handler.execute(params).await {
+        // In test environment, we expect errors
+        if let Some(error) = result.get("error") {
+            let error_code = error["code"].as_str().unwrap_or("");
+            assert!(
+                error_code == "DEVICE_ERROR" || error_code == "CHECKBOX_TAP_FAILED",
+                "Unexpected error code: {error_code}"
+            );
+            return;
+        }
 
-            // Otherwise check for success structure
-            if result["success"].as_bool().unwrap_or(false) {
-                assert_eq!(result["action"], "tap_checkbox");
-                assert!(result["strategies_tried"].is_array());
-            }
+        // Otherwise check for success structure
+        if result["success"].as_bool().unwrap_or(false) {
+            assert_eq!(result["action"], "tap_checkbox");
+            assert!(result["strategies_tried"].is_array());
         }
-        Err(_) => {
-            // Acceptable in CI environment
-        }
+    } else {
+        // Acceptable in CI environment
     }
 }
 
@@ -55,18 +52,15 @@ async fn test_tap_with_retry() {
         "retry_count": 3
     });
 
-    match handler.execute(params).await {
-        Ok(result) => {
-            // Check structure
-            assert!(result.is_object());
-            if result.get("error").is_some() {
-                // Expected in test environment
-                assert!(result["error"]["code"].is_string());
-            }
+    if let Ok(result) = handler.execute(params).await {
+        // Check structure
+        assert!(result.is_object());
+        if result.get("error").is_some() {
+            // Expected in test environment
+            assert!(result["error"]["code"].is_string());
         }
-        Err(_) => {
-            // Acceptable in CI environment
-        }
+    } else {
+        // Acceptable in CI environment
     }
 }
 
@@ -83,27 +77,24 @@ async fn test_double_tap() {
         }
     });
 
-    match handler.execute(params).await {
-        Ok(result) => {
-            // Check structure
-            assert!(result.is_object());
+    if let Ok(result) = handler.execute(params).await {
+        // Check structure
+        assert!(result.is_object());
 
-            // Handle both success and error cases
-            if let Some(error) = result.get("error") {
-                let error_code = error["code"].as_str().unwrap_or("");
-                assert!(
-                    error_code == "DEVICE_ERROR" || error_code == "DOUBLE_TAP_FAILED",
-                    "Unexpected error code: {error_code}"
-                );
-            } else if result["success"].as_bool().unwrap_or(false) {
-                assert_eq!(result["action"], "double_tap");
-                assert_eq!(result["coordinates"]["x"], 150.0);
-                assert_eq!(result["coordinates"]["y"], 250.0);
-            }
+        // Handle both success and error cases
+        if let Some(error) = result.get("error") {
+            let error_code = error["code"].as_str().unwrap_or("");
+            assert!(
+                error_code == "DEVICE_ERROR" || error_code == "DOUBLE_TAP_FAILED",
+                "Unexpected error code: {error_code}"
+            );
+        } else if result["success"].as_bool().unwrap_or(false) {
+            assert_eq!(result["action"], "double_tap");
+            assert_eq!(result["coordinates"]["x"], 150.0);
+            assert_eq!(result["coordinates"]["y"], 250.0);
         }
-        Err(_) => {
-            // Acceptable in CI environment
-        }
+    } else {
+        // Acceptable in CI environment
     }
 }
 
@@ -126,10 +117,7 @@ async fn test_long_press() {
             eprintln!("test_long_press result: {result:?}");
 
             // Check structure
-            assert!(
-                result.is_object(),
-                "Expected JSON object, got: {result:?}"
-            );
+            assert!(result.is_object(), "Expected JSON object, got: {result:?}");
 
             // In test environment, we might get various types of errors
             if let Some(error) = result.get("error") {

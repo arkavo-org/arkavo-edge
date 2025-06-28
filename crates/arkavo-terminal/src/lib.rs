@@ -484,9 +484,7 @@ pub async fn run_with_string_channels(
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
     // TODO: Implement task-specific view that connects to main process
     let mut app = App::new();
-    println!(
-        "Running task view for task: {task_id} in session: {session_id}"
-    );
+    println!("Running task view for task: {task_id} in session: {session_id}");
     app.run().await
 }
 

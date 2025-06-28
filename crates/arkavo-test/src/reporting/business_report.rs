@@ -79,9 +79,7 @@ impl BusinessReporter {
 
         template_engine
             .register_template_string("html", include_str!("../../templates/report_html.hbs"))
-            .map_err(|e| {
-                TestError::Reporting(format!("Failed to register HTML template: {e}"))
-            })?;
+            .map_err(|e| TestError::Reporting(format!("Failed to register HTML template: {e}")))?;
 
         Ok(Self {
             template_engine,

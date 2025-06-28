@@ -54,9 +54,7 @@ impl CalibrationServer {
             // Initialize IDB if not already done
             eprintln!("[CalibrationServer::check_idb_health] Initializing IDB wrapper...");
             if let Err(e) = IdbWrapper::initialize() {
-                eprintln!(
-                    "[CalibrationServer::check_idb_health] IDB initialization failed: {e}"
-                );
+                eprintln!("[CalibrationServer::check_idb_health] IDB initialization failed: {e}");
                 self.update_idb_status(
                     session_id,
                     IdbStatus {
@@ -85,9 +83,7 @@ impl CalibrationServer {
                     eprintln!(
                         "[CalibrationServer::check_idb_health] Failed to ensure companion running: {e}"
                     );
-                    eprintln!(
-                        "[CalibrationServer::check_idb_health] Error details: {e:?}"
-                    );
+                    eprintln!("[CalibrationServer::check_idb_health] Error details: {e:?}");
                     self.update_idb_status(
                         session_id,
                         IdbStatus {
@@ -193,8 +189,8 @@ impl CalibrationServer {
                             }
                             Err(e) => {
                                 eprintln!(
-                            "[CalibrationServer::check_idb_health] list_apps failed: {e}"
-                        );
+                                    "[CalibrationServer::check_idb_health] list_apps failed: {e}"
+                                );
                                 // Check if this is a framework loading error
                                 let error_str = e.to_string();
                                 if error_str.contains("Library not loaded")
@@ -266,9 +262,7 @@ impl CalibrationServer {
                         last_error: if is_connected {
                             None
                         } else if !device_found {
-                            Some(format!(
-                            "Device {device_id} not found in IDB targets list"
-                        ))
+                            Some(format!("Device {device_id} not found in IDB targets list"))
                         } else if !companion_running {
                             Some("IDB companion process is not running".to_string())
                         } else {
@@ -292,9 +286,7 @@ impl CalibrationServer {
                     Ok(is_connected)
                 }
                 Err(e) => {
-                    eprintln!(
-                        "[CalibrationServer::check_idb_health] list_targets failed: {e}"
-                    );
+                    eprintln!("[CalibrationServer::check_idb_health] list_targets failed: {e}");
                     // Check if it's a connection issue
                     let error_str = e.to_string();
                     let is_connection_issue = error_str.contains("Connection refused")
@@ -406,14 +398,10 @@ impl CalibrationServer {
         let server = self.clone();
         let session_id_clone = session_id.clone();
         tokio::spawn(async move {
-            eprintln!(
-                "Calibration: Background task started for session {session_id_clone}"
-            );
+            eprintln!("Calibration: Background task started for session {session_id_clone}");
             match server.run_calibration(&session_id_clone).await {
                 Ok(_) => {
-                    eprintln!(
-                        "Calibration: Completed successfully for session {session_id_clone}"
-                    );
+                    eprintln!("Calibration: Completed successfully for session {session_id_clone}");
                 }
                 Err(e) => {
                     eprintln!("Calibration: Failed with error: {e}");
@@ -428,9 +416,7 @@ impl CalibrationServer {
     }
 
     async fn run_calibration(&self, session_id: &str) -> Result<(), CalibrationError> {
-        eprintln!(
-            "Calibration: run_calibration started for session {session_id}"
-        );
+        eprintln!("Calibration: run_calibration started for session {session_id}");
         let start_time = std::time::Instant::now();
         const CALIBRATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -461,9 +447,7 @@ impl CalibrationServer {
         // Phase 1: Initialize
         self.update_session_status(session_id, CalibrationStatus::Initializing)
             .await;
-        eprintln!(
-            "Calibration: Starting calibration process for device {device_id}"
-        );
+        eprintln!("Calibration: Starting calibration process for device {device_id}");
         eprintln!("Calibration: Expected duration: 20-30 seconds");
 
         // Check IDB health before starting
@@ -625,9 +609,7 @@ impl CalibrationServer {
                 break;
             }
 
-            eprintln!(
-                "Calibration: Attempt {calibration_attempts} of {MAX_ATTEMPTS}"
-            );
+            eprintln!("Calibration: Attempt {calibration_attempts} of {MAX_ATTEMPTS}");
 
             // Clear previous results if any
             let _ = verification_reader.read_calibration_results();
@@ -824,8 +806,8 @@ impl CalibrationServer {
                             let port_accessible = IdbRecovery::is_companion_port_accessible().await;
 
                             eprintln!(
-                        "Calibration: Timeout recovery - Companion running: {companion_running}, Port accessible: {port_accessible}"
-                    );
+                                "Calibration: Timeout recovery - Companion running: {companion_running}, Port accessible: {port_accessible}"
+                            );
 
                             // Timeouts usually indicate stuck companion
                             if companion_running {

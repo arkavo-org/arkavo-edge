@@ -18,7 +18,7 @@ fn test_idb_init_sync() {
     }
 
     match IdbWrapper::initialize() {
-        Ok(_) => println!("IDB initialized successfully"),
+        Ok(()) => println!("IDB initialized successfully"),
         Err(e) => println!("IDB initialization failed: {e}"),
     }
 

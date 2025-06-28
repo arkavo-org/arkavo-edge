@@ -75,9 +75,7 @@ fn create_test_chat_view(message_count: usize) -> ChatView {
         };
         chat.add_message(
             role,
-            format!(
-                "Test message {i} with some longer content to simulate real chat"
-            ),
+            format!("Test message {i} with some longer content to simulate real chat"),
         );
     }
     chat
@@ -102,9 +100,7 @@ fn create_test_diff_view(line_count: usize) -> DiffView {
                 },
                 old_line_num: Some(line_num),
                 new_line_num: Some(line_num + 10),
-                content: format!(
-                    "Line {line_num} with some code content that might be quite long"
-                ),
+                content: format!("Line {line_num} with some code content that might be quite long"),
             });
         }
 

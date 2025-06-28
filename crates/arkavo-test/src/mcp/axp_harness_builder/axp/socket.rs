@@ -63,9 +63,7 @@ impl SocketManager {
     pub async fn find_active_socket(&self, device_id: &str) -> Option<String> {
         // Check cache first
         if let Some(cached_path) = self.get_cached_socket(device_id).await {
-            eprintln!(
-                "[SocketManager] Using cached socket for device {device_id}: {cached_path}"
-            );
+            eprintln!("[SocketManager] Using cached socket for device {device_id}: {cached_path}");
             return Some(cached_path);
         }
 
@@ -173,8 +171,7 @@ impl SocketManager {
             let path = entry.path();
 
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with(&format!("arkavo-axp-{device_id}-"))
-                    && name.ends_with(".sock")
+                if name.starts_with(&format!("arkavo-axp-{device_id}-")) && name.ends_with(".sock")
                 {
                     match fs::remove_file(&path) {
                         Ok(_) => {

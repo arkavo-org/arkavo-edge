@@ -28,16 +28,12 @@ impl IdbTapEnhanced {
         max_retries: u32,
     ) -> Result<serde_json::Value> {
         let start_time = Instant::now();
-        eprintln!(
-            "[IdbTapEnhanced] Starting enhanced tap at ({x}, {y}) on device {device_id}"
-        );
+        eprintln!("[IdbTapEnhanced] Starting enhanced tap at ({x}, {y}) on device {device_id}");
 
         // Pre-flight checks
         // 1. Verify simulator state
         if let Err(e) = SimulatorStateVerifier::prepare_for_interaction(device_id, None).await {
-            eprintln!(
-                "[IdbTapEnhanced] Warning: Simulator preparation failed: {e}"
-            );
+            eprintln!("[IdbTapEnhanced] Warning: Simulator preparation failed: {e}");
         }
 
         // 2. Check IDB companion health
@@ -162,9 +158,7 @@ impl IdbTapEnhanced {
 
     /// Try using AppleScript as fallback for UI automation
     async fn try_simctl_tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
-        eprintln!(
-            "[IdbTapEnhanced] Attempting AppleScript tap at ({x}, {y})"
-        );
+        eprintln!("[IdbTapEnhanced] Attempting AppleScript tap at ({x}, {y})");
 
         // First ensure the simulator window is focused
         let _ = Command::new("xcrun")
@@ -210,9 +204,7 @@ impl IdbTapEnhanced {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[IdbTapEnhanced] AppleScript tap failed: {stderr}");
-            Err(TestError::Mcp(format!(
-                "AppleScript tap failed: {stderr}"
-            )))
+            Err(TestError::Mcp(format!("AppleScript tap failed: {stderr}")))
         }
     }
 

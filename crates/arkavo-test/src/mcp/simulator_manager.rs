@@ -275,9 +275,7 @@ impl SimulatorManager {
             if error.contains("not running") {
                 return Ok(());
             }
-            return Err(TestError::Mcp(format!(
-                "Failed to terminate app: {error}"
-            )));
+            return Err(TestError::Mcp(format!("Failed to terminate app: {error}")));
         }
 
         Ok(())

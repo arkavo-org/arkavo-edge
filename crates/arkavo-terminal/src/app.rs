@@ -415,9 +415,7 @@ impl App {
                                                 Err(e) => {
                                                     self.add_debug_log(
                                                         crate::ui::debug::LogLevel::Error,
-                                                        format!(
-                                                            "[UI] Failed to send to LLM: {e}"
-                                                        ),
+                                                        format!("[UI] Failed to send to LLM: {e}"),
                                                     );
                                                     if let Some(task) = self
                                                         .task_manager
@@ -714,9 +712,8 @@ Scrolling (when in scroll mode):
 
             // If there are more than 9 tasks, show a pager
             if task_count > 9 {
-                let pager_text = format!(
-                    " Showing 1-9 of {task_count} tasks (use 1-9 keys to jump) "
-                );
+                let pager_text =
+                    format!(" Showing 1-9 of {task_count} tasks (use 1-9 keys to jump) ");
                 let pager_area = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -940,7 +937,9 @@ Scrolling (when in scroll mode):
             "SCROLL MODE (↑↓/jk/PgUp/PgDn/Home/End)"
         };
 
-        let status = format!(" {mode_indicator} | Model: {active_model} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit ");
+        let status = format!(
+            " {mode_indicator} | Model: {active_model} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit "
+        );
 
         let paragraph = Paragraph::new(status)
             .style(Style::default().fg(Color::White).bg(Color::DarkGray))

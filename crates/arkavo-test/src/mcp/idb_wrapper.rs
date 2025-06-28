@@ -481,9 +481,7 @@ impl IdbWrapper {
         };
 
         if needs_start {
-            eprintln!(
-                "[IdbWrapper] Starting companion server for device {device_id}..."
-            );
+            eprintln!("[IdbWrapper] Starting companion server for device {device_id}...");
 
             // First verify the device exists
             if !Self::verify_device_target(device_id).await? {
@@ -492,9 +490,7 @@ impl IdbWrapper {
                 eprintln!("{}", IdbErrorHandler::format_guidance(&guidance));
 
                 // Try to boot the device if it exists but isn't booted
-                eprintln!(
-                    "[IdbWrapper] Attempting to boot device {device_id} with simctl..."
-                );
+                eprintln!("[IdbWrapper] Attempting to boot device {device_id} with simctl...");
                 let boot_cmd = Command::new("xcrun")
                     .args(["simctl", "boot", device_id])
                     .output();
@@ -637,8 +633,8 @@ impl IdbWrapper {
                             let stderr_str = String::from_utf8_lossy(&stderr_bytes);
 
                             eprintln!(
-                            "[IdbWrapper] Companion process exited immediately with status: {status:?}"
-                        );
+                                "[IdbWrapper] Companion process exited immediately with status: {status:?}"
+                            );
                             eprintln!("[IdbWrapper] Stderr: {stderr_str}");
 
                             // Check for specific exit codes
@@ -709,12 +705,10 @@ impl IdbWrapper {
                             return Ok(child);
                         }
                         Err(e) => {
-                            eprintln!(
-                            "[IdbWrapper] Failed to check companion process status: {e}"
-                        );
+                            eprintln!("[IdbWrapper] Failed to check companion process status: {e}");
                             return Err(TestError::Mcp(format!(
-                            "Failed to verify companion started: {e}"
-                        )));
+                                "Failed to verify companion started: {e}"
+                            )));
                         }
                     }
                 }
@@ -853,9 +847,7 @@ impl IdbWrapper {
                 let start_result = start_cmd.args(["--udid", device_id]).spawn();
 
                 if let Ok(mut child) = start_result {
-                    eprintln!(
-                        "[IdbWrapper] Started IDB companion process for device {device_id}"
-                    );
+                    eprintln!("[IdbWrapper] Started IDB companion process for device {device_id}");
 
                     // Give it a moment to start
                     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -881,9 +873,7 @@ impl IdbWrapper {
                     // Give it more time to fully initialize
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 } else {
-                    eprintln!(
-                        "[IdbWrapper] Failed to start IDB companion for device {device_id}"
-                    );
+                    eprintln!("[IdbWrapper] Failed to start IDB companion for device {device_id}");
                 }
             }
         }
@@ -897,9 +887,7 @@ impl IdbWrapper {
     pub async fn tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         let _start_time = std::time::Instant::now();
 
-        eprintln!(
-            "[IdbWrapper::tap] Starting tap at ({x}, {y}) on device {device_id}"
-        );
+        eprintln!("[IdbWrapper::tap] Starting tap at ({x}, {y}) on device {device_id}");
 
         // Initialize and get the embedded binary path
         Self::initialize()?;
@@ -1114,9 +1102,7 @@ impl IdbWrapper {
 
     /// Verify that a device is available in IDB targets
     pub async fn verify_device_target(device_id: &str) -> Result<bool> {
-        eprintln!(
-            "[IdbWrapper] Verifying device {device_id} is available in IDB targets..."
-        );
+        eprintln!("[IdbWrapper] Verifying device {device_id} is available in IDB targets...");
 
         let targets = Self::list_targets().await?;
 
@@ -1182,9 +1168,7 @@ impl IdbWrapper {
             }
         }
 
-        eprintln!(
-            "[IdbWrapper] Device {device_id} not found in simctl either!"
-        );
+        eprintln!("[IdbWrapper] Device {device_id} not found in simctl either!");
         Ok(false)
     }
 

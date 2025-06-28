@@ -83,9 +83,7 @@ impl McpTestServer {
         {
             eprintln!("[McpTestServer] Initializing IDB companion...");
             if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
-                eprintln!(
-                    "[McpTestServer] Warning: Failed to initialize IDB companion: {e}"
-                );
+                eprintln!("[McpTestServer] Warning: Failed to initialize IDB companion: {e}");
                 eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
             } else {
                 eprintln!("[McpTestServer] IDB companion initialized successfully");
@@ -122,8 +120,8 @@ impl McpTestServer {
                     }
                     Err(e) => {
                         eprintln!(
-                        "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
-                    );
+                            "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
+                        );
                         eprintln!("[McpTestServer] Memory tools will not be available");
                         None
                     }
@@ -570,9 +568,7 @@ impl McpTestServer {
         )
         .await
         .map_err(|_| {
-            TestError::Mcp(format!(
-                "Tool execution timeout after {timeout_duration:?}"
-            ))
+            TestError::Mcp(format!("Tool execution timeout after {timeout_duration:?}"))
         })??;
 
         Ok(ToolResponse {
@@ -1373,9 +1369,7 @@ impl TestExecutor {
                     .arg(test_name)
                     .current_dir(&self.working_dir)
                     .output()
-                    .map_err(|e| {
-                        TestError::Execution(format!("Failed to run Python test: {e}"))
-                    })?
+                    .map_err(|e| TestError::Execution(format!("Failed to run Python test: {e}")))?
             }
         };
 
