@@ -11,7 +11,7 @@ members = [
     "crates/arkavo-test",
     "crates/arkavo-llm",
     "crates/arkavo-memory",
-    "crates/arkavo-mcp",
+    "crates/arkavo-mcp", "crates/arkavo-dataflow",
 ]
 resolver = "2"
 
