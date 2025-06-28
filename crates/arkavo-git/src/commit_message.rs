@@ -139,7 +139,7 @@ impl CommitMessageGenerator {
                     .map(|(ext, _)| ext.as_str())
                     .unwrap_or("files");
 
-                format!("update {} files", primary_type)
+                format!("update {primary_type} files")
             }
         };
 
@@ -152,7 +152,7 @@ impl CommitMessageGenerator {
             summary.files_deleted
         );
 
-        format!("{}: {} - {}", prefix, main_action, details)
+        format!("{prefix}: {main_action} - {details}")
     }
 }
 

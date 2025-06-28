@@ -35,7 +35,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy -- -A clippy::uninlined_format_args -D warnings
+      - run: cargo clippy -- -D warnings
 
   # Tests and builds can run in parallel
   test:

@@ -30,7 +30,7 @@ impl AIStepMapper {
             .claude_client
             .complete(&prompt)
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {e}")))?;
 
         self.parse_actions_response(&response)
     }
@@ -72,7 +72,7 @@ Return ONLY the JSON array, no other text."#,
         let cleaned_response = response.trim();
 
         serde_json::from_str::<Vec<Action>>(cleaned_response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse AI response as actions: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse AI response as actions: {e}")))
     }
 
     pub async fn natural_language_to_actions(&self, text: &str) -> Result<Vec<Action>> {
@@ -96,7 +96,7 @@ Return ONLY the JSON array."#,
             .claude_client
             .complete(&prompt)
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {e}")))?;
 
         self.parse_actions_response(&response)
     }

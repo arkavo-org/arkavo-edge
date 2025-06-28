@@ -29,8 +29,7 @@ impl IdbTapEnhanced {
     ) -> Result<serde_json::Value> {
         let start_time = Instant::now();
         eprintln!(
-            "[IdbTapEnhanced] Starting enhanced tap at ({}, {}) on device {}",
-            x, y, device_id
+            "[IdbTapEnhanced] Starting enhanced tap at ({x}, {y}) on device {device_id}"
         );
 
         // Pre-flight checks
@@ -100,7 +99,7 @@ impl IdbTapEnhanced {
                 }
                 Err(e) => {
                     let latency = tap_start.elapsed().as_millis() as u64;
-                    eprintln!("[IdbTapEnhanced] IDB tap failed: {} ({}ms)", e, latency);
+                    eprintln!("[IdbTapEnhanced] IDB tap failed: {e} ({latency}ms)");
 
                     // Record failure metrics
                     IdbCompanionHealth::record_tap_result(device_id, false, latency);
@@ -165,8 +164,7 @@ impl IdbTapEnhanced {
     /// Try using AppleScript as fallback for UI automation
     async fn try_simctl_tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         eprintln!(
-            "[IdbTapEnhanced] Attempting AppleScript tap at ({}, {})",
-            x, y
+            "[IdbTapEnhanced] Attempting AppleScript tap at ({x}, {y})"
         );
 
         // First ensure the simulator window is focused
@@ -189,17 +187,16 @@ impl IdbTapEnhanced {
             end tell
             delay 0.1
             tell application "System Events"
-                click at {{{}, {}}}
+                click at {{{screen_x}, {screen_y}}}
             end tell
-            "#,
-            screen_x, screen_y
+            "#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
         if output.status.success() {
             eprintln!("[IdbTapEnhanced] AppleScript tap succeeded");
@@ -213,10 +210,9 @@ impl IdbTapEnhanced {
             }))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[IdbTapEnhanced] AppleScript tap failed: {}", stderr);
+            eprintln!("[IdbTapEnhanced] AppleScript tap failed: {stderr}");
             Err(TestError::Mcp(format!(
-                "AppleScript tap failed: {}",
-                stderr
+                "AppleScript tap failed: {stderr}"
             )))
         }
     }
@@ -227,7 +223,7 @@ impl IdbTapEnhanced {
         let output = Command::new("xcrun")
             .args(["simctl", "ui", device_id, "appearance", "light"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to focus simulator: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to focus simulator: {e}")))?;
 
         if !output.status.success() {
             eprintln!("[IdbTapEnhanced] Warning: Could not focus simulator");
@@ -242,7 +238,7 @@ impl IdbTapEnhanced {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if let Ok(devices) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
             // Try to find device and infer screen size from device type
@@ -258,8 +254,7 @@ impl IdbTapEnhanced {
 
                             if x < 0.0 || x > width || y < 0.0 || y > height {
                                 return Err(TestError::Mcp(format!(
-                                    "Coordinates ({}, {}) out of bounds for device with size {}x{}",
-                                    x, y, width, height
+                                    "Coordinates ({x}, {y}) out of bounds for device with size {width}x{height}"
                                 )));
                             }
 

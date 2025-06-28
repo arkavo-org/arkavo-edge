@@ -98,8 +98,7 @@ impl UiInteractionKit {
             if let Some((cached_device_id, socket_path)) = cache.as_ref() {
                 if cached_device_id == &device_id {
                     eprintln!(
-                        "[AXP] Using cached socket for device {}: {}",
-                        device_id, socket_path
+                        "[AXP] Using cached socket for device {device_id}: {socket_path}"
                     );
                     return Some((socket_path.clone(), true));
                 }
@@ -118,7 +117,7 @@ impl UiInteractionKit {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     // Check if socket is for this device
-                    if name.starts_with(&format!("arkavo-axp-{}-", device_id))
+                    if name.starts_with(&format!("arkavo-axp-{device_id}-"))
                         && name.ends_with(".sock")
                     {
                         let socket_path = entry.path();
@@ -157,7 +156,7 @@ impl UiInteractionKit {
             *cache = None;
         }
 
-        eprintln!("[AXP] No active AXP harness found for device {}", device_id);
+        eprintln!("[AXP] No active AXP harness found for device {device_id}");
         None
     }
 
@@ -166,11 +165,11 @@ impl UiInteractionKit {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        eprintln!("[AXP] Sending tap to ({}, {}) via {}", x, y, socket_path);
+        eprintln!("[AXP] Sending tap to ({x}, {y}) via {socket_path}");
 
         let mut stream = UnixStream::connect(socket_path)
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to connect to AXP socket: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to connect to AXP socket: {e}")))?;
 
         let (reader, mut writer) = stream.split();
         let mut reader = BufReader::new(reader);
@@ -201,8 +200,7 @@ impl UiInteractionKit {
             }
             Ok(Err(e)) => {
                 return Err(TestError::Mcp(format!(
-                    "Failed to read AXP capabilities: {}",
-                    e
+                    "Failed to read AXP capabilities: {e}"
                 )));
             }
             Err(_) => {
@@ -218,30 +216,30 @@ impl UiInteractionKit {
         });
 
         let command_str = serde_json::to_string(&tap_command)
-            .map_err(|e| TestError::Mcp(format!("Failed to serialize AXP command: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to serialize AXP command: {e}")))?;
 
         writer
             .write_all(command_str.as_bytes())
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to send AXP command: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send AXP command: {e}")))?;
         writer
             .write_all(b"\n")
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to send newline: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send newline: {e}")))?;
         writer
             .flush()
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to flush: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to flush: {e}")))?;
 
         // Read response
         let mut response_line = String::new();
         reader
             .read_line(&mut response_line)
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to read AXP response: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read AXP response: {e}")))?;
 
         let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse AXP response: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse AXP response: {e}")))?;
 
         if response
             .get("success")
@@ -252,7 +250,7 @@ impl UiInteractionKit {
                 .get("tapTime")
                 .and_then(|t| t.as_f64())
                 .unwrap_or(0.0);
-            eprintln!("[AXP] Tap completed in {:.1}ms", tap_time);
+            eprintln!("[AXP] Tap completed in {tap_time:.1}ms");
 
             Ok(serde_json::json!({
                 "success": true,
@@ -280,7 +278,7 @@ impl UiInteractionKit {
                 eprintln!("[AXP] This is expected with beta iOS versions - will use fallback");
             }
 
-            Err(TestError::Mcp(format!("AXP tap failed: {}", error)))
+            Err(TestError::Mcp(format!("AXP tap failed: {error}")))
         }
     }
 
@@ -337,9 +335,8 @@ impl UiInteractionKit {
                                                 dtype["screenHeight"].as_f64(),
                                             ) {
                                                 eprintln!(
-                                                    "Found device dimensions from simctl: {}x{}",
-                                                    width, height
-                                                );
+                            "Found device dimensions from simctl: {width}x{height}"
+                        );
                                                 return Some((width, height));
                                             }
                                         }
@@ -392,8 +389,7 @@ impl UiInteractionKit {
             }
             Err(e) => {
                 eprintln!(
-                    "[UiInteractionKit] Failed to initialize XCTest runner: {}. Text-based tapping unavailable.",
-                    e
+                    "[UiInteractionKit] Failed to initialize XCTest runner: {e}. Text-based tapping unavailable."
                 );
                 None
             }
@@ -463,7 +459,7 @@ impl UiInteractionKit {
                 Ok(bridge)
             }
             Ok(Err(e)) => {
-                eprintln!("[UiInteractionKit] Connection error: {}", e);
+                eprintln!("[UiInteractionKit] Connection error: {e}");
                 Err(e)
             }
             Err(_) => {
@@ -528,12 +524,12 @@ impl Tool for UiInteractionKit {
 
                 // First capture a screenshot of the entire simulator window
                 let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
-                let screenshot_name = format!("layout_analysis_{}.png", timestamp);
-                let screenshot_path = format!("test_results/{}", screenshot_name);
+                let screenshot_name = format!("layout_analysis_{timestamp}.png");
+                let screenshot_path = format!("test_results/{screenshot_name}");
 
                 // Ensure test_results directory exists
                 std::fs::create_dir_all("test_results").map_err(|e| {
-                    TestError::Mcp(format!("Failed to create test_results directory: {}", e))
+                    TestError::Mcp(format!("Failed to create test_results directory: {e}"))
                 })?;
 
                 // Capture the entire simulator window using screencapture
@@ -549,7 +545,7 @@ impl Tool for UiInteractionKit {
                         .args(["simctl", "io", &device_id, "screenshot", &screenshot_path])
                         .output()
                         .map_err(|e| {
-                            TestError::Mcp(format!("Failed to capture screenshot: {}", e))
+                            TestError::Mcp(format!("Failed to capture screenshot: {e}"))
                         })?;
 
                     if !output.status.success() {

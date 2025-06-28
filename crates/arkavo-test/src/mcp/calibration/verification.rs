@@ -102,7 +102,7 @@ impl VerificationReader {
             if path.exists() {
                 eprintln!("[VerificationReader] Found results at: {}", path.display());
                 let data = fs::read_to_string(path)?;
-                eprintln!("[VerificationReader] Raw data: {}", data);
+                eprintln!("[VerificationReader] Raw data: {data}");
                 let results: CalibrationResults = serde_json::from_str(&data)?;
 
                 eprintln!(
@@ -134,8 +134,7 @@ impl VerificationReader {
         loop {
             if start.elapsed() > timeout {
                 return Err(CalibrationError::ValidationError(format!(
-                    "Timeout waiting for calibration results after {} seconds",
-                    timeout_secs
+                    "Timeout waiting for calibration results after {timeout_secs} seconds"
                 )));
             }
 
@@ -177,8 +176,7 @@ impl VerificationReader {
             if output.status.success() {
                 let container_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 eprintln!(
-                    "[VerificationReader] App container path: {}",
-                    container_path
+                    "[VerificationReader] App container path: {container_path}"
                 );
                 return PathBuf::from(container_path).join("Documents/calibration_results.json");
             } else {

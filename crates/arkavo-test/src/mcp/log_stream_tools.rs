@@ -70,7 +70,7 @@ impl LogStreamKit {
         let filter_predicate = if let Some(custom_predicate) = predicate {
             custom_predicate.to_string()
         } else if let Some(process) = process_name {
-            format!("process == \"{}\"", process)
+            format!("process == \"{process}\"")
         } else {
             "eventType == \"logMessage\"".to_string()
         };
@@ -80,7 +80,7 @@ impl LogStreamKit {
 
         // Create log output file
         let log_file_path = env::temp_dir()
-            .join(format!("arkavo_logs_{}.txt", stream_id))
+            .join(format!("arkavo_logs_{stream_id}.txt"))
             .display()
             .to_string();
 
@@ -102,7 +102,7 @@ impl LogStreamKit {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to start log stream: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to start log stream: {e}")))?;
 
         let stdout = child
             .stdout
@@ -125,13 +125,13 @@ impl LogStreamKit {
                 if let Some(file) = &file {
                     use std::io::Write;
                     let mut file = file;
-                    writeln!(file, "{}", line).ok();
+                    writeln!(file, "{line}").ok();
                 }
 
                 // Parse JSON log entry if possible
                 if let Ok(log_entry) = serde_json::from_str::<Value>(&line) {
                     if let Some(message) = log_entry.get("eventMessage").and_then(|m| m.as_str()) {
-                        eprintln!("[LOG:{}] {}", stream_id_clone, message);
+                        eprintln!("[LOG:{stream_id_clone}] {message}");
                     }
                 }
             }
@@ -196,13 +196,13 @@ impl LogStreamKit {
     ) -> Result<Value> {
         let log_file_path = if let Some(id) = stream_id {
             env::temp_dir()
-                .join(format!("arkavo_logs_{}.txt", id))
+                .join(format!("arkavo_logs_{id}.txt"))
                 .display()
                 .to_string()
         } else {
             // Find most recent log file
             let entries = std::fs::read_dir(env::temp_dir())
-                .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {e}")))?;
 
             let mut log_files: Vec<_> = entries
                 .filter_map(|e| e.ok())
@@ -224,7 +224,7 @@ impl LogStreamKit {
 
         // Read the log file
         let contents = std::fs::read_to_string(&log_file_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to read log file: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read log file: {e}")))?;
 
         let lines: Vec<&str> = contents.lines().collect();
         let limit = limit.unwrap_or(100);

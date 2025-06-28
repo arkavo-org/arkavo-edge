@@ -69,7 +69,7 @@ impl CalibrationDataStore {
         let backup_path = self
             .storage_path
             .join("backups")
-            .join(format!("{}_{}_{}.json", device_id, version, timestamp));
+            .join(format!("{device_id}_{version}_{timestamp}.json"));
         fs::create_dir_all(backup_path.parent().unwrap())?;
 
         let full_data = CalibrationData {
@@ -238,11 +238,11 @@ impl CalibrationDataStore {
     }
 
     fn get_config_path(&self, device_id: &str) -> PathBuf {
-        self.storage_path.join(format!("{}_config.json", device_id))
+        self.storage_path.join(format!("{device_id}_config.json"))
     }
 
     fn get_result_path(&self, device_id: &str) -> PathBuf {
-        self.storage_path.join(format!("{}_result.json", device_id))
+        self.storage_path.join(format!("{device_id}_result.json"))
     }
 }
 

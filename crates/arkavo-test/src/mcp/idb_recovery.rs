@@ -52,7 +52,7 @@ impl IdbRecovery {
 
             // Also check alternative ports
             for port in [10883, 10884, 10885] {
-                if TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
+                if TcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
                     return true;
                 }
             }
@@ -134,8 +134,7 @@ impl IdbRecovery {
         let port_accessible = Self::is_companion_port_accessible().await;
 
         eprintln!(
-            "[IdbRecovery] Current state - Companion running: {}, Port accessible: {}",
-            companion_running, port_accessible
+            "[IdbRecovery] Current state - Companion running: {companion_running}, Port accessible: {port_accessible}"
         );
 
         // Special handling for "companion running but not connected" scenario
@@ -174,7 +173,7 @@ impl IdbRecovery {
             ];
 
             for path in &cache_paths {
-                eprintln!("[IdbRecovery] Clearing cache: {}", path);
+                eprintln!("[IdbRecovery] Clearing cache: {path}");
                 let expanded = if path.starts_with("~") {
                     let home = std::env::var("HOME").unwrap_or_default();
                     path.replacen("~", &home, 1)
@@ -210,8 +209,7 @@ impl IdbRecovery {
             // Force re-initialization by clearing the static path
             if let Err(e) = IdbWrapper::initialize_with_preference(false) {
                 eprintln!(
-                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {}",
-                    e
+                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}"
                 );
             }
         }
@@ -228,7 +226,7 @@ impl IdbRecovery {
 
     /// Force disconnect and reconnect for a specific device
     pub async fn force_reconnect_device(&self, device_id: &str) -> Result<()> {
-        eprintln!("[IdbRecovery] Force reconnecting device {}...", device_id);
+        eprintln!("[IdbRecovery] Force reconnecting device {device_id}...");
 
         #[cfg(target_os = "macos")]
         {
@@ -238,7 +236,7 @@ impl IdbRecovery {
             {
                 let mut devices = CONNECTED_DEVICES.lock().unwrap();
                 devices.remove(device_id);
-                eprintln!("[IdbRecovery] Removed device {} from tracking", device_id);
+                eprintln!("[IdbRecovery] Removed device {device_id} from tracking");
             }
 
             // Step 2: Try to explicitly disconnect via IDB using the correct binary path
@@ -258,7 +256,7 @@ impl IdbRecovery {
                     eprintln!("[IdbRecovery] Successfully disconnected device");
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("[IdbRecovery] Disconnect command failed: {}", stderr);
+                    eprintln!("[IdbRecovery] Disconnect command failed: {stderr}");
                 }
             }
 
@@ -267,8 +265,7 @@ impl IdbRecovery {
 
             // Step 4: Force a new connection by using IDB's connect command
             eprintln!(
-                "[IdbRecovery] Forcing new connection to device {}...",
-                device_id
+                "[IdbRecovery] Forcing new connection to device {device_id}..."
             );
 
             // Initialize IDB if needed
@@ -287,7 +284,7 @@ impl IdbRecovery {
                     eprintln!("[IdbRecovery] Successfully connected to device");
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("[IdbRecovery] Connect command failed: {}", stderr);
+                    eprintln!("[IdbRecovery] Connect command failed: {stderr}");
 
                     // If direct connect fails, try with explicit port
                     eprintln!("[IdbRecovery] Retrying with explicit port...");
@@ -306,7 +303,7 @@ impl IdbRecovery {
 
             // The ensure_connected method in IdbWrapper will handle the reconnection
             // We just need to trigger it by clearing the device from the cache
-            eprintln!("[IdbRecovery] Device {} reconnection attempted", device_id);
+            eprintln!("[IdbRecovery] Device {device_id} reconnection attempted");
         }
 
         Ok(())
@@ -340,8 +337,7 @@ impl IdbRecovery {
                 let device_count = devices.len();
                 devices.clear();
                 eprintln!(
-                    "[IdbRecovery] Cleared {} devices from connection tracking",
-                    device_count
+                    "[IdbRecovery] Cleared {device_count} devices from connection tracking"
                 );
             }
 
@@ -360,7 +356,7 @@ impl IdbRecovery {
                     // Step 3: Try to send SIGTERM first
                     for pid in pids.lines() {
                         if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                            eprintln!("[IdbRecovery] Sending SIGTERM to PID {}", pid_num);
+                            eprintln!("[IdbRecovery] Sending SIGTERM to PID {pid_num}");
                             let _ = Command::new("kill")
                                 .arg("-TERM")
                                 .arg(pid_num.to_string())
@@ -394,9 +390,8 @@ impl IdbRecovery {
                     for pid in pids.lines() {
                         if let Ok(pid_num) = pid.trim().parse::<i32>() {
                             eprintln!(
-                                "[IdbRecovery] Killing process {} holding port 10882",
-                                pid_num
-                            );
+                            "[IdbRecovery] Killing process {pid_num} holding port 10882"
+                        );
                             let _ = Command::new("kill")
                                 .arg("-9")
                                 .arg(pid_num.to_string())
@@ -429,8 +424,7 @@ impl IdbRecovery {
             eprintln!("[IdbRecovery] Re-initializing IDB wrapper with embedded binary...");
             if let Err(e) = IdbWrapper::initialize_with_preference(false) {
                 eprintln!(
-                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {}",
-                    e
+                    "[IdbRecovery] Warning: Failed to re-initialize IDB wrapper: {e}"
                 );
 
                 // Try again with system IDB as fallback

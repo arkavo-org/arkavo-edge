@@ -38,7 +38,7 @@ impl SimctlFallback {
         let output = Command::new("xcrun")
             .args(["simctl", "io", device_id, "screenshot", output_path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute simctl screenshot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute simctl screenshot: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -51,21 +51,20 @@ impl SimctlFallback {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(TestError::Mcp(format!(
-                "simctl screenshot failed: {}",
-                stderr
+                "simctl screenshot failed: {stderr}"
             )))
         }
     }
 
     /// Boot a device if needed
     pub async fn ensure_booted(device_id: &str) -> Result<()> {
-        eprintln!("[SimctlFallback] Ensuring device {} is booted", device_id);
+        eprintln!("[SimctlFallback] Ensuring device {device_id} is booted");
 
         // Check current state
         let list_output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run simctl list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run simctl list: {e}")))?;
 
         if !list_output.status.success() {
             return Err(TestError::Mcp("Failed to list devices".to_string()));

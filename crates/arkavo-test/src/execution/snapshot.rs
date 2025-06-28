@@ -51,7 +51,7 @@ impl SnapshotManager {
         let current_id = self
             .current_branch
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read current branch: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to read current branch: {e}")))?
             .clone();
 
         let new_id = uuid::Uuid::new_v4().to_string();
@@ -68,7 +68,7 @@ impl SnapshotManager {
         let mut nodes = self
             .nodes
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {e}")))?;
 
         if let Some(parent) = nodes.get_mut(&current_id) {
             parent.children.push(new_id.clone());
@@ -83,12 +83,11 @@ impl SnapshotManager {
         let nodes = self
             .nodes
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {e}")))?;
 
         if !nodes.contains_key(snapshot_id) {
             return Err(TestError::Execution(format!(
-                "Snapshot not found: {}",
-                snapshot_id
+                "Snapshot not found: {snapshot_id}"
             )));
         }
 
@@ -97,7 +96,7 @@ impl SnapshotManager {
         let mut current = self
             .current_branch
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write current branch: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write current branch: {e}")))?;
 
         *current = snapshot_id.to_string();
 
@@ -108,19 +107,19 @@ impl SnapshotManager {
         let nodes = self
             .nodes
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {e}")))?;
 
         let source = nodes
             .get(source_id)
             .ok_or_else(|| {
-                TestError::Execution(format!("Source snapshot not found: {}", source_id))
+                TestError::Execution(format!("Source snapshot not found: {source_id}"))
             })?
             .clone();
 
         let target = nodes
             .get(target_id)
             .ok_or_else(|| {
-                TestError::Execution(format!("Target snapshot not found: {}", target_id))
+                TestError::Execution(format!("Target snapshot not found: {target_id}"))
             })?
             .clone();
 
@@ -142,7 +141,7 @@ impl SnapshotManager {
         let mut nodes = self
             .nodes
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {e}")))?;
 
         if let Some(target) = nodes.get_mut(target_id) {
             target.children.push(merged_id.clone());
@@ -157,7 +156,7 @@ impl SnapshotManager {
         let nodes = self
             .nodes
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {e}")))?;
 
         let mut history = Vec::new();
         let mut current_id = Some(snapshot_id.to_string());
@@ -179,11 +178,11 @@ impl SnapshotManager {
         let mut nodes = self
             .nodes
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {e}")))?;
 
         let node = nodes
             .get_mut(snapshot_id)
-            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {}", snapshot_id)))?;
+            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {snapshot_id}")))?;
 
         if !node.tags.contains(&tag.to_string()) {
             node.tags.push(tag.to_string());
@@ -196,7 +195,7 @@ impl SnapshotManager {
         let nodes = self
             .nodes
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read nodes: {e}")))?;
 
         let tagged: Vec<SnapshotNode> = nodes
             .values()

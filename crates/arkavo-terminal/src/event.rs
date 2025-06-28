@@ -85,7 +85,7 @@ impl EventHandler {
                 let key = match s.key {
                     KeyCode::Char(c) => {
                         if s.modifiers.contains(KeyModifiers::CONTROL) {
-                            format!("Ctrl+{}", c)
+                            format!("Ctrl+{c}")
                         } else {
                             c.to_string()
                         }

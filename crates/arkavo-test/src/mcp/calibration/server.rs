@@ -55,15 +55,14 @@ impl CalibrationServer {
             eprintln!("[CalibrationServer::check_idb_health] Initializing IDB wrapper...");
             if let Err(e) = IdbWrapper::initialize() {
                 eprintln!(
-                    "[CalibrationServer::check_idb_health] IDB initialization failed: {}",
-                    e
+                    "[CalibrationServer::check_idb_health] IDB initialization failed: {e}"
                 );
                 self.update_idb_status(
                     session_id,
                     IdbStatus {
                         connected: false,
                         last_health_check: Some(chrono::Utc::now()),
-                        last_error: Some(format!("IDB initialization failed: {}", e)),
+                        last_error: Some(format!("IDB initialization failed: {e}")),
                         companion_running: false,
                     },
                 )
@@ -74,31 +73,27 @@ impl CalibrationServer {
 
             // Ensure companion is running for this specific device
             eprintln!(
-                "[CalibrationServer::check_idb_health] Ensuring IDB companion is running for device {}...",
-                device_id
+                "[CalibrationServer::check_idb_health] Ensuring IDB companion is running for device {device_id}..."
             );
             match IdbWrapper::ensure_companion_running(device_id).await {
                 Ok(_) => {
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] IDB companion started/verified for device {}",
-                        device_id
+                        "[CalibrationServer::check_idb_health] IDB companion started/verified for device {device_id}"
                     );
                 }
                 Err(e) => {
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] Failed to ensure companion running: {}",
-                        e
+                        "[CalibrationServer::check_idb_health] Failed to ensure companion running: {e}"
                     );
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] Error details: {:?}",
-                        e
+                        "[CalibrationServer::check_idb_health] Error details: {e:?}"
                     );
                     self.update_idb_status(
                         session_id,
                         IdbStatus {
                             connected: false,
                             last_health_check: Some(chrono::Utc::now()),
-                            last_error: Some(format!("Failed to start IDB companion: {}", e)),
+                            last_error: Some(format!("Failed to start IDB companion: {e}")),
                             companion_running: false,
                         },
                     )
@@ -111,15 +106,13 @@ impl CalibrationServer {
             eprintln!("[CalibrationServer::check_idb_health] Checking companion process status...");
             let companion_running = IdbRecovery::is_companion_running().await;
             eprintln!(
-                "[CalibrationServer::check_idb_health] Companion process running: {}",
-                companion_running
+                "[CalibrationServer::check_idb_health] Companion process running: {companion_running}"
             );
 
             eprintln!("[CalibrationServer::check_idb_health] Checking port 10882 accessibility...");
             let port_accessible = IdbRecovery::is_companion_port_accessible().await;
             eprintln!(
-                "[CalibrationServer::check_idb_health] Port 10882 accessible: {}",
-                port_accessible
+                "[CalibrationServer::check_idb_health] Port 10882 accessible: {port_accessible}"
             );
 
             // If companion is running but port not accessible, it's stuck
@@ -166,8 +159,7 @@ impl CalibrationServer {
             match IdbWrapper::list_targets().await {
                 Ok(targets) => {
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] list_targets succeeded, checking for device {}...",
-                        device_id
+                        "[CalibrationServer::check_idb_health] list_targets succeeded, checking for device {device_id}..."
                     );
                     let device_found = targets.as_array()
                         .map(|arr| {
@@ -176,15 +168,14 @@ impl CalibrationServer {
                                 let udid = t.get("udid").and_then(|u| u.as_str()).unwrap_or("unknown");
                                 let matches = udid == device_id;
                                 if matches {
-                                    eprintln!("[CalibrationServer::check_idb_health] Found matching device: {}", udid);
+                                    eprintln!("[CalibrationServer::check_idb_health] Found matching device: {udid}");
                                 }
                                 matches
                             })
                         })
                         .unwrap_or(false);
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] Device {} found in targets: {}",
-                        device_id, device_found
+                        "[CalibrationServer::check_idb_health] Device {device_id} found in targets: {device_found}"
                     );
 
                     // Check if IDB is actually connected to this specific device
@@ -203,9 +194,8 @@ impl CalibrationServer {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "[CalibrationServer::check_idb_health] list_apps failed: {}",
-                                    e
-                                );
+                            "[CalibrationServer::check_idb_health] list_apps failed: {e}"
+                        );
                                 // Check if this is a framework loading error
                                 let error_str = e.to_string();
                                 if error_str.contains("Library not loaded")
@@ -220,8 +210,7 @@ impl CalibrationServer {
                         }
                     } else {
                         eprintln!(
-                            "[CalibrationServer::check_idb_health] Device not found ({}) or companion not running ({})",
-                            device_found, companion_running
+                            "[CalibrationServer::check_idb_health] Device not found ({device_found}) or companion not running ({companion_running})"
                         );
                         false
                     };
@@ -253,8 +242,7 @@ impl CalibrationServer {
                                     "[CalibrationServer::check_idb_health] Stuck companion recovery completed"
                                 ),
                                 Err(e) => eprintln!(
-                                    "[CalibrationServer::check_idb_health] Stuck companion recovery failed: {}",
-                                    e
+                                    "[CalibrationServer::check_idb_health] Stuck companion recovery failed: {e}"
                                 ),
                             }
                         } else {
@@ -281,9 +269,8 @@ impl CalibrationServer {
                             None
                         } else if !device_found {
                             Some(format!(
-                                "Device {} not found in IDB targets list",
-                                device_id
-                            ))
+                            "Device {device_id} not found in IDB targets list"
+                        ))
                         } else if !companion_running {
                             Some("IDB companion process is not running".to_string())
                         } else {
@@ -302,15 +289,13 @@ impl CalibrationServer {
                     self.update_idb_status(session_id, final_status).await;
 
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] Returning health status: {}",
-                        is_connected
+                        "[CalibrationServer::check_idb_health] Returning health status: {is_connected}"
                     );
                     Ok(is_connected)
                 }
                 Err(e) => {
                     eprintln!(
-                        "[CalibrationServer::check_idb_health] list_targets failed: {}",
-                        e
+                        "[CalibrationServer::check_idb_health] list_targets failed: {e}"
                     );
                     // Check if it's a connection issue
                     let error_str = e.to_string();
@@ -328,7 +313,7 @@ impl CalibrationServer {
                         IdbStatus {
                             connected: false,
                             last_health_check: Some(chrono::Utc::now()),
-                            last_error: Some(format!("IDB health check failed: {}", e)),
+                            last_error: Some(format!("IDB health check failed: {e}")),
                             companion_running: companion_running && !is_connection_issue,
                         },
                     )
@@ -424,14 +409,12 @@ impl CalibrationServer {
         let session_id_clone = session_id.clone();
         tokio::spawn(async move {
             eprintln!(
-                "Calibration: Background task started for session {}",
-                session_id_clone
+                "Calibration: Background task started for session {session_id_clone}"
             );
             match server.run_calibration(&session_id_clone).await {
                 Ok(_) => {
                     eprintln!(
-                        "Calibration: Completed successfully for session {}",
-                        session_id_clone
+                        "Calibration: Completed successfully for session {session_id_clone}"
                     );
                 }
                 Err(e) => {

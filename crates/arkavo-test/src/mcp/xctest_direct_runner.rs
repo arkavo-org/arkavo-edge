@@ -30,8 +30,7 @@ impl XCTestDirectRunner {
     /// Compile and run XCTest code directly
     pub fn run_on_simulator(&self, device_id: &str) -> Result<()> {
         eprintln!(
-            "[DirectRunner] Creating XCTest executable for device {}",
-            device_id
+            "[DirectRunner] Creating XCTest executable for device {device_id}"
         );
 
         // Create Swift code that uses XCTest but runs as a regular executable
@@ -203,7 +202,7 @@ do {{
         let platform_path = String::from_utf8_lossy(&platform_output.stdout)
             .trim()
             .to_string();
-        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
 
         eprintln!("[DirectRunner] Compiling with XCTest framework...");
 
@@ -245,7 +244,7 @@ do {{
         let mut child = Command::new("xcrun")
             .args(["simctl", "spawn", device_id, binary_path.to_str().unwrap()])
             .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to spawn: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to spawn: {e}")))?;
 
         // Give it time to start
         std::thread::sleep(std::time::Duration::from_secs(2));

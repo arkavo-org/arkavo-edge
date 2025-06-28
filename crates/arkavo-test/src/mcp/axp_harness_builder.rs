@@ -52,8 +52,7 @@ impl AxpHarnessBuilder {
 
     async fn build_axp_harness(&self, app_bundle_id: &str) -> Result<Value> {
         eprintln!(
-            "[AxpHarnessBuilder] Building generic AXP harness for {}",
-            app_bundle_id
+            "[AxpHarnessBuilder] Building generic AXP harness for {app_bundle_id}"
         );
 
         // Pre-flight checks
@@ -133,7 +132,7 @@ impl AxpHarnessBuilder {
 
         // Install to simulator
         if let Err(e) = self.install_to_simulator(&device_id, bundle_path) {
-            eprintln!("[AxpHarnessBuilder] Warning: Failed to auto-install: {}", e);
+            eprintln!("[AxpHarnessBuilder] Warning: Failed to auto-install: {e}");
         } else {
             eprintln!("[AxpHarnessBuilder] Successfully installed to simulator");
         }
@@ -196,7 +195,7 @@ impl AxpHarnessBuilder {
         ));
 
         fs::create_dir_all(&build_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {e}")))?;
 
         eprintln!(
             "[AxpHarnessBuilder] Build directory: {}",
@@ -210,7 +209,7 @@ impl AxpHarnessBuilder {
         let sources_dir = build_dir.join("Sources");
         let harness_dir = sources_dir.join("ArkavoHarness");
         fs::create_dir_all(&harness_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {e}")))?;
         Ok(harness_dir)
     }
 
@@ -227,10 +226,10 @@ impl AxpHarnessBuilder {
         if ios_version.is_ios26_or_later() {
             eprintln!("[AxpHarnessBuilder] Using iOS 26 enhanced bridge with symbol discovery");
             fs::write(&ax_bridge_path, templates::ARKAVO_AX_BRIDGE_IOS26_SWIFT)
-                .map_err(|e| TestError::Mcp(format!("Failed to write iOS 26 AX bridge: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to write iOS 26 AX bridge: {e}")))?;
         } else {
             fs::write(&ax_bridge_path, templates::ARKAVO_AX_BRIDGE_SWIFT)
-                .map_err(|e| TestError::Mcp(format!("Failed to write AX bridge: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to write AX bridge: {e}")))?;
         }
 
         // Write test runner based on iOS version
@@ -240,13 +239,13 @@ impl AxpHarnessBuilder {
             let runner_content = templates::ARKAVO_TEST_RUNNER_MINIMAL_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
             fs::write(&runner_path, runner_content).map_err(|e| {
-                TestError::Mcp(format!("Failed to write minimal test runner: {}", e))
+                TestError::Mcp(format!("Failed to write minimal test runner: {e}"))
             })?;
         } else {
             let runner_content = templates::ARKAVO_TEST_RUNNER_AXP_SWIFT
                 .replace("{{SOCKET_PATH}}", &socket_path.to_string_lossy());
             fs::write(&runner_path, runner_content)
-                .map_err(|e| TestError::Mcp(format!("Failed to write test runner: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to write test runner: {e}")))?;
         }
 
         Ok(())
@@ -281,7 +280,7 @@ let package = Package(
 
         let package_path = build_dir.join("Package.swift");
         fs::write(&package_path, package_swift)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {e}")))?;
 
         Ok(())
     }
@@ -290,7 +289,7 @@ let package = Package(
         let info_plist = templates::GENERIC_AXP_HARNESS_PLIST;
         let plist_path = build_dir.join("Info.plist");
         fs::write(&plist_path, info_plist)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {e}")))?;
         Ok(plist_path)
     }
 
@@ -298,13 +297,12 @@ let package = Package(
         let output = Command::new("xcrun")
             .args(["simctl", "install", device_id, bundle_path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcrun simctl install: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run xcrun simctl install: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(TestError::Mcp(format!(
-                "Failed to install harness: {}",
-                stderr
+                "Failed to install harness: {stderr}"
             )));
         }
 

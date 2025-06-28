@@ -29,7 +29,7 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "runtimes", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list runtimes: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list runtimes: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -40,7 +40,7 @@ impl DeviceHealthManager {
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse runtime list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse runtime list: {e}")))?;
 
         let mut runtimes = Vec::new();
 
@@ -87,11 +87,11 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         let mut health_reports = Vec::new();
 
@@ -108,7 +108,7 @@ impl DeviceHealthManager {
                             // Check if runtime is available
                             let runtime_available = available_runtime_ids.contains(runtime_id);
                             if !runtime_available {
-                                issues.push(format!("Runtime {} is not available", runtime_id));
+                                issues.push(format!("Runtime {runtime_id} is not available"));
                             }
 
                             // Check if device is available
@@ -121,7 +121,7 @@ impl DeviceHealthManager {
                                 if let Some(error) =
                                     device.get("availabilityError").and_then(|e| e.as_str())
                                 {
-                                    issues.push(format!("Device unavailable: {}", error));
+                                    issues.push(format!("Device unavailable: {error}"));
                                 } else {
                                     issues.push("Device is marked as unavailable".to_string());
                                 }

@@ -88,7 +88,7 @@ impl XCTestEnhanced {
                 bundle_path.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install test bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install test bundle: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -119,7 +119,7 @@ impl XCTestEnhanced {
                 bundle_path.to_str().unwrap(),
             ])
             .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to run test bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run test bundle: {e}")))?;
 
         // Store the process handle for cleanup
         let mut process_guard = self.test_process.lock().await;

@@ -86,7 +86,7 @@ impl IntelligentRunner {
 
         // Find relevant code for the module
         let context = CodeContext {
-            file_path: format!("src/{}.rs", module),
+            file_path: format!("src/{module}.rs"),
             code: self.load_module_code(module).await?,
             language: "rust".to_string(),
         };
@@ -208,7 +208,7 @@ impl IntelligentRunner {
 
     async fn load_module_code(&self, module: &str) -> Result<String> {
         // In real implementation, would load actual module code
-        Ok(self.mock_code_for_file(&format!("src/{}.rs", module)))
+        Ok(self.mock_code_for_file(&format!("src/{module}.rs")))
     }
 
     fn mock_code_for_file(&self, file_path: &str) -> String {

@@ -83,7 +83,7 @@ impl Parser {
                 path,
                 error: _,
                 source: _,
-            } => TestError::GherkinParse(format!("Parse error in file: {:?}", path)),
+            } => TestError::GherkinParse(format!("Parse error in file: {path:?}")),
         })?;
 
         Self::convert_feature(&gherkin_feature)

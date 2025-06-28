@@ -11,8 +11,7 @@ impl AppleScriptTap {
     /// Perform a tap using AppleScript and System Events
     pub async fn tap(device_id: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         eprintln!(
-            "[AppleScriptTap] Performing tap at ({}, {}) for device {}",
-            x, y, device_id
+            "[AppleScriptTap] Performing tap at ({x}, {y}) for device {device_id}"
         );
 
         // First, get the simulator window position
@@ -54,7 +53,7 @@ impl AppleScriptTap {
             .arg("-e")
             .arg(&tap_script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
         if output.status.success() {
             eprintln!("[AppleScriptTap] Tap succeeded");
@@ -69,10 +68,9 @@ impl AppleScriptTap {
             }))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[AppleScriptTap] Tap failed: {}", stderr);
+            eprintln!("[AppleScriptTap] Tap failed: {stderr}");
             Err(TestError::Mcp(format!(
-                "AppleScript tap failed: {}",
-                stderr
+                "AppleScript tap failed: {stderr}"
             )))
         }
     }
@@ -89,7 +87,7 @@ impl AppleScriptTap {
                     set allWindows to windows
                     repeat with aWindow in allWindows
                         set windowName to name of aWindow
-                        if windowName contains "{}" then
+                        if windowName contains "{device_name}" then
                             set windowPosition to position of aWindow
                             set windowSize to size of aWindow
                             return (item 1 of windowPosition & "," & item 2 of windowPosition & "," & item 1 of windowSize & "," & item 2 of windowSize)
@@ -98,15 +96,14 @@ impl AppleScriptTap {
                 end tell
             end tell
             return "0,0,400,800"
-            "#,
-            device_name
+            "#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get window bounds: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get window bounds: {e}")))?;
 
         if output.status.success() {
             let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -119,8 +116,7 @@ impl AppleScriptTap {
                 let height = parts[3].parse::<f64>().unwrap_or(800.0);
 
                 eprintln!(
-                    "[AppleScriptTap] Window bounds: x={}, y={}, w={}, h={}",
-                    x, y, width, height
+                    "[AppleScriptTap] Window bounds: x={x}, y={y}, w={width}, h={height}"
                 );
                 Ok((x, y, width, height))
             } else {

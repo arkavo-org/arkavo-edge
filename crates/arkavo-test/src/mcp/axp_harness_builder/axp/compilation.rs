@@ -30,7 +30,7 @@ impl HarnessCompiler {
             .env("SWIFT_PLATFORM", "iphonesimulator")
             .env("IPHONEOS_DEPLOYMENT_TARGET", "15.0")
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run swift build: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run swift build: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -59,15 +59,15 @@ impl HarnessCompiler {
         // Create .xctest bundle
         let xctest_bundle = build_dir.join("ArkavoHarness.xctest");
         fs::create_dir_all(&xctest_bundle)
-            .map_err(|e| TestError::Mcp(format!("Failed to create bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create bundle: {e}")))?;
 
         // Copy binary
         fs::copy(&dylib_path, xctest_bundle.join("ArkavoHarness"))
-            .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {e}")))?;
 
         // Copy Info.plist
         fs::copy(plist_path, xctest_bundle.join("Info.plist"))
-            .map_err(|e| TestError::Mcp(format!("Failed to copy plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy plist: {e}")))?;
 
         Ok(serde_json::json!({
             "success": true,
@@ -83,8 +83,7 @@ impl HarnessCompiler {
         sim_version: &str,
     ) -> Result<Value> {
         eprintln!(
-            "[AxpHarnessBuilder] Falling back to direct swiftc compilation for iOS {}...",
-            sim_version
+            "[AxpHarnessBuilder] Falling back to direct swiftc compilation for iOS {sim_version}..."
         );
 
         // Determine if this is iOS 26 beta
@@ -107,7 +106,7 @@ impl HarnessCompiler {
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute xcrun: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute xcrun: {e}")))?;
 
         if !sdk_output.status.success() {
             return Ok(serde_json::json!({
@@ -123,7 +122,7 @@ impl HarnessCompiler {
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
             .trim()
             .to_string();
-        eprintln!("[AxpHarnessBuilder] Using SDK: {}", sdk_path);
+        eprintln!("[AxpHarnessBuilder] Using SDK: {sdk_path}");
 
         let swift_files = vec![
             build_dir.join("Sources/ArkavoHarness/ArkavoAXBridge.swift"),
@@ -137,7 +136,7 @@ impl HarnessCompiler {
             "-sdk",
             &sdk_path,
             "-target",
-            &format!("arm64-apple-ios{}.0-simulator", sim_version),
+            &format!("arm64-apple-ios{sim_version}.0-simulator"),
             "-parse-as-library",
             "-emit-library",
             "-module-name",
@@ -157,18 +156,17 @@ impl HarnessCompiler {
                 "-framework",
                 "XCTest",
                 "-F",
-                &format!("{}/System/Library/Frameworks", sdk_path),
+                &format!("{sdk_path}/System/Library/Frameworks"),
                 "-F",
-                &format!("{}/../../Library/Frameworks", sdk_path),
+                &format!("{sdk_path}/../../Library/Frameworks"),
                 "-F",
                 &format!(
-                    "{}/../../../../Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Frameworks",
-                    sdk_path
+                    "{sdk_path}/../../../../Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Frameworks"
                 ),
                 "-F",
-                &format!("{}/System/Library/PrivateFrameworks", sdk_path),
+                &format!("{sdk_path}/System/Library/PrivateFrameworks"),
                 "-L",
-                &format!("{}/usr/lib", sdk_path),
+                &format!("{sdk_path}/usr/lib"),
                 "-L",
                 &format!("{}/usr/lib/swift", sdk_path),
                 "-Xlinker",
@@ -235,15 +233,15 @@ impl HarnessCompiler {
         // Create .xctest bundle
         let xctest_bundle = build_dir.join("ArkavoHarness.xctest");
         fs::create_dir_all(&xctest_bundle)
-            .map_err(|e| TestError::Mcp(format!("Failed to create bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create bundle: {e}")))?;
 
         // Copy binary
         fs::copy(&output_binary, xctest_bundle.join("ArkavoHarness"))
-            .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {e}")))?;
 
         // Copy Info.plist
         fs::copy(plist_path, xctest_bundle.join("Info.plist"))
-            .map_err(|e| TestError::Mcp(format!("Failed to copy plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy plist: {e}")))?;
 
         Ok(serde_json::json!({
             "success": true,

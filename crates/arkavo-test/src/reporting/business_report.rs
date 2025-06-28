@@ -74,13 +74,13 @@ impl BusinessReporter {
                 include_str!("../../templates/report_markdown.hbs"),
             )
             .map_err(|e| {
-                TestError::Reporting(format!("Failed to register markdown template: {}", e))
+                TestError::Reporting(format!("Failed to register markdown template: {e}"))
             })?;
 
         template_engine
             .register_template_string("html", include_str!("../../templates/report_html.hbs"))
             .map_err(|e| {
-                TestError::Reporting(format!("Failed to register HTML template: {}", e))
+                TestError::Reporting(format!("Failed to register HTML template: {e}"))
             })?;
 
         Ok(Self {
@@ -169,13 +169,13 @@ impl BusinessReporter {
     fn render_markdown(&self, data: &ReportData) -> Result<String> {
         self.template_engine
             .render("markdown", data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render markdown: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render markdown: {e}")))
     }
 
     fn render_html(&self, data: &ReportData) -> Result<String> {
         self.template_engine
             .render("html", data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render HTML: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render HTML: {e}")))
     }
 
     fn render_json(&self, data: &ReportData) -> Result<String> {

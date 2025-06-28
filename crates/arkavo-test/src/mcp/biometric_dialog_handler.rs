@@ -45,7 +45,7 @@ impl BiometricDialogHandler {
             "escape" => "53",
             "return" => "36",
             "home" => "115", // Home key
-            _ => return Err(TestError::Mcp(format!("Unknown keycode: {}", keycode))),
+            _ => return Err(TestError::Mcp(format!("Unknown keycode: {keycode}"))),
         };
 
         let script = format!(
@@ -53,16 +53,15 @@ impl BiometricDialogHandler {
                 activate
             end tell
             tell application "System Events"
-                key code {}
-            end tell"#,
-            key_code
+                key code {key_code}
+            end tell"#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send key event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send key event: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -96,10 +95,9 @@ impl BiometricDialogHandler {
             tell application "System Events"
                 tell process "Simulator"
                     set frontmost to true
-                    keystroke "{}"
+                    keystroke "{passcode}"
                 end tell
-            end tell"#,
-            passcode
+            end tell"#
         );
 
         Command::new("osascript")

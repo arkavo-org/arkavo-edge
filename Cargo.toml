@@ -24,4 +24,3 @@ repository = "https://github.com/arkavo/arkavo-edge"
 description = "Developer-centric agentic CLI tool for AI-agent development and framework maintenance"
 
 [workspace.lints.clippy]
-uninlined_format_args = "allow"

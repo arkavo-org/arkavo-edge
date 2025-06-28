@@ -148,7 +148,7 @@ impl IdbInstaller {
         let tap_output = Command::new("brew")
             .args(["tap", "facebook/fb"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run brew tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run brew tap: {e}")))?;
 
         if !tap_output.status.success() {
             return Ok(format!(
@@ -163,7 +163,7 @@ impl IdbInstaller {
         let install_output = Command::new("brew")
             .args(["install", "facebook/fb/idb-companion"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run brew install: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run brew install: {e}")))?;
 
         if !install_output.status.success() {
             return Ok(format!(

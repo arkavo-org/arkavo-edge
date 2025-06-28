@@ -54,11 +54,11 @@ impl DeviceManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let parsed: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         let mut devices = Vec::new();
         let mut device_map = self.devices.lock().unwrap();
@@ -179,7 +179,7 @@ impl DeviceManager {
     pub fn set_active_device(&self, device_id: &str) -> Result<()> {
         let devices = self.devices.lock().unwrap();
         if !devices.contains_key(device_id) {
-            return Err(TestError::Mcp(format!("Device not found: {}", device_id)));
+            return Err(TestError::Mcp(format!("Device not found: {device_id}")));
         }
 
         *self.active_device_id.lock().unwrap() = Some(device_id.to_string());
@@ -203,7 +203,7 @@ impl DeviceManager {
     pub fn boot_device(&self, device_id: &str) -> Result<()> {
         let device = self
             .get_device(device_id)
-            .ok_or_else(|| TestError::Mcp(format!("Device not found: {}", device_id)))?;
+            .ok_or_else(|| TestError::Mcp(format!("Device not found: {device_id}")))?;
 
         if device.is_physical {
             return Err(TestError::Mcp("Cannot boot physical device".to_string()));
@@ -212,7 +212,7 @@ impl DeviceManager {
         Command::new("xcrun")
             .args(["simctl", "boot", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to boot device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to boot device: {e}")))?;
 
         // Update device state
         if let Some(device) = self.devices.lock().unwrap().get_mut(device_id) {
@@ -225,7 +225,7 @@ impl DeviceManager {
     pub fn shutdown_device(&self, device_id: &str) -> Result<()> {
         let device = self
             .get_device(device_id)
-            .ok_or_else(|| TestError::Mcp(format!("Device not found: {}", device_id)))?;
+            .ok_or_else(|| TestError::Mcp(format!("Device not found: {device_id}")))?;
 
         if device.is_physical {
             return Err(TestError::Mcp(
@@ -236,7 +236,7 @@ impl DeviceManager {
         Command::new("xcrun")
             .args(["simctl", "shutdown", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to shutdown device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to shutdown device: {e}")))?;
 
         // Update device state
         if let Some(device) = self.devices.lock().unwrap().get_mut(device_id) {
@@ -250,7 +250,7 @@ impl DeviceManager {
         let output = Command::new("xcrun")
             .args(["simctl", "create", name, device_type, runtime])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to create device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create device: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -271,7 +271,7 @@ impl DeviceManager {
         Command::new("xcrun")
             .args(["simctl", "delete", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to delete device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to delete device: {e}")))?;
 
         // Remove from our cache
         self.devices.lock().unwrap().remove(device_id);

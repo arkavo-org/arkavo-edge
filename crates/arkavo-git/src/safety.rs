@@ -38,7 +38,7 @@ impl<'a> RepoGuard<'a> {
                 .args(["fmt", "--", "--check"])
                 .output()
                 .map_err(|e| {
-                    GitError::PreCommitFailed(format!("Failed to run cargo fmt: {}", e))
+                    GitError::PreCommitFailed(format!("Failed to run cargo fmt: {e}"))
                 })?;
 
             if !output.status.success() {
@@ -57,7 +57,7 @@ impl<'a> RepoGuard<'a> {
                 .args(["clippy", "--", "-D", "warnings"])
                 .output()
                 .map_err(|e| {
-                    GitError::PreCommitFailed(format!("Failed to run cargo clippy: {}", e))
+                    GitError::PreCommitFailed(format!("Failed to run cargo clippy: {e}"))
                 })?;
 
             if !output.status.success() {
@@ -76,7 +76,7 @@ impl<'a> RepoGuard<'a> {
                 .args(["test", "--quiet"])
                 .output()
                 .map_err(|e| {
-                    GitError::PreCommitFailed(format!("Failed to run cargo test: {}", e))
+                    GitError::PreCommitFailed(format!("Failed to run cargo test: {e}"))
                 })?;
 
             if !output.status.success() {

@@ -42,7 +42,7 @@ impl SimulatorManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "--json"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -53,7 +53,7 @@ impl SimulatorManager {
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         self.devices.clear();
 
@@ -110,14 +110,14 @@ impl SimulatorManager {
         let output = Command::new("xcrun")
             .args(["simctl", "boot", udid])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to boot device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to boot device: {e}")))?;
 
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             if error.contains("already booted") {
                 return Ok(());
             }
-            return Err(TestError::Mcp(format!("Failed to boot device: {}", error)));
+            return Err(TestError::Mcp(format!("Failed to boot device: {error}")));
         }
 
         Ok(())
@@ -127,7 +127,7 @@ impl SimulatorManager {
         let output = Command::new("xcrun")
             .args(["simctl", "shutdown", udid])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to shutdown device: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to shutdown device: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -165,8 +165,7 @@ impl SimulatorManager {
 
                     if matches.is_empty() {
                         return Err(TestError::Mcp(format!(
-                            "No app found matching pattern: {}",
-                            app_path
+                            "No app found matching pattern: {app_path}"
                         )));
                     }
 
@@ -190,8 +189,7 @@ impl SimulatorManager {
                 }
                 Err(e) => {
                     return Err(TestError::Mcp(format!(
-                        "Invalid glob pattern '{}': {}",
-                        app_path, e
+                        "Invalid glob pattern '{app_path}': {e}"
                     )));
                 }
             }
@@ -202,15 +200,14 @@ impl SimulatorManager {
         // Verify the resolved path exists
         if !std::path::Path::new(&resolved_path).exists() {
             return Err(TestError::Mcp(format!(
-                "App not found at resolved path: {}",
-                resolved_path
+                "App not found at resolved path: {resolved_path}"
             )));
         }
 
         let output = Command::new("xcrun")
             .args(["simctl", "install", udid, &resolved_path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install app: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -227,7 +224,7 @@ impl SimulatorManager {
         let output = Command::new("xcrun")
             .args(["simctl", "uninstall", udid, bundle_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(

@@ -139,7 +139,7 @@ impl Tool for SimulatorControl {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -278,13 +278,12 @@ impl Tool for AppManagement {
 
                 // Log the launch attempt
                 eprintln!(
-                    "MCP: Attempting to launch app {} on device {}",
-                    bundle_id, device_id
+                    "MCP: Attempting to launch app {bundle_id} on device {device_id}"
                 );
 
                 match manager.launch_app(device_id, bundle_id, &args) {
                     Ok(pid) => {
-                        eprintln!("MCP: App launched successfully with PID: {}", pid);
+                        eprintln!("MCP: App launched successfully with PID: {pid}");
                         Ok(serde_json::json!({
                             "success": true,
                             "message": format!("App {} launched successfully", bundle_id),
@@ -333,7 +332,7 @@ impl Tool for AppManagement {
                     "error": e.to_string()
                 })),
             },
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -472,7 +471,7 @@ impl Tool for FileOperations {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

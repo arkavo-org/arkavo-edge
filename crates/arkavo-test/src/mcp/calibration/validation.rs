@@ -120,7 +120,7 @@ impl CalibrationValidator {
                             "Coordinates within {} pixels",
                             self.tolerance.coordinate_tolerance_pixels
                         ),
-                        actual_result: format!("Distance: {:.2} pixels", distance),
+                        actual_result: format!("Distance: {distance:.2} pixels"),
                         severity: IssueSeverity::Minor,
                     });
                 }
@@ -149,7 +149,7 @@ impl CalibrationValidator {
                 if !test_result.post_interaction_state.contains(to) {
                     return ValidationOutcome::Failure(ValidationIssue {
                         element_id: test_result.element_id.clone(),
-                        expected_result: format!("Value changed to '{}'", to),
+                        expected_result: format!("Value changed to '{to}'"),
                         actual_result: "Value unchanged or different".to_string(),
                         severity: IssueSeverity::Major,
                     });

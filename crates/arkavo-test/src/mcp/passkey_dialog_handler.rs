@@ -40,7 +40,7 @@ impl PasskeyDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
         } else {
@@ -141,7 +141,7 @@ impl Tool for PasskeyDialogHandler {
                     .args(["-e", esc_script])
                     .output()
                     .map_err(|e| {
-                        TestError::Mcp(format!("Failed to send ESC via AppleScript: {}", e))
+                        TestError::Mcp(format!("Failed to send ESC via AppleScript: {e}"))
                     })?;
 
                 // NOTE: simctl io does NOT support tap commands
@@ -166,7 +166,7 @@ impl Tool for PasskeyDialogHandler {
                     "Tap settings requires UI interaction. Use ui_interaction tool with tap action instead. Suggested coordinates: (293.0, 450.0) for right side of dialog".to_string()
                 ));
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

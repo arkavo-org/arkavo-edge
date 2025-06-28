@@ -139,7 +139,7 @@ impl ChatView {
 
         let header = Line::from(vec![
             Span::styled(
-                format!("[{}] ", timestamp),
+                format!("[{timestamp}] "),
                 Style::default().fg(Color::DarkGray),
             ),
             Span::styled(msg.role.prefix(), role_style.add_modifier(Modifier::BOLD)),

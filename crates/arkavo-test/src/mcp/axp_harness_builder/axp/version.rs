@@ -73,7 +73,7 @@ impl IosVersion {
     pub fn display_string(&self) -> String {
         let mut s = format!("iOS {}.{}", self.major, self.minor);
         if let Some(patch) = self.patch {
-            s.push_str(&format!(".{}", patch));
+            s.push_str(&format!(".{patch}"));
         }
         if self.is_beta {
             s.push_str(" beta");

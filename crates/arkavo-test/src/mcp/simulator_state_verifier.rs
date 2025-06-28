@@ -77,8 +77,7 @@ impl SimulatorStateVerifier {
             state.app_is_foreground = Self::check_app_foreground(device_id, bundle_id).await?;
             if !state.app_is_foreground {
                 eprintln!(
-                    "[SimulatorStateVerifier] App {} is not in foreground",
-                    bundle_id
+                    "[SimulatorStateVerifier] App {bundle_id} is not in foreground"
                 );
             }
         }
@@ -102,7 +101,7 @@ impl SimulatorStateVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if let Ok(devices) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
             for (_runtime, device_list) in devices["devices"]
@@ -128,7 +127,7 @@ impl SimulatorStateVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "getenv", device_id, "HOME"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to check device responsiveness: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to check device responsiveness: {e}")))?;
 
         Ok(output.status.success())
     }
@@ -173,7 +172,7 @@ impl SimulatorStateVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "io", device_id, "swipe", "up"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to unlock screen: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to unlock screen: {e}")))?;
 
         if !output.status.success() {
             eprintln!("[SimulatorStateVerifier] Warning: Could not unlock screen");

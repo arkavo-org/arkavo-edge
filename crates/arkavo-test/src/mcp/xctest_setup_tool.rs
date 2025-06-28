@@ -90,8 +90,7 @@ impl Tool for XCTestSetupKit {
         // Check if XCUITest is already available and functional
         if !force_reinstall {
             eprintln!(
-                "[XCTestSetupKit] Checking XCTest status for device {}...",
-                device_id
+                "[XCTestSetupKit] Checking XCTest status for device {device_id}..."
             );
             let verification_status = XCTestVerifier::verify_device(&device_id).await?;
 
@@ -264,7 +263,7 @@ impl Tool for XCTestSetupKit {
                 // Test the connection with a ping
                 let test_result = bridge.send_ping().await;
                 if let Err(e) = test_result {
-                    eprintln!("[XCTestSetupKit] Warning: Ping test failed: {}", e);
+                    eprintln!("[XCTestSetupKit] Warning: Ping test failed: {e}");
                     return Ok(serde_json::json!({
                         "success": false,
                         "error": {

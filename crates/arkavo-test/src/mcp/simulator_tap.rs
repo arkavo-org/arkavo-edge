@@ -55,10 +55,10 @@ impl SimulatorTap {
                 device_id,
                 "notifyutil",
                 "-p",
-                &format!("com.apple.synthesized.touch.event.x:{},y:{}", tap_x, tap_y),
+                &format!("com.apple.synthesized.touch.event.x:{tap_x},y:{tap_y}"),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send tap event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send tap event: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -90,7 +90,7 @@ impl SimulatorTap {
             .args(["simctl", "push", device_id, "com.apple.springboard", "-"])
             .env("SIMCTL_CHILD_STDIN", payload.to_string())
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send device event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send device event: {e}")))?;
 
         if output.status.success() {
             Ok(json!({

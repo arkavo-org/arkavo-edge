@@ -132,14 +132,14 @@ impl IdbWrapper {
             // Create a directory structure relative to current working directory
             // This ensures the extraction happens where the user launched the tool from
             let cwd = std::env::current_dir()
-                .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?;
             let arkavo_dir = cwd.join(".arkavo");
             let temp_dir = arkavo_dir.join("idb");
             let bin_dir = temp_dir.join("bin");
 
             // Create the directory structure
             fs::create_dir_all(&bin_dir).map_err(|e| {
-                TestError::Mcp(format!("Failed to create .arkavo/idb/bin dir: {}", e))
+                TestError::Mcp(format!("Failed to create .arkavo/idb/bin dir: {e}"))
             })?;
 
             // Check if .gitignore exists and suggest adding .arkavo
@@ -170,7 +170,7 @@ impl IdbWrapper {
             );
             eprintln!("[IdbWrapper] Working directory: {}", cwd.display());
             fs::write(&binary_path, IDB_COMPANION_BYTES)
-                .map_err(|e| TestError::Mcp(format!("Failed to extract idb_companion: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to extract idb_companion: {e}")))?;
 
             // Verify the file was written correctly
             let file_size = fs::metadata(&binary_path).map(|m| m.len()).unwrap_or(0);
@@ -207,7 +207,7 @@ impl IdbWrapper {
                     // Write archive to temp file
                     let archive_path = temp_dir.join("frameworks.tar.gz");
                     fs::write(&archive_path, IDB_FRAMEWORKS_ARCHIVE).map_err(|e| {
-                        TestError::Mcp(format!("Failed to write frameworks archive: {}", e))
+                        TestError::Mcp(format!("Failed to write frameworks archive: {e}"))
                     })?;
 
                     // Extract the archive
@@ -220,7 +220,7 @@ impl IdbWrapper {
                         ])
                         .status()
                         .map_err(|e| {
-                            TestError::Mcp(format!("Failed to extract frameworks: {}", e))
+                            TestError::Mcp(format!("Failed to extract frameworks: {e}"))
                         })?;
 
                     if status.success() {
@@ -249,7 +249,7 @@ impl IdbWrapper {
                     eprintln!("[IdbWrapper] Warning: No embedded frameworks archive found");
                     // Try to set up framework symlinks to system frameworks
                     if let Err(e) = frameworks_data::setup_framework_links(&temp_dir) {
-                        eprintln!("[IdbWrapper] Warning: {}", e);
+                        eprintln!("[IdbWrapper] Warning: {e}");
                     }
                 }
             }
@@ -261,7 +261,7 @@ impl IdbWrapper {
                 let mut perms = fs::metadata(&binary_path).unwrap().permissions();
                 perms.set_mode(0o755);
                 fs::set_permissions(&binary_path, perms)
-                    .map_err(|e| TestError::Mcp(format!("Failed to set permissions: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to set permissions: {e}")))?;
             }
 
             // Remove quarantine attribute if present (macOS Gatekeeper)
@@ -366,7 +366,7 @@ impl IdbWrapper {
         {
             use std::os::unix::fs::PermissionsExt;
             let metadata = std::fs::metadata(&binary_path)
-                .map_err(|e| TestError::Mcp(format!("Failed to get binary metadata: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to get binary metadata: {e}")))?;
             let permissions = metadata.permissions();
             eprintln!(
                 "[IdbWrapper::create_command] Binary permissions: {:o}",
@@ -483,20 +483,18 @@ impl IdbWrapper {
 
         if needs_start {
             eprintln!(
-                "[IdbWrapper] Starting companion server for device {}...",
-                device_id
+                "[IdbWrapper] Starting companion server for device {device_id}..."
             );
 
             // First verify the device exists
             if !Self::verify_device_target(device_id).await? {
-                let error_msg = format!("Device {} not found in IDB targets list", device_id);
+                let error_msg = format!("Device {device_id} not found in IDB targets list");
                 let guidance = IdbErrorHandler::analyze_and_guide(&error_msg);
                 eprintln!("{}", IdbErrorHandler::format_guidance(&guidance));
 
                 // Try to boot the device if it exists but isn't booted
                 eprintln!(
-                    "[IdbWrapper] Attempting to boot device {} with simctl...",
-                    device_id
+                    "[IdbWrapper] Attempting to boot device {device_id} with simctl..."
                 );
                 let boot_cmd = Command::new("xcrun")
                     .args(["simctl", "boot", device_id])
@@ -507,12 +505,12 @@ impl IdbWrapper {
                         if !output.status.success() {
                             let stderr = String::from_utf8_lossy(&output.stderr);
                             if !stderr.contains("Unable to boot device in current state: Booted") {
-                                eprintln!("[IdbWrapper] Failed to boot device: {}", stderr);
+                                eprintln!("[IdbWrapper] Failed to boot device: {stderr}");
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("[IdbWrapper] Failed to execute boot command: {}", e);
+                        eprintln!("[IdbWrapper] Failed to execute boot command: {e}");
                     }
                 }
 
@@ -524,12 +522,12 @@ impl IdbWrapper {
                     return Err(TestError::Mcp(error_msg));
                 }
 
-                eprintln!("[IdbWrapper] Device {} now visible after boot!", device_id);
+                eprintln!("[IdbWrapper] Device {device_id} now visible after boot!");
             }
 
             // Get an available port for this companion instance
             let port = IdbPortManager::get_next_idb_port()?;
-            eprintln!("[IdbWrapper] Using port {} for IDB companion", port);
+            eprintln!("[IdbWrapper] Using port {port} for IDB companion");
 
             // Start a new companion process for this device
             let mut command = Self::create_command()?;
@@ -537,8 +535,7 @@ impl IdbWrapper {
             // Log the command details for debugging
             eprintln!("[IdbWrapper] Command path: {:?}", command.get_program());
             eprintln!(
-                "[IdbWrapper] Command args: --udid {} --only simulator --grpc-port {}",
-                device_id, port
+                "[IdbWrapper] Command args: --udid {device_id} --only simulator --grpc-port {port}"
             );
 
             // Log environment variables to confirm they're set
@@ -546,7 +543,7 @@ impl IdbWrapper {
             for (key, value) in command.get_envs() {
                 if let (Some(k), Some(v)) = (key.to_str(), value.and_then(|val| val.to_str())) {
                     if k.starts_with("DYLD_") || k.starts_with("OBJC_") {
-                        eprintln!("[IdbWrapper]   {}={}", k, v);
+                        eprintln!("[IdbWrapper]   {k}={v}");
                     }
                 }
             }
@@ -565,7 +562,7 @@ impl IdbWrapper {
                     let current_arch = String::from_utf8_lossy(&arch_output.stdout)
                         .trim()
                         .to_string();
-                    eprintln!("[IdbWrapper] Current system architecture: {}", current_arch);
+                    eprintln!("[IdbWrapper] Current system architecture: {current_arch}");
 
                     if current_arch == "arm64" && !file_info.contains("arm64") {
                         eprintln!(
@@ -606,8 +603,8 @@ impl IdbWrapper {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[IdbWrapper] Failed to run binary --help test: {}", e);
-                    return Err(TestError::Mcp(format!("Binary cannot be executed: {}", e)));
+                    eprintln!("[IdbWrapper] Failed to run binary --help test: {e}");
+                    return Err(TestError::Mcp(format!("Binary cannot be executed: {e}")));
                 }
             }
 
@@ -641,9 +638,8 @@ impl IdbWrapper {
                             let stderr_str = String::from_utf8_lossy(&stderr_bytes);
 
                             eprintln!(
-                                "[IdbWrapper] Companion process exited immediately with status: {:?}",
-                                status
-                            );
+                            "[IdbWrapper] Companion process exited immediately with status: {status:?}"
+                        );
                             eprintln!("[IdbWrapper] Stderr: {}", stderr_str);
 
                             // Check for specific exit codes

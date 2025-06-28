@@ -48,7 +48,7 @@ impl EnrollmentFlowHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
         } else {
@@ -78,7 +78,7 @@ impl EnrollmentFlowHandler {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to dismiss dialog: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to dismiss dialog: {e}")))?;
 
         Ok(())
     }
@@ -90,7 +90,7 @@ impl EnrollmentFlowHandler {
             .arg(device_id)
             .arg(bundle_id)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to terminate app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to terminate app: {e}")))?;
 
         if !output.status.success() {
             // App might not be running, which is okay
@@ -107,7 +107,7 @@ impl EnrollmentFlowHandler {
             .arg(device_id)
             .arg(bundle_id)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -137,7 +137,7 @@ impl EnrollmentFlowHandler {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to enroll biometrics: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to enroll biometrics: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -283,7 +283,7 @@ impl Tool for EnrollmentFlowHandler {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

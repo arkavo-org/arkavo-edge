@@ -50,7 +50,7 @@ impl XCTestVerifier {
             Err(e) => {
                 status.error_details = Some(XCTestError {
                     stage: "bundle_check".to_string(),
-                    message: format!("Failed to check bundle installation: {}", e),
+                    message: format!("Failed to check bundle installation: {e}"),
                     can_retry: false,
                 });
                 return Ok(status);
@@ -67,7 +67,7 @@ impl XCTestVerifier {
             Err(e) => {
                 status.error_details = Some(XCTestError {
                     stage: "bridge_test".to_string(),
-                    message: format!("Bridge connectivity test failed: {}", e),
+                    message: format!("Bridge connectivity test failed: {e}"),
                     can_retry: true,
                 });
             }
@@ -81,7 +81,7 @@ impl XCTestVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -144,8 +144,7 @@ impl XCTestVerifier {
                     Err(e) => {
                         let _ = child.kill();
                         Err(TestError::Mcp(format!(
-                            "Failed to check process status: {}",
-                            e
+                            "Failed to check process status: {e}"
                         )))
                     }
                 }

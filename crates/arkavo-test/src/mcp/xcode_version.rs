@@ -21,7 +21,7 @@ impl XcodeVersion {
         let output = Command::new("xcodebuild")
             .arg("-version")
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(

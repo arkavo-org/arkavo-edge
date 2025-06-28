@@ -55,7 +55,7 @@ impl Tool for AppDiagnosticTool {
         let list_output = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         if !list_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -69,15 +69,15 @@ impl Tool for AppDiagnosticTool {
         // Parse the plist-style output to find apps
         if let Some(target_bundle_id) = bundle_id {
             // Look for the specific bundle ID in the output
-            let found = output_text.contains(&format!("\"{}\"", target_bundle_id))
-                || output_text.contains(&format!("{} =", target_bundle_id));
+            let found = output_text.contains(&format!("{target_bundle_id}"))
+                || output_text.contains(&format!("{target_bundle_id} ="));
 
             // Try to extract some info about the app
             let mut app_info = serde_json::json!({});
 
             if found {
                 // Look for the app's display name
-                if let Some(start) = output_text.find(&format!("\"{}\"", target_bundle_id)) {
+                if let Some(start) = output_text.find(&format!("{target_bundle_id}")) {
                     let app_section = &output_text[start..];
                     if let Some(name_start) = app_section.find("CFBundleDisplayName = ") {
                         let name_section = &app_section[name_start + 22..];
@@ -94,9 +94,9 @@ impl Tool for AppDiagnosticTool {
                 "bundle_id": target_bundle_id,
                 "status": if found { "installed" } else { "not_installed" },
                 "message": if found {
-                    format!("App '{}' is installed on the simulator", target_bundle_id)
+                    format!("App '{target_bundle_id}' is installed on the simulator")
                 } else {
-                    format!("App '{}' is not installed on the simulator. You need to install it first.", target_bundle_id)
+                    format!("App '{target_bundle_id}' is not installed on the simulator. You need to install it first.")
                 },
                 "app_info": app_info
             }));

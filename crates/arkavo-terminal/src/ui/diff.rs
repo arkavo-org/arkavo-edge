@@ -220,7 +220,7 @@ impl DiffView {
                 // Line numbers
                 if let Some(old_num) = line.old_line_num {
                     spans.push(Span::styled(
-                        format!("{:4}", old_num),
+                        format!("{old_num:4}"),
                         Style::default().fg(Color::DarkGray),
                     ));
                 } else {
@@ -231,7 +231,7 @@ impl DiffView {
 
                 if let Some(new_num) = line.new_line_num {
                     spans.push(Span::styled(
-                        format!("{:4}", new_num),
+                        format!("{new_num:4}"),
                         Style::default().fg(Color::DarkGray),
                     ));
                 } else {
@@ -340,7 +340,7 @@ impl DiffView {
         if is_old_side {
             if let Some(num) = line.old_line_num {
                 spans.push(Span::styled(
-                    format!("{:4}", num),
+                    format!("{num:4}"),
                     Style::default().fg(Color::DarkGray),
                 ));
             } else {
@@ -348,7 +348,7 @@ impl DiffView {
             }
         } else if let Some(num) = line.new_line_num {
             spans.push(Span::styled(
-                format!("{:4}", num),
+                format!("{num:4}"),
                 Style::default().fg(Color::DarkGray),
             ));
         } else {

@@ -143,8 +143,7 @@ impl Tool for DeviceManagementKit {
                 let timeout = Duration::from_secs_f64(timeout_secs);
 
                 eprintln!(
-                    "[DeviceManagement] Starting boot_wait for device {} with timeout {:?}",
-                    device_id, timeout
+                    "[DeviceManagement] Starting boot_wait for device {device_id} with timeout {timeout:?}"
                 );
 
                 let boot_status =
@@ -274,14 +273,13 @@ impl Tool for DeviceManagementKit {
                     .unwrap_or(false);
 
                 eprintln!(
-                    "[DeviceManagement] Running cleanup_unhealthy (dry_run: {})",
-                    dry_run
+                    "[DeviceManagement] Running cleanup_unhealthy (dry_run: {dry_run})"
                 );
 
                 // First try the built-in simctl command
                 if !dry_run {
                     if let Err(e) = DeviceHealthManager::delete_unavailable_devices() {
-                        eprintln!("Warning: simctl delete unavailable failed: {}", e);
+                        eprintln!("Warning: simctl delete unavailable failed: {e}");
                     }
                 }
 

@@ -223,7 +223,7 @@ impl Renderable for CodeView {
                 0
             };
 
-            let scroll_indicator = format!(" {}% ", scroll_percentage);
+            let scroll_indicator = format!(" {scroll_percentage}% ");
             let indicator_x = area.right() - scroll_indicator.len() as u16 - 1;
             let indicator_y = area.top();
 

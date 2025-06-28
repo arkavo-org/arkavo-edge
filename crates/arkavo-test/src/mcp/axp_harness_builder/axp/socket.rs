@@ -64,15 +64,14 @@ impl SocketManager {
         // Check cache first
         if let Some(cached_path) = self.get_cached_socket(device_id).await {
             eprintln!(
-                "[SocketManager] Using cached socket for device {}: {}",
-                device_id, cached_path
+                "[SocketManager] Using cached socket for device {device_id}: {cached_path}"
             );
             return Some(cached_path);
         }
 
         // Ensure socket directory exists
         if let Err(e) = fs::create_dir_all(&self.socket_dir) {
-            eprintln!("[SocketManager] Failed to create socket directory: {}", e);
+            eprintln!("[SocketManager] Failed to create socket directory: {e}");
             return None;
         }
 
@@ -81,7 +80,7 @@ impl SocketManager {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     // Check if socket is for this device
-                    if name.starts_with(&format!("arkavo-axp-{}-", device_id))
+                    if name.starts_with(&format!("arkavo-axp-{device_id}-"))
                         && name.ends_with(".sock")
                     {
                         let socket_path = entry.path();
@@ -174,7 +173,7 @@ impl SocketManager {
             let path = entry.path();
 
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with(&format!("arkavo-axp-{}-", device_id))
+                if name.starts_with(&format!("arkavo-axp-{device_id}-"))
                     && name.ends_with(".sock")
                 {
                     match fs::remove_file(&path) {

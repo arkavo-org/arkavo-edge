@@ -131,25 +131,21 @@ impl CalibrationAgentImpl {
             match tap_result {
                 Ok(Ok(result)) => {
                     eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {:?}",
-                        result
+                        "[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {result:?}"
                     );
                 }
                 Ok(Err(e)) => {
                     eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {}",
-                        e
+                        "[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {e}"
                     );
                     return Err(CalibrationError::InteractionFailed(format!(
-                        "Failed to tap at ({}, {}): {}",
-                        x, y, e
+                        "Failed to tap at ({x}, {y}): {e}"
                     )));
                 }
                 Err(_) => {
                     eprintln!("[CalibrationAgentImpl::execute_tap] Tap timeout after 10 seconds");
                     return Err(CalibrationError::InteractionFailed(format!(
-                        "Tap timeout at ({}, {}) - All methods failed",
-                        x, y
+                        "Tap timeout at ({x}, {y}) - All methods failed"
                     )));
                 }
             }
@@ -345,9 +341,8 @@ impl CalibrationAgent for CalibrationAgentImpl {
                         let elements = self.discover_ui_elements()?;
                         let element = elements.iter().find(|e| e.id == *id).ok_or_else(|| {
                             CalibrationError::InteractionFailed(format!(
-                                "Element with ID '{}' not found",
-                                id
-                            ))
+                            "Element with ID '{id}' not found"
+                        ))
                         })?;
 
                         let center_x = element.frame.x + element.frame.width / 2.0;
@@ -362,9 +357,8 @@ impl CalibrationAgent for CalibrationAgentImpl {
                             .find(|e| e.accessibility_id.as_ref() == Some(acc_id))
                             .ok_or_else(|| {
                                 CalibrationError::InteractionFailed(format!(
-                                    "Element with accessibility ID '{}' not found",
-                                    acc_id
-                                ))
+                            "Element with accessibility ID '{acc_id}' not found"
+                        ))
                             })?;
 
                         let center_x = element.frame.x + element.frame.width / 2.0;

@@ -53,10 +53,9 @@ impl Tool for IntelligentBugFinderKit {
 
         // Use AI to analyze the module
         let analysis_prompt = format!(
-            "Analyze the {} module for potential bugs. Context: {}. \
-             Look for: security vulnerabilities, race conditions, error handling issues, \
+            "Analyze the {module} module for potential bugs. Context: {context}. 
+             Look for: security vulnerabilities, race conditions, error handling issues, 
              edge cases, and logic errors. Provide specific examples.",
-            module, context
         );
 
         let bugs = self
@@ -125,8 +124,7 @@ impl Tool for InvariantDiscoveryKit {
         let invariants = self
             .analysis_engine
             .discover_properties_from_prompt(&format!(
-                "What invariants should always be true in the {}? Context: {}",
-                system, code_context
+                "What invariants should always be true in the {system}? Context: {code_context}"
             ))
             .await?;
 
@@ -191,10 +189,9 @@ impl Tool for ChaosTestingKit {
         let test_cases = self
             .analysis_engine
             .generate_test_cases_from_prompt(&format!(
-                "Generate chaos engineering test cases for: {}. \
-                 Include: timing issues, partial failures, cascading failures, \
-                 and recovery scenarios.",
-                scenario
+                "Generate chaos engineering test cases for: {scenario}. 
+                 Include: timing issues, partial failures, cascading failures, 
+                 and recovery scenarios."
             ))
             .await?;
 
@@ -268,10 +265,9 @@ impl Tool for EdgeCaseExplorerKit {
         let edge_cases = self
             .analysis_engine
             .generate_edge_cases(&format!(
-                "Explore edge cases in the {}. Depth: {}. \
-                 Consider: boundary values, invalid inputs, timing issues, \
-                 concurrent access, state transitions, and error conditions.",
-                flow, depth
+                "Explore edge cases in the {flow}. Depth: {depth}. 
+                 Consider: boundary values, invalid inputs, timing issues, 
+                 concurrent access, state transitions, and error conditions."
             ))
             .await?;
 

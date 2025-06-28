@@ -78,8 +78,7 @@ impl Tool for FindBugsKit {
             "swift" => analyze_swift(path, &bug_types).await?,
             _ => {
                 return Err(TestError::Mcp(format!(
-                    "Unsupported language: {}",
-                    detected_language
+                    "Unsupported language: {detected_language}"
                 )));
             }
         };
@@ -262,7 +261,7 @@ fn detect_language(path: &str) -> Result<String> {
     let output = Command::new("find")
         .args([path, "-name", "*.rs", "-o", "-name", "*.swift"])
         .output()
-        .map_err(|e| TestError::Mcp(format!("Failed to detect language: {}", e)))?;
+        .map_err(|e| TestError::Mcp(format!("Failed to detect language: {e}")))?;
 
     let files = String::from_utf8_lossy(&output.stdout);
     if files.contains(".rs") {
@@ -283,7 +282,7 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
             .args(["clippy", "--message-format=json"])
             .current_dir(path)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run clippy: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run clippy: {e}")))?;
 
         // Parse clippy output
         for line in String::from_utf8_lossy(&output.stdout).lines() {

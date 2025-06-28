@@ -42,7 +42,7 @@ impl EnrollmentDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
         } else {
@@ -72,7 +72,7 @@ impl EnrollmentDialogHandler {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(

@@ -20,10 +20,11 @@ impl XCTestCompiler {
             .output()
             .map_err(|e| {
                 TestError::Mcp(format!(
-                    "xcrun not found. Xcode or Xcode Command Line Tools must be installed.\n\
-                Install Xcode from the App Store or run: xcode-select --install\n\
-                Error: {}",
-                    e
+                    "xcrun not found. Xcode or Xcode Command Line Tools must be installed.
+
+                Install Xcode from the App Store or run: xcode-select --install
+
+                Error: {e}"
                 ))
             })?;
 
@@ -42,7 +43,7 @@ impl XCTestCompiler {
 
         // Create build directory if it doesn't exist
         fs::create_dir_all(&build_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {e}")))?;
 
         // Generate socket path
         let socket_path =
@@ -75,7 +76,7 @@ impl XCTestCompiler {
         // Step 1: Create temporary source directory
         let source_dir = self.build_dir.join("Sources");
         fs::create_dir_all(&source_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {e}")))?;
 
         // Step 2: Process and copy templates
         self.process_templates(&source_dir)?;
@@ -121,7 +122,7 @@ impl XCTestCompiler {
         // Write Swift source
         let swift_path = source_dir.join("ArkavoTestRunner.swift");
         fs::write(&swift_path, swift_source)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Swift source: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Swift source: {e}")))?;
 
         // Use embedded Info.plist template
         eprintln!("[XCTestCompiler] Using embedded Info.plist template from binary");
@@ -129,7 +130,7 @@ impl XCTestCompiler {
 
         let plist_path = self.build_dir.join("Info.plist");
         fs::write(&plist_path, plist_content)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {e}")))?;
 
         Ok(())
     }
@@ -163,7 +164,7 @@ let package = Package(
 
         let package_path = build_dir.join("Package.swift");
         fs::write(&package_path, package_swift)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {e}")))?;
 
         Ok(())
     }
@@ -181,7 +182,7 @@ let package = Package(
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}\nMake sure Xcode is installed and command line tools are configured.\nRun: xcode-select --install", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {e}\nMake sure Xcode is installed and command line tools are configured.\nRun: xcode-select --install")))?;
 
         if !sdk_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -193,13 +194,13 @@ let package = Package(
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
             .trim()
             .to_string();
-        eprintln!("[XCTestCompiler] Using SDK: {}", sdk_path);
+        eprintln!("[XCTestCompiler] Using SDK: {sdk_path}");
 
         // Dynamically get platform path for frameworks
         let platform_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {e}")))?;
 
         if !platform_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -211,23 +212,21 @@ let package = Package(
         let platform_path = String::from_utf8_lossy(&platform_output.stdout)
             .trim()
             .to_string();
-        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
         eprintln!(
-            "[XCTestCompiler] XCTest framework path: {}",
-            xctest_framework_path
+            "[XCTestCompiler] XCTest framework path: {xctest_framework_path}"
         );
 
         // Verify XCTest framework exists
-        if !std::path::Path::new(&format!("{}/XCTest.framework", xctest_framework_path)).exists() {
+        if !std::path::Path::new(&format!("{xctest_framework_path}/XCTest.framework")).exists() {
             return Err(TestError::Mcp(format!(
-                "XCTest.framework not found at {}. Xcode may not be properly installed.",
-                xctest_framework_path
+                "XCTest.framework not found at {xctest_framework_path}. Xcode may not be properly installed."
             )));
         }
 
         // Only support ARM64 simulators
         let target = "arm64-apple-ios15.0-simulator";
-        eprintln!("[XCTestCompiler] Compiling for architecture: {}", target);
+        eprintln!("[XCTestCompiler] Compiling for architecture: {target}");
 
         // Compile as a framework/bundle
         let output = Command::new("xcrun")
@@ -262,18 +261,20 @@ let package = Package(
                 swift_source.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             eprintln!("[XCTestCompiler] Compilation failed");
-            eprintln!("[XCTestCompiler] STDOUT: {}", stdout);
-            eprintln!("[XCTestCompiler] STDERR: {}", stderr);
+            eprintln!("[XCTestCompiler] STDOUT: {stdout}");
+            eprintln!("[XCTestCompiler] STDERR: {stderr}");
 
             return Err(TestError::Mcp(format!(
-                "Swift compilation failed for ARM64.\nError: {}\n\nNote: Only ARM64 simulators are supported.",
-                stderr
+                "Swift compilation failed for ARM64.
+Error: {stderr}
+
+Note: Only ARM64 simulators are supported."
             )));
         }
 
@@ -292,13 +293,13 @@ let package = Package(
 
         // Create bundle directory structure
         fs::create_dir_all(&bundle_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to create bundle directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create bundle directory: {e}")))?;
 
         // Copy Info.plist
         let plist_src = build_dir.join("Info.plist");
         let plist_dst = bundle_path.join("Info.plist");
         fs::copy(&plist_src, &plist_dst)
-            .map_err(|e| TestError::Mcp(format!("Failed to copy Info.plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy Info.plist: {e}")))?;
 
         // Find and copy the compiled binary
         let binary_src = build_dir.join("ArkavoTestRunner");
@@ -311,7 +312,7 @@ let package = Package(
                 binary_dst.display()
             );
             fs::copy(&binary_src, &binary_dst)
-                .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {e}")))?;
 
             // Make it executable
             #[cfg(unix)]
@@ -942,7 +943,7 @@ int main(int argc, char * argv[]) {
         let platform_path = String::from_utf8_lossy(&platform_output.stdout)
             .trim()
             .to_string();
-        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
 
         let compile_output = Command::new("xcrun")
             .args([

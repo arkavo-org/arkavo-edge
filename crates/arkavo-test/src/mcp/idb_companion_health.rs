@@ -59,8 +59,7 @@ impl IdbCompanionHealth {
     /// Check if IDB companion is healthy for a device
     pub async fn check_health(device_id: &str) -> Result<bool> {
         eprintln!(
-            "[IdbCompanionHealth] Checking health for device {}",
-            device_id
+            "[IdbCompanionHealth] Checking health for device {device_id}"
         );
 
         // Initial health check state
@@ -77,8 +76,7 @@ impl IdbCompanionHealth {
             if let Some(pid) = metrics.companion_pid {
                 if !Self::is_process_running(pid) {
                     eprintln!(
-                        "[IdbCompanionHealth] Companion process {} is not running",
-                        pid
+                        "[IdbCompanionHealth] Companion process {pid} is not running"
                     );
                     metrics.companion_pid = None;
                     is_healthy = false;
@@ -112,7 +110,7 @@ impl IdbCompanionHealth {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[IdbCompanionHealth] Connection test failed: {}", e);
+                        eprintln!("[IdbCompanionHealth] Connection test failed: {e}");
                         metrics.connection_established = false;
                         is_healthy = false;
                     }
@@ -121,8 +119,7 @@ impl IdbCompanionHealth {
                 // Check failure rate
                 if consecutive_failures > 5 {
                     eprintln!(
-                        "[IdbCompanionHealth] Too many consecutive failures: {}",
-                        consecutive_failures
+                        "[IdbCompanionHealth] Too many consecutive failures: {consecutive_failures}"
                     );
                     is_healthy = false;
                 }

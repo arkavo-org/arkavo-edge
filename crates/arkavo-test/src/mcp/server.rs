@@ -84,8 +84,7 @@ impl McpTestServer {
             eprintln!("[McpTestServer] Initializing IDB companion...");
             if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
                 eprintln!(
-                    "[McpTestServer] Warning: Failed to initialize IDB companion: {}",
-                    e
+                    "[McpTestServer] Warning: Failed to initialize IDB companion: {e}"
                 );
                 eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
             } else {
@@ -463,7 +462,7 @@ impl McpTestServer {
         let mut tools = self
             .tools
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {e}")))?;
         tools.insert(name, tool);
         Ok(())
     }
@@ -531,7 +530,7 @@ impl McpTestServer {
         let tools = self
             .tools
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {e}")))?;
 
         let mut schemas = Vec::new();
         for (name, tool) in tools.iter() {
@@ -654,7 +653,7 @@ impl McpTestServer {
             let tools = self
                 .tools
                 .read()
-                .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to acquire tool lock: {e}")))?;
 
             eprintln!(
                 "[McpTestServer] Available tools: {:?}",

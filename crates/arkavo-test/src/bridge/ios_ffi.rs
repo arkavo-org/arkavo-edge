@@ -43,9 +43,9 @@ impl RustTestHarness {
         }
 
         let action_cstr = CString::new(action)
-            .map_err(|e| TestError::Bridge(format!("Invalid action string: {}", e)))?;
+            .map_err(|e| TestError::Bridge(format!("Invalid action string: {e}")))?;
         let params_cstr = CString::new(params)
-            .map_err(|e| TestError::Bridge(format!("Invalid params string: {}", e)))?;
+            .map_err(|e| TestError::Bridge(format!("Invalid params string: {e}")))?;
 
         unsafe {
             let result_ptr = ios_bridge_execute_action(
@@ -114,11 +114,11 @@ impl RustTestHarness {
         }
 
         let entity_cstr = CString::new(entity)
-            .map_err(|e| TestError::Bridge(format!("Invalid entity string: {}", e)))?;
+            .map_err(|e| TestError::Bridge(format!("Invalid entity string: {e}")))?;
         let action_cstr = CString::new(action)
-            .map_err(|e| TestError::Bridge(format!("Invalid action string: {}", e)))?;
+            .map_err(|e| TestError::Bridge(format!("Invalid action string: {e}")))?;
         let data_cstr = CString::new(data)
-            .map_err(|e| TestError::Bridge(format!("Invalid data string: {}", e)))?;
+            .map_err(|e| TestError::Bridge(format!("Invalid data string: {e}")))?;
 
         unsafe {
             let result_ptr = ios_bridge_mutate_state(
@@ -151,7 +151,7 @@ impl RustTestHarness {
         let snapshot = self
             .snapshots
             .get(name)
-            .ok_or_else(|| TestError::Bridge(format!("Snapshot not found: {}", name)))?
+            .ok_or_else(|| TestError::Bridge(format!("Snapshot not found: {name}")))?
             .clone();
 
         self.restore_snapshot(&snapshot)?;
@@ -162,7 +162,7 @@ impl RustTestHarness {
         let snapshot = self
             .snapshots
             .get(from)
-            .ok_or_else(|| TestError::Bridge(format!("Parent snapshot not found: {}", from)))?
+            .ok_or_else(|| TestError::Bridge(format!("Parent snapshot not found: {from}")))?
             .clone();
 
         self.snapshots.insert(to.to_string(), snapshot);

@@ -23,8 +23,7 @@ pub fn git_fallback_fetch(repo_path: &Path, remote: &str) -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(GitError::Git(git2::Error::from_str(&format!(
-            "git fetch failed: {}",
-            stderr
+            "git fetch failed: {stderr}"
         ))));
     }
 
@@ -33,7 +32,7 @@ pub fn git_fallback_fetch(repo_path: &Path, remote: &str) -> Result<()> {
 
 /// Fallback to system git for push operations
 pub fn git_fallback_push(repo_path: &Path, remote: &str, branch: &str) -> Result<()> {
-    let refspec = format!("refs/heads/{}", branch);
+    let refspec = format!("refs/heads/{branch}");
     let output = Command::new("git")
         .current_dir(repo_path)
         .args(["push", remote, &refspec])
@@ -43,8 +42,7 @@ pub fn git_fallback_push(repo_path: &Path, remote: &str, branch: &str) -> Result
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(GitError::Git(git2::Error::from_str(&format!(
-            "git push failed: {}",
-            stderr
+            "git push failed: {stderr}"
         ))));
     }
 
@@ -62,8 +60,7 @@ pub fn git_fallback_pull(repo_path: &Path, remote: &str, branch: &str) -> Result
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(GitError::Git(git2::Error::from_str(&format!(
-            "git pull failed: {}",
-            stderr
+            "git pull failed: {stderr}"
         ))));
     }
 

@@ -564,7 +564,7 @@ impl Tool for CalibrationTool {
                 self.build_and_install_reference_app(device_id).await
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -616,11 +616,11 @@ impl CalibrationTool {
             ])
             .current_dir(&ios_project_path)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {e}")))?;
 
         if !build_output.status.success() {
             let error_msg = String::from_utf8_lossy(&build_output.stderr);
-            eprintln!("[CalibrationTool] Build failed: {}", error_msg);
+            eprintln!("[CalibrationTool] Build failed: {error_msg}");
 
             return Ok(json!({
                 "success": false,
@@ -667,8 +667,7 @@ impl CalibrationTool {
 
         // Install to simulator
         eprintln!(
-            "[CalibrationTool] Installing app to simulator {}...",
-            device_id
+            "[CalibrationTool] Installing app to simulator {device_id}..."
         );
         let install_output = Command::new("xcrun")
             .args(["simctl", "install", device_id, app_path.to_str().unwrap()])

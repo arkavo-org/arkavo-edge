@@ -318,11 +318,11 @@ impl TestExecutor {
             .arg("--nocapture")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined_output = format!("{}\n{}", stdout, stderr);
+        let combined_output = format!("{stdout}\n{stderr}");
 
         Ok(("rust", combined_output))
     }
@@ -337,7 +337,7 @@ impl TestExecutor {
     async fn run_javascript_test(&self, test_name: &str) -> Result<(&'static str, String)> {
         // Check for test runner in package.json
         let package_json = fs::read_to_string(self.working_dir.join("package.json"))
-            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {e}")))?;
 
         let test_runner = if package_json.contains("jest") {
             vec!["jest", test_name]
@@ -353,11 +353,11 @@ impl TestExecutor {
             .args(&test_runner[1..])
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("javascript", format!("{}\n{}", stdout, stderr)))
+        Ok(("javascript", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_python_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -382,7 +382,7 @@ impl TestExecutor {
                     .current_dir(&self.working_dir)
                     .output()
                     .map_err(|e| {
-                        TestError::Execution(format!("Failed to run Python test: {}", e))
+                        TestError::Execution(format!("Failed to run Python test: {e}"))
                     })?
             }
         };

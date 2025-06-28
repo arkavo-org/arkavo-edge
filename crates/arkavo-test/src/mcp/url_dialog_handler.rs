@@ -85,7 +85,7 @@ impl UrlDialogHandler {
         let device = self
             .device_manager
             .get_device(device_id)
-            .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
+            .ok_or_else(|| TestError::Mcp(format!("Device {device_id} not found")))?;
 
         let (x, y) = self.get_open_button_coordinates(&device.name);
 
@@ -105,7 +105,7 @@ impl UrlDialogHandler {
                 device_id,
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {e}")))?;
 
         if !output.status.success() {
             let _stderr = String::from_utf8_lossy(&output.stderr);
@@ -123,7 +123,7 @@ impl UrlDialogHandler {
                     &y.to_string(),
                 ])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {e}")))?;
 
             if !simctl_output.status.success() {
                 return Ok(json!({
@@ -164,7 +164,7 @@ impl Tool for UrlDialogHandler {
                 let device = self
                     .device_manager
                     .get_device(&device_id)
-                    .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
+                    .ok_or_else(|| TestError::Mcp(format!("Device {device_id} not found")))?;
 
                 let (x, y) = match device.name.as_str() {
                     name if name.contains("iPhone 16 Pro") => (78.0, 490.0),

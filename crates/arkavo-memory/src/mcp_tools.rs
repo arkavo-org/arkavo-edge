@@ -77,8 +77,7 @@ impl Tool for StoreMemoryTool {
             .await
             .map_err(|e| {
                 Box::new(MemoryError::Embedding(format!(
-                    "Failed to generate embedding: {}",
-                    e
+                    "Failed to generate embedding: {e}"
                 ))) as Box<dyn std::error::Error + Send + Sync>
             })?;
 
@@ -97,8 +96,7 @@ impl Tool for StoreMemoryTool {
 
         self.storage.store(memory).await.map_err(|e| {
             Box::new(MemoryError::Storage(format!(
-                "Failed to store memory: {}",
-                e
+                "Failed to store memory: {e}"
             ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
@@ -180,7 +178,7 @@ impl Tool for SearchMemoryTool {
             .search(query, limit, category)
             .await
             .map_err(|e| {
-                Box::new(MemoryError::Storage(format!("Search failed: {}", e)))
+                Box::new(MemoryError::Storage(format!("Search failed: {e}")))
                     as Box<dyn std::error::Error + Send + Sync>
             })?;
 
@@ -253,12 +251,12 @@ impl Tool for GetMemoryTool {
         })?;
 
         let id = Uuid::parse_str(id_str).map_err(|e| {
-            Box::new(MemoryError::BadRequest(format!("Invalid UUID: {}", e)))
+            Box::new(MemoryError::BadRequest(format!("Invalid UUID: {e}")))
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
 
         let memory = self.storage.get(id).await.map_err(|e| {
-            Box::new(MemoryError::Storage(format!("Failed to get memory: {}", e)))
+            Box::new(MemoryError::Storage(format!("Failed to get memory: {e}")))
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
 
@@ -321,8 +319,7 @@ impl Tool for CategorizeMemoryTool {
 
         let (category, confidence) = self.storage.categorize(content).await.map_err(|e| {
             Box::new(MemoryError::Storage(format!(
-                "Categorization failed: {}",
-                e
+                "Categorization failed: {e}"
             ))) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
