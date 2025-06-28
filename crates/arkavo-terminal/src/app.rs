@@ -238,7 +238,7 @@ impl App {
                         task.set_status(crate::ui::task_window::TaskStatus::Error);
                         task.add_message(
                             crate::ui::task_window::MessageRole::System,
-                            format!("Error: {}", error),
+                            format!("Error: {error}"),
                         );
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Error,
@@ -408,18 +408,14 @@ impl App {
                                                     self.add_debug_log(
                                                         crate::ui::debug::LogLevel::Info,
                                                         format!(
-                                                            "[UI] Sent request for task {}",
-                                                            task_id
+                                                            "[UI] Sent request for task {task_id}"
                                                         ),
                                                     );
                                                 }
                                                 Err(e) => {
                                                     self.add_debug_log(
                                                         crate::ui::debug::LogLevel::Error,
-                                                        format!(
-                                                            "[UI] Failed to send to LLM: {}",
-                                                            e
-                                                        ),
+                                                        format!("[UI] Failed to send to LLM: {e}"),
                                                     );
                                                     if let Some(task) = self
                                                         .task_manager
@@ -428,7 +424,7 @@ impl App {
                                                         task.set_status(crate::ui::task_window::TaskStatus::Error);
                                                         task.add_message(
                                                             crate::ui::task_window::MessageRole::System,
-                                                            format!("Failed to send request: {}", e),
+                                                            format!("Failed to send request: {e}"),
                                                         );
                                                     }
                                                 }
@@ -661,7 +657,7 @@ impl App {
 
         // Render model selector with indication of actual model
         let active_model_display = if let Some(ref active) = self.active_model {
-            format!("Active Model: {}", active)
+            format!("Active Model: {active}")
         } else {
             "Active Model: devstral:latest".to_string()
         };
@@ -716,10 +712,8 @@ Scrolling (when in scroll mode):
 
             // If there are more than 9 tasks, show a pager
             if task_count > 9 {
-                let pager_text = format!(
-                    " Showing 1-9 of {} tasks (use 1-9 keys to jump) ",
-                    task_count
-                );
+                let pager_text =
+                    format!(" Showing 1-9 of {task_count} tasks (use 1-9 keys to jump) ");
                 let pager_area = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -944,8 +938,7 @@ Scrolling (when in scroll mode):
         };
 
         let status = format!(
-            " {} | Model: {} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit ",
-            mode_indicator, active_model
+            " {mode_indicator} | Model: {active_model} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit "
         );
 
         let paragraph = Paragraph::new(status)
@@ -994,8 +987,7 @@ Scrolling (when in scroll mode):
         let streaming_indicator = if is_streaming { " ● Streaming" } else { "" };
 
         let perf_text = format!(
-            " {} FPS | Sent: {} | Received: {}{}",
-            fps, messages_sent, messages_received, streaming_indicator
+            " {fps} FPS | Sent: {messages_sent} | Received: {messages_received}{streaming_indicator}"
         );
 
         let color = if fps >= 100 {
@@ -1045,7 +1037,7 @@ Scrolling (when in scroll mode):
                 Err(e) => {
                     self.add_debug_log(
                         crate::ui::debug::LogLevel::Error,
-                        format!("[UI] Helix editor error: {}", e),
+                        format!("[UI] Helix editor error: {e}"),
                     );
                 }
             }

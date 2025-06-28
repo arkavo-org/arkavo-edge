@@ -31,7 +31,7 @@ impl StateManager {
         let state = self
             .current_state
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read current state: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read current state: {e}")))?;
 
         let snapshot = StateSnapshot {
             id: Uuid::new_v4().to_string(),
@@ -45,7 +45,7 @@ impl StateManager {
 
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshot: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshot: {e}")))?
             .insert(id.clone(), snapshot);
 
         Ok(id)
@@ -55,16 +55,16 @@ impl StateManager {
         let snapshots = self
             .snapshots
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {e}")))?;
 
         let snapshot = snapshots
             .get(id)
-            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {}", id)))?;
+            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {id}")))?;
 
         let mut state = self
             .current_state
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write current state: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write current state: {e}")))?;
 
         *state = snapshot.data.clone();
 
@@ -75,7 +75,7 @@ impl StateManager {
         let snapshots = self
             .snapshots
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {e}")))?;
 
         let mut list: Vec<StateSnapshot> = snapshots.values().cloned().collect();
         list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -86,9 +86,9 @@ impl StateManager {
     pub fn delete_snapshot(&self, id: &str) -> Result<()> {
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {e}")))?
             .remove(id)
-            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {}", id)))?;
+            .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {id}")))?;
 
         Ok(())
     }
@@ -97,11 +97,11 @@ impl StateManager {
         let snapshots = self
             .snapshots
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read snapshots: {e}")))?;
 
-        let parent = snapshots.get(from_id).ok_or_else(|| {
-            TestError::Execution(format!("Parent snapshot not found: {}", from_id))
-        })?;
+        let parent = snapshots
+            .get(from_id)
+            .ok_or_else(|| TestError::Execution(format!("Parent snapshot not found: {from_id}")))?;
 
         let new_snapshot = StateSnapshot {
             id: Uuid::new_v4().to_string(),
@@ -121,7 +121,7 @@ impl StateManager {
 
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {e}")))?
             .insert(id.clone(), new_snapshot);
 
         Ok(id)
@@ -131,7 +131,7 @@ impl StateManager {
         let state = self
             .current_state
             .read()
-            .map_err(|e| TestError::Execution(format!("Failed to read current state: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read current state: {e}")))?;
 
         Ok(state.clone())
     }
@@ -140,7 +140,7 @@ impl StateManager {
         let mut state = self
             .current_state
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write current state: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to write current state: {e}")))?;
 
         *state = data;
 

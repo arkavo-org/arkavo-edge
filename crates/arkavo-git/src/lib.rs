@@ -115,7 +115,7 @@ impl GitManager {
         let message = generator.generate(repo)?;
 
         // Add AI-generated suffix
-        let full_message = format!("{}\n\n[AI-generated]", message);
+        let full_message = format!("{message}\n\n[AI-generated]");
 
         // Create commit
         self.commit_changes(repo, &full_message)

@@ -34,7 +34,7 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Err(e) => {
-            println!("   ✗ Failed to list targets: {}", e);
+            println!("   ✗ Failed to list targets: {e}");
             return Err(e.into());
         }
     }
@@ -43,17 +43,14 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
     let device_id = "325F1C75-3912-426F-9A7F-C533911A56E5";
 
     // Ensure companion is running
-    println!(
-        "\n3. Ensuring IDB companion is running for device {}...",
-        device_id
-    );
+    println!("\n3. Ensuring IDB companion is running for device {device_id}...");
     let companion_process = match IdbWrapper::ensure_companion_running(device_id).await {
         Ok(child) => {
             println!("   ✓ IDB companion is ready");
             Some(child)
         }
         Err(e) => {
-            println!("   ✗ Failed to ensure companion: {}", e);
+            println!("   ✗ Failed to ensure companion: {e}");
 
             // Let's check what simulators are available
             println!("\n   Checking available simulators via simctl...");
@@ -62,7 +59,7 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
                 .output()?;
 
             let output_str = String::from_utf8_lossy(&simctl_output.stdout);
-            println!("   Booted simulators:\n{}", output_str);
+            println!("   Booted simulators:\n{output_str}");
 
             return Err(e.into());
         }
@@ -78,7 +75,7 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Result: {}", serde_json::to_string_pretty(&result)?);
         }
         Err(e) => {
-            println!("   ✗ Tap failed: {}", e);
+            println!("   ✗ Tap failed: {e}");
             return Err(e.into());
         }
     }
@@ -91,7 +88,7 @@ async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Result: {}", serde_json::to_string_pretty(&result)?);
         }
         Err(e) => {
-            println!("   ✗ Second tap failed: {}", e);
+            println!("   ✗ Second tap failed: {e}");
             return Err(e.into());
         }
     }

@@ -50,7 +50,7 @@ impl XCTestVerifier {
             Err(e) => {
                 status.error_details = Some(XCTestError {
                     stage: "bundle_check".to_string(),
-                    message: format!("Failed to check bundle installation: {}", e),
+                    message: format!("Failed to check bundle installation: {e}"),
                     can_retry: false,
                 });
                 return Ok(status);
@@ -67,7 +67,7 @@ impl XCTestVerifier {
             Err(e) => {
                 status.error_details = Some(XCTestError {
                     stage: "bridge_test".to_string(),
-                    message: format!("Bridge connectivity test failed: {}", e),
+                    message: format!("Bridge connectivity test failed: {e}"),
                     can_retry: true,
                 });
             }
@@ -81,7 +81,7 @@ impl XCTestVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -144,18 +144,14 @@ impl XCTestVerifier {
                     Err(e) => {
                         let _ = child.kill();
                         Err(TestError::Mcp(format!(
-                            "Failed to check process status: {}",
-                            e
+                            "Failed to check process status: {e}"
                         )))
                     }
                 }
             }
             Err(e) => {
                 // If the standard approach fails, just check if we can run any xctest
-                eprintln!(
-                    "Standard XCTest launch failed: {}, trying minimal verification",
-                    e
-                );
+                eprintln!("Standard XCTest launch failed: {e}, trying minimal verification");
 
                 // Check if device can run tests at all
                 let verify_output = Command::new("xcrun")
@@ -179,7 +175,7 @@ impl XCTestVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "booted", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if !output.status.success() {
             return Ok(false);
@@ -187,7 +183,7 @@ impl XCTestVerifier {
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let devices: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         // Find first booted device
         if let Some(devices_map) = devices.get("devices").and_then(|d| d.as_object()) {

@@ -51,7 +51,10 @@ impl Tool for RunTestKit {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing test_name parameter".to_string()))?;
 
-        let timeout = params.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30);
+        let timeout = params
+            .get("timeout")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(30);
 
         // Discover and run actual tests from the repository
         let executor = TestExecutor::new();
@@ -142,11 +145,14 @@ impl Tool for ListTestsKit {
             .and_then(|v| v.as_str())
             .unwrap_or("all");
 
-        let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let page = params
+            .get("page")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(1) as usize;
 
         let page_size = params
             .get("page_size")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(50) as usize;
 
         let executor = TestExecutor::new();
@@ -282,18 +288,14 @@ impl TestExecutor {
     fn is_swift_project(&self) -> bool {
         self.working_dir.join("Package.swift").exists()
             || self.working_dir.join("project.pbxproj").exists()
-            || fs::read_dir(&self.working_dir)
-                .ok()
-                .map(|entries| {
-                    entries.filter_map(|e| e.ok()).any(|entry| {
-                        entry
-                            .path()
-                            .extension()
-                            .map(|ext| ext == "xcodeproj" || ext == "xcworkspace")
-                            .unwrap_or(false)
-                    })
+            || fs::read_dir(&self.working_dir).ok().is_some_and(|entries| {
+                entries.filter_map(std::result::Result::ok).any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext == "xcodeproj" || ext == "xcworkspace")
                 })
-                .unwrap_or(false)
+            })
     }
 
     fn is_javascript_project(&self) -> bool {
@@ -318,11 +320,11 @@ impl TestExecutor {
             .arg("--nocapture")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined_output = format!("{}\n{}", stdout, stderr);
+        let combined_output = format!("{stdout}\n{stderr}");
 
         Ok(("rust", combined_output))
     }
@@ -337,7 +339,7 @@ impl TestExecutor {
     async fn run_javascript_test(&self, test_name: &str) -> Result<(&'static str, String)> {
         // Check for test runner in package.json
         let package_json = fs::read_to_string(self.working_dir.join("package.json"))
-            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {e}")))?;
 
         let test_runner = if package_json.contains("jest") {
             vec!["jest", test_name]
@@ -353,11 +355,11 @@ impl TestExecutor {
             .args(&test_runner[1..])
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("javascript", format!("{}\n{}", stdout, stderr)))
+        Ok(("javascript", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_python_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -381,15 +383,13 @@ impl TestExecutor {
                     .arg(test_name)
                     .current_dir(&self.working_dir)
                     .output()
-                    .map_err(|e| {
-                        TestError::Execution(format!("Failed to run Python test: {}", e))
-                    })?
+                    .map_err(|e| TestError::Execution(format!("Failed to run Python test: {e}")))?
             }
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("python", format!("{}\n{}", stdout, stderr)))
+        Ok(("python", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_go_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -400,11 +400,11 @@ impl TestExecutor {
             .arg("-v")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run go test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run go test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("go", format!("{}\n{}", stdout, stderr)))
+        Ok(("go", format!("{stdout}\n{stderr}")))
     }
 
     fn parse_test_output(&self, output: &str, test_type: &str) -> (&'static str, Option<String>) {
@@ -478,7 +478,7 @@ impl TestExecutor {
                             lines[i..]
                                 .iter()
                                 .take(3)
-                                .cloned()
+                                .copied()
                                 .collect::<Vec<_>>()
                                 .join("\n"),
                         );
@@ -493,7 +493,7 @@ impl TestExecutor {
                             lines[i..]
                                 .iter()
                                 .take(5)
-                                .cloned()
+                                .copied()
                                 .collect::<Vec<_>>()
                                 .join("\n"),
                         );
@@ -504,7 +504,7 @@ impl TestExecutor {
                 // Generic error extraction
                 for line in lines.iter().rev() {
                     if line.contains("error") || line.contains("failed") {
-                        return Some(line.to_string());
+                        return Some((*line).to_string());
                     }
                 }
             }

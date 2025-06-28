@@ -217,7 +217,7 @@ impl AutoDiscovery {
         Ok("// Auto-generated bridge code".to_string())
     }
 
-    fn can_use_dylib_injection(&self) -> bool {
+    const fn can_use_dylib_injection(&self) -> bool {
         // Check if we can use dynamic library injection
         cfg!(target_os = "macos") || cfg!(target_os = "ios")
     }
@@ -261,7 +261,7 @@ pub struct ProjectInfo {
     pub test_framework: Option<TestFramework>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProjectType {
     #[allow(non_camel_case_types)]
     iOS,

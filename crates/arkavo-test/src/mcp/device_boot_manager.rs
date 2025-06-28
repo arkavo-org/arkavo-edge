@@ -14,7 +14,7 @@ pub struct BootStatus {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BootState {
     NotStarted,
     Booting,
@@ -44,7 +44,7 @@ impl DeviceBootManager {
         let boot_output = Command::new("xcrun")
             .args(["simctl", "boot", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to start boot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to start boot: {e}")))?;
 
         // Check if already booted (this is not an error)
         if !boot_output.status.success() {
@@ -90,10 +90,7 @@ impl DeviceBootManager {
 
         if !status.ui_ready {
             // UI might still be loading, but basic services are ready
-            eprintln!(
-                "Warning: UI services may not be fully ready on device {}",
-                device_id
-            );
+            eprintln!("Warning: UI services may not be fully ready on device {device_id}");
         }
 
         status.current_state = BootState::Ready;
@@ -107,11 +104,11 @@ impl DeviceBootManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         // Find the device in the JSON
         if let Some(devices_map) = data.get("devices").and_then(|d| d.as_object()) {
@@ -144,7 +141,7 @@ impl DeviceBootManager {
                 "system/com.apple.SpringBoard",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to check SpringBoard: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to check SpringBoard: {e}")))?;
 
         // If SpringBoard service is running, UI should be ready
         Ok(output.status.success() && !output.stdout.is_empty())
@@ -157,7 +154,7 @@ impl DeviceBootManager {
                 "simctl", "spawn", device_id, "log", "show", "--style", "compact", "--last", "1m",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get device logs: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get device logs: {e}")))?;
 
         let logs = String::from_utf8_lossy(&output.stdout);
 
@@ -189,7 +186,7 @@ impl DeviceBootManager {
         Command::new("xcrun")
             .args(["simctl", "terminate", device_id, "all"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to terminate apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to terminate apps: {e}")))?;
 
         Ok(())
     }

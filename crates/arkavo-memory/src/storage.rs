@@ -61,7 +61,7 @@ impl MemoryStorage {
             .unwrap()
             .as_nanos();
         let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join(format!("arkavo_test_{}_{}.db", timestamp, test_id));
+        let db_path = temp_dir.join(format!("arkavo_test_{timestamp}_{test_id}.db"));
 
         Self::with_path(db_path, HnswConfig::default()).await
     }
@@ -70,7 +70,7 @@ impl MemoryStorage {
         let data_dir = PathBuf::from(".arkavo").join("memory_server");
 
         std::fs::create_dir_all(&data_dir)
-            .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {}", e)))?;
+            .map_err(|e| MemoryError::Storage(format!("Failed to create data directory: {e}")))?;
 
         Ok(data_dir)
     }
@@ -84,14 +84,14 @@ impl MemoryStorage {
     pub async fn with_path(db_path: PathBuf, config: HnswConfig) -> Result<Self> {
         #[cfg(debug_assertions)]
         {
-            eprintln!("Memory storage: Creating database at {:?}", db_path);
+            eprintln!("Memory storage: Creating database at {db_path:?}");
             eprintln!("Current directory: {:?}", std::env::current_dir());
         }
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                MemoryError::Storage(format!("Failed to create database directory: {}", e))
+                MemoryError::Storage(format!("Failed to create database directory: {e}"))
             })?;
         }
 
@@ -182,7 +182,7 @@ impl MemoryStorage {
             let embedding_blob: Vec<u8> = row.get("embedding_blob");
 
             let id = Uuid::parse_str(&id_str)
-                .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {}", e)))?;
+                .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
             let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
 
             embeddings.insert(id, embedding.clone());
@@ -269,10 +269,10 @@ impl MemoryStorage {
         let updated_at_str: String = row.get("updated_at");
 
         let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {}", e)))?
+            .map_err(|e| MemoryError::Storage(format!("Invalid created_at timestamp: {e}")))?
             .with_timezone(&chrono::Utc);
         let updated_at = chrono::DateTime::parse_from_rfc3339(&updated_at_str)
-            .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {}", e)))?
+            .map_err(|e| MemoryError::Storage(format!("Invalid updated_at timestamp: {e}")))?
             .with_timezone(&chrono::Utc);
 
         Ok(Memory {

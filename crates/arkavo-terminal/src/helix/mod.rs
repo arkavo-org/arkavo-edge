@@ -105,7 +105,7 @@ mod tests {
         // This test will pass/fail based on whether helix is installed
         println!("Helix available: {}", helix.is_available());
         if let Some(path) = helix.get_binary_info() {
-            println!("Helix binary at: {}", path);
+            println!("Helix binary at: {path}");
         }
     }
 }

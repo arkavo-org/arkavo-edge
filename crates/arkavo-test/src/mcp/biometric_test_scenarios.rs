@@ -58,10 +58,10 @@ impl BiometricTestScenario {
                 "com.apple.BiometricKit.enrollmentChanged",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to check enrollment: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to check enrollment: {e}")))?;
 
         let status = String::from_utf8_lossy(&output.stdout);
-        Ok(status.contains("1"))
+        Ok(status.contains('1'))
     }
 }
 
@@ -136,7 +136,7 @@ impl Tool for BiometricTestScenario {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
                 if output.status.success() {
                     Ok(json!({
@@ -181,7 +181,7 @@ impl Tool for BiometricTestScenario {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to send ESC: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -223,7 +223,7 @@ impl Tool for BiometricTestScenario {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
                 if output.status.success() {
                     Ok(json!({
@@ -326,7 +326,7 @@ impl Tool for BiometricTestScenario {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown scenario: {}", scenario))),
+            _ => Err(TestError::Mcp(format!("Unknown scenario: {scenario}"))),
         }
     }
 
@@ -412,7 +412,7 @@ impl Tool for SmartBiometricHandler {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {e}")))?;
 
                 if output.status.success() {
                     Ok(json!({
@@ -451,7 +451,7 @@ impl Tool for SmartBiometricHandler {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {e}")))?;
 
                 if output.status.success() {
                     Ok(json!({
@@ -514,7 +514,7 @@ impl Tool for SmartBiometricHandler {
                     .arg("-e")
                     .arg(applescript)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("AppleScript failed: {e}")))?;
 
                 if output.status.success() {
                     Ok(json!({
@@ -535,7 +535,7 @@ impl Tool for SmartBiometricHandler {
                 }
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown test type: {}", test_type))),
+            _ => Err(TestError::Mcp(format!("Unknown test type: {test_type}"))),
         }
     }
 

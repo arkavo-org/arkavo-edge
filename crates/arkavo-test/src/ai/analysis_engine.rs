@@ -47,15 +47,14 @@ impl AnalysisEngine {
     /// Discover properties and invariants that should hold
     pub async fn discover_properties(&self, domain: &DomainAnalysis) -> Result<Vec<Property>> {
         let prompt = format!(
-            "Given this domain model analysis: {:?}\n\
+            "Given this domain model analysis: {domain:?}\n\
              Identify properties and invariants that should always be true.\n\
              Focus on:\n\
              1. Data consistency rules\n\
              2. Business logic constraints\n\
              3. State transition rules\n\
              4. Security properties\n\
-             Format as JSON array of properties.",
-            domain
+             Format as JSON array of properties."
         );
 
         if self.api_key.is_none() {
@@ -92,14 +91,13 @@ impl AnalysisEngine {
     pub async fn analyze_failure(&self, test_case: &TestCase, error: &str) -> Result<BugAnalysis> {
         let prompt = format!(
             "Analyze this test failure:\n\
-             Test case: {:?}\n\
-             Error: {}\n\
+             Test case: {test_case:?}\n\
+             Error: {error}\n\
              Provide:\n\
              1. Root cause analysis\n\
              2. Minimal reproduction steps\n\
              3. Suggested fix\n\
-             4. Severity assessment",
-            test_case, error
+             4. Severity assessment"
         );
 
         if self.api_key.is_none() {
@@ -150,43 +148,43 @@ impl AnalysisEngine {
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| TestError::Ai(format!("API request failed: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("API request failed: {e}")))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(TestError::Ai(format!("API error: {}", error_text)));
+            return Err(TestError::Ai(format!("API error: {error_text}")));
         }
 
         let response_json: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to parse response: {e}")))?;
 
         response_json["content"][0]["text"]
             .as_str()
             .ok_or_else(|| TestError::Ai("Invalid response format".to_string()))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
     }
 
     fn parse_analysis_response(&self, response: &str) -> Result<DomainAnalysis> {
         // Extract JSON from response and parse
         serde_json::from_str(response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse analysis: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse analysis: {e}")))
     }
 
     fn parse_properties_response(&self, response: &str) -> Result<Vec<Property>> {
         serde_json::from_str(response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse properties: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse properties: {e}")))
     }
 
     fn parse_test_cases_response(&self, response: &str) -> Result<Vec<TestCase>> {
         serde_json::from_str(response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse test cases: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse test cases: {e}")))
     }
 
     fn parse_bug_analysis_response(&self, response: &str) -> Result<BugAnalysis> {
         serde_json::from_str(response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse bug analysis: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse bug analysis: {e}")))
     }
 
     // Mock implementations for testing without API key
@@ -245,7 +243,7 @@ impl AnalysisEngine {
     fn mock_test_cases(&self, property: &Property, count: usize) -> Vec<TestCase> {
         (0..count)
             .map(|i| TestCase {
-                id: format!("test_{}", i),
+                id: format!("test_{i}"),
                 property: property.name.clone(),
                 description: format!("Test case {} for {}", i, property.name),
                 inputs: self.generate_mock_inputs(i),

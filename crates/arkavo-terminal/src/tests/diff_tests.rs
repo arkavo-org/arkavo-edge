@@ -50,7 +50,7 @@ fn test_diff_scroll_bounds() {
             line_type: DiffLineType::Context,
             old_line_num: Some(i),
             new_line_num: Some(i),
-            content: format!("Line {}", i),
+            content: format!("Line {i}"),
         });
     }
 

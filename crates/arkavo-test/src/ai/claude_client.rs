@@ -73,21 +73,20 @@ impl ClaudeClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {e}")))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             return Err(TestError::Ai(format!(
-                "Claude API error: {} - {}",
-                status, error_text
+                "Claude API error: {status} - {error_text}"
             )));
         }
 
         let claude_response: ClaudeResponse = response
             .json()
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {e}")))?;
 
         claude_response
             .content
@@ -123,21 +122,20 @@ impl ClaudeClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to send request to Claude: {e}")))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             return Err(TestError::Ai(format!(
-                "Claude API error: {} - {}",
-                status, error_text
+                "Claude API error: {status} - {error_text}"
             )));
         }
 
         let claude_response: ClaudeResponse = response
             .json()
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to parse Claude response: {e}")))?;
 
         claude_response
             .content

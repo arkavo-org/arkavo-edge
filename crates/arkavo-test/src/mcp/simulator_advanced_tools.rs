@@ -76,7 +76,7 @@ impl SimulatorAdvancedKit {
         let path_output = Command::new("xcrun")
             .args(["simctl", "get_app_container", device_id, "booted"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get device paths: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get device paths: {e}")))?;
 
         let data_path = if path_output.status.success() {
             Some(
@@ -115,7 +115,7 @@ impl SimulatorAdvancedKit {
         let output = Command::new("xcrun")
             .args(["simctl", "spawn", device_id, "launchctl", "list"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list processes: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list processes: {e}")))?;
 
         if !output.status.success() {
             return Ok(Vec::new());
@@ -152,7 +152,7 @@ impl SimulatorAdvancedKit {
         let output = Command::new("du")
             .args(["-sk", path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get directory size: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get directory size: {e}")))?;
 
         if output.status.success() {
             let size_str = String::from_utf8_lossy(&output.stdout);
@@ -220,7 +220,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "terminate", device_id, process_name])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to kill process: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to kill process: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -243,7 +243,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "erase", device_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to reset device: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to reset device: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -270,7 +270,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "clone", device_id, new_name])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to clone device: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to clone device: {e}")))?;
 
                 if output.status.success() {
                     let new_device_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -302,7 +302,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "listapps", device_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
                 if output.status.success() {
                     let apps_json = String::from_utf8_lossy(&output.stdout);
@@ -340,7 +340,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "uninstall", device_id, bundle_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -363,7 +363,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "keychain", device_id, "reset"])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to clear keychain: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to clear keychain: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -376,7 +376,7 @@ impl Tool for SimulatorAdvancedKit {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

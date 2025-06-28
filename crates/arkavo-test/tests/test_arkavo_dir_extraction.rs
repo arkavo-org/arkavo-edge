@@ -47,7 +47,7 @@ async fn test_idb_extracts_to_arkavo_directory() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let mode = metadata.permissions().mode();
         assert!(mode & 0o111 != 0, "Binary should be executable");
-        println!("✅ Binary has executable permissions: {:o}", mode);
+        println!("✅ Binary has executable permissions: {mode:o}");
     }
 
     // Check for frameworks

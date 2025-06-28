@@ -45,19 +45,16 @@ impl BiometricKit {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            Ok(device.id)
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }
@@ -90,12 +87,11 @@ impl BiometricKit {
                 delay 0.2
                 tell application "System Events"
                     tell process "Simulator"
-                        click menu item "{}" of menu "{}" of menu item "{}" of menu "Features" of menu bar 1
+                        click menu item "{menu_item}" of menu "{menu_name}" of menu item "{menu_name}" of menu "Features" of menu bar 1
                     end tell
                 end tell
             end tell
-            "#,
-            menu_item, menu_name, menu_name
+            "#
         );
 
         // Execute AppleScript
@@ -111,7 +107,7 @@ impl BiometricKit {
                 } else {
                     // Log error for debugging
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("AppleScript error: {}", stderr);
+                    eprintln!("AppleScript error: {stderr}");
                     false
                 }
             }
@@ -199,7 +195,7 @@ impl Tool for BiometricKit {
                         tell application "System Events"
                             tell process "Simulator"
                                 -- Click to ensure menu item is checked
-                                set enrollMenuItem to menu item "Enrolled" of menu "{}" of menu item "{}" of menu "Features" of menu bar 1
+                                set enrollMenuItem to menu item "Enrolled" of menu "{menu_name}" of menu item "{menu_name}" of menu "Features" of menu bar 1
                                 if exists enrollMenuItem then
                                     -- Check if not already enrolled
                                     if value of attribute "AXMenuItemMarkChar" of enrollMenuItem is not "✓" then
@@ -214,8 +210,7 @@ impl Tool for BiometricKit {
                             end tell
                         end tell
                     end tell
-                    "#,
-                    menu_name, menu_name
+                    "#
                 );
 
                 let result = Command::new("osascript")
@@ -227,9 +222,9 @@ impl Tool for BiometricKit {
                     Ok(output) if output.status.success() => {
                         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                         let message = match stdout.as_str() {
-                            "enrolled" => format!("{} enrollment enabled", menu_name),
-                            "already_enrolled" => format!("{} was already enrolled", menu_name),
-                            _ => format!("{} enrollment toggled", menu_name),
+                            "enrolled" => format!("{menu_name} enrollment enabled"),
+                            "already_enrolled" => format!("{menu_name} was already enrolled"),
+                            _ => format!("{menu_name} enrollment toggled"),
                         };
 
                         Ok(serde_json::json!({
@@ -379,7 +374,7 @@ impl Tool for BiometricKit {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 
@@ -470,10 +465,6 @@ impl Tool for SystemDialogKit {
         // Map action to common button texts
         let button = match (action, button_text) {
             (_, Some(text)) => text,
-            ("accept", _) => "OK",
-            ("dismiss", _) => "Cancel",
-            ("allow", _) => "Allow",
-            ("deny", _) => "Don't Allow",
             _ => "OK",
         };
 
@@ -486,14 +477,14 @@ impl Tool for SystemDialogKit {
                 tell application "System Events"
                     tell process "Simulator"
                         tell window 1
-                            if exists button "{}" then
-                                click button "{}"
+                            if exists button "{button}" then
+                                click button "{button}"
                                 return "success"
                             else
                                 -- Try to find any button containing the text
                                 set allButtons to buttons
                                 repeat with aButton in allButtons
-                                    if name of aButton contains "{}" then
+                                    if name of aButton contains "{button}" then
                                         click aButton
                                         return "success"
                                     end if
@@ -504,8 +495,7 @@ impl Tool for SystemDialogKit {
                     end tell
                 end tell
             end tell
-            "#,
-            button, button, button
+            "#
         );
 
         let result = Command::new("osascript")

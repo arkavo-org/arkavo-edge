@@ -29,7 +29,7 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "runtimes", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list runtimes: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list runtimes: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -40,7 +40,7 @@ impl DeviceHealthManager {
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse runtime list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse runtime list: {e}")))?;
 
         let mut runtimes = Vec::new();
 
@@ -52,13 +52,13 @@ impl DeviceHealthManager {
                 ) {
                     let is_available = runtime
                         .get("isAvailable")
-                        .and_then(|a| a.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
 
                     let build_version = runtime
                         .get("buildversion")
                         .and_then(|b| b.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
 
                     runtimes.push(RuntimeInfo {
                         identifier: identifier.to_string(),
@@ -87,11 +87,11 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         let mut health_reports = Vec::new();
 
@@ -108,20 +108,20 @@ impl DeviceHealthManager {
                             // Check if runtime is available
                             let runtime_available = available_runtime_ids.contains(runtime_id);
                             if !runtime_available {
-                                issues.push(format!("Runtime {} is not available", runtime_id));
+                                issues.push(format!("Runtime {runtime_id} is not available"));
                             }
 
                             // Check if device is available
                             let is_available = device
                                 .get("isAvailable")
-                                .and_then(|a| a.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(true); // Default to true for backwards compatibility
 
                             if !is_available {
                                 if let Some(error) =
                                     device.get("availabilityError").and_then(|e| e.as_str())
                                 {
-                                    issues.push(format!("Device unavailable: {}", error));
+                                    issues.push(format!("Device unavailable: {error}"));
                                 } else {
                                     issues.push("Device is marked as unavailable".to_string());
                                 }
@@ -168,7 +168,7 @@ impl DeviceHealthManager {
                     let output = Command::new("xcrun")
                         .args(["simctl", "delete", &report.device_id])
                         .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to delete device: {}", e)))?;
+                        .map_err(|e| TestError::Mcp(format!("Failed to delete device: {e}")))?;
 
                     if output.status.success() {
                         deleted_devices.push(report.device_id);
@@ -193,7 +193,7 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "delete", "unavailable"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to delete unavailable devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to delete unavailable devices: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(

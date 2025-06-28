@@ -39,7 +39,7 @@ mod tui_input_tests {
 
         // Create a very long input that exceeds typical terminal width
         let long_text = "a".repeat(200);
-        app.input_buffer = long_text.clone();
+        app.input_buffer = long_text;
 
         // Test that buffer length is preserved
         assert_eq!(app.input_buffer.len(), 200);

@@ -21,8 +21,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Default behavior
     let feature_path = args
         .first()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("tests"));
+        .map_or_else(|| PathBuf::from("tests"), PathBuf::from);
 
     if feature_path.is_file() && feature_path.extension() == Some(std::ffi::OsStr::new("feature")) {
         run_gherkin_test(&feature_path)
@@ -38,7 +37,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
 
     println!("Feature: {}", feature.name);
     if let Some(desc) = &feature.description {
-        println!("Description: {}", desc);
+        println!("Description: {desc}");
     }
 
     let runtime = tokio::runtime::Runtime::new()?;
@@ -50,7 +49,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
     let reporter = BusinessReporter::new(OutputFormat::Markdown)?;
     let report = reporter.generate_report(&results)?;
 
-    println!("\n{}", report);
+    println!("\n{report}");
 
     let failed = results
         .iter()
@@ -222,7 +221,7 @@ fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::erro
                 println!("\n{}. {} ({:?})", i + 1, bug.root_cause, bug.severity);
                 println!("   Minimal reproduction:");
                 for line in bug.minimal_reproduction.lines() {
-                    println!("   {}", line);
+                    println!("   {line}");
                 }
                 println!("   💡 Suggested fix: {}", bug.suggested_fix);
             }
@@ -304,14 +303,8 @@ fn run_bdd_tests(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Find all .feature files
     let feature_files = std::fs::read_dir("tests")
         .unwrap_or_else(|_| std::fs::read_dir(".").unwrap())
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "feature")
-                .unwrap_or(false)
-        })
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "feature"))
         .collect::<Vec<_>>();
 
     if feature_files.is_empty() {

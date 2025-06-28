@@ -12,7 +12,7 @@ pub enum IOSToolError {
 impl IOSToolError {
     pub fn to_response(&self) -> Value {
         match self {
-            IOSToolError::NoSimulatorAvailable => json!({
+            Self::NoSimulatorAvailable => json!({
                 "error": {
                     "code": "NO_SIMULATOR_AVAILABLE",
                     "message": "No iOS simulator is available. Please ensure Xcode is installed and at least one simulator is configured.",
@@ -23,7 +23,7 @@ impl IOSToolError {
                 }
             }),
 
-            IOSToolError::BridgeNotConnected => json!({
+            Self::BridgeNotConnected => json!({
                 "error": {
                     "code": "IOS_BRIDGE_NOT_CONNECTED",
                     "message": "iOS bridge is not connected. The tool is running in standalone mode without iOS integration.",
@@ -34,7 +34,7 @@ impl IOSToolError {
                 }
             }),
 
-            IOSToolError::SimulatorNotBooted => json!({
+            Self::SimulatorNotBooted => json!({
                 "error": {
                     "code": "SIMULATOR_NOT_BOOTED",
                     "message": "iOS simulator exists but is not booted.",
@@ -45,7 +45,7 @@ impl IOSToolError {
                 }
             }),
 
-            IOSToolError::XcodeNotInstalled => json!({
+            Self::XcodeNotInstalled => json!({
                 "error": {
                     "code": "XCODE_NOT_INSTALLED",
                     "message": "Xcode or Xcode Command Line Tools are not installed.",
@@ -56,7 +56,7 @@ impl IOSToolError {
                 }
             }),
 
-            IOSToolError::InvalidDeviceId => json!({
+            Self::InvalidDeviceId => json!({
                 "error": {
                     "code": "INVALID_DEVICE_ID",
                     "message": "The specified device ID is invalid or device not found.",

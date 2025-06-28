@@ -28,7 +28,7 @@ pub fn check_system_frameworks() -> bool {
 pub fn setup_framework_links(target_dir: &Path) -> Result<()> {
     let frameworks_dir = target_dir.join("Frameworks");
     fs::create_dir_all(&frameworks_dir)
-        .map_err(|e| TestError::Mcp(format!("Failed to create Frameworks directory: {}", e)))?;
+        .map_err(|e| TestError::Mcp(format!("Failed to create Frameworks directory: {e}")))?;
 
     // Find system frameworks
     let system_frameworks = [
@@ -65,7 +65,7 @@ pub fn setup_framework_links(target_dir: &Path) -> Result<()> {
                     source.display()
                 );
                 std::os::unix::fs::symlink(&source, &target).map_err(|e| {
-                    TestError::Mcp(format!("Failed to create symlink for {}: {}", framework, e))
+                    TestError::Mcp(format!("Failed to create symlink for {framework}: {e}"))
                 })?;
             }
         }

@@ -69,7 +69,7 @@ impl Tool for IdbManagementTool {
                 "health_check" => {
                     let is_running = IdbRecovery::is_companion_running().await;
                     let can_list = match IdbWrapper::list_targets().await {
-                        Ok(targets) => !targets.as_array().map(|a| a.is_empty()).unwrap_or(true),
+                        Ok(targets) => !targets.as_array().is_none_or(std::vec::Vec::is_empty),
                         Err(_) => false,
                     };
 
@@ -97,7 +97,7 @@ impl Tool for IdbManagementTool {
 
                 "recover" => {
                     match self.recovery.attempt_recovery().await {
-                        Ok(_) => {
+                        Ok(()) => {
                             // Check if recovery was successful
                             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                             let is_running = IdbRecovery::is_companion_running().await;
@@ -125,7 +125,7 @@ impl Tool for IdbManagementTool {
 
                 "status" => match IdbWrapper::list_targets().await {
                     Ok(targets) => {
-                        let target_count = targets.as_array().map(|a| a.len()).unwrap_or(0);
+                        let target_count = targets.as_array().map_or(0, std::vec::Vec::len);
 
                         Ok(json!({
                             "success": true,

@@ -78,9 +78,10 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
         .status()
         .expect("Failed to execute curl");
 
-    if !status.success() {
-        panic!("Failed to download idb_companion from {download_url}");
-    }
+    assert!(
+        status.success(),
+        "Failed to download idb_companion from {download_url}"
+    );
 
     // Extract the tarball
     let extract_dir = temp_dir.join("idb_extract");
@@ -96,9 +97,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
         .status()
         .expect("Failed to execute tar");
 
-    if !status.success() {
-        panic!("Failed to extract idb_companion tarball");
-    }
+    assert!(status.success(), "Failed to extract idb_companion tarball");
 
     // Copy the binary
     let src_binary = extract_dir.join("bin").join("idb_companion");
@@ -147,9 +146,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
             .status()
             .expect("Failed to create frameworks archive");
 
-        if !status.success() {
-            panic!("Failed to create frameworks archive");
-        }
+        assert!(status.success(), "Failed to create frameworks archive");
 
         // Verify the archive was created and has content
         if let Ok(metadata) = fs::metadata(frameworks_archive_path) {
@@ -157,9 +154,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
                 "Successfully packaged IDB frameworks: {} bytes",
                 metadata.len()
             );
-            if metadata.len() == 0 {
-                panic!("Frameworks archive is empty!");
-            }
+            assert!((metadata.len() != 0), "Frameworks archive is empty!");
         } else {
             panic!(
                 "Failed to create frameworks archive at: {}",

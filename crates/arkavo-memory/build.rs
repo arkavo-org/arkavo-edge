@@ -53,7 +53,6 @@ fn main() {
 
     // Skip downloads if embeddings feature is not enabled
     if env::var("CARGO_FEATURE_EMBEDDINGS").is_err() {
-        println!("cargo:warning=Skipping model downloads - embeddings feature not enabled");
         return;
     }
 

@@ -106,7 +106,7 @@ mod tests {
         };
 
         let json = serde_json::to_string_pretty(&device_status).unwrap();
-        println!("Device with XCTest status JSON:\n{}", json);
+        println!("Device with XCTest status JSON:\n{json}");
 
         let parsed: DeviceWithXCTestStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.device.id, "device-123");

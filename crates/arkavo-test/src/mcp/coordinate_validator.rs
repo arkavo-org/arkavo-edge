@@ -71,19 +71,16 @@ impl CoordinateValidator {
         let mut issues = Vec::new();
 
         if x < 0.0 {
-            issues.push(format!("X coordinate {} is negative", x));
+            issues.push(format!("X coordinate {x} is negative"));
         }
         if y < 0.0 {
-            issues.push(format!("Y coordinate {} is negative", y));
+            issues.push(format!("Y coordinate {y} is negative"));
         }
         if x >= width {
-            issues.push(format!("X coordinate {} exceeds screen width {}", x, width));
+            issues.push(format!("X coordinate {x} exceeds screen width {width}"));
         }
         if y >= height {
-            issues.push(format!(
-                "Y coordinate {} exceeds screen height {}",
-                y, height
-            ));
+            issues.push(format!("Y coordinate {y} exceeds screen height {height}"));
         }
 
         let is_valid = issues.is_empty();
@@ -110,18 +107,18 @@ impl CoordinateValidator {
         // Clamp to screen bounds
         if x < 0.0 {
             adjusted_x = 0.0;
-            adjustments.push(format!("X adjusted from {} to 0", x));
+            adjustments.push(format!("X adjusted from {x} to 0"));
         } else if x >= width {
             adjusted_x = width - 1.0;
-            adjustments.push(format!("X adjusted from {} to {}", x, adjusted_x));
+            adjustments.push(format!("X adjusted from {x} to {adjusted_x}"));
         }
 
         if y < 0.0 {
             adjusted_y = 0.0;
-            adjustments.push(format!("Y adjusted from {} to 0", y));
+            adjustments.push(format!("Y adjusted from {y} to 0"));
         } else if y >= height {
             adjusted_y = height - 1.0;
-            adjustments.push(format!("Y adjusted from {} to {}", y, adjusted_y));
+            adjustments.push(format!("Y adjusted from {y} to {adjusted_y}"));
         }
 
         (adjusted_x, adjusted_y, adjustments)
@@ -164,8 +161,7 @@ impl Tool for CoordinateValidator {
         let device_info = self.device_manager.get_device(&device_id);
         let device_type = device_info
             .as_ref()
-            .map(|d| d.device_type.as_str())
-            .unwrap_or("unknown");
+            .map_or("unknown", |d| d.device_type.as_str());
 
         let (width, height) = self.get_device_bounds(device_type);
 
@@ -194,12 +190,12 @@ impl Tool for CoordinateValidator {
 
                 let x = coordinates
                     .get("x")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
                 let y = coordinates
                     .get("y")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
                 let (is_valid, message) = self.validate_coordinates(x, y, width, height);
@@ -221,12 +217,12 @@ impl Tool for CoordinateValidator {
 
                 let x = coordinates
                     .get("x")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
                 let y = coordinates
                     .get("y")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
                 let (adjusted_x, adjusted_y, adjustments) =
@@ -244,7 +240,7 @@ impl Tool for CoordinateValidator {
                     "device_type": device_type
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

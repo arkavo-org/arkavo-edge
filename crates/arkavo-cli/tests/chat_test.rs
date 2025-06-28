@@ -10,7 +10,7 @@ fn test_chat_command() {
     // This will fail if Ollama is not running, but that's expected
     // We're just testing that the command structure works
     match arkavo_cli::run(&args) {
-        Ok(_) => {
+        Ok(()) => {
             // Success if Ollama is running
         }
         Err(e) => {
@@ -23,8 +23,7 @@ fn test_chat_command() {
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
                     || error_msg.contains("print mode doesn't support interactive prompts"),
-                "Unexpected error: {}",
-                error_msg
+                "Unexpected error: {error_msg}"
             );
         }
     }
@@ -42,7 +41,7 @@ fn test_git_analysis_prompt() {
     // This test verifies that the chat command is structured to handle Git analysis
     // The actual MCP tool calls would be made by the LLM based on the system prompt
     match arkavo_cli::run(&args) {
-        Ok(_) => {
+        Ok(()) => {
             // Success if Ollama is running - the LLM would receive the Git analysis instructions
         }
         Err(e) => {
@@ -55,8 +54,7 @@ fn test_git_analysis_prompt() {
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
                     || error_msg.contains("print mode doesn't support interactive prompts"),
-                "Unexpected error: {}",
-                error_msg
+                "Unexpected error: {error_msg}"
             );
         }
     }

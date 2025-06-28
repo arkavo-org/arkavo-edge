@@ -31,12 +31,12 @@ pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
             println!("Directories:");
             for dir in &dirs {
-                println!("  {}/", dir);
+                println!("  {dir}/");
             }
 
             println!("\nFiles:");
             for file in &files {
-                println!("  {}", file);
+                println!("  {file}");
             }
 
             println!("\nSummary:");
@@ -49,17 +49,17 @@ pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|f| f.ends_with(".rs") || f.ends_with(".toml") || f.ends_with(".md"))
                     .collect();
 
-                if !source_files.is_empty() {
-                    for file in source_files {
-                        println!("  {}", file);
-                    }
-                } else {
+                if source_files.is_empty() {
                     println!("  No source files found in current directory");
+                } else {
+                    for file in source_files {
+                        println!("  {file}");
+                    }
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error reading directory: {}", e);
+            eprintln!("Error reading directory: {e}");
             return Err(e.into());
         }
     }

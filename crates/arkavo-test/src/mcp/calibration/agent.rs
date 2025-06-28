@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    ActionTarget, ActionType, CalibrationAction, CalibrationAgent, CalibrationError,
+    CoordinateMapping, DeviceProfile, ElementFrame, ElementType, ExpectedResult, GroundTruth,
+    InteractionResult, ScreenSize, StateChange, UIElement, ValidationCriterion,
+};
 use std::collections::HashMap;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -16,7 +20,7 @@ pub struct CalibrationAgentImpl {
 }
 
 impl CalibrationAgentImpl {
-    pub fn new(device_id: String) -> Result<Self, CalibrationError> {
+    pub const fn new(device_id: String) -> Result<Self, CalibrationError> {
         Ok(Self { device_id })
     }
 
@@ -94,7 +98,9 @@ impl CalibrationAgentImpl {
                             if let Some(device_array) = devices.as_array() {
                                 for device in device_array {
                                     if device["udid"].as_str() == Some(&self.device_id) {
-                                        return device["state"].as_str().map(|s| s.to_string());
+                                        return device["state"]
+                                            .as_str()
+                                            .map(std::string::ToString::to_string);
                                     }
                                 }
                             }
@@ -131,25 +137,19 @@ impl CalibrationAgentImpl {
             match tap_result {
                 Ok(Ok(result)) => {
                     eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {:?}",
-                        result
+                        "[CalibrationAgentImpl::execute_tap] Enhanced tap successful! Result: {result:?}"
                     );
                 }
                 Ok(Err(e)) => {
-                    eprintln!(
-                        "[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {}",
-                        e
-                    );
+                    eprintln!("[CalibrationAgentImpl::execute_tap] Enhanced tap failed: {e}");
                     return Err(CalibrationError::InteractionFailed(format!(
-                        "Failed to tap at ({}, {}): {}",
-                        x, y, e
+                        "Failed to tap at ({x}, {y}): {e}"
                     )));
                 }
                 Err(_) => {
                     eprintln!("[CalibrationAgentImpl::execute_tap] Tap timeout after 10 seconds");
                     return Err(CalibrationError::InteractionFailed(format!(
-                        "Tap timeout at ({}, {}) - All methods failed",
-                        x, y
+                        "Tap timeout at ({x}, {y}) - All methods failed"
                     )));
                 }
             }
@@ -345,8 +345,7 @@ impl CalibrationAgent for CalibrationAgentImpl {
                         let elements = self.discover_ui_elements()?;
                         let element = elements.iter().find(|e| e.id == *id).ok_or_else(|| {
                             CalibrationError::InteractionFailed(format!(
-                                "Element with ID '{}' not found",
-                                id
+                                "Element with ID '{id}' not found"
                             ))
                         })?;
 
@@ -362,8 +361,7 @@ impl CalibrationAgent for CalibrationAgentImpl {
                             .find(|e| e.accessibility_id.as_ref() == Some(acc_id))
                             .ok_or_else(|| {
                                 CalibrationError::InteractionFailed(format!(
-                                    "Element with accessibility ID '{}' not found",
-                                    acc_id
+                                    "Element with accessibility ID '{acc_id}' not found"
                                 ))
                             })?;
 

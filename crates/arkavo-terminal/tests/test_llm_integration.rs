@@ -50,7 +50,7 @@ mod llm_integration_tests {
         let response3 = LlmResponse {
             task_id,
             model_name: "test-model".to_string(),
-            content: "".to_string(),
+            content: String::new(),
             is_streaming: true,
             is_complete: true,
             error: None,
@@ -78,7 +78,7 @@ mod llm_integration_tests {
             let request = LlmRequest {
                 task_id,
                 model_name: model.clone(),
-                prompt: format!("Test prompt for {}", model),
+                prompt: format!("Test prompt for {model}"),
             };
 
             assert_eq!(request.model_name, model);

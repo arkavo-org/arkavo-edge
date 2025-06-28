@@ -15,7 +15,7 @@ struct McpToolAdapter<T: McpTool> {
 }
 
 impl<T: McpTool> McpToolAdapter<T> {
-    fn new(tool: T) -> Self {
+    const fn new(tool: T) -> Self {
         Self { inner: tool }
     }
 }

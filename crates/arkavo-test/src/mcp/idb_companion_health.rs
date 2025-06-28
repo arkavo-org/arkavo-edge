@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Mutex;
@@ -49,8 +48,8 @@ impl CompanionHealthMetrics {
 }
 
 /// Global health tracking for all IDB companions
-static COMPANION_HEALTH: Lazy<Mutex<HashMap<String, CompanionHealthMetrics>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static COMPANION_HEALTH: std::sync::LazyLock<Mutex<HashMap<String, CompanionHealthMetrics>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Manages IDB companion health and recovery
 pub struct IdbCompanionHealth;
@@ -58,10 +57,7 @@ pub struct IdbCompanionHealth;
 impl IdbCompanionHealth {
     /// Check if IDB companion is healthy for a device
     pub async fn check_health(device_id: &str) -> Result<bool> {
-        eprintln!(
-            "[IdbCompanionHealth] Checking health for device {}",
-            device_id
-        );
+        eprintln!("[IdbCompanionHealth] Checking health for device {device_id}");
 
         // Initial health check state
         let mut is_healthy = true;
@@ -76,10 +72,7 @@ impl IdbCompanionHealth {
             // Check if companion process is running
             if let Some(pid) = metrics.companion_pid {
                 if !Self::is_process_running(pid) {
-                    eprintln!(
-                        "[IdbCompanionHealth] Companion process {} is not running",
-                        pid
-                    );
+                    eprintln!("[IdbCompanionHealth] Companion process {pid} is not running");
                     metrics.companion_pid = None;
                     is_healthy = false;
                 }
@@ -112,7 +105,7 @@ impl IdbCompanionHealth {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[IdbCompanionHealth] Connection test failed: {}", e);
+                        eprintln!("[IdbCompanionHealth] Connection test failed: {e}");
                         metrics.connection_established = false;
                         is_healthy = false;
                     }
@@ -121,8 +114,7 @@ impl IdbCompanionHealth {
                 // Check failure rate
                 if consecutive_failures > 5 {
                     eprintln!(
-                        "[IdbCompanionHealth] Too many consecutive failures: {}",
-                        consecutive_failures
+                        "[IdbCompanionHealth] Too many consecutive failures: {consecutive_failures}"
                     );
                     is_healthy = false;
                 }
@@ -198,10 +190,7 @@ impl IdbCompanionHealth {
         if let Some(metrics) = health_map.get_mut(device_id) {
             metrics.consecutive_failures = 0;
             metrics.last_failed_tap = None;
-            eprintln!(
-                "[IdbCompanionHealth] Reset metrics for device {}",
-                device_id
-            );
+            eprintln!("[IdbCompanionHealth] Reset metrics for device {device_id}");
         }
     }
 
@@ -256,10 +245,7 @@ impl IdbCompanionHealth {
 
     /// Perform recovery for unhealthy companion
     pub async fn recover_companion(device_id: &str) -> Result<()> {
-        eprintln!(
-            "[IdbCompanionHealth] Starting recovery for device {}",
-            device_id
-        );
+        eprintln!("[IdbCompanionHealth] Starting recovery for device {device_id}");
 
         #[cfg(target_os = "macos")]
         {
@@ -291,10 +277,7 @@ impl IdbCompanionHealth {
             // 6. Reset health metrics
             Self::reset_metrics(device_id);
 
-            eprintln!(
-                "[IdbCompanionHealth] Recovery completed for device {}",
-                device_id
-            );
+            eprintln!("[IdbCompanionHealth] Recovery completed for device {device_id}");
         }
 
         Ok(())

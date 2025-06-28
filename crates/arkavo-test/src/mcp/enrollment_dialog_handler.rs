@@ -42,19 +42,16 @@ impl EnrollmentDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            Ok(device.id)
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }
@@ -72,7 +69,7 @@ impl EnrollmentDialogHandler {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -157,8 +154,7 @@ impl Tool for EnrollmentDialogHandler {
         let device_info = self.device_manager.get_device(&device_id);
         let device_type = device_info
             .as_ref()
-            .map(|d| d.device_type.as_str())
-            .unwrap_or("unknown");
+            .map_or("unknown", |d| d.device_type.as_str());
 
         match action {
             "get_cancel_coordinates" => {
@@ -273,7 +269,7 @@ impl Tool for EnrollmentDialogHandler {
                     ]
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

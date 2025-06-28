@@ -139,7 +139,7 @@ impl TaskWindow {
             // Split content into lines for proper wrapping calculation
             for line in msg.content.lines() {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("[{}] ", role_prefix), role_style),
+                    Span::styled(format!("[{role_prefix}] "), role_style),
                     Span::raw(line),
                 ]));
             }

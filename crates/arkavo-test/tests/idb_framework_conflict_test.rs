@@ -8,25 +8,22 @@ async fn test_idb_initialization_with_system_preference() {
     let result = IdbWrapper::initialize_with_preference(true);
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             eprintln!("IDB initialized successfully");
 
             // Try to list targets to verify it works
             let targets_result = IdbWrapper::list_targets().await;
             match targets_result {
                 Ok(targets) => {
-                    eprintln!("Successfully listed targets: {:?}", targets);
+                    eprintln!("Successfully listed targets: {targets:?}");
                 }
                 Err(e) => {
-                    eprintln!("Failed to list targets: {}", e);
+                    eprintln!("Failed to list targets: {e}");
                 }
             }
         }
         Err(e) => {
-            eprintln!(
-                "IDB initialization failed (expected if IDB not installed): {}",
-                e
-            );
+            eprintln!("IDB initialization failed (expected if IDB not installed): {e}");
             // This is acceptable - the test passes either way to show error handling works
         }
     }
@@ -42,7 +39,7 @@ async fn test_idb_framework_conflict_handling() {
     let result = IdbWrapper::initialize();
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             eprintln!("IDB initialized with ARKAVO_USE_SYSTEM_IDB=1");
         }
         Err(e) => {
@@ -80,11 +77,11 @@ async fn test_idb_tap_with_framework_conflicts() {
 
     match tap_result {
         Ok(result) => {
-            eprintln!("Tap succeeded: {:?}", result);
+            eprintln!("Tap succeeded: {result:?}");
         }
         Err(e) => {
             let error_msg = e.to_string();
-            eprintln!("Tap failed: {}", error_msg);
+            eprintln!("Tap failed: {error_msg}");
 
             // Check if we got a helpful error message about framework conflicts
             if error_msg.contains("Framework conflict detected") {

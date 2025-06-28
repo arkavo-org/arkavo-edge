@@ -90,7 +90,7 @@ impl Tool for SimulatorControl {
                     .map_err(|_| TestError::Mcp("Failed to lock simulator manager".to_string()))?;
 
                 match manager.boot_device(device_id) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("Device {} booted successfully", device_id)
                     })),
@@ -112,7 +112,7 @@ impl Tool for SimulatorControl {
                     .map_err(|_| TestError::Mcp("Failed to lock simulator manager".to_string()))?;
 
                 match manager.shutdown_device(device_id) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("Device {} shutdown successfully", device_id)
                     })),
@@ -129,7 +129,7 @@ impl Tool for SimulatorControl {
                     .map_err(|_| TestError::Mcp("Failed to lock simulator manager".to_string()))?;
 
                 match manager.refresh_devices() {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": "Device list refreshed"
                     })),
@@ -139,7 +139,7 @@ impl Tool for SimulatorControl {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -225,7 +225,7 @@ impl Tool for AppManagement {
                     .ok_or_else(|| TestError::Mcp("Missing app_path parameter".to_string()))?;
 
                 match manager.install_app(device_id, app_path) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("App installed successfully on device {}", device_id),
                         "app_path": app_path,
@@ -251,7 +251,7 @@ impl Tool for AppManagement {
                     .ok_or_else(|| TestError::Mcp("Missing bundle_id parameter".to_string()))?;
 
                 match manager.uninstall_app(device_id, bundle_id) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("App {} uninstalled successfully", bundle_id)
                     })),
@@ -277,14 +277,11 @@ impl Tool for AppManagement {
                 };
 
                 // Log the launch attempt
-                eprintln!(
-                    "MCP: Attempting to launch app {} on device {}",
-                    bundle_id, device_id
-                );
+                eprintln!("MCP: Attempting to launch app {bundle_id} on device {device_id}");
 
                 match manager.launch_app(device_id, bundle_id, &args) {
                     Ok(pid) => {
-                        eprintln!("MCP: App launched successfully with PID: {}", pid);
+                        eprintln!("MCP: App launched successfully with PID: {pid}");
                         Ok(serde_json::json!({
                             "success": true,
                             "message": format!("App {} launched successfully", bundle_id),
@@ -294,7 +291,7 @@ impl Tool for AppManagement {
                         }))
                     }
                     Err(e) => {
-                        eprintln!("MCP: Failed to launch app: {}", e);
+                        eprintln!("MCP: Failed to launch app: {e}");
                         Ok(serde_json::json!({
                             "success": false,
                             "error": e.to_string(),
@@ -312,7 +309,7 @@ impl Tool for AppManagement {
                     .ok_or_else(|| TestError::Mcp("Missing bundle_id parameter".to_string()))?;
 
                 match manager.terminate_app(device_id, bundle_id) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("App {} terminated successfully", bundle_id)
                     })),
@@ -333,7 +330,7 @@ impl Tool for AppManagement {
                     "error": e.to_string()
                 })),
             },
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -423,7 +420,7 @@ impl Tool for FileOperations {
                     .ok_or_else(|| TestError::Mcp("Missing remote_path parameter".to_string()))?;
 
                 match manager.push_file(device_id, local_path, remote_path) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("File pushed successfully to {}", remote_path)
                     })),
@@ -445,7 +442,7 @@ impl Tool for FileOperations {
                     .ok_or_else(|| TestError::Mcp("Missing local_path parameter".to_string()))?;
 
                 match manager.pull_file(device_id, remote_path, local_path) {
-                    Ok(_) => Ok(serde_json::json!({
+                    Ok(()) => Ok(serde_json::json!({
                         "success": true,
                         "message": format!("File pulled successfully to {}", local_path)
                     })),
@@ -472,7 +469,7 @@ impl Tool for FileOperations {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

@@ -70,7 +70,7 @@ impl LogStreamKit {
         let filter_predicate = if let Some(custom_predicate) = predicate {
             custom_predicate.to_string()
         } else if let Some(process) = process_name {
-            format!("process == \"{}\"", process)
+            format!("process == \"{process}\"")
         } else {
             "eventType == \"logMessage\"".to_string()
         };
@@ -80,7 +80,7 @@ impl LogStreamKit {
 
         // Create log output file
         let log_file_path = env::temp_dir()
-            .join(format!("arkavo_logs_{}.txt", stream_id))
+            .join(format!("arkavo_logs_{stream_id}.txt"))
             .display()
             .to_string();
 
@@ -102,7 +102,7 @@ impl LogStreamKit {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to start log stream: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to start log stream: {e}")))?;
 
         let stdout = child
             .stdout
@@ -125,13 +125,13 @@ impl LogStreamKit {
                 if let Some(file) = &file {
                     use std::io::Write;
                     let mut file = file;
-                    writeln!(file, "{}", line).ok();
+                    writeln!(file, "{line}").ok();
                 }
 
                 // Parse JSON log entry if possible
                 if let Ok(log_entry) = serde_json::from_str::<Value>(&line) {
                     if let Some(message) = log_entry.get("eventMessage").and_then(|m| m.as_str()) {
-                        eprintln!("[LOG:{}] {}", stream_id_clone, message);
+                        eprintln!("[LOG:{stream_id_clone}] {message}");
                     }
                 }
             }
@@ -196,16 +196,16 @@ impl LogStreamKit {
     ) -> Result<Value> {
         let log_file_path = if let Some(id) = stream_id {
             env::temp_dir()
-                .join(format!("arkavo_logs_{}.txt", id))
+                .join(format!("arkavo_logs_{id}.txt"))
                 .display()
                 .to_string()
         } else {
             // Find most recent log file
             let entries = std::fs::read_dir(env::temp_dir())
-                .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {e}")))?;
 
             let mut log_files: Vec<_> = entries
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| e.file_name().to_string_lossy().starts_with("arkavo_logs_"))
                 .collect();
 
@@ -224,12 +224,12 @@ impl LogStreamKit {
 
         // Read the log file
         let contents = std::fs::read_to_string(&log_file_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to read log file: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read log file: {e}")))?;
 
         let lines: Vec<&str> = contents.lines().collect();
         let limit = limit.unwrap_or(100);
         let start = lines.len().saturating_sub(limit);
-        let recent_lines: Vec<String> = lines[start..].iter().map(|s| s.to_string()).collect();
+        let recent_lines: Vec<String> = lines[start..].iter().map(|s| (*s).to_string()).collect();
 
         // Parse JSON logs if possible
         let mut parsed_logs = Vec::new();
@@ -264,22 +264,19 @@ impl Tool for LogStreamKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
+                } else if let Some(device) = self.device_manager.get_active_device() {
+                    device.id
                 } else {
-                    match self.device_manager.get_active_device() {
-                        Some(device) => device.id,
+                    self.device_manager.refresh_devices().ok();
+                    match self.device_manager.get_booted_devices().first() {
+                        Some(device) => device.id.clone(),
                         None => {
-                            self.device_manager.refresh_devices().ok();
-                            match self.device_manager.get_booted_devices().first() {
-                                Some(device) => device.id.clone(),
-                                None => {
-                                    return Ok(json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
-                                        }
-                                    }));
+                            return Ok(json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
                                 }
-                            }
+                            }));
                         }
                     }
                 };
@@ -308,13 +305,13 @@ impl Tool for LogStreamKit {
                 let stream_id = params.get("stream_id").and_then(|v| v.as_str());
                 let limit = params
                     .get("limit")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .map(|n| n as usize);
 
                 self.read_recent_logs(stream_id, limit).await
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -360,22 +357,19 @@ impl Tool for AppDiagnosticExporter {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -389,7 +383,7 @@ impl Tool for AppDiagnosticExporter {
         let launch_output = Command::new("xcrun")
             .args(["simctl", "launch", &device_id, bundle_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
         if !launch_output.status.success() {
             return Ok(json!({
@@ -409,7 +403,7 @@ impl Tool for AppDiagnosticExporter {
         let output = Command::new("xcrun")
             .args(["simctl", "openurl", &device_id, export_url])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to open diagnostic export URL: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to open diagnostic export URL: {e}")))?;
 
         if !output.status.success() {
             return Ok(json!({

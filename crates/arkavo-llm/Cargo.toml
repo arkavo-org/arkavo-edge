@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "LLM integration for Arkavo Edge"
+readme = "README.md"
+keywords = ["cli", "ai", "agent", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
 
 [dependencies]
 tokio = { version = "1.42", features = ["full"] }

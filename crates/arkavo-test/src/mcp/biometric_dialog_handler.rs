@@ -45,7 +45,7 @@ impl BiometricDialogHandler {
             "escape" => "53",
             "return" => "36",
             "home" => "115", // Home key
-            _ => return Err(TestError::Mcp(format!("Unknown keycode: {}", keycode))),
+            _ => return Err(TestError::Mcp(format!("Unknown keycode: {keycode}"))),
         };
 
         let script = format!(
@@ -53,16 +53,15 @@ impl BiometricDialogHandler {
                 activate
             end tell
             tell application "System Events"
-                key code {}
-            end tell"#,
-            key_code
+                key code {key_code}
+            end tell"#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send key event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send key event: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -96,17 +95,16 @@ impl BiometricDialogHandler {
             tell application "System Events"
                 tell process "Simulator"
                     set frontmost to true
-                    keystroke "{}"
+                    keystroke "{passcode}"
                 end tell
-            end tell"#,
-            passcode
+            end tell"#
         );
 
         Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {e}")))?;
 
         Ok(())
     }
@@ -172,7 +170,7 @@ impl Tool for BiometricDialogHandler {
             "cancel" => {
                 // Specifically try to cancel the dialog
                 match self.simulate_cancel_button(&device_id) {
-                    Ok(_) => Ok(json!({
+                    Ok(()) => Ok(json!({
                         "success": true,
                         "action": "cancel",
                         "method": "escape_key",
@@ -212,7 +210,7 @@ impl Tool for BiometricDialogHandler {
                     .unwrap_or("1234");
 
                 match self.simulate_passcode_entry(&device_id, passcode) {
-                    Ok(_) => {
+                    Ok(()) => {
                         // After typing passcode, send return key
                         self.send_key_event(&device_id, "return").ok();
 
@@ -231,7 +229,7 @@ impl Tool for BiometricDialogHandler {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

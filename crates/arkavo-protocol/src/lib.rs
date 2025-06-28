@@ -10,8 +10,8 @@ impl Default for Client {
 }
 
 impl Client {
-    pub fn new() -> Self {
-        Client
+    pub const fn new() -> Self {
+        Self
     }
 
     pub fn send_message(&self, message: &str) -> Result<String, Box<dyn std::error::Error>> {
