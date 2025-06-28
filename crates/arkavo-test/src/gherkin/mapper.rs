@@ -30,7 +30,7 @@ impl AIStepMapper {
             .claude_client
             .complete(&prompt)
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {e}")))?;
 
         self.parse_actions_response(&response)
     }
@@ -72,14 +72,14 @@ Return ONLY the JSON array, no other text."#,
         let cleaned_response = response.trim();
 
         serde_json::from_str::<Vec<Action>>(cleaned_response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse AI response as actions: {}", e)))
+            .map_err(|e| TestError::Ai(format!("Failed to parse AI response as actions: {e}")))
     }
 
     pub async fn natural_language_to_actions(&self, text: &str) -> Result<Vec<Action>> {
         let tools_list: Vec<&ToolDefinition> = self.tool_registry.values().collect();
 
         let prompt = format!(
-            r#"Convert this natural language test description to tool calls.
+            r"Convert this natural language test description to tool calls.
 
 Description: {}
 
@@ -87,7 +87,7 @@ Available tools:
 {}
 
 Return a JSON array of actions with tool_name, parameters, and optional expected_outcome.
-Return ONLY the JSON array."#,
+Return ONLY the JSON array.",
             text,
             serde_json::to_string_pretty(&tools_list).unwrap_or_default()
         );
@@ -96,7 +96,7 @@ Return ONLY the JSON array."#,
             .claude_client
             .complete(&prompt)
             .await
-            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to get AI response: {e}")))?;
 
         self.parse_actions_response(&response)
     }

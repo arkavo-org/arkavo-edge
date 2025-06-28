@@ -1,11 +1,11 @@
 use crate::{Result, TestError};
-use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::net::TcpListener;
 use std::process::Command;
 use std::sync::Mutex;
 
-static ALLOCATED_PORTS: Lazy<Mutex<HashSet<u16>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static ALLOCATED_PORTS: std::sync::LazyLock<Mutex<HashSet<u16>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub struct IdbPortManager;
 
@@ -36,16 +36,13 @@ impl IdbPortManager {
 
     /// Kill any existing IDB companion process on a port
     pub fn kill_idb_on_port(port: u16) -> Result<()> {
-        eprintln!(
-            "[IdbPortManager] Checking for IDB companion on port {}...",
-            port
-        );
+        eprintln!("[IdbPortManager] Checking for IDB companion on port {port}...");
 
         // First try lsof to find the process
         let lsof_output = Command::new("lsof")
-            .args(["-i", &format!("tcp:{}", port)])
+            .args(["-i", &format!("tcp:{port}")])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run lsof: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run lsof: {e}")))?;
 
         if lsof_output.status.success() {
             let output = String::from_utf8_lossy(&lsof_output.stdout);
@@ -56,8 +53,7 @@ impl IdbPortManager {
                 if parts.len() > 1 && parts[0].contains("idb_compan") {
                     let pid = parts[1];
                     eprintln!(
-                        "[IdbPortManager] Found idb_companion process {} on port {}, killing...",
-                        pid, port
+                        "[IdbPortManager] Found idb_companion process {pid} on port {port}, killing...",
                     );
 
                     let _ = Command::new("kill").arg("-9").arg(pid).output();
@@ -80,26 +76,22 @@ impl IdbPortManager {
         let max_port = 10892;
 
         // First, try to clean up any existing IDB on default port
-        if !Self::is_port_available(default_port) {
-            eprintln!(
-                "[IdbPortManager] Default port {} is in use, attempting cleanup...",
-                default_port
-            );
-            Self::kill_idb_on_port(default_port)?;
+        if Self::is_port_available(default_port) {
+            Self::allocate_port(default_port);
+            return Ok(default_port);
+        }
+        eprintln!("[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",);
+        Self::kill_idb_on_port(default_port)?;
 
-            // Check again after cleanup
-            if Self::is_port_available(default_port) {
-                Self::allocate_port(default_port);
-                return Ok(default_port);
-            }
-        } else {
+        // Check again after cleanup
+        if Self::is_port_available(default_port) {
             Self::allocate_port(default_port);
             return Ok(default_port);
         }
 
         // If default port is still not available, find another
         if let Some(port) = Self::find_available_port(default_port + 1, max_port) {
-            eprintln!("[IdbPortManager] Using alternate port: {}", port);
+            eprintln!("[IdbPortManager] Using alternate port: {port}");
             Self::allocate_port(port);
             Ok(port)
         } else {

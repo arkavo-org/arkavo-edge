@@ -45,7 +45,7 @@ impl ToolRegistry {
 
     pub fn register(&mut self, tool: Box<dyn TestTool>) {
         let definition = tool.definition();
-        self.tools.insert(definition.name.clone(), tool);
+        self.tools.insert(definition.name, tool);
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn TestTool> {

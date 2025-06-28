@@ -11,9 +11,9 @@ mod test_idb_connection {
 
         // Initialize IDB
         match IdbWrapper::initialize() {
-            Ok(_) => eprintln!("✓ IDB initialized successfully"),
+            Ok(()) => eprintln!("✓ IDB initialized successfully"),
             Err(e) => {
-                eprintln!("✗ IDB initialization failed: {}", e);
+                eprintln!("✗ IDB initialization failed: {e}");
                 return;
             }
         }
@@ -57,7 +57,7 @@ mod test_idb_connection {
                 }
             }
             Err(e) => {
-                eprintln!("✗ list-targets failed: {}", e);
+                eprintln!("✗ list-targets failed: {e}");
             }
         }
 
@@ -75,7 +75,7 @@ mod test_idb_connection {
                 );
             }
             Err(e) => {
-                eprintln!("✗ Tap command failed: {}", e);
+                eprintln!("✗ Tap command failed: {e}");
                 eprintln!("This might indicate IDB is not properly connected to the simulator");
             }
         }

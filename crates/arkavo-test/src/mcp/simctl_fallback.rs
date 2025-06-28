@@ -38,7 +38,7 @@ impl SimctlFallback {
         let output = Command::new("xcrun")
             .args(["simctl", "io", device_id, "screenshot", output_path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute simctl screenshot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute simctl screenshot: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -51,28 +51,27 @@ impl SimctlFallback {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(TestError::Mcp(format!(
-                "simctl screenshot failed: {}",
-                stderr
+                "simctl screenshot failed: {stderr}"
             )))
         }
     }
 
     /// Boot a device if needed
     pub async fn ensure_booted(device_id: &str) -> Result<()> {
-        eprintln!("[SimctlFallback] Ensuring device {} is booted", device_id);
+        eprintln!("[SimctlFallback] Ensuring device {device_id} is booted");
 
         // Check current state
         let list_output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run simctl list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run simctl list: {e}")))?;
 
         if !list_output.status.success() {
             return Err(TestError::Mcp("Failed to list devices".to_string()));
         }
 
         let json = serde_json::from_slice::<serde_json::Value>(&list_output.stdout)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         let mut needs_boot = false;
 
@@ -94,16 +93,16 @@ impl SimctlFallback {
         }
 
         if needs_boot {
-            eprintln!("[SimctlFallback] Booting device {}...", device_id);
+            eprintln!("[SimctlFallback] Booting device {device_id}...");
             let boot_output = Command::new("xcrun")
                 .args(["simctl", "boot", device_id])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to boot device: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to boot device: {e}")))?;
 
             if !boot_output.status.success() {
                 let stderr = String::from_utf8_lossy(&boot_output.stderr);
                 if !stderr.contains("Unable to boot device in current state: Booted") {
-                    return Err(TestError::Mcp(format!("Failed to boot device: {}", stderr)));
+                    return Err(TestError::Mcp(format!("Failed to boot device: {stderr}")));
                 }
             }
 

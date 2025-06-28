@@ -49,12 +49,12 @@ mod tests {
                 let mut buffer = [0u8; 1024];
                 let n = stream.read(&mut buffer)?;
                 let response = String::from_utf8_lossy(&buffer[..n]);
-                eprintln!("Received response: {}", response);
+                eprintln!("Received response: {response}");
 
                 assert!(response.contains("Echo:"));
             }
             Err(e) => {
-                eprintln!("Failed to connect to socket: {}", e);
+                eprintln!("Failed to connect to socket: {e}");
                 return Err(e.into());
             }
         }

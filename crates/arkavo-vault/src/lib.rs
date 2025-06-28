@@ -4,7 +4,7 @@ pub struct Vault {
 
 impl Vault {
     pub fn new(path: &str) -> Self {
-        Vault {
+        Self {
             path: path.to_string(),
         }
     }

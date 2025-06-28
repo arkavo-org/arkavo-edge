@@ -104,7 +104,7 @@ The fix detects these error patterns:
 "#;
 
 /// User-facing guidance
-pub const USER_GUIDANCE: &str = r#"
+pub const USER_GUIDANCE: &str = r"
 # iOS 26 Beta - User Guide
 
 ## Quick Summary
@@ -149,12 +149,11 @@ A: When iOS 26 stable is released with updated XCTest symbols.
 
 **Q: Can I force the old behavior?**
 A: No, it would crash. The minimal templates are required for iOS 26 beta.
-"#;
+";
 
 /// Get all embedded documentation
 pub fn get_all_documentation() -> String {
     format!(
-        "iOS 26 Beta Fix v{}\n\n{}\n\n{}\n\n{}",
-        IOS26_BETA_FIX_VERSION, EMBEDDED_FIX_SUMMARY, TECHNICAL_DETAILS, USER_GUIDANCE
+        "iOS 26 Beta Fix v{IOS26_BETA_FIX_VERSION}\n\n{EMBEDDED_FIX_SUMMARY}\n\n{TECHNICAL_DETAILS}\n\n{USER_GUIDANCE}"
     )
 }

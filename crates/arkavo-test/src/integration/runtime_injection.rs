@@ -16,7 +16,7 @@ impl RuntimeInjector {
     }
 
     /// Inject into iOS app at runtime using dylib
-    pub fn inject_ios(&self) -> Result<()> {
+    pub const fn inject_ios(&self) -> Result<()> {
         #[cfg(target_os = "ios")]
         {
             // Use Objective-C runtime to swizzle methods
@@ -28,7 +28,7 @@ impl RuntimeInjector {
     }
 
     /// Inject into Android app using ADB
-    pub fn inject_android(&self) -> Result<()> {
+    pub const fn inject_android(&self) -> Result<()> {
         #[cfg(target_os = "android")]
         {
             // Use Android instrumentation
@@ -70,12 +70,12 @@ impl RuntimeInjector {
     }
 
     #[allow(dead_code)]
-    fn setup_android_hooks(&self) -> Result<()> {
+    const fn setup_android_hooks(&self) -> Result<()> {
         // Use Frida or similar for Android
         Ok(())
     }
 
-    fn setup_web_hooks(&self) -> Result<()> {
+    const fn setup_web_hooks(&self) -> Result<()> {
         // Inject via browser DevTools protocol
         Ok(())
     }

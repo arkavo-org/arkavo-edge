@@ -117,10 +117,7 @@ impl MultiTerminalManager {
 
         Command::new("osascript")
             .arg("-e")
-            .arg(format!(
-                "tell app \"Terminal\" to do script \"{}\"",
-                command
-            ))
+            .arg(format!("tell app \"Terminal\" to do script \"{command}\""))
             .spawn()?;
 
         Ok(())
@@ -139,11 +136,10 @@ impl MultiTerminalManager {
                     tell current window
                         create tab with default profile
                         tell current session
-                            write text \"{}\"
+                            write text \"{command}\"
                         end tell
                     end tell
-                end tell",
-                command
+                end tell"
             ))
             .spawn()?;
 

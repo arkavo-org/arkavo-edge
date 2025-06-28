@@ -136,23 +136,22 @@ impl CommitMessageGenerator {
                     .file_types
                     .iter()
                     .max_by_key(|(_, count)| *count)
-                    .map(|(ext, _)| ext.as_str())
-                    .unwrap_or("files");
+                    .map_or("files", |(ext, _)| ext.as_str());
 
-                format!("update {} files", primary_type)
+                format!("update {primary_type} files")
             }
         };
 
         let details = format!(
             "{} file{} changed ({} added, {} modified, {} deleted)",
             summary.total_files,
-            if summary.total_files != 1 { "s" } else { "" },
+            if summary.total_files == 1 { "" } else { "s" },
             summary.files_added,
             summary.files_modified,
             summary.files_deleted
         );
 
-        format!("{}: {} - {}", prefix, main_action, details)
+        format!("{prefix}: {main_action} - {details}")
     }
 }
 

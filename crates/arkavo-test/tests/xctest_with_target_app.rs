@@ -72,10 +72,10 @@ mod tests {
 
                 match timeout(Duration::from_secs(5), bridge.send_tap_command(tap_command)).await {
                     Ok(Ok(response)) => {
-                        eprintln!("✅ Tap command succeeded: {:?}", response);
+                        eprintln!("✅ Tap command succeeded: {response:?}");
                     }
                     Ok(Err(e)) => {
-                        eprintln!("❌ Tap command failed: {}", e);
+                        eprintln!("❌ Tap command failed: {e}");
                     }
                     Err(_) => {
                         eprintln!("❌ Tap command timed out");
@@ -83,7 +83,7 @@ mod tests {
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("❌ Connection failed: {}", e);
+                eprintln!("❌ Connection failed: {e}");
                 return Err(e.into());
             }
             Err(_) => {

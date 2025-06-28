@@ -238,7 +238,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize memory tools
     if let Err(e) = mcp_server.initialize_memory_tools().await {
-        eprintln!("Warning: Failed to initialize memory tools: {}", e);
+        eprintln!("Warning: Failed to initialize memory tools: {e}");
         // Continue without memory tools rather than failing completely
     }
 
@@ -246,7 +246,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up panic handler to ensure clean JSON-RPC error on panic
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("MCP Server panic: {:?}", panic_info);
+        eprintln!("MCP Server panic: {panic_info:?}");
         // Don't output to stdout to avoid corrupting JSON-RPC stream
     }));
 
@@ -258,11 +258,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     for line in reader.lines() {
         let line = match line {
             Ok(l) => {
-                eprintln!("MCP Server received: {}", l);
+                eprintln!("MCP Server received: {l}");
                 l
             }
             Err(e) => {
-                eprintln!("Error reading input: {}", e);
+                eprintln!("Error reading input: {e}");
                 continue;
             }
         };
@@ -271,7 +271,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let json_value: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("JSON parse error: {}", e);
+                eprintln!("JSON parse error: {e}");
                 // For parse errors, we can't send a proper error response
                 // because we don't have a request ID
                 continue;
@@ -280,7 +280,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // Validate request schema
         if let Err(e) = validate_request(&json_value) {
-            eprintln!("Request validation error: {}", e);
+            eprintln!("Request validation error: {e}");
 
             // Try to extract ID for error response
             if let Some(id) = json_value.get("id") {
@@ -288,13 +288,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let error_resp = error_response(
                         id_val,
                         INVALID_REQUEST,
-                        format!("Invalid request: {}", e),
+                        format!("Invalid request: {e}"),
                         None,
                     );
 
                     let resp_json = serde_json::to_value(&error_resp)?;
                     if let Err(e) = validate_response(&resp_json) {
-                        eprintln!("ERROR: Generated invalid error response: {}", e);
+                        eprintln!("ERROR: Generated invalid error response: {e}");
                         continue;
                     }
 
@@ -309,7 +309,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let request: JsonRpcRequest = match serde_json::from_value(json_value) {
             Ok(req) => req,
             Err(e) => {
-                eprintln!("Failed to parse request: {}", e);
+                eprintln!("Failed to parse request: {e}");
                 continue;
             }
         };
@@ -361,24 +361,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(tool_response) => {
                                 // Check if the tool returned an error object (and it's not null)
                                 if let Some(error_obj) = tool_response.result.get("error") {
-                                    if !error_obj.is_null() {
-                                        // Tool returned an actual error - convert to JSON-RPC error
-                                        let error_code = error_obj
-                                            .get("code")
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or("TOOL_ERROR");
-                                        let error_msg = error_obj
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .unwrap_or("Tool execution failed");
-
-                                        error_response(
-                                            request_id.clone(),
-                                            INTERNAL_ERROR,
-                                            format!("{}: {}", error_code, error_msg),
-                                            Some(tool_response.result),
-                                        )
-                                    } else {
+                                    if error_obj.is_null() {
                                         // error field is null, treat as success
                                         // Check response size before formatting
                                         let result_str =
@@ -411,6 +394,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     "text": trimmed_result
                                                 }]
                                             }),
+                                        )
+                                    } else {
+                                        // Tool returned an actual error - convert to JSON-RPC error
+                                        let error_code = error_obj
+                                            .get("code")
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("TOOL_ERROR");
+                                        let error_msg = error_obj
+                                            .get("message")
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("Tool execution failed");
+
+                                        error_response(
+                                            request_id.clone(),
+                                            INTERNAL_ERROR,
+                                            format!("{error_code}: {error_msg}"),
+                                            Some(tool_response.result),
                                         )
                                     }
                                 } else {
@@ -451,7 +451,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Err(e) => error_response(
                                 request_id.clone(),
                                 INTERNAL_ERROR,
-                                format!("Tool execution error: {}", e),
+                                format!("Tool execution error: {e}"),
                                 None,
                             ),
                         }
@@ -522,7 +522,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => error_response(
                         request_id.clone(),
                         INTERNAL_ERROR,
-                        format!("Failed to get tool schemas: {}", e),
+                        format!("Failed to get tool schemas: {e}"),
                         None,
                     ),
                 }
@@ -539,7 +539,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Validate response before sending
         let response_json = serde_json::to_value(&response)?;
         if let Err(e) = validate_response(&response_json) {
-            eprintln!("ERROR: Generated invalid response: {}", e);
+            eprintln!("ERROR: Generated invalid response: {e}");
             eprintln!(
                 "Response was: {}",
                 serde_json::to_string_pretty(&response_json)?
@@ -563,8 +563,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // Send validated response
         let response_str = serde_json::to_string(&response)?;
-        eprintln!("MCP Server sending response: {}", response_str);
-        writeln!(stdout, "{}", response_str)?;
+        eprintln!("MCP Server sending response: {response_str}");
+        writeln!(stdout, "{response_str}")?;
         stdout.flush()?;
     }
 

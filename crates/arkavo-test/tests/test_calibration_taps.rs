@@ -44,7 +44,7 @@ async fn test_calibration_tap_sequence() -> Result<(), Box<dyn std::error::Error
         return Ok(());
     };
 
-    eprintln!("   Found device: {}", device_id);
+    eprintln!("   Found device: {device_id}");
 
     // Step 2: Check if ArkavoReference app is available
     eprintln!("\n2. Checking for ArkavoReference app...");
@@ -128,14 +128,14 @@ async fn test_calibration_tap_sequence() -> Result<(), Box<dyn std::error::Error
         let container_path = String::from_utf8_lossy(&docs_output.stdout)
             .trim()
             .to_string();
-        let calibration_file = format!("{}/Documents/calibration_results.json", container_path);
+        let calibration_file = format!("{container_path}/Documents/calibration_results.json");
 
         if std::path::Path::new(&calibration_file).exists() {
             eprintln!("   ✓ Found calibration results!");
             let contents = std::fs::read_to_string(&calibration_file)?;
-            eprintln!("   Results: {}", contents);
+            eprintln!("   Results: {contents}");
         } else {
-            eprintln!("   ✗ No calibration results found at: {}", calibration_file);
+            eprintln!("   ✗ No calibration results found at: {calibration_file}");
         }
     }
 

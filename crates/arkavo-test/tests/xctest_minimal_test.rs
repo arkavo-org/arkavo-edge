@@ -23,7 +23,7 @@ fn test_basic_unix_socket() {
     let server_thread = thread::spawn(move || {
         use std::os::unix::net::UnixListener;
 
-        println!("Server: Creating listener at {}", server_path);
+        println!("Server: Creating listener at {server_path}");
         let listener = UnixListener::bind(&server_path).expect("Failed to bind");
         println!("Server: Listening for connections");
 
@@ -58,7 +58,7 @@ fn test_basic_unix_socket() {
     thread::sleep(Duration::from_millis(500));
 
     // Connect as client
-    println!("\nClient: Connecting to {}", socket_path);
+    println!("\nClient: Connecting to {socket_path}");
     let stream = UnixStream::connect(socket_path).expect("Failed to connect");
     println!("Client: Connected!");
 

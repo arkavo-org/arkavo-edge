@@ -46,16 +46,13 @@ impl UrlDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             Ok(id.to_string())
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            Ok(device.id)
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted iOS device found".to_string())),
-                    }
-                }
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted iOS device found".to_string())),
             }
         }
     }
@@ -85,7 +82,7 @@ impl UrlDialogHandler {
         let device = self
             .device_manager
             .get_device(device_id)
-            .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
+            .ok_or_else(|| TestError::Mcp(format!("Device {device_id} not found")))?;
 
         let (x, y) = self.get_open_button_coordinates(&device.name);
 
@@ -105,7 +102,7 @@ impl UrlDialogHandler {
                 device_id,
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb tap: {e}")))?;
 
         if !output.status.success() {
             let _stderr = String::from_utf8_lossy(&output.stderr);
@@ -123,7 +120,7 @@ impl UrlDialogHandler {
                     &y.to_string(),
                 ])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to execute simctl tap: {e}")))?;
 
             if !simctl_output.status.success() {
                 return Ok(json!({
@@ -164,7 +161,7 @@ impl Tool for UrlDialogHandler {
                 let device = self
                     .device_manager
                     .get_device(&device_id)
-                    .ok_or_else(|| TestError::Mcp(format!("Device {} not found", device_id)))?;
+                    .ok_or_else(|| TestError::Mcp(format!("Device {device_id} not found")))?;
 
                 let (x, y) = match device.name.as_str() {
                     name if name.contains("iPhone 16 Pro") => (78.0, 490.0),
@@ -182,7 +179,7 @@ impl Tool for UrlDialogHandler {
                         &device_id,
                     ])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -200,13 +197,10 @@ impl Tool for UrlDialogHandler {
                 // Wait briefly for dialog to appear
                 let wait_timeout = params
                     .get("wait_timeout")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(2);
 
-                eprintln!(
-                    "[UrlDialogHandler] Waiting {}s for URL dialog to appear...",
-                    wait_timeout
-                );
+                eprintln!("[UrlDialogHandler] Waiting {wait_timeout}s for URL dialog to appear...");
                 thread::sleep(Duration::from_secs(wait_timeout));
 
                 // Tap the Open button
@@ -224,7 +218,7 @@ impl Tool for UrlDialogHandler {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

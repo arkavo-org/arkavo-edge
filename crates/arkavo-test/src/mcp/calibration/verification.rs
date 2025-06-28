@@ -1,4 +1,4 @@
-use super::*;
+use super::{CalibrationError, ScreenSize};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -14,7 +14,7 @@ pub struct TapVerification {
     pub target_hit: bool,
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -25,15 +25,15 @@ pub struct Coordinate {
 }
 
 impl Coordinate {
-    pub fn offset_from(&self, other: &Coordinate) -> Coordinate {
-        Coordinate {
+    pub fn offset_from(&self, other: &Self) -> Self {
+        Self {
             x: self.x - other.x,
             y: self.y - other.y,
         }
     }
 
-    pub fn distance_to(&self, other: &Coordinate) -> f64 {
-        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2)).sqrt()
+    pub fn distance_to(&self, other: &Self) -> f64 {
+        (self.x - other.x).hypot(self.y - other.y)
     }
 }
 
@@ -81,7 +81,7 @@ pub struct VerificationReader {
 }
 
 impl VerificationReader {
-    pub fn new(device_id: String) -> Self {
+    pub const fn new(device_id: String) -> Self {
         Self { device_id }
     }
 
@@ -102,7 +102,7 @@ impl VerificationReader {
             if path.exists() {
                 eprintln!("[VerificationReader] Found results at: {}", path.display());
                 let data = fs::read_to_string(path)?;
-                eprintln!("[VerificationReader] Raw data: {}", data);
+                eprintln!("[VerificationReader] Raw data: {data}");
                 let results: CalibrationResults = serde_json::from_str(&data)?;
 
                 eprintln!(
@@ -134,8 +134,7 @@ impl VerificationReader {
         loop {
             if start.elapsed() > timeout {
                 return Err(CalibrationError::ValidationError(format!(
-                    "Timeout waiting for calibration results after {} seconds",
-                    timeout_secs
+                    "Timeout waiting for calibration results after {timeout_secs} seconds"
                 )));
             }
 
@@ -176,17 +175,13 @@ impl VerificationReader {
         {
             if output.status.success() {
                 let container_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                eprintln!(
-                    "[VerificationReader] App container path: {}",
-                    container_path
-                );
+                eprintln!("[VerificationReader] App container path: {container_path}");
                 return PathBuf::from(container_path).join("Documents/calibration_results.json");
-            } else {
-                eprintln!(
-                    "[VerificationReader] Failed to get app container: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
             }
+            eprintln!(
+                "[VerificationReader] Failed to get app container: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         env::temp_dir().join("calibration_not_found.json")

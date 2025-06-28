@@ -53,12 +53,12 @@ impl Tool for CoordinateConverterKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         let x = params
             .get("x")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
         let y = params
             .get("y")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
         let from = params
@@ -116,14 +116,12 @@ impl Tool for CoordinateConverterKit {
         if from == "points" {
             if x < 0.0 || x > logical_width {
                 warnings.push(format!(
-                    "X coordinate {} is out of bounds (0-{})",
-                    x, logical_width
+                    "X coordinate {x} is out of bounds (0-{logical_width})"
                 ));
             }
             if y < 0.0 || y > logical_height {
                 warnings.push(format!(
-                    "Y coordinate {} is out of bounds (0-{})",
-                    y, logical_height
+                    "Y coordinate {y} is out of bounds (0-{logical_height})"
                 ));
             }
         } else if from == "pixels" {
@@ -131,14 +129,12 @@ impl Tool for CoordinateConverterKit {
             let pixel_height = logical_height * scale_factor;
             if x < 0.0 || x > pixel_width {
                 warnings.push(format!(
-                    "X coordinate {} is out of bounds (0-{})",
-                    x, pixel_width
+                    "X coordinate {x} is out of bounds (0-{pixel_width})"
                 ));
             }
             if y < 0.0 || y > pixel_height {
                 warnings.push(format!(
-                    "Y coordinate {} is out of bounds (0-{})",
-                    y, pixel_height
+                    "Y coordinate {y} is out of bounds (0-{pixel_height})"
                 ));
             }
         }

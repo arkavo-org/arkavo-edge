@@ -7,8 +7,8 @@ impl Default for McpClient {
 }
 
 impl McpClient {
-    pub fn new() -> Self {
-        McpClient
+    pub const fn new() -> Self {
+        Self
     }
 
     pub fn send(&self, _message: &str) -> Result<String, Box<dyn std::error::Error>> {

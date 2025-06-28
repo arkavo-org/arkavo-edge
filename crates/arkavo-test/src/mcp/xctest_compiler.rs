@@ -20,10 +20,11 @@ impl XCTestCompiler {
             .output()
             .map_err(|e| {
                 TestError::Mcp(format!(
-                    "xcrun not found. Xcode or Xcode Command Line Tools must be installed.\n\
-                Install Xcode from the App Store or run: xcode-select --install\n\
-                Error: {}",
-                    e
+                    "xcrun not found. Xcode or Xcode Command Line Tools must be installed.
+
+                Install Xcode from the App Store or run: xcode-select --install
+
+                Error: {e}"
                 ))
             })?;
 
@@ -42,7 +43,7 @@ impl XCTestCompiler {
 
         // Create build directory if it doesn't exist
         fs::create_dir_all(&build_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create build directory: {e}")))?;
 
         // Generate socket path
         let socket_path =
@@ -75,7 +76,7 @@ impl XCTestCompiler {
         // Step 1: Create temporary source directory
         let source_dir = self.build_dir.join("Sources");
         fs::create_dir_all(&source_dir)
-            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create source directory: {e}")))?;
 
         // Step 2: Process and copy templates
         self.process_templates(&source_dir)?;
@@ -121,7 +122,7 @@ impl XCTestCompiler {
         // Write Swift source
         let swift_path = source_dir.join("ArkavoTestRunner.swift");
         fs::write(&swift_path, swift_source)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Swift source: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Swift source: {e}")))?;
 
         // Use embedded Info.plist template
         eprintln!("[XCTestCompiler] Using embedded Info.plist template from binary");
@@ -129,7 +130,7 @@ impl XCTestCompiler {
 
         let plist_path = self.build_dir.join("Info.plist");
         fs::write(&plist_path, plist_content)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Info.plist: {e}")))?;
 
         Ok(())
     }
@@ -163,7 +164,7 @@ let package = Package(
 
         let package_path = build_dir.join("Package.swift");
         fs::write(&package_path, package_swift)
-            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write Package.swift: {e}")))?;
 
         Ok(())
     }
@@ -181,7 +182,7 @@ let package = Package(
         let sdk_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {}\nMake sure Xcode is installed and command line tools are configured.\nRun: xcode-select --install", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get SDK path: {e}\nMake sure Xcode is installed and command line tools are configured.\nRun: xcode-select --install")))?;
 
         if !sdk_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -193,13 +194,13 @@ let package = Package(
         let sdk_path = String::from_utf8_lossy(&sdk_output.stdout)
             .trim()
             .to_string();
-        eprintln!("[XCTestCompiler] Using SDK: {}", sdk_path);
+        eprintln!("[XCTestCompiler] Using SDK: {sdk_path}");
 
         // Dynamically get platform path for frameworks
         let platform_output = Command::new("xcrun")
             .args(["--sdk", "iphonesimulator", "--show-sdk-platform-path"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get platform path: {e}")))?;
 
         if !platform_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -211,23 +212,19 @@ let package = Package(
         let platform_path = String::from_utf8_lossy(&platform_output.stdout)
             .trim()
             .to_string();
-        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
-        eprintln!(
-            "[XCTestCompiler] XCTest framework path: {}",
-            xctest_framework_path
-        );
+        let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
+        eprintln!("[XCTestCompiler] XCTest framework path: {xctest_framework_path}");
 
         // Verify XCTest framework exists
-        if !std::path::Path::new(&format!("{}/XCTest.framework", xctest_framework_path)).exists() {
+        if !std::path::Path::new(&format!("{xctest_framework_path}/XCTest.framework")).exists() {
             return Err(TestError::Mcp(format!(
-                "XCTest.framework not found at {}. Xcode may not be properly installed.",
-                xctest_framework_path
+                "XCTest.framework not found at {xctest_framework_path}. Xcode may not be properly installed."
             )));
         }
 
         // Only support ARM64 simulators
         let target = "arm64-apple-ios15.0-simulator";
-        eprintln!("[XCTestCompiler] Compiling for architecture: {}", target);
+        eprintln!("[XCTestCompiler] Compiling for architecture: {target}");
 
         // Compile as a framework/bundle
         let output = Command::new("xcrun")
@@ -262,18 +259,20 @@ let package = Package(
                 swift_source.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run swift compiler: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             eprintln!("[XCTestCompiler] Compilation failed");
-            eprintln!("[XCTestCompiler] STDOUT: {}", stdout);
-            eprintln!("[XCTestCompiler] STDERR: {}", stderr);
+            eprintln!("[XCTestCompiler] STDOUT: {stdout}");
+            eprintln!("[XCTestCompiler] STDERR: {stderr}");
 
             return Err(TestError::Mcp(format!(
-                "Swift compilation failed for ARM64.\nError: {}\n\nNote: Only ARM64 simulators are supported.",
-                stderr
+                "Swift compilation failed for ARM64.
+Error: {stderr}
+
+Note: Only ARM64 simulators are supported."
             )));
         }
 
@@ -292,13 +291,13 @@ let package = Package(
 
         // Create bundle directory structure
         fs::create_dir_all(&bundle_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to create bundle directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create bundle directory: {e}")))?;
 
         // Copy Info.plist
         let plist_src = build_dir.join("Info.plist");
         let plist_dst = bundle_path.join("Info.plist");
         fs::copy(&plist_src, &plist_dst)
-            .map_err(|e| TestError::Mcp(format!("Failed to copy Info.plist: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy Info.plist: {e}")))?;
 
         // Find and copy the compiled binary
         let binary_src = build_dir.join("ArkavoTestRunner");
@@ -311,7 +310,7 @@ let package = Package(
                 binary_dst.display()
             );
             fs::copy(&binary_src, &binary_dst)
-                .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to copy binary: {e}")))?;
 
             // Make it executable
             #[cfg(unix)]
@@ -333,7 +332,7 @@ let package = Package(
                         binary_path.display()
                     );
                     fs::copy(&binary_path, &binary_dst).map_err(|e| {
-                        TestError::Mcp(format!("Failed to copy binary from DerivedData: {}", e))
+                        TestError::Mcp(format!("Failed to copy binary from DerivedData: {e}"))
                     })?;
 
                     // Make it executable
@@ -362,10 +361,7 @@ let package = Package(
 
     /// Install the XCTest bundle to a simulator
     pub fn install_to_simulator(&self, device_id: &str, bundle_path: &Path) -> Result<()> {
-        eprintln!(
-            "[XCTestCompiler] Installing XCTest bundle to simulator {}...",
-            device_id
-        );
+        eprintln!("[XCTestCompiler] Installing XCTest bundle to simulator {device_id}...");
 
         // For XCTest bundles, we need to copy them to the simulator's app support directory
         // instead of using simctl install which is for regular apps
@@ -389,9 +385,8 @@ let package = Package(
             sim_data_path.join("Library/Developer/Xcode/DerivedData/TestBundles");
 
         // Create the directory if it doesn't exist
-        fs::create_dir_all(&test_bundles_dir).map_err(|e| {
-            TestError::Mcp(format!("Failed to create test bundles directory: {}", e))
-        })?;
+        fs::create_dir_all(&test_bundles_dir)
+            .map_err(|e| TestError::Mcp(format!("Failed to create test bundles directory: {e}")))?;
 
         // Copy the bundle
         let dest_path = test_bundles_dir.join(bundle_path.file_name().unwrap());
@@ -399,7 +394,7 @@ let package = Package(
         // Remove existing bundle if present
         if dest_path.exists() {
             fs::remove_dir_all(&dest_path)
-                .map_err(|e| TestError::Mcp(format!("Failed to remove existing bundle: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to remove existing bundle: {e}")))?;
         }
 
         eprintln!("[XCTestCompiler] Copying bundle to {}", dest_path.display());
@@ -412,13 +407,12 @@ let package = Package(
                 dest_path.parent().unwrap().to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to copy bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy bundle: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(TestError::Mcp(format!(
-                "Failed to copy test bundle: {}",
-                stderr
+                "Failed to copy test bundle: {stderr}"
             )));
         }
 
@@ -942,7 +936,7 @@ int main(int argc, char * argv[]) {
         let platform_path = String::from_utf8_lossy(&platform_output.stdout)
             .trim()
             .to_string();
-        let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+        let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
 
         let compile_output = Command::new("xcrun")
             .args([
@@ -1000,10 +994,7 @@ int main(int argc, char * argv[]) {
         device_id: &str,
         target_app_bundle_id: Option<&str>,
     ) -> Result<()> {
-        eprintln!(
-            "[XCTestCompiler] Launching test host app on device: {}",
-            device_id
-        );
+        eprintln!("[XCTestCompiler] Launching test host app on device: {device_id}");
         eprintln!(
             "[XCTestCompiler] Socket path: {}",
             self.socket_path.display()
@@ -1073,7 +1064,7 @@ int main(int argc, char * argv[]) {
                 host_app_path.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1108,7 +1099,7 @@ int main(int argc, char * argv[]) {
 
         let launch_output = cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch host app: {e}")))?;
 
         if !launch_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1130,21 +1121,21 @@ int main(int argc, char * argv[]) {
     /// * `target_app_bundle_id` - Optional bundle ID of the app to test
     #[deprecated(note = "Use launch_test_host instead to avoid paradigm mixing")]
     pub fn run_tests(&self, device_id: &str, target_app_bundle_id: Option<&str>) -> Result<()> {
-        eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+        eprintln!("[XCTestCompiler] Running tests on device: {device_id}");
         eprintln!(
             "[XCTestCompiler] Socket path: {}",
             self.socket_path.display()
         );
 
         if let Some(app_id) = target_app_bundle_id {
-            eprintln!("[XCTestCompiler] Target app bundle ID: {}", app_id);
+            eprintln!("[XCTestCompiler] Target app bundle ID: {app_id}");
 
             // First, launch the target app
-            eprintln!("[XCTestCompiler] Launching target app: {}", app_id);
+            eprintln!("[XCTestCompiler] Launching target app: {app_id}");
             let launch_output = Command::new("xcrun")
                 .args(["simctl", "launch", device_id, app_id])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to launch target app: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to launch target app: {e}")))?;
 
             if !launch_output.status.success() {
                 eprintln!(
@@ -1180,7 +1171,7 @@ int main(int argc, char * argv[]) {
                 host_app_path.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1219,7 +1210,8 @@ int main(int argc, char * argv[]) {
                 device_id,
                 host_app_path.to_str().unwrap(),
             ])
-            .output()?;
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !reinstall_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1236,9 +1228,9 @@ int main(int argc, char * argv[]) {
         // Launch with environment variables and console output
         eprintln!("[XCTestCompiler] Launching with environment:");
         eprintln!("  ARKAVO_SOCKET_PATH={}", self.socket_path.display());
-        eprintln!("  ARKAVO_TEST_BUNDLE={}", relative_bundle_path);
+        eprintln!("  ARKAVO_TEST_BUNDLE={relative_bundle_path}");
         if let Some(app_id) = target_app_bundle_id {
-            eprintln!("  ARKAVO_TARGET_APP_ID={}", app_id);
+            eprintln!("  ARKAVO_TARGET_APP_ID={app_id}");
         }
 
         let mut launch_cmd = Command::new("xcrun");
@@ -1264,7 +1256,7 @@ int main(int argc, char * argv[]) {
         eprintln!("[XCTestCompiler] Executing launch command...");
         let output = launch_cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {e}")))?;
 
         eprintln!(
             "[XCTestCompiler] Launch command completed with status: {}",
@@ -1298,13 +1290,13 @@ int main(int argc, char * argv[]) {
         let check_cmd = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         let apps_output = String::from_utf8_lossy(&check_cmd.stdout);
-        if !apps_output.contains("com.arkavo.testhost") {
-            eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");
-        } else {
+        if apps_output.contains("com.arkavo.testhost") {
             eprintln!("[XCTestCompiler] Test host app confirmed in apps list");
+        } else {
+            eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");
         }
 
         eprintln!("[XCTestCompiler] Test runner started successfully");
@@ -1327,7 +1319,6 @@ fn find_compiled_binary(derived_data: &Path, name: &str) -> Result<PathBuf> {
     }
 
     Err(TestError::Mcp(format!(
-        "Binary {} not found in DerivedData",
-        name
+        "Binary {name} not found in DerivedData"
     )))
 }

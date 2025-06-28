@@ -64,7 +64,7 @@ pub async fn run() -> Result<()> {
         let client = match initialize_llm_client().await {
             Ok(client) => std::sync::Arc::new(client),
             Err(e) => {
-                eprintln!("Failed to initialize LLM client: {}", e);
+                eprintln!("Failed to initialize LLM client: {e}");
                 return;
             }
         };
@@ -131,7 +131,7 @@ pub async fn run() -> Result<()> {
                                             content: String::new(),
                                             is_streaming: false,
                                             is_complete: true,
-                                            error: Some(format!("Stream error: {}", e)),
+                                            error: Some(format!("Stream error: {e}")),
                                         })
                                         .await;
                                     break;
@@ -159,7 +159,7 @@ pub async fn run() -> Result<()> {
                                 content: String::new(),
                                 is_streaming: false,
                                 is_complete: true,
-                                error: Some(format!("Failed to get LLM response: {}", e)),
+                                error: Some(format!("Failed to get LLM response: {e}")),
                             })
                             .await;
                     }
@@ -203,7 +203,7 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
         if let Ok(client) = LlmClient::from_env() {
             let test_message = vec![Message::user("ping")];
             if client.complete(test_message).await.is_ok() {
-                eprintln!("✓ Connected to saved Ollama server at {}", server_url);
+                eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 return Ok(client);
             }
         }
@@ -253,7 +253,7 @@ async fn prompt_for_ollama_config(
     let base_url = if input.starts_with("http://") || input.starts_with("https://") {
         input.to_string()
     } else {
-        format!("http://{}", input)
+        format!("http://{input}")
     };
 
     // Set the environment variable
@@ -267,7 +267,7 @@ async fn prompt_for_ollama_config(
             let test_message = vec![Message::user("ping")];
             match client.complete(test_message).await {
                 Ok(_) => {
-                    eprintln!("✓ Connected to Ollama at {}", base_url);
+                    eprintln!("✓ Connected to Ollama at {base_url}");
 
                     // Save configuration for future use
                     let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
@@ -290,7 +290,7 @@ async fn prompt_for_ollama_config(
                     };
 
                     if let Err(e) = storage.store(memory).await {
-                        eprintln!("Warning: Could not save configuration: {}", e);
+                        eprintln!("Warning: Could not save configuration: {e}");
                     } else {
                         eprintln!("✓ Saved configuration for future use");
                     }
@@ -377,7 +377,7 @@ pub async fn run_with_string_channels(
                                     content: String::new(),
                                     is_streaming: false,
                                     is_complete: true,
-                                    error: Some(format!("Request timeout after 30s. Model '{}' may not be available.", model_name)),
+                                    error: Some(format!("Request timeout after 30s. Model '{model_name}' may not be available.")),
                                 };
                                 let _ = tx_clone.send(timeout_response).await;
                             });
@@ -390,7 +390,7 @@ pub async fn run_with_string_channels(
                                 content: String::new(),
                                 is_streaming: false,
                                 is_complete: true,
-                                error: Some(format!("Channel error: {}", e)),
+                                error: Some(format!("Channel error: {e}")),
                             };
                             let _ = new_llm_tx.send(error_response).await;
                             pending_requests.remove(&request.task_id);
@@ -484,10 +484,7 @@ pub async fn run_with_string_channels(
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
     // TODO: Implement task-specific view that connects to main process
     let mut app = App::new();
-    println!(
-        "Running task view for task: {} in session: {}",
-        task_id, session_id
-    );
+    println!("Running task view for task: {task_id} in session: {session_id}");
     app.run().await
 }
 

@@ -111,7 +111,7 @@ See axp_harness_builder.rs:
 - Line 419-482: Fallback compilation logic
 "#;
 
-const SYMBOLS_GUIDANCE: &str = r#"
+const SYMBOLS_GUIDANCE: &str = r"
 ## iOS 26 Beta Symbol Issues
 
 ### Missing Symbols
@@ -131,7 +131,7 @@ The minimal templates avoid these symbols by:
 - Using direct UIKit methods
 - Returning stub responses for AXP calls
 - Delegating to IDB for actual automation
-"#;
+";
 
 const WORKAROUNDS_GUIDANCE: &str = r#"
 ## iOS 26 Beta Workarounds

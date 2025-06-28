@@ -25,7 +25,7 @@ async fn test_calibration_workflow() {
 
     // Step 3: Get a test device ID (simulated)
     let device_id = "test-device-001".to_string();
-    println!("\n3. Using test device: {}", device_id);
+    println!("\n3. Using test device: {device_id}");
 
     // Step 4: Start calibration
     println!("\n4. Starting calibration...");
@@ -37,11 +37,11 @@ async fn test_calibration_workflow() {
     let session_id = match server.handle_request(start_request).await {
         CalibrationResponse::SessionStarted { session_id } => {
             println!("   ✓ Calibration started successfully");
-            println!("   Session ID: {}", session_id);
+            println!("   Session ID: {session_id}");
             session_id
         }
         CalibrationResponse::Error { message } => {
-            println!("   ✗ Failed to start calibration: {}", message);
+            println!("   ✗ Failed to start calibration: {message}");
             return;
         }
         _ => {
@@ -99,7 +99,7 @@ async fn test_calibration_workflow() {
             }
         }
         CalibrationResponse::Error { message } => {
-            println!("   ✗ Failed to retrieve calibration: {}", message);
+            println!("   ✗ Failed to retrieve calibration: {message}");
         }
         _ => {}
     }
@@ -108,7 +108,10 @@ async fn test_calibration_workflow() {
     println!("\n7. Enabling auto-monitoring...");
     let monitor_request = CalibrationRequest::EnableAutoMonitoring { enabled: true };
 
-    if let CalibrationResponse::Success = server.handle_request(monitor_request).await {
+    if matches!(
+        server.handle_request(monitor_request).await,
+        CalibrationResponse::Success
+    ) {
         println!("   ✓ Auto-monitoring enabled");
         println!("   System will automatically recalibrate devices when needed");
     }
@@ -142,7 +145,9 @@ async fn test_calibration_with_real_simulator() {
         for (_runtime, device_list) in devices {
             if let Some(array) = device_list.as_array() {
                 if let Some(first_device) = array.first() {
-                    device_id = first_device["udid"].as_str().map(|s| s.to_string());
+                    device_id = first_device["udid"]
+                        .as_str()
+                        .map(std::string::ToString::to_string);
                     if device_id.is_some() {
                         break;
                     }
@@ -152,7 +157,7 @@ async fn test_calibration_with_real_simulator() {
     }
 
     if let Some(device_id) = device_id {
-        println!("Found booted simulator: {}", device_id);
+        println!("Found booted simulator: {device_id}");
 
         // Initialize server and run calibration
         let storage_path = env::temp_dir().join("arkavo_calibration_real");
@@ -167,13 +172,13 @@ async fn test_calibration_with_real_simulator() {
 
         match server.handle_request(start_request).await {
             CalibrationResponse::SessionStarted { session_id } => {
-                println!("Calibration started with session: {}", session_id);
+                println!("Calibration started with session: {session_id}");
 
                 // The actual calibration would run here
                 // For demo purposes, we just show it started
             }
             CalibrationResponse::Error { message } => {
-                println!("Failed to start calibration: {}", message);
+                println!("Failed to start calibration: {message}");
             }
             _ => {}
         }

@@ -18,20 +18,19 @@ async fn test_xctest_direct_compilation_and_connection() {
     let devices = match device_manager.refresh_devices() {
         Ok(devices) => devices,
         Err(e) => {
-            println!("No devices found: {} (expected without Xcode)", e);
+            println!("No devices found: {e} (expected without Xcode)");
             return;
         }
     };
 
-    let booted_device = match devices
+    let booted_device = if let Some(device) = devices
         .iter()
         .find(|d| d.state == arkavo_test::mcp::device_manager::DeviceState::Booted)
     {
-        Some(device) => device,
-        None => {
-            println!("No booted device found");
-            return;
-        }
+        device
+    } else {
+        println!("No booted device found");
+        return;
     };
 
     println!(
@@ -44,7 +43,7 @@ async fn test_xctest_direct_compilation_and_connection() {
     let compiler = match XCTestCompiler::new() {
         Ok(c) => c,
         Err(e) => {
-            println!("Failed to create compiler: {}", e);
+            println!("Failed to create compiler: {e}");
             return;
         }
     };
@@ -55,7 +54,7 @@ async fn test_xctest_direct_compilation_and_connection() {
             path
         }
         Err(e) => {
-            println!("   Compilation failed: {}", e);
+            println!("   Compilation failed: {e}");
             return;
         }
     };
@@ -63,7 +62,7 @@ async fn test_xctest_direct_compilation_and_connection() {
     // Step 2: Install to simulator
     println!("\n2. Installing bundle to simulator...");
     if let Err(e) = compiler.install_to_simulator(&booted_device.id, &bundle_path) {
-        println!("   Installation failed: {}", e);
+        println!("   Installation failed: {e}");
         return;
     }
     println!("   Installation successful");
@@ -78,7 +77,7 @@ async fn test_xctest_direct_compilation_and_connection() {
     // Step 4: Launch the test host app (which starts the Swift server)
     println!("\n4. Launching test host app...");
     if let Err(e) = compiler.launch_test_host(&booted_device.id, None) {
-        println!("   Failed to launch host app: {}", e);
+        println!("   Failed to launch host app: {e}");
         return;
     }
 
@@ -96,11 +95,11 @@ async fn test_xctest_direct_compilation_and_connection() {
             println!("\n7. Sending ping...");
             match bridge.send_ping().await {
                 Ok(()) => println!("   ✅ Ping successful!"),
-                Err(e) => println!("   ❌ Ping failed: {}", e),
+                Err(e) => println!("   ❌ Ping failed: {e}"),
             }
         }
         Err(e) => {
-            println!("   ❌ Connection failed: {}", e);
+            println!("   ❌ Connection failed: {e}");
         }
     }
 

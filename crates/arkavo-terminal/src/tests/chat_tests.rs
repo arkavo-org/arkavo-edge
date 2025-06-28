@@ -25,7 +25,7 @@ fn test_chat_max_messages() {
 
     // Add more than max messages (1000)
     for i in 0..1005 {
-        chat.add_message(MessageRole::User, format!("Message {}", i));
+        chat.add_message(MessageRole::User, format!("Message {i}"));
     }
 
     // Should only keep last 1000
@@ -66,7 +66,7 @@ fn test_scroll_offset() {
 
     // Add messages
     for i in 0..20 {
-        chat.add_message(MessageRole::User, format!("Message {}", i));
+        chat.add_message(MessageRole::User, format!("Message {i}"));
     }
 
     // Initial scroll is at bottom

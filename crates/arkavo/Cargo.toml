@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Main binary for the Arkavo agentic CLI tool"
+repository.workspace = true
+readme = "README.md"
+keywords = ["cli", "ai", "agent"]
+categories = ["command-line-utilities", "development-tools"]
+
 
 [features]
 default = ["memory"]

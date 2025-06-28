@@ -20,7 +20,7 @@ fn safe_open_repo(
         requested.to_path_buf()
     } else {
         let current_dir = env::current_dir()
-            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?;
         current_dir.join(requested)
     };
 
@@ -30,14 +30,14 @@ fn safe_open_repo(
         base_path
     } else {
         let current_dir = env::current_dir()
-            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?;
         sanitize_repo_path(&current_dir, &base_path)
-            .map_err(|e| TestError::Mcp(format!("Path validation failed: {}", e)))?
+            .map_err(|e| TestError::Mcp(format!("Path validation failed: {e}")))?
     };
 
     git_manager
         .open_repo(&final_path)
-        .map_err(|e| TestError::Mcp(format!("Failed to open repository: {}", e)))
+        .map_err(|e| TestError::Mcp(format!("Failed to open repository: {e}")))
 }
 
 pub struct GitStatusKit {
@@ -80,11 +80,11 @@ impl Tool for GitStatusKit {
         let status = self
             .git_manager
             .status(&repo)
-            .map_err(|e| TestError::Mcp(format!("Failed to get status: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get status: {e}")))?;
         let branch = self
             .git_manager
             .get_current_branch(&repo)
-            .map_err(|e| TestError::Mcp(format!("Failed to get branch: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get branch: {e}")))?;
 
         Ok(json!({
             "branch": branch,
@@ -162,7 +162,7 @@ impl Tool for GitDiffKit {
         let diff = self
             .git_manager
             .diff(&repo, &diff_options)
-            .map_err(|e| TestError::Mcp(format!("Failed to get diff: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to get diff: {e}")))?;
 
         Ok(json!({
             "diff": diff,
@@ -229,13 +229,13 @@ impl Tool for GitCommitKit {
         // Stage all changes
         self.git_manager
             .add_all(&repo)
-            .map_err(|e| TestError::Mcp(format!("Failed to stage changes: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to stage changes: {e}")))?;
 
         // Create commit
         let oid = self
             .git_manager
             .commit_changes(&repo, message)
-            .map_err(|e| TestError::Mcp(format!("Failed to commit: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to commit: {e}")))?;
 
         Ok(json!({
             "success": true,
@@ -306,7 +306,7 @@ impl Tool for GitBranchKit {
                 let branches = self
                     .git_manager
                     .list_branches(&repo)
-                    .map_err(|e| TestError::Mcp(format!("Failed to list branches: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to list branches: {e}")))?;
                 Ok(json!({
                     "branches": branches.into_iter().map(|(name, is_current)| {
                         json!({
@@ -322,7 +322,7 @@ impl Tool for GitBranchKit {
                 })?;
                 self.git_manager
                     .create_branch(&repo, name)
-                    .map_err(|e| TestError::Mcp(format!("Failed to create branch: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to create branch: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "created": name
@@ -334,7 +334,7 @@ impl Tool for GitBranchKit {
                 })?;
                 self.git_manager
                     .checkout_branch(&repo, name)
-                    .map_err(|e| TestError::Mcp(format!("Failed to switch branch: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to switch branch: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "switched_to": name
@@ -398,10 +398,10 @@ impl Tool for GitLogKit {
 
         let mut revwalk = repo
             .revwalk()
-            .map_err(|e| TestError::Mcp(format!("Failed to create revwalk: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create revwalk: {e}")))?;
         revwalk
             .push_head()
-            .map_err(|e| TestError::Mcp(format!("Failed to push head: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to push head: {e}")))?;
 
         let mut commits = Vec::new();
         for (i, oid) in revwalk.enumerate() {
@@ -409,10 +409,10 @@ impl Tool for GitLogKit {
                 break;
             }
 
-            let oid = oid.map_err(|e| TestError::Mcp(format!("Failed to get oid: {}", e)))?;
+            let oid = oid.map_err(|e| TestError::Mcp(format!("Failed to get oid: {e}")))?;
             let commit = repo
                 .find_commit(oid)
-                .map_err(|e| TestError::Mcp(format!("Failed to find commit: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to find commit: {e}")))?;
 
             commits.push(json!({
                 "id": oid.to_string(),
@@ -497,14 +497,14 @@ impl Tool for GitRemoteKit {
             None => self
                 .git_manager
                 .get_current_branch(&repo)
-                .map_err(|e| TestError::Mcp(format!("Failed to get current branch: {}", e)))?,
+                .map_err(|e| TestError::Mcp(format!("Failed to get current branch: {e}")))?,
         };
 
         match action {
             "fetch" => {
                 self.git_manager
                     .fetch(&repo, remote)
-                    .map_err(|e| TestError::Mcp(format!("Failed to fetch: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to fetch: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "action": "fetch",
@@ -515,7 +515,7 @@ impl Tool for GitRemoteKit {
             "pull" => {
                 self.git_manager
                     .pull(&repo, remote, &branch)
-                    .map_err(|e| TestError::Mcp(format!("Failed to pull: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to pull: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "action": "pull",
@@ -527,7 +527,7 @@ impl Tool for GitRemoteKit {
             "push" => {
                 self.git_manager
                     .push(&repo, remote, &branch)
-                    .map_err(|e| TestError::Mcp(format!("Failed to push: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to push: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "action": "push",
@@ -540,10 +540,10 @@ impl Tool for GitRemoteKit {
                 // sync = pull then push
                 self.git_manager
                     .sync_upstream(&repo)
-                    .map_err(|e| TestError::Mcp(format!("Failed to sync upstream: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to sync upstream: {e}")))?;
                 self.git_manager
                     .publish(&repo)
-                    .map_err(|e| TestError::Mcp(format!("Failed to publish: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to publish: {e}")))?;
                 Ok(json!({
                     "success": true,
                     "action": "sync",

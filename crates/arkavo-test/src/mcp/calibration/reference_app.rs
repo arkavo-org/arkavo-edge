@@ -1,4 +1,6 @@
-use super::*;
+use super::{
+    ActionTarget, ActionType, CalibrationAction, CalibrationError, Deserialize, HashMap, Serialize,
+};
 use serde_json;
 use std::process::Command;
 use std::thread;
@@ -32,7 +34,7 @@ impl ReferenceAppInterface {
         self
     }
 
-    fn get_url_dialog_coordinates(&self) -> (f64, f64) {
+    const fn get_url_dialog_coordinates(&self) -> (f64, f64) {
         // Default coordinates for "Open" button in URL confirmation dialog
         // This is typically centered on most iPhone models
         (195.0, 490.0)

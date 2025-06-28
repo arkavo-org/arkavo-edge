@@ -7,8 +7,8 @@ impl Default for A2aClient {
 }
 
 impl A2aClient {
-    pub fn new() -> Self {
-        A2aClient
+    pub const fn new() -> Self {
+        Self
     }
 
     pub fn send(&self, _message: &str) -> Result<String, Box<dyn std::error::Error>> {

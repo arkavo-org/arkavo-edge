@@ -141,7 +141,7 @@ pub struct ErrorGuidance {
     pub can_auto_recover: bool,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ErrorType {
     PortConflict,
     DeviceNotFound,
@@ -154,7 +154,7 @@ pub enum ErrorType {
 
 /// Common IDB troubleshooting guide
 pub fn get_troubleshooting_guide() -> String {
-    r#"
+    r"
 🔧 IDB Companion Troubleshooting Guide
 =====================================
 
@@ -187,6 +187,6 @@ For persistent issues:
 - Check logs in the MCP server output
 - Verify Xcode and simulators are up to date
 - Report issues with full error messages
-"#
+"
     .to_string()
 }

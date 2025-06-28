@@ -75,7 +75,7 @@ impl TestRunner {
         };
 
         match self.execute_step_action(step).await {
-            Ok(_) => {
+            Ok(()) => {
                 result.status = TestStatus::Passed;
             }
             Err(e) => {
@@ -133,7 +133,7 @@ impl TestRunner {
             match handle.await {
                 Ok(Ok(result)) => results.push(result),
                 Ok(Err(e)) => return Err(e),
-                Err(e) => return Err(TestError::Execution(format!("Task join error: {}", e))),
+                Err(e) => return Err(TestError::Execution(format!("Task join error: {e}"))),
             }
         }
 
@@ -148,7 +148,7 @@ impl TestRunner {
             name: "Dynamic Test".to_string(),
             status: TestStatus::Passed,
             duration: Duration::from_millis(150),
-            output: format!("Executed dynamic test: {}", test_code),
+            output: format!("Executed dynamic test: {test_code}"),
             error: None,
         };
 

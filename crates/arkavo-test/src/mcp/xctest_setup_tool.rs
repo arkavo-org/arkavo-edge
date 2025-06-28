@@ -71,7 +71,7 @@ impl Tool for XCTestSetupKit {
 
         let force_reinstall = params
             .get("force_reinstall")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         // Ignore target_app_bundle_id even if provided - it causes security restrictions
@@ -89,10 +89,7 @@ impl Tool for XCTestSetupKit {
 
         // Check if XCUITest is already available and functional
         if !force_reinstall {
-            eprintln!(
-                "[XCTestSetupKit] Checking XCTest status for device {}...",
-                device_id
-            );
+            eprintln!("[XCTestSetupKit] Checking XCTest status for device {device_id}...");
             let verification_status = XCTestVerifier::verify_device(&device_id).await?;
 
             if verification_status.is_functional {
@@ -264,7 +261,7 @@ impl Tool for XCTestSetupKit {
                 // Test the connection with a ping
                 let test_result = bridge.send_ping().await;
                 if let Err(e) = test_result {
-                    eprintln!("[XCTestSetupKit] Warning: Ping test failed: {}", e);
+                    eprintln!("[XCTestSetupKit] Warning: Ping test failed: {e}");
                     return Ok(serde_json::json!({
                         "success": false,
                         "error": {
@@ -319,7 +316,7 @@ impl Tool for XCTestSetupKit {
                 }))
             }
             Ok(Err(e)) => {
-                eprintln!("[XCTestSetupKit] Connection failed: {}", e);
+                eprintln!("[XCTestSetupKit] Connection failed: {e}");
                 Ok(serde_json::json!({
                     "success": false,
                     "error": {

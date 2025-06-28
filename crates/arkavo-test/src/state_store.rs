@@ -21,7 +21,7 @@ impl StateStore {
         let data = self
             .data
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to read state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read state: {e}")))?;
         Ok(data.get(entity).cloned())
     }
 
@@ -29,7 +29,7 @@ impl StateStore {
         let mut data = self
             .data
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to write state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write state: {e}")))?;
         data.insert(entity.to_string(), value);
         Ok(())
     }
@@ -47,7 +47,7 @@ impl StateStore {
         let mut data = self
             .data
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to write state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write state: {e}")))?;
 
         let current = data.get(entity);
         let new_value = updater(current, action, update_data.as_ref())?;
@@ -60,7 +60,7 @@ impl StateStore {
         let mut data = self
             .data
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to write state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write state: {e}")))?;
         Ok(data.remove(entity).is_some())
     }
 
@@ -68,11 +68,11 @@ impl StateStore {
         let data = self
             .data
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to read state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read state: {e}")))?;
         let mut snapshots = self
             .snapshots
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to write snapshots: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write snapshots: {e}")))?;
 
         snapshots.insert(name.to_string(), data.clone());
         Ok(())
@@ -82,16 +82,16 @@ impl StateStore {
         let snapshots = self
             .snapshots
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to read snapshots: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read snapshots: {e}")))?;
 
         let snapshot = snapshots
             .get(name)
-            .ok_or_else(|| TestError::Mcp(format!("Snapshot '{}' not found", name)))?;
+            .ok_or_else(|| TestError::Mcp(format!("Snapshot '{name}' not found")))?;
 
         let mut data = self
             .data
             .write()
-            .map_err(|e| TestError::Mcp(format!("Failed to write state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to write state: {e}")))?;
 
         *data = snapshot.clone();
         Ok(())
@@ -101,7 +101,7 @@ impl StateStore {
         let snapshots = self
             .snapshots
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to read snapshots: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read snapshots: {e}")))?;
         Ok(snapshots.keys().cloned().collect())
     }
 
@@ -109,7 +109,7 @@ impl StateStore {
         let data = self
             .data
             .read()
-            .map_err(|e| TestError::Mcp(format!("Failed to read state: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read state: {e}")))?;
 
         if let Some(filter_value) = filter {
             if let Some(filter_obj) = filter_value.as_object() {

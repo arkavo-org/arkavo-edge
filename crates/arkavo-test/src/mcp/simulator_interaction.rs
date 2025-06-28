@@ -48,7 +48,7 @@ impl SimulatorInteraction {
                 &y.to_string(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute enhanced tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute enhanced tap: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -78,18 +78,17 @@ impl SimulatorInteraction {
             
             tell application "System Events"
                 tell process "Simulator"
-                    click at {{{}, {}}}
+                    click at {{{x}, {y}}}
                 end tell
             end tell
-            "#,
-            x, y
+            "#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute AppleScript tap: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -133,7 +132,7 @@ impl SimulatorInteraction {
         let output = Command::new("xcrun")
             .args(["simctl", "ui", device_id, "sendkeys", text])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send text: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send text: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -155,7 +154,7 @@ impl SimulatorInteraction {
             .args(["simctl", "pbcopy", device_id])
             .env("SIMCTL_CHILD_STDIN", text)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to set pasteboard: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to set pasteboard: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -179,7 +178,7 @@ impl SimulatorInteraction {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute paste: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute paste: {e}")))?;
 
         if paste_output.status.success() {
             Ok(json!({

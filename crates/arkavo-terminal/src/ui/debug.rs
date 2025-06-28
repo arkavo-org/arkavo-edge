@@ -162,7 +162,7 @@ impl Renderable for DebugView {
                 let timestamp = log.timestamp.format("%H:%M:%S.%3f").to_string();
                 let line = Line::from(vec![
                     Span::styled(
-                        format!("[{}] ", timestamp),
+                        format!("[{timestamp}] "),
                         Style::default().fg(Color::DarkGray),
                     ),
                     Span::styled(format!("{:5} ", log.level.prefix()), log.level.style()),

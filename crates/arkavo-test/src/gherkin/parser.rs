@@ -32,7 +32,7 @@ pub struct Step {
     pub doc_string: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StepKeyword {
     Given,
     When,
@@ -44,11 +44,11 @@ pub enum StepKeyword {
 impl StepKeyword {
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim() {
-            "Given" => Some(StepKeyword::Given),
-            "When" => Some(StepKeyword::When),
-            "Then" => Some(StepKeyword::Then),
-            "And" => Some(StepKeyword::And),
-            "But" => Some(StepKeyword::But),
+            "Given" => Some(Self::Given),
+            "When" => Some(Self::When),
+            "Then" => Some(Self::Then),
+            "And" => Some(Self::And),
+            "But" => Some(Self::But),
             _ => None,
         }
     }
@@ -57,11 +57,11 @@ impl StepKeyword {
 impl std::fmt::Display for StepKeyword {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StepKeyword::Given => write!(f, "Given"),
-            StepKeyword::When => write!(f, "When"),
-            StepKeyword::Then => write!(f, "Then"),
-            StepKeyword::And => write!(f, "And"),
-            StepKeyword::But => write!(f, "But"),
+            Self::Given => write!(f, "Given"),
+            Self::When => write!(f, "When"),
+            Self::Then => write!(f, "Then"),
+            Self::And => write!(f, "And"),
+            Self::But => write!(f, "But"),
         }
     }
 }
@@ -83,7 +83,7 @@ impl Parser {
                 path,
                 error: _,
                 source: _,
-            } => TestError::GherkinParse(format!("Parse error in file: {:?}", path)),
+            } => TestError::GherkinParse(format!("Parse error in file: {path:?}")),
         })?;
 
         Self::convert_feature(&gherkin_feature)
@@ -111,12 +111,8 @@ impl Parser {
                     keyword: StepKeyword::parse(&step.keyword).unwrap_or(StepKeyword::Given),
                     text: step.value.clone(),
                     data_table: step.table.as_ref().map(|table| {
-                        let headers = table
-                            .rows
-                            .first()
-                            .map(|row| row.to_vec())
-                            .unwrap_or_default();
-                        let rows = table.rows[1..].iter().map(|row| row.to_vec()).collect();
+                        let headers = table.rows.first().cloned().unwrap_or_default();
+                        let rows = table.rows[1..].to_vec();
                         DataTable { headers, rows }
                     }),
                     doc_string: step.docstring.clone(),
@@ -129,7 +125,7 @@ impl Parser {
             .iter()
             .map(|scenario| Scenario {
                 name: scenario.name.clone(),
-                tags: scenario.tags.to_vec(),
+                tags: scenario.tags.clone(),
                 steps: scenario
                     .steps
                     .iter()
@@ -137,12 +133,8 @@ impl Parser {
                         keyword: StepKeyword::parse(&step.keyword).unwrap_or(StepKeyword::Given),
                         text: step.value.clone(),
                         data_table: step.table.as_ref().map(|table| {
-                            let headers = table
-                                .rows
-                                .first()
-                                .map(|row| row.to_vec())
-                                .unwrap_or_default();
-                            let rows = table.rows[1..].iter().map(|row| row.to_vec()).collect();
+                            let headers = table.rows.first().cloned().unwrap_or_default();
+                            let rows = table.rows[1..].to_vec();
                             DataTable { headers, rows }
                         }),
                         doc_string: step.docstring.clone(),

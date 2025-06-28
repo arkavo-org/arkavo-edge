@@ -54,22 +54,19 @@ impl Tool for DeepLinkKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -79,7 +76,7 @@ impl Tool for DeepLinkKit {
             let launch_output = Command::new("xcrun")
                 .args(["simctl", "launch", &device_id, bundle_id])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
             if !launch_output.status.success() {
                 return Ok(json!({
@@ -100,7 +97,7 @@ impl Tool for DeepLinkKit {
         let output = Command::new("xcrun")
             .args(["simctl", "openurl", &device_id, url])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to open URL: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to open URL: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -200,22 +197,19 @@ impl Tool for AppLauncherKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -250,17 +244,17 @@ impl Tool for AppLauncherKit {
 
                 let output = cmd
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
                     "action": "launch",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -274,17 +268,17 @@ impl Tool for AppLauncherKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "terminate", &device_id, bundle_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to terminate app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to terminate app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
                     "action": "terminate",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -298,17 +292,17 @@ impl Tool for AppLauncherKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "install", &device_id, app_path])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to install app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to install app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
                     "action": "install",
                     "app_path": app_path,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -322,17 +316,17 @@ impl Tool for AppLauncherKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "uninstall", &device_id, bundle_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
                     "action": "uninstall",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -341,7 +335,7 @@ impl Tool for AppLauncherKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "listapps", &device_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
                 if output.status.success() {
                     // Parse the plist output
@@ -371,7 +365,7 @@ impl Tool for AppLauncherKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "get_app_container", &device_id, bundle_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to get app info: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to get app info: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -383,15 +377,15 @@ impl Tool for AppLauncherKit {
                     } else {
                         None
                     },
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

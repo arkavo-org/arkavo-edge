@@ -42,7 +42,7 @@ mod tests {
                 eprintln!("Result: {}", serde_json::to_string_pretty(&result)?);
             }
             Ok(Err(e)) => {
-                eprintln!("❌ XCTest setup failed: {}", e);
+                eprintln!("❌ XCTest setup failed: {e}");
                 return Err(e.into());
             }
             Err(_) => {

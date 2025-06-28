@@ -81,7 +81,7 @@ impl OllamaClient {
         for model in &vision_models {
             if available_models.iter().any(|m| m.contains(model)) {
                 debug!("Selected vision model: {}", model);
-                return Ok(model.to_string());
+                return Ok((*model).to_string());
             }
         }
 
@@ -108,7 +108,7 @@ impl OllamaClient {
             for model in &coding_models {
                 if available_models.iter().any(|m| m.contains(model)) {
                     debug!("Selected coding model: {}", model);
-                    return Ok(model.to_string());
+                    return Ok((*model).to_string());
                 }
             }
         }
@@ -134,13 +134,13 @@ impl OllamaClient {
             if model.contains(':') {
                 if available_models.iter().any(|m| m == model) {
                     debug!("Selected general model: {}", model);
-                    return Ok(model.to_string());
+                    return Ok((*model).to_string());
                 }
             } else {
                 // For general model names, use contains matching
                 if available_models.iter().any(|m| m.contains(model)) {
                     debug!("Selected general model: {}", model);
-                    return Ok(model.to_string());
+                    return Ok((*model).to_string());
                 }
             }
         }
@@ -268,7 +268,7 @@ impl Provider for OllamaClient {
         Ok(Box::new(Box::pin(stream)))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ollama"
     }
 }

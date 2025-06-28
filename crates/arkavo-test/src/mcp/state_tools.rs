@@ -317,7 +317,7 @@ impl Tool for SnapshotKit {
                     "timestamp": chrono::Utc::now().to_rfc3339()
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Invalid action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Invalid action: {action}"))),
         }
     }
 

@@ -29,11 +29,11 @@ impl XCTestAppRunner {
 
     /// Create and install a minimal iOS app
     pub fn install_and_run(&self, device_id: &str) -> Result<()> {
-        eprintln!("[AppRunner] Creating iOS app for device {}", device_id);
+        eprintln!("[AppRunner] Creating iOS app for device {device_id}");
 
         // Create app bundle structure
         let app_name = "ArkavoTestApp";
-        let app_dir = self.build_dir.join(format!("{}.app", app_name));
+        let app_dir = self.build_dir.join(format!("{app_name}.app"));
         fs::create_dir_all(&app_dir)?;
 
         // Create Info.plist
@@ -43,11 +43,11 @@ impl XCTestAppRunner {
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>{}</string>
+    <string>{app_name}</string>
     <key>CFBundleIdentifier</key>
     <string>com.arkavo.testapp</string>
     <key>CFBundleName</key>
-    <string>{}</string>
+    <string>{app_name}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -66,8 +66,7 @@ impl XCTestAppRunner {
         <false/>
     </dict>
 </dict>
-</plist>"#,
-            app_name, app_name
+</plist>"#
         );
 
         fs::write(app_dir.join("Info.plist"), info_plist)?;

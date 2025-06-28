@@ -21,11 +21,11 @@ async fn test_idb_companion_can_start() -> Result<()> {
             .filter(|line| !line.trim().is_empty())
             .count()
     } else {
-        panic!("Unexpected response format: {:?}", targets);
+        panic!("Unexpected response format: {targets:?}");
     };
 
     println!("✅ IDB companion started successfully!");
-    println!("✅ Found {} devices/simulators", device_count);
+    println!("✅ Found {device_count} devices/simulators");
 
     // Print some details
     if let Some(raw_output) = targets.get("raw_output").and_then(|v| v.as_str()) {

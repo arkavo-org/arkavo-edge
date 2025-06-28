@@ -61,19 +61,16 @@ impl UiElementHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             if self.device_manager.get_device(id).is_none() {
-                return Err(TestError::Mcp(format!("Device '{}' not found", id)));
+                return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            Ok(device.id)
         } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }
@@ -96,17 +93,16 @@ impl UiElementHandler {
             delay 0.1
             tell application "System Events"
                 tell process "Simulator"
-                    click at {{{}, {}}}
+                    click at {{{x}, {y}}}
                 end tell
-            end tell"#,
-            x, y
+            end tell"#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -136,17 +132,16 @@ impl UiElementHandler {
             tell application "System Events"
                 tell process "Simulator"
                     set frontmost to true
-                    click at {{{}, {}}} with pressing
+                    click at {{{x}, {y}}} with pressing
                 end tell
-            end tell"#,
-            x, y
+            end tell"#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute long press: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute long press: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -189,7 +184,7 @@ impl UiElementHandler {
             (-5.0, 0.0, "tap_left"),
             (5.0, 0.0, "tap_right"),
         ] {
-            strategies_tried.push(label.to_string());
+            strategies_tried.push((*label).to_string());
             if self.perform_tap(x + dx, y + dy).is_ok() {
                 thread::sleep(Duration::from_millis(300));
                 return Ok(strategies_tried);
@@ -216,12 +211,12 @@ impl Tool for UiElementHandler {
 
         let x = coordinates
             .get("x")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
         let y = coordinates
             .get("y")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
         let device_id = match self.get_device_id(&params) {
@@ -262,7 +257,7 @@ impl Tool for UiElementHandler {
             "tap_switch" => {
                 // Switches often need a tap on the right side
                 match self.perform_tap(x + 20.0, y) {
-                    Ok(_) => Ok(json!({
+                    Ok(()) => Ok(json!({
                         "success": true,
                         "action": "tap_switch",
                         "coordinates": {"x": x + 20.0, "y": y},
@@ -279,7 +274,7 @@ impl Tool for UiElementHandler {
                 }
             }
             "double_tap" => match self.perform_double_tap(x, y) {
-                Ok(_) => Ok(json!({
+                Ok(()) => Ok(json!({
                     "success": true,
                     "action": "double_tap",
                     "coordinates": {"x": x, "y": y},
@@ -294,7 +289,7 @@ impl Tool for UiElementHandler {
                 })),
             },
             "long_press" => match self.perform_long_press(x, y) {
-                Ok(_) => Ok(json!({
+                Ok(()) => Ok(json!({
                     "success": true,
                     "action": "long_press",
                     "coordinates": {"x": x, "y": y},
@@ -311,13 +306,13 @@ impl Tool for UiElementHandler {
             "tap_with_retry" => {
                 let retry_count = params
                     .get("retry_count")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(3) as usize;
 
                 let mut last_error = None;
                 for attempt in 1..=retry_count {
                     match self.perform_tap(x, y) {
-                        Ok(_) => {
+                        Ok(()) => {
                             return Ok(json!({
                                 "success": true,
                                 "action": "tap_with_retry",
@@ -340,12 +335,12 @@ impl Tool for UiElementHandler {
                     "success": false,
                     "error": {
                         "code": "TAP_RETRY_FAILED",
-                        "message": last_error.map(|e| e.to_string()).unwrap_or_else(|| "Unknown error".to_string()),
+                        "message": last_error.map_or_else(|| "Unknown error".to_string(), |e| e.to_string()),
                         "attempts": retry_count
                     }
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

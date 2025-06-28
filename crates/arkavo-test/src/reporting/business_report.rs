@@ -42,7 +42,7 @@ pub struct StepReport {
     pub duration: Duration,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TestStatus {
     Passed,
@@ -74,14 +74,12 @@ impl BusinessReporter {
                 include_str!("../../templates/report_markdown.hbs"),
             )
             .map_err(|e| {
-                TestError::Reporting(format!("Failed to register markdown template: {}", e))
+                TestError::Reporting(format!("Failed to register markdown template: {e}"))
             })?;
 
         template_engine
             .register_template_string("html", include_str!("../../templates/report_html.hbs"))
-            .map_err(|e| {
-                TestError::Reporting(format!("Failed to register HTML template: {}", e))
-            })?;
+            .map_err(|e| TestError::Reporting(format!("Failed to register HTML template: {e}")))?;
 
         Ok(Self {
             template_engine,
@@ -169,18 +167,18 @@ impl BusinessReporter {
     fn render_markdown(&self, data: &ReportData) -> Result<String> {
         self.template_engine
             .render("markdown", data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render markdown: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render markdown: {e}")))
     }
 
     fn render_html(&self, data: &ReportData) -> Result<String> {
         self.template_engine
             .render("html", data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render HTML: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render HTML: {e}")))
     }
 
     fn render_json(&self, data: &ReportData) -> Result<String> {
         serde_json::to_string_pretty(data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render JSON: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render JSON: {e}")))
     }
 
     fn render_slack(&self, data: &ReportData) -> Result<String> {

@@ -61,7 +61,10 @@ impl McpClient {
         // If URL provided, parse it to extract command and args
         let (cmd, args) = if let Some(url) = mcp_url {
             // For now, support simple command URLs like "arkavo mcp"
-            let parts: Vec<String> = url.split_whitespace().map(|s| s.to_string()).collect();
+            let parts: Vec<String> = url
+                .split_whitespace()
+                .map(std::string::ToString::to_string)
+                .collect();
             if parts.is_empty() {
                 return Err("Invalid MCP URL".into());
             }
@@ -85,7 +88,7 @@ impl McpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start MCP server '{}': {}", cmd, e))?;
+            .map_err(|e| format!("Failed to start MCP server '{cmd}': {e}"))?;
 
         // Take ownership of stdin and stdout
         let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;
@@ -254,11 +257,11 @@ impl McpClient {
         let mut line = String::new();
         process.stdout.read_line(&mut line)?;
 
-        if !line.is_empty() {
+        if line.is_empty() {
+            Err("No response from MCP server".into())
+        } else {
             let response: JsonRpcResponse = serde_json::from_str(&line)?;
             Ok(response)
-        } else {
-            Err("No response from MCP server".into())
         }
     }
 }

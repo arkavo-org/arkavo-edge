@@ -8,7 +8,7 @@ use tokio::net::{UnixListener, UnixStream, unix::OwnedWriteHalf};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CommandType {
     Tap,
@@ -60,7 +60,7 @@ pub struct CommandParameters {
     pub press_duration: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TargetType {
     Coordinate,
@@ -117,7 +117,7 @@ impl XCTestUnixBridge {
     }
 
     /// Check if the bridge is connected to the XCTest runner
-    pub fn is_connected(&self) -> bool {
+    pub const fn is_connected(&self) -> bool {
         self.client_stream.is_some()
     }
 
@@ -130,11 +130,11 @@ impl XCTestUnixBridge {
         // Remove existing socket file if it exists
         if self.socket_path.exists() {
             std::fs::remove_file(&self.socket_path)
-                .map_err(|e| TestError::Mcp(format!("Failed to remove existing socket: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to remove existing socket: {e}")))?;
         }
 
         let listener = UnixListener::bind(&self.socket_path)
-            .map_err(|e| TestError::Mcp(format!("Failed to bind Unix socket: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to bind Unix socket: {e}")))?;
 
         eprintln!(
             "XCTest Unix bridge listening on: {}",
@@ -151,12 +151,12 @@ impl XCTestUnixBridge {
                         let handlers = response_handlers.clone();
                         tokio::spawn(async move {
                             if let Err(e) = handle_client(stream, handlers).await {
-                                eprintln!("Client handler error: {}", e);
+                                eprintln!("Client handler error: {e}");
                             }
                         });
                     }
                     Err(e) => {
-                        eprintln!("Failed to accept connection: {}", e);
+                        eprintln!("Failed to accept connection: {e}");
                     }
                 }
             }
@@ -195,7 +195,7 @@ impl XCTestUnixBridge {
 
         let stream = UnixStream::connect(&self.socket_path)
             .await
-            .map_err(|e| TestError::Mcp(format!("Failed to connect to XCTest runner: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to connect to XCTest runner: {e}")))?;
 
         eprintln!("[XCTestUnixBridge] Connected to socket");
 
@@ -221,7 +221,7 @@ impl XCTestUnixBridge {
                     }
                     Ok(_) => {
                         let trimmed = line.trim();
-                        eprintln!("[XCTestUnixBridge] Received: {}", trimmed);
+                        eprintln!("[XCTestUnixBridge] Received: {trimmed}");
 
                         // Check for ready signal
                         if trimmed == "[TestBridgeReady]" {
@@ -250,11 +250,11 @@ impl XCTestUnixBridge {
                                 );
                             }
                         } else {
-                            eprintln!("[XCTestUnixBridge] Not a JSON response: {}", trimmed);
+                            eprintln!("[XCTestUnixBridge] Not a JSON response: {trimmed}");
                         }
                     }
                     Err(e) => {
-                        eprintln!("[XCTestUnixBridge] Error reading response: {}", e);
+                        eprintln!("[XCTestUnixBridge] Error reading response: {e}");
                         break;
                     }
                 }
@@ -349,7 +349,7 @@ impl XCTestUnixBridge {
 
         // Send command
         let command_json = serde_json::to_string(&command)
-            .map_err(|e| TestError::Mcp(format!("Failed to serialize command: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to serialize command: {e}")))?;
 
         {
             let mut stream = stream.lock().await;
@@ -360,15 +360,15 @@ impl XCTestUnixBridge {
             stream
                 .write_all(command_json.as_bytes())
                 .await
-                .map_err(|e| TestError::Mcp(format!("Failed to send command: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to send command: {e}")))?;
             stream
                 .write_all(b"\n")
                 .await
-                .map_err(|e| TestError::Mcp(format!("Failed to send newline: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to send newline: {e}")))?;
             stream
                 .flush()
                 .await
-                .map_err(|e| TestError::Mcp(format!("Failed to flush stream: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to flush stream: {e}")))?;
             eprintln!("[XCTestUnixBridge] Command sent successfully");
         }
 
@@ -597,7 +597,7 @@ async fn handle_client(
                 }
             }
             Err(e) => {
-                eprintln!("Error reading from client: {}", e);
+                eprintln!("Error reading from client: {e}");
                 break;
             }
         }

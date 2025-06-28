@@ -105,7 +105,7 @@ fn test_diff() {
     let diff = manager.diff(&repo, &DiffOptions::default()).unwrap();
     assert!(diff.contains("line1"));
     assert!(diff.contains("modified"));
-    assert!(diff.contains("+"));
+    assert!(diff.contains('+'));
 }
 
 #[test]

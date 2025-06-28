@@ -12,7 +12,7 @@ mod tests {
         // First verify simulator state
         match SimulatorStateVerifier::verify_ready_for_interaction(device_id, None).await {
             Ok(state) => {
-                println!("Simulator state: {:?}", state);
+                println!("Simulator state: {state:?}");
 
                 if !state.is_booted {
                     println!("Simulator not booted, skipping test");
@@ -20,7 +20,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                println!("Could not verify simulator state: {}, skipping test", e);
+                println!("Could not verify simulator state: {e}, skipping test");
                 return;
             }
         }
@@ -48,7 +48,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                println!("Tap failed: {}", e);
+                println!("Tap failed: {e}");
 
                 // Print health report
                 let health_report = IdbCompanionHealth::get_health_report();
@@ -66,7 +66,7 @@ mod tests {
 
         // Prepare simulator
         if let Err(e) = SimulatorStateVerifier::prepare_for_interaction(device_id, None).await {
-            println!("Could not prepare simulator: {}, skipping test", e);
+            println!("Could not prepare simulator: {e}, skipping test");
             return;
         }
 
@@ -90,7 +90,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                println!("Tap sequence failed: {}", e);
+                println!("Tap sequence failed: {e}");
             }
         }
 

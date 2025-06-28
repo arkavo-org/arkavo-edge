@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "CLI Core for the Arkavo agentic CLI tool - command parser and multi-step agent loop"
+repository.workspace = true
+readme = "README.md"
+keywords = ["cli", "ai", "agent"]
+categories = ["command-line-utilities", "development-tools"]
+
 
 [features]
 default = ["memory"]

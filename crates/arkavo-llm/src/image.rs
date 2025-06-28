@@ -20,9 +20,9 @@ impl ImageFormat {
             .ok_or_else(|| Error::InvalidImageFormat("Missing file extension".to_string()))?;
 
         match extension.to_lowercase().as_str() {
-            "png" => Ok(ImageFormat::Png),
-            "jpg" | "jpeg" => Ok(ImageFormat::Jpeg),
-            "webp" => Ok(ImageFormat::WebP),
+            "png" => Ok(Self::Png),
+            "jpg" | "jpeg" => Ok(Self::Jpeg),
+            "webp" => Ok(Self::WebP),
             _ => Err(Error::InvalidImageFormat(format!(
                 "Unsupported image format: {extension}"
             ))),
@@ -35,9 +35,9 @@ impl ImageFormat {
         }
 
         match &bytes[..4] {
-            [0x89, 0x50, 0x4E, 0x47] => Ok(ImageFormat::Png),
-            [0xFF, 0xD8, 0xFF, _] => Ok(ImageFormat::Jpeg),
-            _ if bytes.len() >= 12 && &bytes[8..12] == b"WEBP" => Ok(ImageFormat::WebP),
+            [0x89, 0x50, 0x4E, 0x47] => Ok(Self::Png),
+            [0xFF, 0xD8, 0xFF, _] => Ok(Self::Jpeg),
+            _ if bytes.len() >= 12 && &bytes[8..12] == b"WEBP" => Ok(Self::WebP),
             _ => Err(Error::InvalidImageFormat(
                 "Unknown or unsupported image format".to_string(),
             )),

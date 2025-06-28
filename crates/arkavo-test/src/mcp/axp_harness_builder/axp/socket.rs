@@ -17,7 +17,7 @@ pub struct SocketManager {
 
 #[allow(dead_code)]
 impl SocketManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let socket_dir = std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(".arkavo")
@@ -30,7 +30,7 @@ impl SocketManager {
     }
 
     /// Get socket path for a device and app
-    pub fn get_socket_path(&self, device_id: &str, app_bundle_id: &str) -> PathBuf {
+    pub(crate) fn get_socket_path(&self, device_id: &str, app_bundle_id: &str) -> PathBuf {
         self.socket_dir.join(format!(
             "arkavo-axp-{}-{}.sock",
             device_id,
@@ -39,7 +39,7 @@ impl SocketManager {
     }
 
     /// Check if a cached socket exists for the device
-    pub async fn get_cached_socket(&self, device_id: &str) -> Option<String> {
+    pub(crate) async fn get_cached_socket(&self, device_id: &str) -> Option<String> {
         let cache = self.socket_cache.lock().await;
         cache
             .as_ref()
@@ -48,31 +48,28 @@ impl SocketManager {
     }
 
     /// Update the socket cache
-    pub async fn update_cache(&self, device_id: String, socket_path: String) {
+    pub(crate) async fn update_cache(&self, device_id: String, socket_path: String) {
         let mut cache = self.socket_cache.lock().await;
         *cache = Some((device_id, socket_path));
     }
 
     /// Clear the socket cache
-    pub async fn clear_cache(&self) {
+    pub(crate) async fn clear_cache(&self) {
         let mut cache = self.socket_cache.lock().await;
         *cache = None;
     }
 
     /// Find active AXP socket for a device
-    pub async fn find_active_socket(&self, device_id: &str) -> Option<String> {
+    pub(crate) async fn find_active_socket(&self, device_id: &str) -> Option<String> {
         // Check cache first
         if let Some(cached_path) = self.get_cached_socket(device_id).await {
-            eprintln!(
-                "[SocketManager] Using cached socket for device {}: {}",
-                device_id, cached_path
-            );
+            eprintln!("[SocketManager] Using cached socket for device {device_id}: {cached_path}");
             return Some(cached_path);
         }
 
         // Ensure socket directory exists
         if let Err(e) = fs::create_dir_all(&self.socket_dir) {
-            eprintln!("[SocketManager] Failed to create socket directory: {}", e);
+            eprintln!("[SocketManager] Failed to create socket directory: {e}");
             return None;
         }
 
@@ -81,7 +78,7 @@ impl SocketManager {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     // Check if socket is for this device
-                    if name.starts_with(&format!("arkavo-axp-{}-", device_id))
+                    if name.starts_with(&format!("arkavo-axp-{device_id}-"))
                         && name.ends_with(".sock")
                     {
                         let socket_path = entry.path();
@@ -98,9 +95,8 @@ impl SocketManager {
                             self.update_cache(device_id.to_string(), socket_path_str.clone())
                                 .await;
                             return Some(socket_path_str);
-                        } else {
-                            eprintln!("[SocketManager] Socket exists but is not active");
                         }
+                        eprintln!("[SocketManager] Socket exists but is not active");
                     }
                 }
             }
@@ -112,7 +108,7 @@ impl SocketManager {
 
     /// Clean up stale socket files
     /// Removes socket files older than the specified duration
-    pub fn cleanup_stale_sockets(&self, max_age: Duration) -> Result<usize, std::io::Error> {
+    pub(crate) fn cleanup_stale_sockets(&self, max_age: Duration) -> Result<usize, std::io::Error> {
         let mut removed_count = 0;
 
         if !self.socket_dir.exists() {
@@ -137,7 +133,7 @@ impl SocketManager {
                         if age > max_age {
                             // Try to remove stale socket
                             match fs::remove_file(&path) {
-                                Ok(_) => {
+                                Ok(()) => {
                                     eprintln!(
                                         "[SocketManager] Removed stale socket: {}",
                                         path.display()
@@ -162,7 +158,7 @@ impl SocketManager {
     }
 
     /// Clean up all sockets for a specific device
-    pub fn cleanup_device_sockets(&self, device_id: &str) -> Result<usize, std::io::Error> {
+    pub(crate) fn cleanup_device_sockets(&self, device_id: &str) -> Result<usize, std::io::Error> {
         let mut removed_count = 0;
 
         if !self.socket_dir.exists() {
@@ -174,11 +170,10 @@ impl SocketManager {
             let path = entry.path();
 
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with(&format!("arkavo-axp-{}-", device_id))
-                    && name.ends_with(".sock")
+                if name.starts_with(&format!("arkavo-axp-{device_id}-")) && name.ends_with(".sock")
                 {
                     match fs::remove_file(&path) {
-                        Ok(_) => {
+                        Ok(()) => {
                             eprintln!(
                                 "[SocketManager] Removed socket for device {}: {}",
                                 device_id,
@@ -206,7 +201,7 @@ impl Drop for SocketManager {
     fn drop(&mut self) {
         // Clean up stale sockets older than 1 hour on drop
         if let Err(e) = self.cleanup_stale_sockets(Duration::from_secs(3600)) {
-            eprintln!("[SocketManager] Cleanup failed during drop: {}", e);
+            eprintln!("[SocketManager] Cleanup failed during drop: {e}");
         }
     }
 }

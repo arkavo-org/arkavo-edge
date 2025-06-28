@@ -55,10 +55,10 @@ impl SimulatorTap {
                 device_id,
                 "notifyutil",
                 "-p",
-                &format!("com.apple.synthesized.touch.event.x:{},y:{}", tap_x, tap_y),
+                &format!("com.apple.synthesized.touch.event.x:{tap_x},y:{tap_y}"),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send tap event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send tap event: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -90,7 +90,7 @@ impl SimulatorTap {
             .args(["simctl", "push", device_id, "com.apple.springboard", "-"])
             .env("SIMCTL_CHILD_STDIN", payload.to_string())
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to send device event: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to send device event: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -132,14 +132,14 @@ impl SimulatorTap {
 
         // Move through intermediate points
         for i in 1..steps {
-            let x = start_x + (step_x * i as f64);
-            let y = start_y + (step_y * i as f64);
+            let x = step_x.mul_add(i as f64, start_x);
+            let y = step_y.mul_add(i as f64, start_y);
 
             // Small delay between moves
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
 
             // We'd need a proper move event here, for now just track position
-            eprintln!("Swipe position: ({}, {})", x, y);
+            eprintln!("Swipe position: ({x}, {y})");
         }
 
         // End touch

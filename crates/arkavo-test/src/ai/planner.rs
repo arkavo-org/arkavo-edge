@@ -105,7 +105,7 @@ pub struct TestPlanner {
 }
 
 impl TestPlanner {
-    pub fn new(claude: ClaudeClient, tool_registry: Arc<ToolRegistry>) -> Self {
+    pub const fn new(claude: ClaudeClient, tool_registry: Arc<ToolRegistry>) -> Self {
         Self {
             claude,
             tool_registry,
@@ -113,7 +113,7 @@ impl TestPlanner {
         }
     }
 
-    pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
+    pub const fn tool_registry(&self) -> &Arc<ToolRegistry> {
         &self.tool_registry
     }
 
@@ -194,7 +194,7 @@ Example format:
             serde_json::to_string_pretty(&state).unwrap_or_default(),
             objectives
                 .iter()
-                .map(|o| format!("- {}", o))
+                .map(|o| format!("- {o}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
             duration_minutes
@@ -255,9 +255,8 @@ Example:
             );
 
             let response = self.claude.complete(&exploration_prompt).await?;
-            let decision: ExplorationDecision = serde_json::from_str(&response).map_err(|e| {
-                TestError::Ai(format!("Failed to parse exploration decision: {}", e))
-            })?;
+            let decision: ExplorationDecision = serde_json::from_str(&response)
+                .map_err(|e| TestError::Ai(format!("Failed to parse exploration decision: {e}")))?;
 
             if decision.stop_exploration {
                 break;
@@ -276,8 +275,8 @@ Example:
                 Err(e) => {
                     findings.push(Finding {
                         severity: Severity::High,
-                        title: format!("Error during {}", action),
-                        description: format!("Action failed: {}", e),
+                        title: format!("Error during {action}"),
+                        description: format!("Action failed: {e}"),
                         reproduction_steps: vec![format!(
                             "Execute {} with parameters: {:?}",
                             action, params
@@ -332,7 +331,7 @@ Example:
         duration_minutes: u32,
     ) -> Result<TestPlan> {
         let parsed: serde_json::Value = serde_json::from_str(response)
-            .map_err(|e| TestError::Ai(format!("Failed to parse test plan: {}", e)))?;
+            .map_err(|e| TestError::Ai(format!("Failed to parse test plan: {e}")))?;
 
         let strategies = parsed
             .get("strategies")
@@ -398,7 +397,7 @@ pub struct StateTracker {
 }
 
 impl StateTracker {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             actions: std::sync::RwLock::new(Vec::new()),
         }
