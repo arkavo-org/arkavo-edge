@@ -64,8 +64,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         runtime.block_on(ConversationManager::new(memory_storage.clone()))?;
 
     // Initialize repository context manager
-    let repo_context_manager =
-        runtime.block_on(RepositoryContextManager::new(memory_storage))?;
+    let repo_context_manager = runtime.block_on(RepositoryContextManager::new(memory_storage))?;
 
     // Initialize LLM client with fallback to prompt for remote server
     let client = runtime.block_on(initialize_llm_client(print_mode))?;

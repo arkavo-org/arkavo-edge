@@ -113,20 +113,12 @@ impl Tool for XCTestStatusKit {
                 Ok(devices) => {
                     let functional_count = devices
                         .iter()
-                        .filter(|d| {
-                            d.xctest_status
-                                .as_ref()
-                                .is_some_and(|s| s.is_functional)
-                        })
+                        .filter(|d| d.xctest_status.as_ref().is_some_and(|s| s.is_functional))
                         .count();
 
                     let with_bundle_count = devices
                         .iter()
-                        .filter(|d| {
-                            d.xctest_status
-                                .as_ref()
-                                .is_some_and(|s| s.bundle_installed)
-                        })
+                        .filter(|d| d.xctest_status.as_ref().is_some_and(|s| s.bundle_installed))
                         .count();
 
                     let booted_count = devices

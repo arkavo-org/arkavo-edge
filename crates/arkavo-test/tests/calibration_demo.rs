@@ -145,7 +145,9 @@ async fn test_calibration_with_real_simulator() {
         for (_runtime, device_list) in devices {
             if let Some(array) = device_list.as_array() {
                 if let Some(first_device) = array.first() {
-                    device_id = first_device["udid"].as_str().map(std::string::ToString::to_string);
+                    device_id = first_device["udid"]
+                        .as_str()
+                        .map(std::string::ToString::to_string);
                     if device_id.is_some() {
                         break;
                     }

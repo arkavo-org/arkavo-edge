@@ -61,7 +61,11 @@ impl Tool for FindBugsKit {
 
         let bug_types = params
             .get("bug_types")
-            .and_then(|v| v.as_array()).map_or_else(|| vec!["all"], |arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>());
+            .and_then(|v| v.as_array())
+            .map_or_else(
+                || vec!["all"],
+                |arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(),
+            );
 
         // Determine language if auto
         let detected_language = if language == "auto" {

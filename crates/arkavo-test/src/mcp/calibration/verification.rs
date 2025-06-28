@@ -1,4 +1,4 @@
-use super::{ScreenSize, CalibrationError};
+use super::{CalibrationError, ScreenSize};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;

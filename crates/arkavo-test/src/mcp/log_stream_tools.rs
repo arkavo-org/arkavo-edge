@@ -264,7 +264,9 @@ impl Tool for LogStreamKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                } else if let Some(device) = self.device_manager.get_active_device() {
+                    device.id
+                } else {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
@@ -355,7 +357,9 @@ impl Tool for AppDiagnosticExporter {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
+        } else {
             self.device_manager.refresh_devices().ok();
             match self.device_manager.get_booted_devices().first() {
                 Some(device) => device.id.clone(),

@@ -34,14 +34,16 @@ static IDB_COMPANION_BYTES: &[u8] = &[];
 static IDB_FRAMEWORKS_ARCHIVE: &[u8] = &[];
 
 // Global path to extracted binary
-static EXTRACTED_IDB_PATH: std::sync::LazyLock<Mutex<Option<PathBuf>>> = std::sync::LazyLock::new(|| Mutex::new(None));
+static EXTRACTED_IDB_PATH: std::sync::LazyLock<Mutex<Option<PathBuf>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
 
 // Track connected devices for idb_companion
 pub(crate) static CONNECTED_DEVICES: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> =
     std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 // Track if we should use system IDB due to framework conflicts
-static USE_SYSTEM_IDB: std::sync::LazyLock<Mutex<bool>> = std::sync::LazyLock::new(|| Mutex::new(false));
+static USE_SYSTEM_IDB: std::sync::LazyLock<Mutex<bool>> =
+    std::sync::LazyLock::new(|| Mutex::new(false));
 
 /// Wrapper around the embedded idb_companion binary
 pub struct IdbWrapper;
@@ -441,12 +443,12 @@ impl IdbWrapper {
 
     /// Ensure the companion server is running for a specific device
     pub async fn ensure_companion_running(device_id: &str) -> Result<std::process::Child> {
-        
         use std::sync::Mutex;
 
         // Track running companion processes by device
-        static COMPANION_PROCESSES: std::sync::LazyLock<Mutex<HashMap<String, std::process::Child>>> =
-            std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+        static COMPANION_PROCESSES: std::sync::LazyLock<
+            Mutex<HashMap<String, std::process::Child>>,
+        > = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
         // Check and start companion in a separate scope to release the lock before await
         let _device_id_owned = device_id.to_string();
@@ -746,12 +748,10 @@ impl IdbWrapper {
 
             // Check if we can see the device in the targets list
             if let Ok(targets) = serde_json::from_str::<serde_json::Value>(&output_str) {
-                let device_found = targets
-                    .as_array()
-                    .is_some_and(|arr| {
-                        arr.iter()
-                            .any(|t| t.get("udid").and_then(|u| u.as_str()) == Some(device_id))
-                    });
+                let device_found = targets.as_array().is_some_and(|arr| {
+                    arr.iter()
+                        .any(|t| t.get("udid").and_then(|u| u.as_str()) == Some(device_id))
+                });
 
                 if device_found {
                     // For simulators, try to explicitly connect to ensure IDB companion is ready

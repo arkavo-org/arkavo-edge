@@ -1,4 +1,6 @@
-use super::{Serialize, Deserialize, CalibrationError, CalibrationAction, ActionType, ActionTarget, HashMap};
+use super::{
+    ActionTarget, ActionType, CalibrationAction, CalibrationError, Deserialize, HashMap, Serialize,
+};
 use serde_json;
 use std::process::Command;
 use std::thread;

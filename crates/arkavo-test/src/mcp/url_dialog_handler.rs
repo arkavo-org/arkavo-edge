@@ -46,7 +46,9 @@ impl UrlDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             Ok(id.to_string())
-        } else if let Some(device) = self.device_manager.get_active_device() { Ok(device.id) } else {
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            Ok(device.id)
+        } else {
             self.device_manager.refresh_devices().ok();
             match self.device_manager.get_booted_devices().first() {
                 Some(device) => Ok(device.id.clone()),

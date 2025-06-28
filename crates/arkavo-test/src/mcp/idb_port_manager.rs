@@ -4,7 +4,8 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::sync::Mutex;
 
-static ALLOCATED_PORTS: std::sync::LazyLock<Mutex<HashSet<u16>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+static ALLOCATED_PORTS: std::sync::LazyLock<Mutex<HashSet<u16>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub struct IdbPortManager;
 
@@ -79,9 +80,7 @@ impl IdbPortManager {
             Self::allocate_port(default_port);
             return Ok(default_port);
         }
-        eprintln!(
-            "[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",
-        );
+        eprintln!("[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",);
         Self::kill_idb_on_port(default_port)?;
 
         // Check again after cleanup

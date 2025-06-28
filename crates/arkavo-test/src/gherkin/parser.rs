@@ -111,10 +111,7 @@ impl Parser {
                     keyword: StepKeyword::parse(&step.keyword).unwrap_or(StepKeyword::Given),
                     text: step.value.clone(),
                     data_table: step.table.as_ref().map(|table| {
-                        let headers = table
-                            .rows
-                            .first().cloned()
-                            .unwrap_or_default();
+                        let headers = table.rows.first().cloned().unwrap_or_default();
                         let rows = table.rows[1..].to_vec();
                         DataTable { headers, rows }
                     }),
@@ -136,10 +133,7 @@ impl Parser {
                         keyword: StepKeyword::parse(&step.keyword).unwrap_or(StepKeyword::Given),
                         text: step.value.clone(),
                         data_table: step.table.as_ref().map(|table| {
-                            let headers = table
-                                .rows
-                                .first().cloned()
-                                .unwrap_or_default();
+                            let headers = table.rows.first().cloned().unwrap_or_default();
                             let rows = table.rows[1..].to_vec();
                             DataTable { headers, rows }
                         }),

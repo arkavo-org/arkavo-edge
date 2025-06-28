@@ -689,8 +689,14 @@ impl Tool for UiInteractionKit {
                         }
                     } else {
                         // Direct coordinates - check if we should use AXP, XCUITest, or fallback
-                        let x = target.get("x").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-                        let y = target.get("y").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                        let x = target
+                            .get("x")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0);
+                        let y = target
+                            .get("y")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0);
 
                         // First try AXP if available (fastest)
                         if let Some((socket_path, _)) = &axp_available {
@@ -884,7 +890,9 @@ impl Tool for UiInteractionKit {
                     let device_id =
                         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                             id.to_string()
-                        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                        } else if let Some(device) = self.device_manager.get_active_device() {
+                            device.id
+                        } else {
                             self.device_manager.refresh_devices().ok();
                             match self.device_manager.get_booted_devices().first() {
                                 Some(device) => device.id.clone(),
@@ -1195,7 +1203,9 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                } else if let Some(device) = self.device_manager.get_active_device() {
+                    device.id
+                } else {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
@@ -1386,7 +1396,10 @@ impl Tool for UiInteractionKit {
                 }
 
                 // Get repeat count (how many times to press delete)
-                let count = params.get("count").and_then(serde_json::Value::as_u64).unwrap_or(1) as usize;
+                let count = params
+                    .get("count")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1) as usize;
 
                 // Press delete key using key code 51
                 let mut delete_script = r#"
@@ -1490,7 +1503,10 @@ impl Tool for UiInteractionKit {
                     .and_then(|v| v.as_str())
                     .unwrap_or("down");
 
-                let amount = params.get("amount").and_then(serde_json::Value::as_u64).unwrap_or(5) as usize;
+                let amount = params
+                    .get("amount")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(5) as usize;
 
                 // Map direction to key codes
                 let key_code = match direction {
@@ -1591,7 +1607,9 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                } else if let Some(device) = self.device_manager.get_active_device() {
+                    device.id
+                } else {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
@@ -1761,7 +1779,9 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                } else if let Some(device) = self.device_manager.get_active_device() {
+                    device.id
+                } else {
                     self.device_manager.refresh_devices().ok();
                     match self.device_manager.get_booted_devices().first() {
                         Some(device) => device.id.clone(),
@@ -1835,9 +1855,7 @@ impl Tool for UiInteractionKit {
                             }
                         }
                         Err(e) => {
-                            eprintln!(
-                                "[ui_interaction] Failed to ensure companion running: {e}"
-                            );
+                            eprintln!("[ui_interaction] Failed to ensure companion running: {e}");
                             return Ok(serde_json::json!({
                                 "success": false,
                                 "action": "press_button",
@@ -1947,7 +1965,9 @@ impl Tool for ScreenCaptureKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
+        } else {
             // Try to find any booted device
             self.device_manager.refresh_devices().ok();
             match self.device_manager.get_booted_devices().first() {
@@ -2066,7 +2086,9 @@ impl Tool for UiQueryKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+        } else if let Some(device) = self.device_manager.get_active_device() {
+            device.id
+        } else {
             self.device_manager.refresh_devices().ok();
             match self.device_manager.get_booted_devices().first() {
                 Some(device) => device.id.clone(),

@@ -1,4 +1,8 @@
-use super::{Serialize, Deserialize, HashMap, CalibrationError, CalibrationAgent, CalibrationConfig, SafeArea, DeviceProfile, CalibrationResult, InteractionAdjustment, ValidationIssue, IssueSeverity, ValidationReport};
+use super::{
+    CalibrationAgent, CalibrationConfig, CalibrationError, CalibrationResult, Deserialize,
+    DeviceProfile, HashMap, InteractionAdjustment, IssueSeverity, SafeArea, Serialize,
+    ValidationIssue, ValidationReport,
+};
 use crate::mcp::calibration::agent::CalibrationAgentImpl;
 use crate::mcp::calibration::data::CalibrationDataStore;
 use crate::mcp::calibration::reference_app::ReferenceAppInterface;
@@ -484,14 +488,15 @@ impl CalibrationServer {
                     // Get detailed IDB status for error message
                     let idb_status = {
                         let sessions = self.active_calibrations.read().await;
-                        sessions
-                            .get(session_id)
-                            .map_or(IdbStatus {
+                        sessions.get(session_id).map_or(
+                            IdbStatus {
                                 connected: false,
                                 last_health_check: Some(chrono::Utc::now()),
                                 last_error: Some("Unknown status".to_string()),
                                 companion_running: false,
-                            }, |s| s.idb_status.clone())
+                            },
+                            |s| s.idb_status.clone(),
+                        )
                     };
 
                     let mut error_details =

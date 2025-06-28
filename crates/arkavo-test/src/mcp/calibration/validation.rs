@@ -1,4 +1,8 @@
-use super::{Serialize, Deserialize, GroundTruth, ValidationReport, ValidationIssue, IssueSeverity, StateChange, CalibrationResult, InteractionAdjustment, InteractionResult, UIElement, CalibrationAction, ActionType, ActionTarget, ElementType};
+use super::{
+    ActionTarget, ActionType, CalibrationAction, CalibrationResult, Deserialize, ElementType,
+    GroundTruth, InteractionAdjustment, InteractionResult, IssueSeverity, Serialize, StateChange,
+    UIElement, ValidationIssue, ValidationReport,
+};
 use std::collections::HashMap;
 
 pub struct CalibrationValidator {

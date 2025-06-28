@@ -20,7 +20,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Default behavior
     let feature_path = args
-        .first().map_or_else(|| PathBuf::from("tests"), PathBuf::from);
+        .first()
+        .map_or_else(|| PathBuf::from("tests"), PathBuf::from);
 
     if feature_path.is_file() && feature_path.extension() == Some(std::ffi::OsStr::new("feature")) {
         run_gherkin_test(&feature_path)
@@ -303,12 +304,7 @@ fn run_bdd_tests(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let feature_files = std::fs::read_dir("tests")
         .unwrap_or_else(|_| std::fs::read_dir(".").unwrap())
         .filter_map(std::result::Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "feature")
-        })
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "feature"))
         .collect::<Vec<_>>();
 
     if feature_files.is_empty() {

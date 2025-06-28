@@ -33,7 +33,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Check if we're in a git repository
-    let repo = if let Ok(repo) = git_manager.open_repo(&current_dir) { repo } else {
+    let repo = if let Ok(repo) = git_manager.open_repo(&current_dir) {
+        repo
+    } else {
         eprintln!("Warning: Not in a git repository. Skipping git operations.");
         println!("Apply command completed (no git operations performed)");
         return Ok(());

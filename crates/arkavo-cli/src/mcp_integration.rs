@@ -99,9 +99,7 @@ impl McpConnection {
     }
 
     pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self::External(crate::mcp_client::McpClient::new(
-            mcp_url,
-        )?))
+        Ok(Self::External(crate::mcp_client::McpClient::new(mcp_url)?))
     }
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {

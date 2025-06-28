@@ -80,7 +80,9 @@ impl Tool for CalibrationTool {
                 let device_id = params["device_id"].as_str().ok_or_else(|| {
                     TestError::Mcp("device_id is required for start_calibration".to_string())
                 })?;
-                let bundle_id = params["bundle_id"].as_str().map(std::string::ToString::to_string);
+                let bundle_id = params["bundle_id"]
+                    .as_str()
+                    .map(std::string::ToString::to_string);
 
                 // Check if ArkavoReference app is installed
                 let app_check = Command::new("xcrun")
@@ -103,7 +105,10 @@ impl Tool for CalibrationTool {
                     let install_result = self.build_and_install_reference_app(device_id).await?;
 
                     // Check if installation was successful
-                    if let Some(success) = install_result.get("success").and_then(serde_json::Value::as_bool) {
+                    if let Some(success) = install_result
+                        .get("success")
+                        .and_then(serde_json::Value::as_bool)
+                    {
                         if !success {
                             return Ok(json!({
                                 "success": false,

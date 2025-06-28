@@ -1066,7 +1066,10 @@ impl Tool for RunTestKit {
             .and_then(|v| v.as_str())
             .ok_or_else(|| TestError::Mcp("Missing test_name parameter".to_string()))?;
 
-        let timeout = params.get("timeout").and_then(serde_json::Value::as_u64).unwrap_or(30);
+        let timeout = params
+            .get("timeout")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(30);
 
         // Discover and run actual tests from the repository
         let executor = TestExecutor::new();
@@ -1190,16 +1193,14 @@ impl TestExecutor {
     fn is_swift_project(&self) -> bool {
         self.working_dir.join("Package.swift").exists()
             || self.working_dir.join("project.pbxproj").exists()
-            || fs::read_dir(&self.working_dir)
-                .ok()
-                .is_some_and(|entries| {
-                    entries.filter_map(std::result::Result::ok).any(|entry| {
-                        entry
-                            .path()
-                            .extension()
-                            .is_some_and(|ext| ext == "xcodeproj" || ext == "xcworkspace")
-                    })
+            || fs::read_dir(&self.working_dir).ok().is_some_and(|entries| {
+                entries.filter_map(std::result::Result::ok).any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext == "xcodeproj" || ext == "xcworkspace")
                 })
+            })
     }
 
     fn is_javascript_project(&self) -> bool {
@@ -2032,7 +2033,10 @@ impl Tool for ListTestsKit {
             .and_then(|v| v.as_str())
             .unwrap_or("all");
 
-        let page = params.get("page").and_then(serde_json::Value::as_u64).unwrap_or(1) as usize;
+        let page = params
+            .get("page")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(1) as usize;
 
         let page_size = params
             .get("page_size")

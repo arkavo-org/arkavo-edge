@@ -1,4 +1,7 @@
-use super::{Serialize, Deserialize, CalibrationConfig, CalibrationError, CalibrationResult, InteractionAdjustment};
+use super::{
+    CalibrationConfig, CalibrationError, CalibrationResult, Deserialize, InteractionAdjustment,
+    Serialize,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

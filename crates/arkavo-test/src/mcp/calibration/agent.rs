@@ -1,4 +1,8 @@
-use super::{CalibrationError, UIElement, ElementType, ElementFrame, InteractionResult, CalibrationAgent, DeviceProfile, ScreenSize, CoordinateMapping, CalibrationAction, ActionType, ActionTarget, GroundTruth, ExpectedResult, StateChange, ValidationCriterion};
+use super::{
+    ActionTarget, ActionType, CalibrationAction, CalibrationAgent, CalibrationError,
+    CoordinateMapping, DeviceProfile, ElementFrame, ElementType, ExpectedResult, GroundTruth,
+    InteractionResult, ScreenSize, StateChange, UIElement, ValidationCriterion,
+};
 use std::collections::HashMap;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -94,7 +98,9 @@ impl CalibrationAgentImpl {
                             if let Some(device_array) = devices.as_array() {
                                 for device in device_array {
                                     if device["udid"].as_str() == Some(&self.device_id) {
-                                        return device["state"].as_str().map(std::string::ToString::to_string);
+                                        return device["state"]
+                                            .as_str()
+                                            .map(std::string::ToString::to_string);
                                     }
                                 }
                             }

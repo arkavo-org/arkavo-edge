@@ -25,7 +25,10 @@ async fn test_xctest_direct_compilation_and_connection() {
 
     let booted_device = if let Some(device) = devices
         .iter()
-        .find(|d| d.state == arkavo_test::mcp::device_manager::DeviceState::Booted) { device } else {
+        .find(|d| d.state == arkavo_test::mcp::device_manager::DeviceState::Booted)
+    {
+        device
+    } else {
         println!("No booted device found");
         return;
     };
