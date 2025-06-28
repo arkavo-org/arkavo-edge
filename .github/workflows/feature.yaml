@@ -279,17 +279,6 @@ jobs:
         with:
           shared-key: "perf"
       
-      - name: Check binary size
-        run: |
-          cargo build --release --no-default-features
-          SIZE=$(du -b target/release/arkavo | cut -f1)
-          SIZE_MB=$(( SIZE / 1024 / 1024 ))
-          echo "Binary size: $SIZE_MB MB"
-          
-          if [ $SIZE_MB -gt 100 ]; then
-            echo "Warning: Binary size exceeds 100 MB"
-          fi
-          
       - name: Check build time
         run: |
           cargo clean
@@ -302,6 +291,17 @@ jobs:
           
           if [ $BUILD_TIME -gt 300 ]; then
             echo "Warning: Build time exceeds 5 minutes"
+          fi
+          
+      - name: Check binary size
+        run: |
+          # Use the binary from the previous build step
+          SIZE=$(du -b target/release/arkavo | cut -f1)
+          SIZE_MB=$(( SIZE / 1024 / 1024 ))
+          echo "Binary size: $SIZE_MB MB"
+          
+          if [ $SIZE_MB -gt 100 ]; then
+            echo "Warning: Binary size exceeds 100 MB"
           fi
 
   # Smoke tests depend on builds
