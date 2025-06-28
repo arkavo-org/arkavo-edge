@@ -38,7 +38,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
 
     println!("Feature: {}", feature.name);
     if let Some(desc) = &feature.description {
-        println!("Description: {}", desc);
+        println!("Description: {desc}");
     }
 
     let runtime = tokio::runtime::Runtime::new()?;
@@ -50,7 +50,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
     let reporter = BusinessReporter::new(OutputFormat::Markdown)?;
     let report = reporter.generate_report(&results)?;
 
-    println!("\n{}", report);
+    println!("\n{report}");
 
     let failed = results
         .iter()
@@ -222,7 +222,7 @@ fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::erro
                 println!("\n{}. {} ({:?})", i + 1, bug.root_cause, bug.severity);
                 println!("   Minimal reproduction:");
                 for line in bug.minimal_reproduction.lines() {
-                    println!("   {}", line);
+                    println!("   {line}");
                 }
                 println!("   💡 Suggested fix: {}", bug.suggested_fix);
             }

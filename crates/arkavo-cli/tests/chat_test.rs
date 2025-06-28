@@ -23,8 +23,7 @@ fn test_chat_command() {
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
                     || error_msg.contains("print mode doesn't support interactive prompts"),
-                "Unexpected error: {}",
-                error_msg
+                "Unexpected error: {error_msg}"
             );
         }
     }
@@ -55,8 +54,7 @@ fn test_git_analysis_prompt() {
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
                     || error_msg.contains("print mode doesn't support interactive prompts"),
-                "Unexpected error: {}",
-                error_msg
+                "Unexpected error: {error_msg}"
             );
         }
     }

@@ -293,7 +293,7 @@ impl Tool for AppManagement {
                         }))
                     }
                     Err(e) => {
-                        eprintln!("MCP: Failed to launch app: {}", e);
+                        eprintln!("MCP: Failed to launch app: {e}");
                         Ok(serde_json::json!({
                             "success": false,
                             "error": e.to_string(),

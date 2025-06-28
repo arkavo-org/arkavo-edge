@@ -205,7 +205,7 @@ impl Drop for SocketManager {
     fn drop(&mut self) {
         // Clean up stale sockets older than 1 hour on drop
         if let Err(e) = self.cleanup_stale_sockets(Duration::from_secs(3600)) {
-            eprintln!("[SocketManager] Cleanup failed during drop: {}", e);
+            eprintln!("[SocketManager] Cleanup failed during drop: {e}");
         }
     }
 }

@@ -273,7 +273,7 @@ impl Tool for EnrollmentDialogHandler {
                     ]
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

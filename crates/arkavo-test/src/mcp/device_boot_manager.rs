@@ -188,7 +188,7 @@ impl DeviceBootManager {
         Command::new("xcrun")
             .args(["simctl", "terminate", device_id, "all"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to terminate apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to terminate apps: {e}")))?;
 
         Ok(())
     }

@@ -334,7 +334,7 @@ Note: Only ARM64 simulators are supported."
                         binary_path.display()
                     );
                     fs::copy(&binary_path, &binary_dst).map_err(|e| {
-                        TestError::Mcp(format!("Failed to copy binary from DerivedData: {}", e))
+                        TestError::Mcp(format!("Failed to copy binary from DerivedData: {e}"))
                     })?;
 
                     // Make it executable
@@ -364,8 +364,7 @@ Note: Only ARM64 simulators are supported."
     /// Install the XCTest bundle to a simulator
     pub fn install_to_simulator(&self, device_id: &str, bundle_path: &Path) -> Result<()> {
         eprintln!(
-            "[XCTestCompiler] Installing XCTest bundle to simulator {}...",
-            device_id
+            "[XCTestCompiler] Installing XCTest bundle to simulator {device_id}..."
         );
 
         // For XCTest bundles, we need to copy them to the simulator's app support directory
@@ -391,7 +390,7 @@ Note: Only ARM64 simulators are supported."
 
         // Create the directory if it doesn't exist
         fs::create_dir_all(&test_bundles_dir).map_err(|e| {
-            TestError::Mcp(format!("Failed to create test bundles directory: {}", e))
+            TestError::Mcp(format!("Failed to create test bundles directory: {e}"))
         })?;
 
         // Copy the bundle
@@ -400,7 +399,7 @@ Note: Only ARM64 simulators are supported."
         // Remove existing bundle if present
         if dest_path.exists() {
             fs::remove_dir_all(&dest_path)
-                .map_err(|e| TestError::Mcp(format!("Failed to remove existing bundle: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to remove existing bundle: {e}")))?;
         }
 
         eprintln!("[XCTestCompiler] Copying bundle to {}", dest_path.display());
@@ -413,13 +412,12 @@ Note: Only ARM64 simulators are supported."
                 dest_path.parent().unwrap().to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to copy bundle: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to copy bundle: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(TestError::Mcp(format!(
-                "Failed to copy test bundle: {}",
-                stderr
+                "Failed to copy test bundle: {stderr}"
             )));
         }
 
@@ -1002,8 +1000,7 @@ int main(int argc, char * argv[]) {
         target_app_bundle_id: Option<&str>,
     ) -> Result<()> {
         eprintln!(
-            "[XCTestCompiler] Launching test host app on device: {}",
-            device_id
+            "[XCTestCompiler] Launching test host app on device: {device_id}"
         );
         eprintln!(
             "[XCTestCompiler] Socket path: {}",
@@ -1074,7 +1071,7 @@ int main(int argc, char * argv[]) {
                 host_app_path.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1109,7 +1106,7 @@ int main(int argc, char * argv[]) {
 
         let launch_output = cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch host app: {e}")))?;
 
         if !launch_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1131,21 +1128,21 @@ int main(int argc, char * argv[]) {
     /// * `target_app_bundle_id` - Optional bundle ID of the app to test
     #[deprecated(note = "Use launch_test_host instead to avoid paradigm mixing")]
     pub fn run_tests(&self, device_id: &str, target_app_bundle_id: Option<&str>) -> Result<()> {
-        eprintln!("[XCTestCompiler] Running tests on device: {}", device_id);
+        eprintln!("[XCTestCompiler] Running tests on device: {device_id}");
         eprintln!(
             "[XCTestCompiler] Socket path: {}",
             self.socket_path.display()
         );
 
         if let Some(app_id) = target_app_bundle_id {
-            eprintln!("[XCTestCompiler] Target app bundle ID: {}", app_id);
+            eprintln!("[XCTestCompiler] Target app bundle ID: {app_id}");
 
             // First, launch the target app
-            eprintln!("[XCTestCompiler] Launching target app: {}", app_id);
+            eprintln!("[XCTestCompiler] Launching target app: {app_id}");
             let launch_output = Command::new("xcrun")
                 .args(["simctl", "launch", device_id, app_id])
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to launch target app: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to launch target app: {e}")))?;
 
             if !launch_output.status.success() {
                 eprintln!(
@@ -1181,7 +1178,7 @@ int main(int argc, char * argv[]) {
                 host_app_path.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !install_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1220,7 +1217,8 @@ int main(int argc, char * argv[]) {
                 device_id,
                 host_app_path.to_str().unwrap(),
             ])
-            .output()?;
+            .output()
+            .map_err(|e| TestError::Mcp(format!("Failed to install host app: {e}")))?;
 
         if !reinstall_output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -1237,9 +1235,9 @@ int main(int argc, char * argv[]) {
         // Launch with environment variables and console output
         eprintln!("[XCTestCompiler] Launching with environment:");
         eprintln!("  ARKAVO_SOCKET_PATH={}", self.socket_path.display());
-        eprintln!("  ARKAVO_TEST_BUNDLE={}", relative_bundle_path);
+        eprintln!("  ARKAVO_TEST_BUNDLE={relative_bundle_path}");
         if let Some(app_id) = target_app_bundle_id {
-            eprintln!("  ARKAVO_TARGET_APP_ID={}", app_id);
+            eprintln!("  ARKAVO_TARGET_APP_ID={app_id}");
         }
 
         let mut launch_cmd = Command::new("xcrun");
@@ -1265,7 +1263,7 @@ int main(int argc, char * argv[]) {
         eprintln!("[XCTestCompiler] Executing launch command...");
         let output = launch_cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch test host: {e}")))?;
 
         eprintln!(
             "[XCTestCompiler] Launch command completed with status: {}",
@@ -1299,7 +1297,7 @@ int main(int argc, char * argv[]) {
         let check_cmd = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         let apps_output = String::from_utf8_lossy(&check_cmd.stdout);
         if !apps_output.contains("com.arkavo.testhost") {
@@ -1328,7 +1326,6 @@ fn find_compiled_binary(derived_data: &Path, name: &str) -> Result<PathBuf> {
     }
 
     Err(TestError::Mcp(format!(
-        "Binary {} not found in DerivedData",
-        name
+        "Binary {name} not found in DerivedData"
     )))
 }

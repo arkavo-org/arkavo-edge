@@ -134,7 +134,7 @@ impl AppleScriptTap {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if let Ok(devices) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
             for (_runtime, device_list) in devices["devices"]

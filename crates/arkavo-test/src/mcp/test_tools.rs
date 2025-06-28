@@ -389,7 +389,7 @@ impl TestExecutor {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("python", format!("{}\n{}", stdout, stderr)))
+        Ok(("python", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_go_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -400,11 +400,11 @@ impl TestExecutor {
             .arg("-v")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run go test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run go test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("go", format!("{}\n{}", stdout, stderr)))
+        Ok(("go", format!("{stdout}\n{stderr}")))
     }
 
     fn parse_test_output(&self, output: &str, test_type: &str) -> (&'static str, Option<String>) {

@@ -85,7 +85,7 @@ impl McpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to start MCP server '{}': {}", cmd, e))?;
+            .map_err(|e| format!("Failed to start MCP server '{cmd}': {e}"))?;
 
         // Take ownership of stdin and stdout
         let mut stdin = child.stdin.take().ok_or("Failed to get stdin")?;

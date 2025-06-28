@@ -104,7 +104,7 @@ impl BiometricDialogHandler {
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to type passcode: {e}")))?;
 
         Ok(())
     }
@@ -229,7 +229,7 @@ impl Tool for BiometricDialogHandler {
                     })),
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

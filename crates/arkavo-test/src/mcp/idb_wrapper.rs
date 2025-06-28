@@ -57,8 +57,7 @@ impl IdbWrapper {
     /// Initialize with option to prefer system IDB
     pub fn initialize_with_preference(prefer_system: bool) -> Result<()> {
         eprintln!(
-            "[IdbWrapper::initialize_with_preference] Initializing with prefer_system={}",
-            prefer_system
+            "[IdbWrapper::initialize_with_preference] Initializing with prefer_system={prefer_system}"
         );
 
         #[cfg(not(target_os = "macos"))]
@@ -640,7 +639,7 @@ impl IdbWrapper {
                             eprintln!(
                             "[IdbWrapper] Companion process exited immediately with status: {status:?}"
                         );
-                            eprintln!("[IdbWrapper] Stderr: {}", stderr_str);
+                            eprintln!("[IdbWrapper] Stderr: {stderr_str}");
 
                             // Check for specific exit codes
                             if let Some(code) = status.code() {
@@ -700,8 +699,7 @@ impl IdbWrapper {
                             }
 
                             return Err(TestError::Mcp(format!(
-                                "IDB companion failed to start: exited with status {:?}. Error: {}",
-                                status, stderr_str
+                                "IDB companion failed to start: exited with status {status:?}. Error: {stderr_str}"
                             )));
                         }
                         Ok(None) => {
@@ -712,19 +710,17 @@ impl IdbWrapper {
                         }
                         Err(e) => {
                             eprintln!(
-                                "[IdbWrapper] Failed to check companion process status: {}",
-                                e
-                            );
+                            "[IdbWrapper] Failed to check companion process status: {e}"
+                        );
                             return Err(TestError::Mcp(format!(
-                                "Failed to verify companion started: {}",
-                                e
-                            )));
+                            "Failed to verify companion started: {e}"
+                        )));
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[IdbWrapper] Failed to spawn companion process: {}", e);
-                    return Err(TestError::Mcp(format!("Failed to start companion: {}", e)));
+                    eprintln!("[IdbWrapper] Failed to spawn companion process: {e}");
+                    return Err(TestError::Mcp(format!("Failed to start companion: {e}")));
                 }
             }
         }
@@ -751,7 +747,7 @@ impl IdbWrapper {
         let list_output = command
             .args(["--list", "1", "--json"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list targets: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list targets: {e}")))?;
 
         if list_output.status.success() {
             let output_str = String::from_utf8_lossy(&list_output.stdout);
@@ -808,7 +804,7 @@ impl IdbWrapper {
                     let connect_output = connect_cmd
                         .args(["connect", device_id])
                         .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to connect: {}", e)))?;
+                        .map_err(|e| TestError::Mcp(format!("Failed to connect: {e}")))?;
 
                     if connect_output.status.success()
                         || String::from_utf8_lossy(&connect_output.stderr)
@@ -839,8 +835,7 @@ impl IdbWrapper {
                     if !connection_established {}
                 } else {
                     return Err(TestError::Mcp(format!(
-                        "Device {} not found. Make sure the simulator is booted.",
-                        device_id
+                        "Device {device_id} not found. Make sure the simulator is booted."
                     )));
                 }
             }
@@ -850,8 +845,7 @@ impl IdbWrapper {
             // Check if IDB companion is not running
             if stderr.contains("Connection refused") || stderr.contains("failed to connect") {
                 eprintln!(
-                    "[IdbWrapper] IDB companion not running or device not connected. Starting companion for device {}...",
-                    device_id
+                    "[IdbWrapper] IDB companion not running or device not connected. Starting companion for device {device_id}..."
                 );
 
                 // Try to start IDB companion for this specific device
@@ -860,8 +854,7 @@ impl IdbWrapper {
 
                 if let Ok(mut child) = start_result {
                     eprintln!(
-                        "[IdbWrapper] Started IDB companion process for device {}",
-                        device_id
+                        "[IdbWrapper] Started IDB companion process for device {device_id}"
                     );
 
                     // Give it a moment to start
@@ -889,8 +882,7 @@ impl IdbWrapper {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 } else {
                     eprintln!(
-                        "[IdbWrapper] Failed to start IDB companion for device {}",
-                        device_id
+                        "[IdbWrapper] Failed to start IDB companion for device {device_id}"
                     );
                 }
             }
@@ -906,8 +898,7 @@ impl IdbWrapper {
         let _start_time = std::time::Instant::now();
 
         eprintln!(
-            "[IdbWrapper::tap] Starting tap at ({}, {}) on device {}",
-            x, y, device_id
+            "[IdbWrapper::tap] Starting tap at ({x}, {y}) on device {device_id}"
         );
 
         // Initialize and get the embedded binary path
@@ -930,7 +921,7 @@ impl IdbWrapper {
             "simulator",
         ];
 
-        eprintln!("[IdbWrapper::tap] Executing command with args: {:?}", args);
+        eprintln!("[IdbWrapper::tap] Executing command with args: {args:?}");
 
         let mut command = Self::create_command()?;
         command.args(&args);
@@ -938,21 +929,21 @@ impl IdbWrapper {
         // Capture both stdout and stderr for diagnostics
         let output = command
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         eprintln!("[IdbWrapper::tap] Command exit status: {:?}", output.status);
         if !stdout.is_empty() {
-            eprintln!("[IdbWrapper::tap] Stdout: {}", stdout);
+            eprintln!("[IdbWrapper::tap] Stdout: {stdout}");
         }
         if !stderr.is_empty() {
-            eprintln!("[IdbWrapper::tap] Stderr: {}", stderr);
+            eprintln!("[IdbWrapper::tap] Stderr: {stderr}");
         }
 
         if output.status.success() {
-            eprintln!("[IdbWrapper::tap] Tap succeeded at ({}, {})", x, y);
+            eprintln!("[IdbWrapper::tap] Tap succeeded at ({x}, {y})");
             Ok(json!({
                 "success": true,
                 "method": "idb_companion",
@@ -977,7 +968,7 @@ impl IdbWrapper {
                     .lines()
                     .find(|line| line.contains("Class FBProcess is implemented in both"))
                 {
-                    eprintln!("[IdbWrapper::tap] Conflict details: {}", conflict_line);
+                    eprintln!("[IdbWrapper::tap] Conflict details: {conflict_line}");
                 }
 
                 // Set flag to use system IDB
@@ -997,7 +988,7 @@ impl IdbWrapper {
                     retry_command.env("DYLD_DISABLE_LIBRARY_VALIDATION", "1");
 
                     let retry_output = retry_command.output().map_err(|e| {
-                        TestError::Mcp(format!("Failed to execute system idb_companion: {}", e))
+                        TestError::Mcp(format!("Failed to execute system idb_companion: {e}"))
                     })?;
 
                     if retry_output.status.success() {
@@ -1012,8 +1003,7 @@ impl IdbWrapper {
                     } else {
                         let retry_stderr = String::from_utf8_lossy(&retry_output.stderr);
                         return Err(TestError::Mcp(format!(
-                            "System idb_companion tap also failed: {}",
-                            retry_stderr
+                            "System idb_companion tap also failed: {retry_stderr}"
                         )));
                     }
                 } else {
@@ -1050,8 +1040,7 @@ impl IdbWrapper {
                     }
                     Err(applescript_err) => {
                         eprintln!(
-                            "[IdbWrapper::tap] ❌ AppleScript fallback also failed: {}",
-                            applescript_err
+                            "[IdbWrapper::tap] ❌ AppleScript fallback also failed: {applescript_err}"
                         );
                     }
                 }
@@ -1101,7 +1090,7 @@ impl IdbWrapper {
                 "simulator",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -1118,8 +1107,7 @@ impl IdbWrapper {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             Err(TestError::Mcp(format!(
-                "idb_companion swipe failed: {}",
-                stderr
+                "idb_companion swipe failed: {stderr}"
             )))
         }
     }
@@ -1127,8 +1115,7 @@ impl IdbWrapper {
     /// Verify that a device is available in IDB targets
     pub async fn verify_device_target(device_id: &str) -> Result<bool> {
         eprintln!(
-            "[IdbWrapper] Verifying device {} is available in IDB targets...",
-            device_id
+            "[IdbWrapper] Verifying device {device_id} is available in IDB targets..."
         );
 
         let targets = Self::list_targets().await?;
@@ -1138,7 +1125,7 @@ impl IdbWrapper {
             for device in devices {
                 if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
                     if udid == device_id {
-                        eprintln!("[IdbWrapper] Device {} found in IDB targets", device_id);
+                        eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
                         return Ok(true);
                     }
                 }
@@ -1149,7 +1136,7 @@ impl IdbWrapper {
                 if let Ok(device) = serde_json::from_str::<serde_json::Value>(line) {
                     if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
                         if udid == device_id {
-                            eprintln!("[IdbWrapper] Device {} found in IDB targets", device_id);
+                            eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
                             return Ok(true);
                         }
                     }
@@ -1157,14 +1144,14 @@ impl IdbWrapper {
             }
         }
 
-        eprintln!("[IdbWrapper] Device {} NOT found in IDB targets", device_id);
+        eprintln!("[IdbWrapper] Device {device_id} NOT found in IDB targets");
 
         // Try to get more info about available devices
         eprintln!("[IdbWrapper] Running xcrun simctl to check device status...");
         let simctl_output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run simctl: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to run simctl: {e}")))?;
 
         if simctl_output.status.success() {
             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&simctl_output.stdout) {
@@ -1178,14 +1165,12 @@ impl IdbWrapper {
                                 let state = device["state"].as_str().unwrap_or("Unknown");
                                 let name = device["name"].as_str().unwrap_or("Unknown");
                                 eprintln!(
-                                    "[IdbWrapper] Found device in simctl: {} - {} (state: {})",
-                                    device_id, name, state
+                                    "[IdbWrapper] Found device in simctl: {device_id} - {name} (state: {state})"
                                 );
 
                                 if state != "Booted" {
                                     eprintln!(
-                                        "[IdbWrapper] WARNING: Device is not booted! Current state: {}",
-                                        state
+                                        "[IdbWrapper] WARNING: Device is not booted! Current state: {state}"
                                     );
                                 }
 
@@ -1198,8 +1183,7 @@ impl IdbWrapper {
         }
 
         eprintln!(
-            "[IdbWrapper] Device {} not found in simctl either!",
-            device_id
+            "[IdbWrapper] Device {device_id} not found in simctl either!"
         );
         Ok(false)
     }
@@ -1213,7 +1197,7 @@ impl IdbWrapper {
 
         let output = command
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1256,7 +1240,7 @@ impl IdbWrapper {
                 "simulator",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -1271,8 +1255,7 @@ impl IdbWrapper {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             Err(TestError::Mcp(format!(
-                "idb_companion type_text failed: {}",
-                stderr
+                "idb_companion type_text failed: {stderr}"
             )))
         }
     }
@@ -1295,7 +1278,7 @@ impl IdbWrapper {
                 "simulator",
             ])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         if output.status.success() {
             Ok(json!({
@@ -1310,8 +1293,7 @@ impl IdbWrapper {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             Err(TestError::Mcp(format!(
-                "idb_companion press_button failed: {}",
-                stderr
+                "idb_companion press_button failed: {stderr}"
             )))
         }
     }
@@ -1333,7 +1315,7 @@ impl IdbWrapper {
 
         let output = command
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute idb_companion: {e}")))?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1353,8 +1335,7 @@ impl IdbWrapper {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             Err(TestError::Mcp(format!(
-                "idb_companion list-apps failed: {}",
-                stderr
+                "idb_companion list-apps failed: {stderr}"
             )))
         }
     }

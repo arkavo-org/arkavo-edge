@@ -221,7 +221,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to list MCP tools: {}", e);
+                    eprintln!("Warning: Failed to list MCP tools: {e}");
                     "\n\nMCP Integration: Enabled (tool listing failed)\nYou can run tests and interact with iOS simulators through MCP tools. Use /tools command to see available tools.".to_string()
                 }
             }
@@ -300,7 +300,7 @@ Repository details:
                     messages.push(Message::user_with_images(&prompt_text, vec![encoded_image]));
                 }
                 Err(e) => {
-                    eprintln!("Error loading image: {}", e);
+                    eprintln!("Error loading image: {e}");
                     messages.push(Message::user(&prompt_text));
                 }
             }
@@ -336,7 +336,7 @@ Repository details:
         let llm_handle = runtime.spawn(async move {
             eprintln!("[LLM Task] Started, waiting for messages...");
             while let Some(user_input) = ui_rx.recv().await {
-                eprintln!("[LLM Task] Received user input: {}", user_input);
+                eprintln!("[LLM Task] Received user input: {user_input}");
                 // Process the user input with LLM
                 let user_message = Message::user(user_input.clone());
                 messages_clone.push(user_message);
@@ -362,7 +362,7 @@ Repository details:
                                 }
                                 Err(e) => {
                                     let _ =
-                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {}", e)).await;
+                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {e}")).await;
                                     break;
                                 }
                             }
@@ -381,8 +381,8 @@ Repository details:
                         );
                     }
                     Err(e) => {
-                        eprintln!("[LLM Task] Error: {}", e);
-                        let _ = llm_tx.send(format!("Error: {}", e)).await;
+                        eprintln!("[LLM Task] Error: {e}");
+                        let _ = llm_tx.send(format!("Error: {e}")).await;
                     }
                 }
                 eprintln!("[LLM Task] Waiting for next message...");
@@ -447,7 +447,7 @@ Repository details:
                         }
                         println!("\nUsage: /switch <session-id>");
                     }
-                    Err(e) => eprintln!("Error listing sessions: {}", e),
+                    Err(e) => eprintln!("Error listing sessions: {e}"),
                 }
             } else {
                 // Switch to specified session
@@ -461,7 +461,7 @@ Repository details:
                             )?;
                             println!("Switched to session: {}", &session_id.to_string()[..8]);
                         }
-                        Err(e) => eprintln!("Error switching session: {}", e),
+                        Err(e) => eprintln!("Error switching session: {e}"),
                     }
                 } else {
                     eprintln!("Invalid session ID format");
@@ -487,7 +487,7 @@ Repository details:
                 if let Some(ref mcp) = mcp_client {
                     match mcp.call_tool(tool_name, args, client.provider_name()) {
                         Ok(result) => {
-                            println!("Tool Result ({}):", tool_name);
+                            println!("Tool Result ({tool_name}):");
                             println!(
                                 "{}",
                                 serde_json::to_string_pretty(&result)
@@ -498,8 +498,7 @@ Repository details:
                             // Add to conversation context
                             let user_msg = Message::user(input);
                             let tool_msg = Message::assistant(format!(
-                                "Tool {} executed. Result: {}",
-                                tool_name, result
+                                "Tool {tool_name} executed. Result: {result}"
                             ));
                             runtime.block_on(conversation_manager.add_message(&user_msg))?;
                             runtime.block_on(conversation_manager.add_message(&tool_msg))?;
@@ -507,7 +506,7 @@ Repository details:
                             messages.push(tool_msg);
                         }
                         Err(e) => {
-                            eprintln!("Tool execution failed: {}", e);
+                            eprintln!("Tool execution failed: {e}");
                         }
                     }
                     continue;
@@ -520,7 +519,7 @@ Repository details:
             if let Some(command_response) =
                 handle_command(command_input, &mcp_client, client.provider_name())
             {
-                println!("{}", command_response);
+                println!("{command_response}");
                 println!();
                 continue;
             }
@@ -554,7 +553,7 @@ Repository details:
                         messages.push(msg);
                     }
                     Err(e) => {
-                        eprintln!("Error loading screenshot: {}", e);
+                        eprintln!("Error loading screenshot: {e}");
                         continue;
                     }
                 }
@@ -571,7 +570,7 @@ Repository details:
 
             if !img_path.is_empty() {
                 // Convert to "@analyze_screenshot path" syntax
-                let converted_input = format!("@analyze_screenshot {}", img_path);
+                let converted_input = format!("@analyze_screenshot {img_path}");
                 let msg = Message::user(&converted_input);
                 runtime.block_on(conversation_manager.add_message(&msg))?;
                 messages.push(msg);
@@ -604,7 +603,7 @@ Repository details:
                 }
             }
             Err(e) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {e}");
                 // Remove the failed user message
                 messages.pop();
             }
@@ -653,7 +652,7 @@ async fn process_message(
             }
             Err(e) => {
                 progress.finish_and_clear();
-                return Err(format!("Stream error: {}", e).into());
+                return Err(format!("Stream error: {e}").into());
             }
         }
     }
@@ -682,18 +681,18 @@ async fn process_message(
             println!("=== MCP Tool Results ===");
 
             for (tool_name, result) in &tool_results {
-                println!("\n[Tool: {}]", tool_name);
+                println!("\n[Tool: {tool_name}]");
                 println!("Response:");
 
                 // Pretty print the result if it's JSON
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(result) {
                     if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
-                        println!("{}", pretty);
+                        println!("{pretty}");
                     } else {
-                        println!("{}", result);
+                        println!("{result}");
                     }
                 } else {
-                    println!("{}", result);
+                    println!("{result}");
                 }
             }
 
@@ -734,7 +733,7 @@ async fn process_message_print(
                 }
             }
             Err(e) => {
-                return Err(format!("Stream error: {}", e).into());
+                return Err(format!("Stream error: {e}").into());
             }
         }
     }
@@ -749,17 +748,17 @@ async fn process_message_print(
         // If we executed tools, print them
         if !tool_results.is_empty() {
             for (tool_name, result) in tool_results {
-                println!("\n[Tool Result - {}]:", tool_name);
+                println!("\n[Tool Result - {tool_name}]:");
 
                 // Pretty print the result if it's JSON
                 if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
                     if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
-                        println!("{}", pretty);
+                        println!("{pretty}");
                     } else {
-                        println!("{}", result);
+                        println!("{result}");
                     }
                 } else {
-                    println!("{}", result);
+                    println!("{result}");
                 }
             }
             io::stdout().flush()?;
@@ -799,13 +798,13 @@ fn handle_command(
                 match client.call_tool("read_file", json!({ "path": file_path }), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
-                            Some(format!("Content of {} (via MCP):\n\n{}", file_path, text))
+                            Some(format!("Content of {file_path} (via MCP):\n\n{text}"))
                         } else {
-                            Some(format!("MCP read result: {}", result))
+                            Some(format!("MCP read result: {result}"))
                         }
                     }
                     Err(e) => {
-                        eprintln!("MCP read failed, falling back to local: {}", e);
+                        eprintln!("MCP read failed, falling back to local: {e}");
                         read_file(&file_path)
                     }
                 }
@@ -825,13 +824,13 @@ fn handle_command(
                 match client.call_tool("list_directory", json!({ "path": path }), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
-                            Some(format!("Contents of {} (via MCP):\n\n{}", path, text))
+                            Some(format!("Contents of {path} (via MCP):\n\n{text}"))
                         } else {
-                            Some(format!("MCP list result: {}", result))
+                            Some(format!("MCP list result: {result}"))
                         }
                     }
                     Err(e) => {
-                        eprintln!("MCP list failed, falling back to local: {}", e);
+                        eprintln!("MCP list failed, falling back to local: {e}");
                         list_files(&path)
                     }
                 }
@@ -851,12 +850,12 @@ fn handle_command(
                 match client.call_tool("list_tests", json!({}), llm_provider) {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
-                            Some(format!("Available tests (via MCP):\n\n{}", text))
+                            Some(format!("Available tests (via MCP):\n\n{text}"))
                         } else {
-                            Some(format!("MCP test list result: {}", result))
+                            Some(format!("MCP test list result: {result}"))
                         }
                     }
-                    Err(e) => Some(format!("Failed to list tests: {}", e)),
+                    Err(e) => Some(format!("Failed to list tests: {e}")),
                 }
             } else {
                 None
@@ -879,12 +878,12 @@ fn handle_command(
                 {
                     Ok(result) => {
                         if let Some(text) = result.get("result").and_then(|r| r.as_str()) {
-                            Some(format!("Test execution result (via MCP):\n\n{}", text))
+                            Some(format!("Test execution result (via MCP):\n\n{text}"))
                         } else {
-                            Some(format!("MCP test result: {}", result))
+                            Some(format!("MCP test result: {result}"))
                         }
                     }
-                    Err(e) => Some(format!("Failed to run test: {}", e)),
+                    Err(e) => Some(format!("Failed to run test: {e}")),
                 }
             } else {
                 None
@@ -905,7 +904,7 @@ fn handle_command(
                             Some(output)
                         }
                     }
-                    Err(e) => Some(format!("Failed to list MCP tools: {}", e)),
+                    Err(e) => Some(format!("Failed to list MCP tools: {e}")),
                 }
             } else {
                 Some(
@@ -933,9 +932,9 @@ fn read_file(file_path: &str) -> Option<String> {
             } else {
                 content
             };
-            Some(format!("Content of {}:\n\n{}", file_path, preview))
+            Some(format!("Content of {file_path}:\n\n{preview}"))
         }
-        Err(e) => Some(format!("Error reading file '{}': {}", file_path, e)),
+        Err(e) => Some(format!("Error reading file '{file_path}': {e}")),
     }
 }
 
@@ -1088,7 +1087,7 @@ fn handle_tool_calls_in_response(
                     }
                     Err(e) => {
                         debug_println!("DEBUG: Tool {} failed with error: {}", tool_name, e);
-                        tool_results.push((tool_name.to_string(), format!("Error: {}", e)));
+                        tool_results.push((tool_name.to_string(), format!("Error: {e}")));
                     }
                 }
             } else {
@@ -1146,7 +1145,7 @@ fn list_files(path: &str) -> Option<String> {
             for entry in entries.filter_map(|e| e.ok()) {
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    dirs.push(format!("{}/ (dir)", file_name));
+                    dirs.push(format!("{file_name}/ (dir)"));
                 } else {
                     files.push(file_name);
                 }
@@ -1158,11 +1157,11 @@ fn list_files(path: &str) -> Option<String> {
             let mut result = format!("Contents of {}:\n\n", path.display());
 
             for dir in &dirs {
-                result.push_str(&format!("  {}\n", dir));
+                result.push_str(&format!("  {dir}\n"));
             }
 
             for file in &files {
-                result.push_str(&format!("  {}\n", file));
+                result.push_str(&format!("  {file}\n"));
             }
 
             if dirs.is_empty() && files.is_empty() {
@@ -1205,7 +1204,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
             let test_message = vec![Message::user("ping")];
             if client.complete(test_message).await.is_ok() {
                 if !print_mode {
-                    eprintln!("✓ Connected to saved Ollama server at {}", server_url);
+                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 }
                 return Ok(client);
             }
@@ -1271,7 +1270,7 @@ async fn prompt_for_remote_ollama(
             cleared_memory.content = "CLEARED".to_string();
             cleared_memory.updated_at = chrono::Utc::now();
             if let Err(e) = storage.store(cleared_memory).await {
-                eprintln!("Warning: Could not clear configuration: {}", e);
+                eprintln!("Warning: Could not clear configuration: {e}");
             }
         }
         eprintln!("✓ Cleared saved Ollama server configuration");
@@ -1282,7 +1281,7 @@ async fn prompt_for_remote_ollama(
     let base_url = if input.starts_with("http://") || input.starts_with("https://") {
         input.to_string()
     } else {
-        format!("http://{}", input)
+        format!("http://{input}")
     };
 
     // Set the environment variable for this session
@@ -1297,7 +1296,7 @@ async fn prompt_for_remote_ollama(
             let test_message = vec![Message::user("ping")];
             match client.complete(test_message).await {
                 Ok(_) => {
-                    eprintln!("✓ Connected to Ollama at {}", base_url);
+                    eprintln!("✓ Connected to Ollama at {base_url}");
 
                     // Save the configuration for future use
                     // Generate a dummy embedding since we're not using embeddings feature
@@ -1321,17 +1320,17 @@ async fn prompt_for_remote_ollama(
                     };
 
                     if let Err(e) = storage.store(memory).await {
-                        eprintln!("Warning: Could not save Ollama server configuration: {}", e);
+                        eprintln!("Warning: Could not save Ollama server configuration: {e}");
                     } else {
                         eprintln!("✓ Saved configuration for future use");
                     }
 
                     Ok(client)
                 }
-                Err(e) => Err(format!("Failed to connect to Ollama at {}: {}", base_url, e).into()),
+                Err(e) => Err(format!("Failed to connect to Ollama at {base_url}: {e}").into()),
             }
         }
-        Err(e) => Err(format!("Failed to create client for {}: {}", base_url, e).into()),
+        Err(e) => Err(format!("Failed to create client for {base_url}: {e}").into()),
     }
 }
 

@@ -318,7 +318,7 @@ impl Tool for XCTestSetupKit {
                 }))
             }
             Ok(Err(e)) => {
-                eprintln!("[XCTestSetupKit] Connection failed: {}", e);
+                eprintln!("[XCTestSetupKit] Connection failed: {e}");
                 Ok(serde_json::json!({
                     "success": false,
                     "error": {

@@ -41,7 +41,7 @@ mod tests {
                 assert!(version >= XcodeVersion::new(10, 0, 0));
             }
             Err(e) => {
-                println!("Could not detect Xcode version: {}", e);
+                println!("Could not detect Xcode version: {e}");
                 // This is not a failure if Xcode is not installed
             }
         }

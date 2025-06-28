@@ -78,7 +78,7 @@ mod llm_integration_tests {
             let request = LlmRequest {
                 task_id,
                 model_name: model.clone(),
-                prompt: format!("Test prompt for {}", model),
+                prompt: format!("Test prompt for {model}"),
             };
 
             assert_eq!(request.model_name, model);

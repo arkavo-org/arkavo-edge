@@ -161,13 +161,13 @@ async fn test_git_log_tool() {
     // Create additional commits
     for i in 1..=3 {
         fs::write(
-            temp_dir.path().join(format!("file{}.txt", i)),
-            format!("content {}", i),
+            temp_dir.path().join(format!("file{i}.txt")),
+            format!("content {i}"),
         )
         .unwrap();
         manager.add_all(&repo).unwrap();
         manager
-            .commit_changes(&repo, &format!("Commit {}", i))
+            .commit_changes(&repo, &format!("Commit {i}"))
             .unwrap();
     }
 

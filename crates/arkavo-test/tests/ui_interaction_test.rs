@@ -29,7 +29,7 @@ mod ui_interaction_tests {
         match device_manager.refresh_devices() {
             Ok(_) => {}
             Err(e) => {
-                eprintln!("Failed to refresh devices: {}, skipping test", e);
+                eprintln!("Failed to refresh devices: {e}, skipping test");
                 return;
             }
         }
@@ -48,14 +48,14 @@ mod ui_interaction_tests {
         let xctest = match XCTestEnhanced::new(device_manager.clone()).await {
             Ok(test) => test,
             Err(e) => {
-                eprintln!("Failed to create XCTest instance: {}", e);
+                eprintln!("Failed to create XCTest instance: {e}");
                 return;
             }
         };
 
         // Initialize XCTest on the device
         if let Err(e) = xctest.initialize(device_id).await {
-            eprintln!("Failed to initialize XCTest: {}", e);
+            eprintln!("Failed to initialize XCTest: {e}");
             return;
         }
 
@@ -66,17 +66,17 @@ mod ui_interaction_tests {
                 println!("Tap successful: {:?}", response.result);
             }
             Err(e) => {
-                eprintln!("Tap failed: {}", e);
+                eprintln!("Tap failed: {e}");
             }
         }
 
         // Test tap by text
         match xctest.tap_by_text("Login", Some(5.0)).await {
             Ok(response) => {
-                println!("Text tap result: {:?}", response);
+                println!("Text tap result: {response:?}");
             }
             Err(e) => {
-                eprintln!("Text tap failed: {}", e);
+                eprintln!("Text tap failed: {e}");
             }
         }
     }

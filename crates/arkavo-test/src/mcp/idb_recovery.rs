@@ -416,7 +416,7 @@ impl IdbRecovery {
             ];
 
             for path in &temp_paths {
-                eprintln!("[IdbRecovery] Removing {}", path);
+                eprintln!("[IdbRecovery] Removing {path}");
                 let _ = Command::new("rm").arg("-f").arg(path).output();
             }
 
@@ -431,8 +431,7 @@ impl IdbRecovery {
                 eprintln!("[IdbRecovery] Trying with system IDB as fallback...");
                 if let Err(e) = IdbWrapper::initialize_with_preference(true) {
                     return Err(TestError::Mcp(format!(
-                        "Failed to initialize IDB after recovery: {}",
-                        e
+                        "Failed to initialize IDB after recovery: {e}"
                     )));
                 }
             }

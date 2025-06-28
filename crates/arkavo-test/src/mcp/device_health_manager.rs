@@ -168,7 +168,7 @@ impl DeviceHealthManager {
                     let output = Command::new("xcrun")
                         .args(["simctl", "delete", &report.device_id])
                         .output()
-                        .map_err(|e| TestError::Mcp(format!("Failed to delete device: {}", e)))?;
+                        .map_err(|e| TestError::Mcp(format!("Failed to delete device: {e}")))?;
 
                     if output.status.success() {
                         deleted_devices.push(report.device_id);
@@ -193,7 +193,7 @@ impl DeviceHealthManager {
         let output = Command::new("xcrun")
             .args(["simctl", "delete", "unavailable"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to delete unavailable devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to delete unavailable devices: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(

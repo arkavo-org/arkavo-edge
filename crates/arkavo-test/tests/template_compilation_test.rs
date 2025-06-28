@@ -50,7 +50,7 @@ fn test_xctest_template_compiles() {
     let platform_path = String::from_utf8_lossy(&platform_output.stdout)
         .trim()
         .to_string();
-    let xctest_framework_path = format!("{}/Developer/Library/Frameworks", platform_path);
+    let xctest_framework_path = format!("{platform_path}/Developer/Library/Frameworks");
 
     // Try to compile the Swift file (ARM64 only now)
     let compile_output = Command::new("xcrun")
@@ -82,8 +82,7 @@ fn test_xctest_template_compiles() {
     if !compile_output.status.success() {
         let stderr = String::from_utf8_lossy(&compile_output.stderr);
         panic!(
-            "Swift template failed to compile:\n{}\n\nThis means the template has syntax errors that will fail at runtime!",
-            stderr
+            "Swift template failed to compile:\n{stderr}\n\nThis means the template has syntax errors that will fail at runtime!"
         );
     }
 

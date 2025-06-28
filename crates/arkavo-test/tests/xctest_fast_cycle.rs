@@ -17,13 +17,13 @@ async fn test_fast_xctest_verification_cycle() {
     println!("1. Quick system check...");
     match XCTestVerifier::quick_verify().await {
         Ok(is_functional) => {
-            println!("   XCTest functional: {}", is_functional);
+            println!("   XCTest functional: {is_functional}");
             if !is_functional {
                 println!("   Note: This is expected in CI or without simulators");
             }
         }
         Err(e) => {
-            println!("   Error: {} (expected in CI)", e);
+            println!("   Error: {e} (expected in CI)");
         }
     }
 
@@ -38,7 +38,7 @@ async fn test_fast_xctest_verification_cycle() {
             }
         }
         Err(e) => {
-            println!("   No devices found: {} (expected without Xcode)", e);
+            println!("   No devices found: {e} (expected without Xcode)");
             return;
         }
     }
@@ -63,7 +63,7 @@ async fn test_fast_xctest_verification_cycle() {
                     );
 
                     if let Some(response_time) = xctest_status.swift_response_time {
-                        println!("   Response Time: {:?}", response_time);
+                        println!("   Response Time: {response_time:?}");
                     }
 
                     if let Some(error) = &xctest_status.error_details {
@@ -76,7 +76,7 @@ async fn test_fast_xctest_verification_cycle() {
             }
         }
         Err(e) => {
-            println!("   Failed to get device status: {}", e);
+            println!("   Failed to get device status: {e}");
         }
     }
 
@@ -102,7 +102,7 @@ async fn test_fast_xctest_verification_cycle() {
             println!("   No devices available");
         }
         Err(e) => {
-            println!("   Error finding best device: {}", e);
+            println!("   Error finding best device: {e}");
         }
     }
 
@@ -171,7 +171,7 @@ async fn test_xctest_setup_and_verify() {
                     }
                 }
                 Err(e) => {
-                    println!("   ❌ Setup error: {}", e);
+                    println!("   ❌ Setup error: {e}");
                 }
             }
         }
@@ -184,7 +184,7 @@ async fn test_xctest_setup_and_verify() {
         println!("   Functional: {}", final_status.is_functional);
         println!("   Bundle Installed: {}", final_status.bundle_installed);
         if let Some(response_time) = final_status.swift_response_time {
-            println!("   Response Time: {:?}", response_time);
+            println!("   Response Time: {response_time:?}");
         }
     } else {
         println!("No booted simulator found. Please boot a simulator first.");
@@ -206,7 +206,7 @@ async fn test_xctest_verification_performance() {
     let start = Instant::now();
     let _ = XCTestVerifier::quick_verify().await;
     let quick_duration = start.elapsed();
-    println!("Quick verify took: {:?}", quick_duration);
+    println!("Quick verify took: {quick_duration:?}");
     assert!(
         quick_duration.as_secs() < 5,
         "Quick verify should complete within 5 seconds"
@@ -217,7 +217,7 @@ async fn test_xctest_verification_performance() {
     let start = Instant::now();
     let _ = DeviceXCTestStatusManager::get_all_devices_with_status(device_manager).await;
     let full_duration = start.elapsed();
-    println!("Full device status check took: {:?}", full_duration);
+    println!("Full device status check took: {full_duration:?}");
     assert!(
         full_duration.as_secs() < 10,
         "Full status check should complete within 10 seconds"

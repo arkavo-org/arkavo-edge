@@ -15,8 +15,7 @@ fn test_swift_template_exists() {
 
     assert!(
         template_path.exists(),
-        "Swift template should exist at {:?}",
-        template_path
+        "Swift template should exist at {template_path:?}"
     );
 
     // Verify template contains expected markers
@@ -47,8 +46,7 @@ fn test_info_plist_template_exists() {
 
     assert!(
         plist_path.exists(),
-        "Info.plist template should exist at {:?}",
-        plist_path
+        "Info.plist template should exist at {plist_path:?}"
     );
 
     // Verify plist contains expected keys

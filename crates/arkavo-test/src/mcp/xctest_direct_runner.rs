@@ -266,7 +266,7 @@ do {{
                 eprintln!("[DirectRunner] XCTest server running");
             }
             Err(e) => {
-                eprintln!("[DirectRunner] Warning: Could not check status: {}", e);
+                eprintln!("[DirectRunner] Warning: Could not check status: {e}");
             }
         }
 

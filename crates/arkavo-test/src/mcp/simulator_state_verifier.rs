@@ -28,8 +28,7 @@ impl SimulatorStateVerifier {
         app_bundle_id: Option<&str>,
     ) -> Result<SimulatorState> {
         eprintln!(
-            "[SimulatorStateVerifier] Checking state for device {}",
-            device_id
+            "[SimulatorStateVerifier] Checking state for device {device_id}"
         );
 
         let mut state = SimulatorState {
@@ -187,7 +186,7 @@ impl SimulatorStateVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "listapps", device_id, "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         if let Ok(apps) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
             if let Some(app_array) = apps.as_array() {
@@ -252,8 +251,7 @@ impl SimulatorStateVerifier {
         app_bundle_id: Option<&str>,
     ) -> Result<()> {
         eprintln!(
-            "[SimulatorStateVerifier] Preparing device {} for interaction",
-            device_id
+            "[SimulatorStateVerifier] Preparing device {device_id} for interaction"
         );
 
         // 1. Verify state
@@ -267,7 +265,7 @@ impl SimulatorStateVerifier {
         // 3. Launch app if needed and not in foreground
         if let Some(bundle_id) = app_bundle_id {
             if !state.app_is_foreground {
-                eprintln!("[SimulatorStateVerifier] Launching app {}", bundle_id);
+                eprintln!("[SimulatorStateVerifier] Launching app {bundle_id}");
                 let _ = Command::new("xcrun")
                     .args(["simctl", "launch", device_id, bundle_id])
                     .output();

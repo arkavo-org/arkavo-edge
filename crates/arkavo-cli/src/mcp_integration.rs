@@ -147,9 +147,9 @@ impl McpConnection {
                         if let Some(tool) = tools.get(&tool_name) {
                             tool.execute(args)
                                 .await
-                                .map_err(|e| format!("Tool execution error: {}", e))
+                                .map_err(|e| format!("Tool execution error: {e}"))
                         } else {
-                            Err(format!("Tool '{}' not found", tool_name))
+                            Err(format!("Tool '{tool_name}' not found"))
                         }
                     });
                     tx.send(result).ok();

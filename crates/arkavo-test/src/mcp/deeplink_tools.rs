@@ -391,7 +391,7 @@ impl Tool for AppLauncherKit {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

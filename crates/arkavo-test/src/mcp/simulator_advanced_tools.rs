@@ -340,7 +340,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "uninstall", device_id, bundle_id])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to uninstall app: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -363,7 +363,7 @@ impl Tool for SimulatorAdvancedKit {
                 let output = Command::new("xcrun")
                     .args(["simctl", "keychain", device_id, "reset"])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to clear keychain: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to clear keychain: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -376,7 +376,7 @@ impl Tool for SimulatorAdvancedKit {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

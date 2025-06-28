@@ -168,7 +168,7 @@ impl HarnessCompiler {
                 "-L",
                 &format!("{sdk_path}/usr/lib"),
                 "-L",
-                &format!("{}/usr/lib/swift", sdk_path),
+                &format!("{sdk_path}/usr/lib/swift"),
                 "-Xlinker",
                 "-rpath",
                 "-Xlinker",
@@ -188,11 +188,11 @@ impl HarnessCompiler {
             cmd.arg(file.to_str().unwrap());
         }
 
-        eprintln!("[AxpHarnessBuilder] Running: {:?}", cmd);
+        eprintln!("[AxpHarnessBuilder] Running: {cmd:?}");
 
         let output = cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to compile: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to compile: {e}")))?;
 
         if !output.status.success() {
             let error_details = String::from_utf8_lossy(&output.stderr).to_string();

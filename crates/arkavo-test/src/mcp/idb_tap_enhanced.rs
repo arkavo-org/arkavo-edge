@@ -36,8 +36,7 @@ impl IdbTapEnhanced {
         // 1. Verify simulator state
         if let Err(e) = SimulatorStateVerifier::prepare_for_interaction(device_id, None).await {
             eprintln!(
-                "[IdbTapEnhanced] Warning: Simulator preparation failed: {}",
-                e
+                "[IdbTapEnhanced] Warning: Simulator preparation failed: {e}"
             );
         }
 
@@ -48,13 +47,13 @@ impl IdbTapEnhanced {
         if !companion_healthy {
             eprintln!("[IdbTapEnhanced] IDB companion unhealthy, attempting recovery...");
             if let Err(e) = IdbCompanionHealth::recover_companion(device_id).await {
-                eprintln!("[IdbTapEnhanced] Recovery failed: {}", e);
+                eprintln!("[IdbTapEnhanced] Recovery failed: {e}");
             }
         }
 
         // 3. Verify coordinates are within reasonable bounds
         if let Err(e) = Self::verify_coordinates(device_id, x, y).await {
-            eprintln!("[IdbTapEnhanced] Coordinate verification failed: {}", e);
+            eprintln!("[IdbTapEnhanced] Coordinate verification failed: {e}");
             // Continue anyway as the coordinates might still be valid
         }
 

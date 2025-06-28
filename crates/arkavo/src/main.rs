@@ -29,7 +29,7 @@ fn main() {
     };
 
     if let Err(err) = arkavo_cli::run(&command_args) {
-        eprintln!("Error: {}", err);
+        eprintln!("Error: {err}");
         process::exit(1);
     }
 }

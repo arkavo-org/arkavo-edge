@@ -14,8 +14,7 @@ async fn test_idb_recovery_stuck_companion() {
     let port_accessible = IdbRecovery::is_companion_port_accessible().await;
 
     eprintln!(
-        "Initial state - Companion running: {}, Port accessible: {}",
-        companion_running, port_accessible
+        "Initial state - Companion running: {companion_running}, Port accessible: {port_accessible}"
     );
 
     // If we detect the stuck state, try recovery
@@ -34,8 +33,7 @@ async fn test_idb_recovery_stuck_companion() {
                 let port_accessible_after = IdbRecovery::is_companion_port_accessible().await;
 
                 eprintln!(
-                    "After recovery - Companion running: {}, Port accessible: {}",
-                    companion_running_after, port_accessible_after
+                    "After recovery - Companion running: {companion_running_after}, Port accessible: {port_accessible_after}"
                 );
 
                 // If companion is running, port should be accessible
@@ -47,7 +45,7 @@ async fn test_idb_recovery_stuck_companion() {
                 }
             }
             Err(e) => {
-                eprintln!("Recovery failed: {}", e);
+                eprintln!("Recovery failed: {e}");
                 // Don't fail the test as IDB might not be installed
             }
         }
@@ -68,10 +66,10 @@ async fn test_force_reconnect_device() {
 
     match recovery.force_reconnect_device(device_id).await {
         Ok(_) => {
-            eprintln!("Force reconnect completed for device {}", device_id);
+            eprintln!("Force reconnect completed for device {device_id}");
         }
         Err(e) => {
-            eprintln!("Force reconnect failed (expected if no device): {}", e);
+            eprintln!("Force reconnect failed (expected if no device): {e}");
         }
     }
 }

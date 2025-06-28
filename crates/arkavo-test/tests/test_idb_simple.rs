@@ -19,7 +19,7 @@ fn test_idb_init_sync() {
 
     match IdbWrapper::initialize() {
         Ok(_) => println!("IDB initialized successfully"),
-        Err(e) => println!("IDB initialization failed: {}", e),
+        Err(e) => println!("IDB initialization failed: {e}"),
     }
 
     // Try to get binary path
@@ -33,6 +33,6 @@ fn test_idb_init_sync() {
                 println!("Binary size: {} bytes", metadata.len());
             }
         }
-        Err(e) => println!("Failed to get binary path: {}", e),
+        Err(e) => println!("Failed to get binary path: {e}"),
     }
 }

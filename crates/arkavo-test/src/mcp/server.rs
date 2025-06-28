@@ -122,9 +122,8 @@ impl McpTestServer {
                     }
                     Err(e) => {
                         eprintln!(
-                            "[McpTestServer] Warning: Failed to initialize memory storage: {}",
-                            e
-                        );
+                        "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
+                    );
                         eprintln!("[McpTestServer] Memory tools will not be available");
                         None
                     }
@@ -503,10 +502,9 @@ impl McpTestServer {
                     Ok(())
                 }
                 Err(e) => {
-                    eprintln!("[McpTestServer] Failed to initialize memory tools: {}", e);
+                    eprintln!("[McpTestServer] Failed to initialize memory tools: {e}");
                     Err(TestError::Mcp(format!(
-                        "Failed to initialize memory storage: {}",
-                        e
+                        "Failed to initialize memory storage: {e}"
                     )))
                 }
             }
@@ -573,8 +571,7 @@ impl McpTestServer {
         .await
         .map_err(|_| {
             TestError::Mcp(format!(
-                "Tool execution timeout after {:?}",
-                timeout_duration
+                "Tool execution timeout after {timeout_duration:?}"
             ))
         })??;
 
@@ -648,7 +645,7 @@ impl McpTestServer {
     }
 
     async fn execute_tool(&self, tool_name: &str, params: Value) -> Result<Value> {
-        eprintln!("[McpTestServer] execute_tool called for: {}", tool_name);
+        eprintln!("[McpTestServer] execute_tool called for: {tool_name}");
         let tool = {
             let tools = self
                 .tools
@@ -661,11 +658,11 @@ impl McpTestServer {
             );
             tools
                 .get(tool_name)
-                .ok_or_else(|| TestError::Mcp(format!("Tool not found: {}", tool_name)))?
+                .ok_or_else(|| TestError::Mcp(format!("Tool not found: {tool_name}")))?
                 .clone()
         };
 
-        eprintln!("[McpTestServer] Executing tool: {}", tool_name);
+        eprintln!("[McpTestServer] Executing tool: {tool_name}");
         let result = tool.execute(params).await;
         eprintln!(
             "[McpTestServer] Tool execution result: {:?}",
@@ -1021,7 +1018,7 @@ impl Tool for SnapshotKit {
                     "timestamp": chrono::Utc::now().to_rfc3339()
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Invalid action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Invalid action: {action}"))),
         }
     }
 
@@ -1233,11 +1230,11 @@ impl TestExecutor {
             .arg("--nocapture")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run cargo test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined_output = format!("{}\n{}", stdout, stderr);
+        let combined_output = format!("{stdout}\n{stderr}");
 
         Ok(("rust", combined_output))
     }
@@ -1251,11 +1248,11 @@ impl TestExecutor {
                 .arg(test_name)
                 .current_dir(&self.working_dir)
                 .output()
-                .map_err(|e| TestError::Execution(format!("Failed to run swift test: {}", e)))?;
+                .map_err(|e| TestError::Execution(format!("Failed to run swift test: {e}")))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Ok(("swift-spm", format!("{}\n{}", stdout, stderr)));
+            return Ok(("swift-spm", format!("{stdout}\n{stderr}")));
         }
 
         // For Xcode projects, we need to find the scheme and workspace/project
@@ -1322,17 +1319,17 @@ impl TestExecutor {
         let output = cmd
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run xcodebuild test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run xcodebuild test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("swift-xcode", format!("{}\n{}", stdout, stderr)))
+        Ok(("swift-xcode", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_javascript_test(&self, test_name: &str) -> Result<(&'static str, String)> {
         // Check for test runner in package.json
         let package_json = fs::read_to_string(self.working_dir.join("package.json"))
-            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to read package.json: {e}")))?;
 
         let test_runner = if package_json.contains("jest") {
             vec!["jest", test_name]
@@ -1348,11 +1345,11 @@ impl TestExecutor {
             .args(&test_runner[1..])
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run JS test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("javascript", format!("{}\n{}", stdout, stderr)))
+        Ok(("javascript", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_python_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -1377,14 +1374,14 @@ impl TestExecutor {
                     .current_dir(&self.working_dir)
                     .output()
                     .map_err(|e| {
-                        TestError::Execution(format!("Failed to run Python test: {}", e))
+                        TestError::Execution(format!("Failed to run Python test: {e}"))
                     })?
             }
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("python", format!("{}\n{}", stdout, stderr)))
+        Ok(("python", format!("{stdout}\n{stderr}")))
     }
 
     async fn run_go_test(&self, test_name: &str) -> Result<(&'static str, String)> {
@@ -1395,11 +1392,11 @@ impl TestExecutor {
             .arg("-v")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to run go test: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to run go test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Ok(("go", format!("{}\n{}", stdout, stderr)))
+        Ok(("go", format!("{stdout}\n{stderr}")))
     }
 
     fn parse_test_output(&self, output: &str, test_type: &str) -> (&'static str, Option<String>) {
@@ -1541,7 +1538,7 @@ impl TestExecutor {
             .arg("--list")
             .current_dir(&self.working_dir)
             .output()
-            .map_err(|e| TestError::Execution(format!("Failed to list Rust tests: {}", e)))?;
+            .map_err(|e| TestError::Execution(format!("Failed to list Rust tests: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -1726,7 +1723,7 @@ impl TestExecutor {
                                 if let (Some(class), Some(method_name)) =
                                     (&current_class, extract_swift_test_method_name(line))
                                 {
-                                    let full_test_name = format!("{}.{}", class, method_name);
+                                    let full_test_name = format!("{class}.{method_name}");
 
                                     // Determine test type based on class and method names
                                     let method_test_type =

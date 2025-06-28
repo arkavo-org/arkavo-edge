@@ -34,8 +34,7 @@ impl CalibrationDataStore {
         result: CalibrationResult,
     ) -> Result<(), CalibrationError> {
         eprintln!(
-            "[CalibrationDataStore] Storing calibration for device {}",
-            device_id
+            "[CalibrationDataStore] Storing calibration for device {device_id}"
         );
         eprintln!(
             "[CalibrationDataStore] Result - success: {}, successful_interactions: {}/{}",

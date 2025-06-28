@@ -69,7 +69,7 @@ impl Tool for AppDiagnosticTool {
         // Parse the plist-style output to find apps
         if let Some(target_bundle_id) = bundle_id {
             // Look for the specific bundle ID in the output
-            let found = output_text.contains(&format!("{target_bundle_id}"))
+            let found = output_text.contains(target_bundle_id)
                 || output_text.contains(&format!("{target_bundle_id} ="));
 
             // Try to extract some info about the app
@@ -77,7 +77,7 @@ impl Tool for AppDiagnosticTool {
 
             if found {
                 // Look for the app's display name
-                if let Some(start) = output_text.find(&format!("{target_bundle_id}")) {
+                if let Some(start) = output_text.find(target_bundle_id) {
                     let app_section = &output_text[start..];
                     if let Some(name_start) = app_section.find("CFBundleDisplayName = ") {
                         let name_section = &app_section[name_start + 22..];

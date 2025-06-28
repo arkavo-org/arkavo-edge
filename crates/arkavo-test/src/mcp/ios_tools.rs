@@ -618,7 +618,7 @@ impl Tool for UiInteractionKit {
                     if let Some(text) = target.get("text").and_then(|v| v.as_str()) {
                         // Only try XCUITest if it's already available
                         if xctest_available {
-                            eprintln!("Attempting XCUITest tap by text: {}", text);
+                            eprintln!("Attempting XCUITest tap by text: {text}");
                             use_xctest = true;
                             xctest_command = Some(XCTestUnixBridge::create_text_tap(
                                 text.to_string(),
@@ -658,8 +658,7 @@ impl Tool for UiInteractionKit {
                         // Only try XCUITest if it's already available
                         if xctest_available {
                             eprintln!(
-                                "Attempting XCUITest tap by accessibility ID: {}",
-                                accessibility_id
+                                "Attempting XCUITest tap by accessibility ID: {accessibility_id}"
                             );
                             use_xctest = true;
                             xctest_command = Some(XCTestUnixBridge::create_accessibility_tap(
@@ -701,13 +700,12 @@ impl Tool for UiInteractionKit {
 
                         // First try AXP if available (fastest)
                         if let Some((socket_path, _)) = &axp_available {
-                            eprintln!("[ui_interaction] Using AXP for tap at ({}, {})", x, y);
+                            eprintln!("[ui_interaction] Using AXP for tap at ({x}, {y})");
                             match self.send_axp_tap(socket_path, x, y).await {
                                 Ok(result) => return Ok(result),
                                 Err(e) => {
                                     eprintln!(
-                                        "[ui_interaction] AXP tap failed: {}, falling back",
-                                        e
+                                        "[ui_interaction] AXP tap failed: {e}, falling back"
                                     );
                                     // Continue to other methods
                                 }
@@ -790,8 +788,7 @@ impl Tool for UiInteractionKit {
                                     }
                                     Err(e) => {
                                         eprintln!(
-                                            "XCUITest error: {}, falling back to AppleScript",
-                                            e
+                                            "XCUITest error: {e}, falling back to AppleScript"
                                         );
                                         // Fall back to AppleScript for coordinates
                                         if let (Some(x), Some(y)) =
@@ -956,8 +953,7 @@ impl Tool for UiInteractionKit {
                     let adjusted_y = y.min(max_y - 1.0).max(0.0);
 
                     eprintln!(
-                        "UI tap: device={}, type={}, logical_size={}x{}, tap_point=({}, {})",
-                        device_id, device_type, max_x, max_y, adjusted_x, adjusted_y
+                        "UI tap: device={device_id}, type={device_type}, logical_size={max_x}x{max_y}, tap_point=({adjusted_x}, {adjusted_y})"
                     );
 
                     // Special handling for enrollment dialog on iPhone 16 Pro Max
@@ -979,14 +975,12 @@ impl Tool for UiInteractionKit {
                         eprintln!("[ui_interaction] Initializing IDB wrapper...");
                         if let Err(e) = IdbWrapper::initialize() {
                             eprintln!(
-                                "[ui_interaction] IDB initialization failed: {}, will try fallback methods",
-                                e
+                                "[ui_interaction] IDB initialization failed: {e}, will try fallback methods"
                             );
                         } else {
                             // Ensure companion is running for this device
                             eprintln!(
-                                "[ui_interaction] Ensuring IDB companion is running for device {}...",
-                                device_id
+                                "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
                             );
                             match IdbWrapper::ensure_companion_running(&device_id).await {
                                 Ok(_) => {
@@ -998,8 +992,7 @@ impl Tool for UiInteractionKit {
                                     {
                                         Ok(mut result) => {
                                             eprintln!(
-                                                "[ui_interaction] IDB tap succeeded at ({}, {})",
-                                                adjusted_x, adjusted_y
+                                                "[ui_interaction] IDB tap succeeded at ({adjusted_x}, {adjusted_y})"
                                             );
                                             // Add device info to response
                                             if let Some(obj) = result.as_object_mut() {
@@ -1036,8 +1029,7 @@ impl Tool for UiInteractionKit {
                                         }
                                         Err(e) => {
                                             eprintln!(
-                                                "[ui_interaction] IDB tap failed: {}, trying fallback methods",
-                                                e
+                                                "[ui_interaction] IDB tap failed: {e}, trying fallback methods"
                                             );
 
                                             // Check for common IDB port conflict error
@@ -1054,8 +1046,7 @@ impl Tool for UiInteractionKit {
                                 }
                                 Err(e) => {
                                     eprintln!(
-                                        "[ui_interaction] Failed to ensure companion running: {}, trying fallback methods",
-                                        e
+                                        "[ui_interaction] Failed to ensure companion running: {e}, trying fallback methods"
                                     );
                                 }
                             }
@@ -1076,8 +1067,7 @@ impl Tool for UiInteractionKit {
                         if let Ok(output) = simctl_output {
                             if output.status.success() {
                                 eprintln!(
-                                    "UI tap via simctl io succeeded at ({}, {})",
-                                    adjusted_x, adjusted_y
+                                    "UI tap via simctl io succeeded at ({adjusted_x}, {adjusted_y})"
                                 );
                                 return Ok(serde_json::json!({
                                     "success": true,
@@ -1119,8 +1109,7 @@ impl Tool for UiInteractionKit {
                         if let Ok(output) = applescript_output {
                             if output.status.success() {
                                 eprintln!(
-                                    "UI tap via AppleScript/Accessibility succeeded at ({}, {})",
-                                    adjusted_x, adjusted_y
+                                    "UI tap via AppleScript/Accessibility succeeded at ({adjusted_x}, {adjusted_y})"
                                 );
                                 return Ok(serde_json::json!({
                                     "success": true,
@@ -1252,14 +1241,12 @@ impl Tool for UiInteractionKit {
                     eprintln!("[ui_interaction] Initializing IDB wrapper for type_text...");
                     if let Err(e) = IdbWrapper::initialize() {
                         eprintln!(
-                            "[ui_interaction] IDB initialization failed: {}, will try fallback methods",
-                            e
+                            "[ui_interaction] IDB initialization failed: {e}, will try fallback methods"
                         );
                     } else {
                         // Ensure companion is running for this device
                         eprintln!(
-                            "[ui_interaction] Ensuring IDB companion is running for device {}...",
-                            device_id
+                            "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
                         );
                         match IdbWrapper::ensure_companion_running(&device_id).await {
                             Ok(_) => {
@@ -1270,15 +1257,13 @@ impl Tool for UiInteractionKit {
                                 match IdbWrapper::type_text(&device_id, text).await {
                                     Ok(result) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB type_text succeeded: '{}'",
-                                            text
+                                            "[ui_interaction] IDB type_text succeeded: '{text}'"
                                         );
                                         return Ok(result);
                                     }
                                     Err(e) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB type_text failed: {}, trying fallback methods",
-                                            e
+                                            "[ui_interaction] IDB type_text failed: {e}, trying fallback methods"
                                         );
                                         // Continue to fallback methods below
                                     }
@@ -1286,8 +1271,7 @@ impl Tool for UiInteractionKit {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "[ui_interaction] Failed to ensure companion running: {}, trying fallback methods",
-                                    e
+                                    "[ui_interaction] Failed to ensure companion running: {e}, trying fallback methods"
                                 );
                             }
                         }
@@ -1321,7 +1305,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(&type_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to type text: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to type text: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1379,7 +1363,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(clear_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to clear text: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to clear text: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1409,7 +1393,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(select_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to select all: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to select all: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1451,7 +1435,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(&delete_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to press delete: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to press delete: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1480,7 +1464,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(copy_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to copy: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to copy: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1508,7 +1492,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(paste_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to paste: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to paste: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1548,20 +1532,19 @@ impl Tool for UiInteractionKit {
                         tell process "Simulator"
                             set frontmost to true
                             -- Simulate arrow key presses for scrolling
-                            repeat {} times
-                                key code {}
+                            repeat {amount} times
+                                key code {key_code}
                                 delay 0.05
                             end repeat
                         end tell
-                    end tell"#,
-                    amount, key_code
+                    end tell"#
                 );
 
                 let output = Command::new("osascript")
                     .arg("-e")
                     .arg(&scroll_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute scroll: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute scroll: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1680,14 +1663,12 @@ impl Tool for UiInteractionKit {
                     eprintln!("[ui_interaction] Initializing IDB wrapper for swipe...");
                     if let Err(e) = IdbWrapper::initialize() {
                         eprintln!(
-                            "[ui_interaction] IDB initialization failed: {}, will try fallback methods",
-                            e
+                            "[ui_interaction] IDB initialization failed: {e}, will try fallback methods"
                         );
                     } else {
                         // Ensure companion is running for this device
                         eprintln!(
-                            "[ui_interaction] Ensuring IDB companion is running for device {}...",
-                            device_id
+                            "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
                         );
                         match IdbWrapper::ensure_companion_running(&device_id).await {
                             Ok(_) => {
@@ -1699,15 +1680,13 @@ impl Tool for UiInteractionKit {
                                 {
                                     Ok(result) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB swipe succeeded from ({}, {}) to ({}, {})",
-                                            x1, y1, x2, y2
+                                            "[ui_interaction] IDB swipe succeeded from ({x1}, {y1}) to ({x2}, {y2})"
                                         );
                                         return Ok(result);
                                     }
                                     Err(e) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB swipe failed: {}, trying fallback methods",
-                                            e
+                                            "[ui_interaction] IDB swipe failed: {e}, trying fallback methods"
                                         );
                                         // Continue to fallback methods below
                                     }
@@ -1715,8 +1694,7 @@ impl Tool for UiInteractionKit {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "[ui_interaction] Failed to ensure companion running: {}, trying fallback methods",
-                                    e
+                                    "[ui_interaction] Failed to ensure companion running: {e}, trying fallback methods"
                                 );
                             }
                         }
@@ -1741,12 +1719,11 @@ impl Tool for UiInteractionKit {
                                 set frontmost to true
                                 -- Simulate arrow key presses for scrolling
                                 repeat 10 times
-                                    key code {}
+                                    key code {key_code}
                                     delay 0.05
                                 end repeat
                             end tell
-                        end tell"#,
-                        key_code
+                        end tell"#
                     )
                 } else {
                     let key_code = if is_scroll_right { "124" } else { "123" }; // right: 124, left: 123
@@ -1760,12 +1737,11 @@ impl Tool for UiInteractionKit {
                                 set frontmost to true
                                 -- Simulate arrow key presses for horizontal scrolling
                                 repeat 10 times
-                                    key code {}
+                                    key code {key_code}
                                     delay 0.05
                                 end repeat
                             end tell
-                        end tell"#,
-                        key_code
+                        end tell"#
                     )
                 };
 
@@ -1773,7 +1749,7 @@ impl Tool for UiInteractionKit {
                     .arg("-e")
                     .arg(&scroll_script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute swipe: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute swipe: {e}")))?;
 
                 Ok(serde_json::json!({
                     "success": output.status.success(),
@@ -1840,7 +1816,7 @@ impl Tool for UiInteractionKit {
                     // Initialize IDB if not already done
                     eprintln!("[ui_interaction] Initializing IDB wrapper for press_button...");
                     if let Err(e) = IdbWrapper::initialize() {
-                        eprintln!("[ui_interaction] IDB initialization failed: {}", e);
+                        eprintln!("[ui_interaction] IDB initialization failed: {e}");
                         return Ok(serde_json::json!({
                             "success": false,
                             "action": "press_button",
@@ -1856,8 +1832,7 @@ impl Tool for UiInteractionKit {
                     } else {
                         // Ensure companion is running for this device
                         eprintln!(
-                            "[ui_interaction] Ensuring IDB companion is running for device {}...",
-                            device_id
+                            "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
                         );
                         match IdbWrapper::ensure_companion_running(&device_id).await {
                             Ok(_) => {
@@ -1868,15 +1843,13 @@ impl Tool for UiInteractionKit {
                                 match IdbWrapper::press_button(&device_id, button).await {
                                     Ok(result) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB press_button succeeded: '{}'",
-                                            button
+                                            "[ui_interaction] IDB press_button succeeded: '{button}'"
                                         );
                                         return Ok(result);
                                     }
                                     Err(e) => {
                                         eprintln!(
-                                            "[ui_interaction] IDB press_button failed: {}, no fallback available",
-                                            e
+                                            "[ui_interaction] IDB press_button failed: {e}, no fallback available"
                                         );
                                         return Ok(serde_json::json!({
                                             "success": false,
@@ -1895,8 +1868,7 @@ impl Tool for UiInteractionKit {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "[ui_interaction] Failed to ensure companion running: {}",
-                                    e
+                                    "[ui_interaction] Failed to ensure companion running: {e}"
                                 );
                                 return Ok(serde_json::json!({
                                     "success": false,
@@ -1927,7 +1899,7 @@ impl Tool for UiInteractionKit {
                     }));
                 }
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 
@@ -1996,14 +1968,14 @@ impl Tool for ScreenCaptureKit {
                         }
                     })
                     .collect();
-                Box::leak(format!("screenshot_{}_{}", timestamp, random_suffix).into_boxed_str())
+                Box::leak(format!("screenshot_{timestamp}_{random_suffix}").into_boxed_str())
             });
 
-        let path = format!("test_results/{}.png", name);
+        let path = format!("test_results/{name}.png");
 
         // Create directory if it doesn't exist
         std::fs::create_dir_all("test_results")
-            .map_err(|e| TestError::Mcp(format!("Failed to create directory: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to create directory: {e}")))?;
 
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
@@ -2036,7 +2008,7 @@ impl Tool for ScreenCaptureKit {
         let output = Command::new("xcrun")
             .args(["simctl", "io", &device_id, "screenshot", &path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {e}")))?;
 
         let mut result = if output.status.success() {
             serde_json::json!({
@@ -2183,8 +2155,7 @@ impl Tool for UiQueryKit {
                 "note": "Direct text extraction requires XCTest. Screenshots can be analyzed for text content."
             })),
             _ => Err(TestError::Mcp(format!(
-                "Unknown query type: {}",
-                query_type
+                "Unknown query type: {query_type}"
             ))),
         }
     }
@@ -2199,7 +2170,7 @@ fn get_active_device_id() -> Result<String> {
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices", "booted"])
         .output()
-        .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+        .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
@@ -2218,7 +2189,7 @@ fn get_active_device_id() -> Result<String> {
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices"])
         .output()
-        .map_err(|e| TestError::Mcp(format!("Failed to list all devices: {}", e)))?;
+        .map_err(|e| TestError::Mcp(format!("Failed to list all devices: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 

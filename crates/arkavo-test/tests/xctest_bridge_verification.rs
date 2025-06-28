@@ -8,15 +8,14 @@ async fn test_xctest_quick_verify() {
 
     match result {
         Ok(is_functional) => {
-            println!("XCTest bridge functional status: {}", is_functional);
+            println!("XCTest bridge functional status: {is_functional}");
             if !is_functional {
                 println!("XCTest bridge is not functional - this is expected in CI environments");
             }
         }
         Err(e) => {
             println!(
-                "XCTest verification error: {} - this is expected in CI environments",
-                e
+                "XCTest verification error: {e} - this is expected in CI environments"
             );
         }
     }
@@ -62,18 +61,18 @@ async fn test_xctest_device_verification() {
 
     let device_id = device_id.expect("No booted simulator found. Please boot a simulator first.");
 
-    println!("Testing XCTest verification on device: {}", device_id);
+    println!("Testing XCTest verification on device: {device_id}");
 
     let status = XCTestVerifier::verify_device(&device_id)
         .await
         .expect("Verification failed");
 
-    println!("XCTest Status for device {}:", device_id);
+    println!("XCTest Status for device {device_id}:");
     println!("  Functional: {}", status.is_functional);
     println!("  Bundle Installed: {}", status.bundle_installed);
     println!("  Bridge Connectable: {}", status.bridge_connectable);
     if let Some(response_time) = status.swift_response_time {
-        println!("  Response Time: {:?}", response_time);
+        println!("  Response Time: {response_time:?}");
     }
     if let Some(error) = &status.error_details {
         println!("  Error: {} at stage {}", error.message, error.stage);
@@ -99,7 +98,7 @@ fn test_xctest_status_structure() {
 
     // Serialize to JSON to verify it works well for MCP responses
     let json = serde_json::to_string_pretty(&status).unwrap();
-    println!("XCTest status JSON:\n{}", json);
+    println!("XCTest status JSON:\n{json}");
 
     // Verify we can deserialize it back
     let parsed: XCTestStatus = serde_json::from_str(&json).unwrap();

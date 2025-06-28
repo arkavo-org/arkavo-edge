@@ -16,8 +16,7 @@ fn test_xctest_templates_exist() {
 
     assert!(
         swift_template.exists(),
-        "Swift template not found at {:?}",
-        swift_template
+        "Swift template not found at {swift_template:?}"
     );
 
     // Check Info.plist template
@@ -28,8 +27,7 @@ fn test_xctest_templates_exist() {
 
     assert!(
         plist_template.exists(),
-        "Info.plist template not found at {:?}",
-        plist_template
+        "Info.plist template not found at {plist_template:?}"
     );
 
     println!("✅ XCUITest templates found successfully");

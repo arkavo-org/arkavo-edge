@@ -314,7 +314,7 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
         let output = Command::new("grep")
             .args(["-rn", "--include=*.swift", r"!\s*[{.\[(]", path])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to search for patterns: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to search for patterns: {e}")))?;
 
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if let Some((file_line, _)) = line.split_once(':') {

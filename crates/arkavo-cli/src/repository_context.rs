@@ -309,7 +309,7 @@ impl RepositoryContextManager {
         let cache_key = format!(
             "cache:file:{}@{}",
             path_str,
-            self.hash_string(&format!("{:?}", modified))
+            self.hash_string(&format!("{modified:?}"))
         );
 
         // Check in-memory LRU cache
@@ -356,7 +356,7 @@ impl RepositoryContextManager {
         };
 
         if let Err(e) = self.memory_storage.store(memory).await {
-            eprintln!("Warning: Failed to cache file in memory: {}", e);
+            eprintln!("Warning: Failed to cache file in memory: {e}");
         }
 
         // Update LRU cache
@@ -425,7 +425,7 @@ impl RepositoryContextManager {
         result.push_str(&format!("Git repository: {}\n", context.is_git_repo));
 
         if let Some(branch) = &context.current_branch {
-            result.push_str(&format!("Current branch: {}\n", branch));
+            result.push_str(&format!("Current branch: {branch}\n"));
         }
 
         if let Some(status) = &context.git_status {
@@ -457,7 +457,7 @@ impl RepositoryContextManager {
         }
 
         if let Some(project_type) = &context.project_type {
-            result.push_str(&format!("\nProject type: {}\n", project_type));
+            result.push_str(&format!("\nProject type: {project_type}\n"));
         }
 
         if !context.dependencies.is_empty() {

@@ -1,5 +1,3 @@
-#![deny(clippy::all)]
-
 pub mod ai;
 pub mod bridge;
 pub mod execution;

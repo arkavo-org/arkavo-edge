@@ -52,7 +52,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    println!("Found {} changed files:", total_changes);
+    println!("Found {total_changes} changed files:");
     if !status.modified.is_empty() {
         println!("  Modified: {}", status.modified.len());
     }
@@ -90,7 +90,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         match result {
             Ok(oid) => {
-                println!("\nSuccessfully created commit: {}", oid);
+                println!("\nSuccessfully created commit: {oid}");
 
                 // Get the commit message for display
                 if let Ok(commit) = repo.find_commit(oid) {
@@ -104,14 +104,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     match git_manager.publish(&repo) {
                         Ok(_) => println!("Successfully pushed to remote"),
                         Err(e) => {
-                            eprintln!("Failed to push: {}", e);
+                            eprintln!("Failed to push: {e}");
                             eprintln!("You can manually push with: git push");
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("\nFailed to create commit: {}", e);
+                eprintln!("\nFailed to create commit: {e}");
                 if validate && e.to_string().contains("PreCommitFailed") {
                     eprintln!("\nPre-commit validation failed. You can:");
                     eprintln!("  - Fix the issues and try again");

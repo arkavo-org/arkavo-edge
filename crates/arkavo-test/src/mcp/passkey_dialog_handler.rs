@@ -119,9 +119,9 @@ impl Tool for PasskeyDialogHandler {
 
                 // NOTE: simctl io does NOT support tap commands
                 // This functionality requires XCTest bridge or AppleScript
-                return Err(TestError::Mcp(
+                Err(TestError::Mcp(
                     "Accept enrollment requires UI interaction. Use ui_interaction tool with tap action instead. Suggested coordinates: (196.5, 450.0) for center of dialog".to_string()
-                ));
+                ))
             }
             "cancel_dialog" => {
                 // Generic cancel for any passkey-related dialog
@@ -162,9 +162,9 @@ impl Tool for PasskeyDialogHandler {
 
                 // NOTE: simctl io does NOT support tap commands
                 // This functionality requires XCTest bridge or AppleScript
-                return Err(TestError::Mcp(
+                Err(TestError::Mcp(
                     "Tap settings requires UI interaction. Use ui_interaction tool with tap action instead. Suggested coordinates: (293.0, 450.0) for right side of dialog".to_string()
-                ));
+                ))
             }
             _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }

@@ -180,7 +180,7 @@ impl BusinessReporter {
 
     fn render_json(&self, data: &ReportData) -> Result<String> {
         serde_json::to_string_pretty(data)
-            .map_err(|e| TestError::Reporting(format!("Failed to render JSON: {}", e)))
+            .map_err(|e| TestError::Reporting(format!("Failed to render JSON: {e}")))
     }
 
     fn render_slack(&self, data: &ReportData) -> Result<String> {

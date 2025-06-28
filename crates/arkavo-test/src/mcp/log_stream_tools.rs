@@ -314,7 +314,7 @@ impl Tool for LogStreamKit {
                 self.read_recent_logs(stream_id, limit).await
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 
@@ -389,7 +389,7 @@ impl Tool for AppDiagnosticExporter {
         let launch_output = Command::new("xcrun")
             .args(["simctl", "launch", &device_id, bundle_id])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
         if !launch_output.status.success() {
             return Ok(json!({
@@ -409,7 +409,7 @@ impl Tool for AppDiagnosticExporter {
         let output = Command::new("xcrun")
             .args(["simctl", "openurl", &device_id, export_url])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to open diagnostic export URL: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to open diagnostic export URL: {e}")))?;
 
         if !output.status.success() {
             return Ok(json!({

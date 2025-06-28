@@ -182,7 +182,7 @@ impl Tool for UrlDialogHandler {
                         &device_id,
                     ])
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute tap: {e}")))?;
 
                 Ok(json!({
                     "success": output.status.success(),
@@ -204,8 +204,7 @@ impl Tool for UrlDialogHandler {
                     .unwrap_or(2);
 
                 eprintln!(
-                    "[UrlDialogHandler] Waiting {}s for URL dialog to appear...",
-                    wait_timeout
+                    "[UrlDialogHandler] Waiting {wait_timeout}s for URL dialog to appear..."
                 );
                 thread::sleep(Duration::from_secs(wait_timeout));
 
@@ -224,7 +223,7 @@ impl Tool for UrlDialogHandler {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

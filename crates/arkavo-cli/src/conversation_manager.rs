@@ -165,7 +165,7 @@ impl ConversationManager {
         progress.set_message("Loading conversation context...");
 
         // Query recent messages for this session
-        let query = format!("session_id:{}", session_id);
+        let query = format!("session_id:{session_id}");
         let results = self
             .memory_storage
             .search(&query, 100, Some("conversation"))
@@ -193,7 +193,7 @@ impl ConversationManager {
             progress.set_message("Checking for conversation summary...");
 
             // Look for existing summary
-            let summary_query = format!("session_id:{} type:summary", session_id);
+            let summary_query = format!("session_id:{session_id} type:summary");
             let summaries = self
                 .memory_storage
                 .search(&summary_query, 5, Some("conversation"))
@@ -277,7 +277,7 @@ impl ConversationManager {
             id: Uuid::new_v4(),
             session_id,
             role: "system".to_string(),
-            content: format!("Previous conversation summary:\n{}", summary),
+            content: format!("Previous conversation summary:\n{summary}"),
             timestamp: Utc::now(),
             token_count: self.count_tokens(&summary),
             is_summary: true,
@@ -323,7 +323,7 @@ impl ConversationManager {
 
     pub async fn switch_session(&mut self, session_id: Uuid) -> anyhow::Result<()> {
         // Verify session exists
-        let query = format!("session_id:{}", session_id);
+        let query = format!("session_id:{session_id}");
         let results = self
             .memory_storage
             .search(&query, 1, Some("conversation"))

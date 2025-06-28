@@ -152,8 +152,7 @@ impl XCTestVerifier {
             Err(e) => {
                 // If the standard approach fails, just check if we can run any xctest
                 eprintln!(
-                    "Standard XCTest launch failed: {}, trying minimal verification",
-                    e
+                    "Standard XCTest launch failed: {e}, trying minimal verification"
                 );
 
                 // Check if device can run tests at all
@@ -178,7 +177,7 @@ impl XCTestVerifier {
         let output = Command::new("xcrun")
             .args(["simctl", "list", "devices", "booted", "-j"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to list devices: {e}")))?;
 
         if !output.status.success() {
             return Ok(false);
@@ -186,7 +185,7 @@ impl XCTestVerifier {
 
         let json_str = String::from_utf8_lossy(&output.stdout);
         let devices: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         // Find first booted device
         if let Some(devices_map) = devices.get("devices").and_then(|d| d.as_object()) {

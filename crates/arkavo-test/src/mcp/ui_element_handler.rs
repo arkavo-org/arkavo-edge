@@ -135,17 +135,16 @@ impl UiElementHandler {
             tell application "System Events"
                 tell process "Simulator"
                     set frontmost to true
-                    click at {{{}, {}}} with pressing
+                    click at {{{x}, {y}}} with pressing
                 end tell
-            end tell"#,
-            x, y
+            end tell"#
         );
 
         let output = Command::new("osascript")
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute long press: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute long press: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -344,7 +343,7 @@ impl Tool for UiElementHandler {
                     }
                 }))
             }
-            _ => Err(TestError::Mcp(format!("Unsupported action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unsupported action: {action}"))),
         }
     }
 

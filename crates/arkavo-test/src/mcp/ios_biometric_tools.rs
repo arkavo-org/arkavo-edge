@@ -198,7 +198,7 @@ impl Tool for BiometricKit {
                         tell application "System Events"
                             tell process "Simulator"
                                 -- Click to ensure menu item is checked
-                                set enrollMenuItem to menu item "Enrolled" of menu "{}" of menu item "{}" of menu "Features" of menu bar 1
+                                set enrollMenuItem to menu item "Enrolled" of menu "{menu_name}" of menu item "{menu_name}" of menu "Features" of menu bar 1
                                 if exists enrollMenuItem then
                                     -- Check if not already enrolled
                                     if value of attribute "AXMenuItemMarkChar" of enrollMenuItem is not "✓" then
@@ -213,8 +213,7 @@ impl Tool for BiometricKit {
                             end tell
                         end tell
                     end tell
-                    "#,
-                    menu_name, menu_name
+                    "#
                 );
 
                 let result = Command::new("osascript")
@@ -469,10 +468,6 @@ impl Tool for SystemDialogKit {
         // Map action to common button texts
         let button = match (action, button_text) {
             (_, Some(text)) => text,
-            ("accept", _) => "OK",
-            ("dismiss", _) => "Cancel",
-            ("allow", _) => "Allow",
-            ("deny", _) => "Don't Allow",
             _ => "OK",
         };
 
@@ -485,14 +480,14 @@ impl Tool for SystemDialogKit {
                 tell application "System Events"
                     tell process "Simulator"
                         tell window 1
-                            if exists button "{}" then
-                                click button "{}"
+                            if exists button "{button}" then
+                                click button "{button}"
                                 return "success"
                             else
                                 -- Try to find any button containing the text
                                 set allButtons to buttons
                                 repeat with aButton in allButtons
-                                    if name of aButton contains "{}" then
+                                    if name of aButton contains "{button}" then
                                         click aButton
                                         return "success"
                                     end if
@@ -503,8 +498,7 @@ impl Tool for SystemDialogKit {
                     end tell
                 end tell
             end tell
-            "#,
-            button, button, button
+            "#
         );
 
         let result = Command::new("osascript")

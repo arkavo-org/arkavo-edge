@@ -139,7 +139,7 @@ impl SimulatorTap {
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
 
             // We'd need a proper move event here, for now just track position
-            eprintln!("Swipe position: ({}, {})", x, y);
+            eprintln!("Swipe position: ({x}, {y})");
         }
 
         // End touch

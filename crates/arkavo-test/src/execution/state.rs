@@ -45,7 +45,7 @@ impl StateManager {
 
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshot: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshot: {e}")))?
             .insert(id.clone(), snapshot);
 
         Ok(id)
@@ -86,7 +86,7 @@ impl StateManager {
     pub fn delete_snapshot(&self, id: &str) -> Result<()> {
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {e}")))?
             .remove(id)
             .ok_or_else(|| TestError::Execution(format!("Snapshot not found: {id}")))?;
 
@@ -121,7 +121,7 @@ impl StateManager {
 
         self.snapshots
             .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {}", e)))?
+            .map_err(|e| TestError::Execution(format!("Failed to write snapshots: {e}")))?
             .insert(id.clone(), new_snapshot);
 
         Ok(id)

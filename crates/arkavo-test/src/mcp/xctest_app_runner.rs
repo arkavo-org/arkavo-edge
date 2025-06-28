@@ -43,11 +43,11 @@ impl XCTestAppRunner {
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>{}</string>
+    <string>{app_name}</string>
     <key>CFBundleIdentifier</key>
     <string>com.arkavo.testapp</string>
     <key>CFBundleName</key>
-    <string>{}</string>
+    <string>{app_name}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -66,8 +66,7 @@ impl XCTestAppRunner {
         <false/>
     </dict>
 </dict>
-</plist>"#,
-            app_name, app_name
+</plist>"#
         );
 
         fs::write(app_dir.join("Info.plist"), info_plist)?;

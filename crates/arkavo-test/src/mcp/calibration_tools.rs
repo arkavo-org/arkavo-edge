@@ -69,7 +69,7 @@ impl CalibrationTool {
 #[async_trait]
 impl Tool for CalibrationTool {
     async fn execute(&self, params: Value) -> Result<Value> {
-        eprintln!("[CalibrationTool] Execute called with params: {:?}", params);
+        eprintln!("[CalibrationTool] Execute called with params: {params:?}");
         let action = params["action"]
             .as_str()
             .ok_or_else(|| TestError::Mcp("action is required".to_string()))?;
@@ -497,7 +497,7 @@ impl Tool for CalibrationTool {
                     "devices": devices,
                     "count": devices.len()
                 });
-                eprintln!("[CalibrationTool] Returning response: {:?}", response);
+                eprintln!("[CalibrationTool] Returning response: {response:?}");
                 Ok(response)
             }
 
@@ -672,7 +672,7 @@ impl CalibrationTool {
         let install_output = Command::new("xcrun")
             .args(["simctl", "install", device_id, app_path.to_str().unwrap()])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to install app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to install app: {e}")))?;
 
         if !install_output.status.success() {
             let error_msg = String::from_utf8_lossy(&install_output.stderr);
@@ -695,13 +695,12 @@ impl CalibrationTool {
         let launch_output = Command::new("xcrun")
             .args(["simctl", "launch", device_id, "com.arkavo.reference"])
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
         if !launch_output.status.success() {
             let error_msg = String::from_utf8_lossy(&launch_output.stderr);
             eprintln!(
-                "[CalibrationTool] Warning: Failed to launch app: {}",
-                error_msg
+                "[CalibrationTool] Warning: Failed to launch app: {error_msg}"
             );
             // Don't fail the operation, just warn
         } else {

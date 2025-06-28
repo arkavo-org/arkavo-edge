@@ -24,8 +24,7 @@ async fn test_tap_checkbox() {
                 let error_code = error["code"].as_str().unwrap_or("");
                 assert!(
                     error_code == "DEVICE_ERROR" || error_code == "CHECKBOX_TAP_FAILED",
-                    "Unexpected error code: {}",
-                    error_code
+                    "Unexpected error code: {error_code}"
                 );
                 return;
             }
@@ -94,8 +93,7 @@ async fn test_double_tap() {
                 let error_code = error["code"].as_str().unwrap_or("");
                 assert!(
                     error_code == "DEVICE_ERROR" || error_code == "DOUBLE_TAP_FAILED",
-                    "Unexpected error code: {}",
-                    error_code
+                    "Unexpected error code: {error_code}"
                 );
             } else if result["success"].as_bool().unwrap_or(false) {
                 assert_eq!(result["action"], "double_tap");
@@ -125,13 +123,12 @@ async fn test_long_press() {
     match handler.execute(params).await {
         Ok(result) => {
             // Debug output
-            eprintln!("test_long_press result: {:?}", result);
+            eprintln!("test_long_press result: {result:?}");
 
             // Check structure
             assert!(
                 result.is_object(),
-                "Expected JSON object, got: {:?}",
-                result
+                "Expected JSON object, got: {result:?}"
             );
 
             // In test environment, we might get various types of errors
@@ -140,9 +137,7 @@ async fn test_long_press() {
                 let error_code = error["code"].as_str().unwrap_or("");
                 assert!(
                     error_code == "DEVICE_ERROR" || error_code == "LONG_PRESS_FAILED",
-                    "Unexpected error code: {} in error: {:?}",
-                    error_code,
-                    error
+                    "Unexpected error code: {error_code} in error: {error:?}"
                 );
                 return;
             }
@@ -156,14 +151,13 @@ async fn test_long_press() {
                 // Handle failure case
                 assert!(
                     result.get("error").is_some(),
-                    "Expected either success or error in result: {:?}",
-                    result
+                    "Expected either success or error in result: {result:?}"
                 );
             }
         }
         Err(e) => {
             // In CI without display, the handler itself might return an error
-            eprintln!("Handler returned error: {:?}", e);
+            eprintln!("Handler returned error: {e:?}");
             // This is acceptable in CI environment
         }
     }

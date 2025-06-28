@@ -55,8 +55,7 @@ impl IdbPortManager {
                 if parts.len() > 1 && parts[0].contains("idb_compan") {
                     let pid = parts[1];
                     eprintln!(
-                        "[IdbPortManager] Found idb_companion process {} on port {}, killing...",
-                        pid, port
+                        "[IdbPortManager] Found idb_companion process {pid} on port {port}, killing...",
                     );
 
                     let _ = Command::new("kill").arg("-9").arg(pid).output();
@@ -81,8 +80,7 @@ impl IdbPortManager {
         // First, try to clean up any existing IDB on default port
         if !Self::is_port_available(default_port) {
             eprintln!(
-                "[IdbPortManager] Default port {} is in use, attempting cleanup...",
-                default_port
+                "[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",
             );
             Self::kill_idb_on_port(default_port)?;
 
@@ -98,7 +96,7 @@ impl IdbPortManager {
 
         // If default port is still not available, find another
         if let Some(port) = Self::find_available_port(default_port + 1, max_port) {
-            eprintln!("[IdbPortManager] Using alternate port: {}", port);
+            eprintln!("[IdbPortManager] Using alternate port: {port}");
             Self::allocate_port(port);
             Ok(port)
         } else {

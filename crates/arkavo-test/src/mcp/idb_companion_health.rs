@@ -196,8 +196,7 @@ impl IdbCompanionHealth {
             metrics.consecutive_failures = 0;
             metrics.last_failed_tap = None;
             eprintln!(
-                "[IdbCompanionHealth] Reset metrics for device {}",
-                device_id
+                "[IdbCompanionHealth] Reset metrics for device {device_id}"
             );
         }
     }
@@ -254,8 +253,7 @@ impl IdbCompanionHealth {
     /// Perform recovery for unhealthy companion
     pub async fn recover_companion(device_id: &str) -> Result<()> {
         eprintln!(
-            "[IdbCompanionHealth] Starting recovery for device {}",
-            device_id
+            "[IdbCompanionHealth] Starting recovery for device {device_id}"
         );
 
         #[cfg(target_os = "macos")]
@@ -289,8 +287,7 @@ impl IdbCompanionHealth {
             Self::reset_metrics(device_id);
 
             eprintln!(
-                "[IdbCompanionHealth] Recovery completed for device {}",
-                device_id
+                "[IdbCompanionHealth] Recovery completed for device {device_id}"
             );
         }
 
