@@ -9,7 +9,7 @@ pub struct XcodeVersion {
 }
 
 impl XcodeVersion {
-    pub fn new(major: u32, minor: u32, patch: u32) -> Self {
+    pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
         Self {
             major,
             minor,
@@ -57,52 +57,52 @@ impl XcodeVersion {
         Err(TestError::Mcp("Failed to parse Xcode version".to_string()))
     }
 
-    pub fn supports_bootstatus(&self) -> bool {
+    pub const fn supports_bootstatus(&self) -> bool {
         // bootstatus was added in Xcode 11
         self.major >= 11
     }
 
-    pub fn supports_privacy(&self) -> bool {
+    pub const fn supports_privacy(&self) -> bool {
         // privacy commands were added in Xcode 11.4
         self.major > 11 || (self.major == 11 && self.minor >= 4)
     }
 
-    pub fn supports_ui_commands(&self) -> bool {
+    pub const fn supports_ui_commands(&self) -> bool {
         // UI commands were added in Xcode 15
         self.major >= 15
     }
 
-    pub fn supports_device_appearance(&self) -> bool {
+    pub const fn supports_device_appearance(&self) -> bool {
         // Device appearance commands were added in Xcode 13
         self.major >= 13
     }
 
-    pub fn supports_push_notification(&self) -> bool {
+    pub const fn supports_push_notification(&self) -> bool {
         // Push notification support was added in Xcode 11.4
         self.major > 11 || (self.major == 11 && self.minor >= 4)
     }
 
-    pub fn supports_clone(&self) -> bool {
+    pub const fn supports_clone(&self) -> bool {
         // Clone was added in Xcode 12
         self.major >= 12
     }
 
-    pub fn supports_device_pair(&self) -> bool {
+    pub const fn supports_device_pair(&self) -> bool {
         // Device pairing was added in Xcode 14
         self.major >= 14
     }
 
-    pub fn supports_device_focus(&self) -> bool {
+    pub const fn supports_device_focus(&self) -> bool {
         // Device focus mode was added in Xcode 16
         self.major >= 16
     }
 
-    pub fn supports_device_streaming(&self) -> bool {
+    pub const fn supports_device_streaming(&self) -> bool {
         // Device streaming was added in Xcode 25
         self.major >= 25
     }
 
-    pub fn supports_enhanced_ui_interaction(&self) -> bool {
+    pub const fn supports_enhanced_ui_interaction(&self) -> bool {
         // Enhanced UI interaction was added in Xcode 26
         self.major >= 26
     }

@@ -163,7 +163,7 @@ impl AnalysisEngine {
         response_json["content"][0]["text"]
             .as_str()
             .ok_or_else(|| TestError::Ai("Invalid response format".to_string()))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
     }
 
     fn parse_analysis_response(&self, response: &str) -> Result<DomainAnalysis> {

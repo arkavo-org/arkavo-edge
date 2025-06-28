@@ -337,7 +337,7 @@ impl ConversationManager {
         Ok(())
     }
 
-    pub fn get_current_session_id(&self) -> Option<Uuid> {
+    pub const fn get_current_session_id(&self) -> Option<Uuid> {
         self.current_session_id
     }
 

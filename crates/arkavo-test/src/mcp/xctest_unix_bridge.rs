@@ -8,7 +8,7 @@ use tokio::net::{UnixListener, UnixStream, unix::OwnedWriteHalf};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CommandType {
     Tap,
@@ -60,7 +60,7 @@ pub struct CommandParameters {
     pub press_duration: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TargetType {
     Coordinate,
@@ -117,7 +117,7 @@ impl XCTestUnixBridge {
     }
 
     /// Check if the bridge is connected to the XCTest runner
-    pub fn is_connected(&self) -> bool {
+    pub const fn is_connected(&self) -> bool {
         self.client_stream.is_some()
     }
 

@@ -53,12 +53,12 @@ impl Tool for CoordinateConverterKit {
     async fn execute(&self, params: Value) -> Result<Value> {
         let x = params
             .get("x")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
         let y = params
             .get("y")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
         let from = params

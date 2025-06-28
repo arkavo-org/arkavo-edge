@@ -46,7 +46,7 @@ impl AxpHarnessBuilder {
     }
 
     /// Get iOS 26 beta compilation guidance
-    pub fn get_ios26_beta_guidance() -> &'static str {
+    pub const fn get_ios26_beta_guidance() -> &'static str {
         axp::constants::IOS26_BETA_COMPILATION_GUIDANCE
     }
 

@@ -54,22 +54,17 @@ impl Tool for DeepLinkKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -200,22 +195,17 @@ impl Tool for AppLauncherKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -257,10 +247,10 @@ impl Tool for AppLauncherKit {
                     "action": "launch",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -281,10 +271,10 @@ impl Tool for AppLauncherKit {
                     "action": "terminate",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -305,10 +295,10 @@ impl Tool for AppLauncherKit {
                     "action": "install",
                     "app_path": app_path,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -329,10 +319,10 @@ impl Tool for AppLauncherKit {
                     "action": "uninstall",
                     "bundle_id": bundle_id,
                     "device_id": device_id,
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }
@@ -383,10 +373,10 @@ impl Tool for AppLauncherKit {
                     } else {
                         None
                     },
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
                     }
                 }))
             }

@@ -140,7 +140,7 @@ impl IntelligentRunner {
         };
 
         match execution_result {
-            Ok(_) => {
+            Ok(()) => {
                 result.failed = false;
             }
             Err(error) => {
@@ -286,7 +286,7 @@ pub struct PropertyReport {
 }
 
 impl PropertyReport {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             properties: Vec::new(),
         }
@@ -312,7 +312,7 @@ pub struct EdgeCaseReport {
 }
 
 impl EdgeCaseReport {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             edge_cases: Vec::new(),
         }

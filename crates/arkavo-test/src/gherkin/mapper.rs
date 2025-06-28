@@ -79,7 +79,7 @@ Return ONLY the JSON array, no other text."#,
         let tools_list: Vec<&ToolDefinition> = self.tool_registry.values().collect();
 
         let prompt = format!(
-            r#"Convert this natural language test description to tool calls.
+            r"Convert this natural language test description to tool calls.
 
 Description: {}
 
@@ -87,7 +87,7 @@ Available tools:
 {}
 
 Return a JSON array of actions with tool_name, parameters, and optional expected_outcome.
-Return ONLY the JSON array."#,
+Return ONLY the JSON array.",
             text,
             serde_json::to_string_pretty(&tools_list).unwrap_or_default()
         );

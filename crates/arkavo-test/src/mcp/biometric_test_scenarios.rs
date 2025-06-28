@@ -61,7 +61,7 @@ impl BiometricTestScenario {
             .map_err(|e| TestError::Mcp(format!("Failed to check enrollment: {e}")))?;
 
         let status = String::from_utf8_lossy(&output.stdout);
-        Ok(status.contains("1"))
+        Ok(status.contains('1'))
     }
 }
 

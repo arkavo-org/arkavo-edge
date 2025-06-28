@@ -137,7 +137,7 @@ impl Tool for DeviceManagementKit {
 
                 let timeout_secs = params
                     .get("timeout_seconds")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(60.0);
 
                 let timeout = Duration::from_secs_f64(timeout_secs);
@@ -269,7 +269,7 @@ impl Tool for DeviceManagementKit {
             "cleanup_unhealthy" => {
                 let dry_run = params
                     .get("dry_run")
-                    .and_then(|v| v.as_bool())
+                    .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
 
                 eprintln!("[DeviceManagement] Running cleanup_unhealthy (dry_run: {dry_run})");

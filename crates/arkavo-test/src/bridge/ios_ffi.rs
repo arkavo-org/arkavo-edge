@@ -22,7 +22,7 @@ impl RustTestHarness {
         }
     }
 
-    pub fn connect_ios_bridge(&mut self, bridge: *mut IOSBridge) {
+    pub const fn connect_ios_bridge(&mut self, bridge: *mut IOSBridge) {
         self.bridge = Some(bridge);
     }
 
@@ -176,7 +176,7 @@ impl RustTestHarness {
 
         unsafe {
             let mut size: usize = 0;
-            let snapshot_ptr = ios_bridge_create_snapshot(self.bridge.unwrap(), &mut size);
+            let snapshot_ptr = ios_bridge_create_snapshot(self.bridge.unwrap(), &raw mut size);
 
             if snapshot_ptr.is_null() {
                 return Err(TestError::Bridge("Failed to create snapshot".to_string()));
@@ -198,7 +198,7 @@ impl RustTestHarness {
         unsafe {
             ios_bridge_restore_snapshot(
                 self.bridge.unwrap(),
-                data.as_ptr() as *const c_void,
+                data.as_ptr().cast::<c_void>(),
                 data.len(),
             );
         }

@@ -43,7 +43,7 @@ impl Tool for XCTestStatusKit {
         let device_id = params.get("device_id").and_then(|v| v.as_str());
         let find_best = params
             .get("find_best")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         if find_best {
@@ -54,9 +54,9 @@ impl Tool for XCTestStatusKit {
                 Ok(Some(best_device)) => Ok(serde_json::json!({
                     "success": true,
                     "best_device": best_device,
-                    "recommendation": if best_device.xctest_status.as_ref().map(|s| s.is_functional).unwrap_or(false) {
+                    "recommendation": if best_device.xctest_status.as_ref().is_some_and(|s| s.is_functional) {
                         "This device is ready for XCTest operations"
-                    } else if best_device.xctest_status.as_ref().map(|s| s.bundle_installed).unwrap_or(false) {
+                    } else if best_device.xctest_status.as_ref().is_some_and(|s| s.bundle_installed) {
                         "XCTest bundle is installed but not functional. Run setup_xcuitest to fix."
                     } else {
                         "No XCTest bundle installed. Run setup_xcuitest to install."
@@ -116,8 +116,7 @@ impl Tool for XCTestStatusKit {
                         .filter(|d| {
                             d.xctest_status
                                 .as_ref()
-                                .map(|s| s.is_functional)
-                                .unwrap_or(false)
+                                .is_some_and(|s| s.is_functional)
                         })
                         .count();
 
@@ -126,8 +125,7 @@ impl Tool for XCTestStatusKit {
                         .filter(|d| {
                             d.xctest_status
                                 .as_ref()
-                                .map(|s| s.bundle_installed)
-                                .unwrap_or(false)
+                                .is_some_and(|s| s.bundle_installed)
                         })
                         .count();
 

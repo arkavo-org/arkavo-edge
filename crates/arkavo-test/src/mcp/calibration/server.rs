@@ -1,4 +1,4 @@
-use super::*;
+use super::{Serialize, Deserialize, HashMap, CalibrationError, CalibrationAgent, CalibrationConfig, SafeArea, DeviceProfile, CalibrationResult, InteractionAdjustment, ValidationIssue, IssueSeverity, ValidationReport};
 use crate::mcp::calibration::agent::CalibrationAgentImpl;
 use crate::mcp::calibration::data::CalibrationDataStore;
 use crate::mcp::calibration::reference_app::ReferenceAppInterface;
@@ -157,7 +157,7 @@ impl CalibrationServer {
                         "[CalibrationServer::check_idb_health] list_targets succeeded, checking for device {device_id}..."
                     );
                     let device_found = targets.as_array()
-                        .map(|arr| {
+                        .is_some_and(|arr| {
                             eprintln!("[CalibrationServer::check_idb_health] Found {} targets", arr.len());
                             arr.iter().any(|t| {
                                 let udid = t.get("udid").and_then(|u| u.as_str()).unwrap_or("unknown");
@@ -167,8 +167,7 @@ impl CalibrationServer {
                                 }
                                 matches
                             })
-                        })
-                        .unwrap_or(false);
+                        });
                     eprintln!(
                         "[CalibrationServer::check_idb_health] Device {device_id} found in targets: {device_found}"
                     );
@@ -233,7 +232,7 @@ impl CalibrationServer {
                                 "[CalibrationServer::check_idb_health] Attempting stuck companion recovery..."
                             );
                             match self.idb_recovery.recover_stuck_companion().await {
-                                Ok(_) => eprintln!(
+                                Ok(()) => eprintln!(
                                     "[CalibrationServer::check_idb_health] Stuck companion recovery completed"
                                 ),
                                 Err(e) => eprintln!(
@@ -246,7 +245,7 @@ impl CalibrationServer {
                                 "[CalibrationServer::check_idb_health] Attempting to force reconnect device..."
                             );
                             match self.idb_recovery.force_reconnect_device(device_id).await {
-                                Ok(_) => eprintln!(
+                                Ok(()) => eprintln!(
                                     "[CalibrationServer::check_idb_health] Device reconnection completed"
                                 ),
                                 Err(e) => eprintln!(
@@ -400,7 +399,7 @@ impl CalibrationServer {
         tokio::spawn(async move {
             eprintln!("Calibration: Background task started for session {session_id_clone}");
             match server.run_calibration(&session_id_clone).await {
-                Ok(_) => {
+                Ok(()) => {
                     eprintln!("Calibration: Completed successfully for session {session_id_clone}");
                 }
                 Err(e) => {
@@ -487,13 +486,12 @@ impl CalibrationServer {
                         let sessions = self.active_calibrations.read().await;
                         sessions
                             .get(session_id)
-                            .map(|s| s.idb_status.clone())
-                            .unwrap_or(IdbStatus {
+                            .map_or(IdbStatus {
                                 connected: false,
                                 last_health_check: Some(chrono::Utc::now()),
                                 last_error: Some("Unknown status".to_string()),
                                 companion_running: false,
-                            })
+                            }, |s| s.idb_status.clone())
                     };
 
                     let mut error_details =
@@ -768,12 +766,11 @@ impl CalibrationServer {
                                         self.record_tap(session_id).await;
                                         last_successful_tap = std::time::Instant::now();
                                         continue;
-                                    } else {
-                                        eprintln!(
-                                            "Calibration: Retry tap {} failed after recovery",
-                                            idx + 1
-                                        );
                                     }
+                                    eprintln!(
+                                        "Calibration: Retry tap {} failed after recovery",
+                                        idx + 1
+                                    );
                                 }
                             }
                         }
@@ -900,7 +897,7 @@ impl CalibrationServer {
         // Get the tap count from the session
         let tap_count = {
             let sessions = self.active_calibrations.read().await;
-            sessions.get(session_id).map(|s| s.tap_count).unwrap_or(0)
+            sessions.get(session_id).map_or(0, |s| s.tap_count)
         };
 
         // Phase 5: Generate calibration result with offset
@@ -998,7 +995,7 @@ impl CalibrationServer {
         // Create a validation report based on actual tap results
         let failed_taps = expected_taps.saturating_sub(tap_count);
         let accuracy = if expected_taps > 0 {
-            (tap_count as f64 / expected_taps as f64) * 100.0
+            (f64::from(tap_count) / f64::from(expected_taps)) * 100.0
         } else {
             0.0
         };
@@ -1168,7 +1165,7 @@ pub struct CalibrationAPI {
 }
 
 impl CalibrationAPI {
-    pub fn new(server: CalibrationServer) -> Self {
+    pub const fn new(server: CalibrationServer) -> Self {
         Self { server }
     }
 

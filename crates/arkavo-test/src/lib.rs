@@ -56,11 +56,11 @@ impl TestHarness {
         })
     }
 
-    pub fn mcp_server(&self) -> &Arc<mcp::server::McpTestServer> {
+    pub const fn mcp_server(&self) -> &Arc<mcp::server::McpTestServer> {
         &self.mcp_server
     }
 
-    pub fn state_manager(&self) -> &Arc<execution::state::StateManager> {
+    pub const fn state_manager(&self) -> &Arc<execution::state::StateManager> {
         &self.state_manager
     }
 

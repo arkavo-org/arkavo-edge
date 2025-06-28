@@ -42,7 +42,7 @@ pub struct StepReport {
     pub duration: Duration,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TestStatus {
     Passed,

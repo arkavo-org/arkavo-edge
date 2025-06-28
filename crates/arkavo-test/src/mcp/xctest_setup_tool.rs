@@ -71,7 +71,7 @@ impl Tool for XCTestSetupKit {
 
         let force_reinstall = params
             .get("force_reinstall")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         // Ignore target_app_bundle_id even if provided - it causes security restrictions

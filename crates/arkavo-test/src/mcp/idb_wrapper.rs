@@ -5,7 +5,6 @@
 // This module embeds and wraps the idb_companion binary from Meta's idb project.
 // See THIRD-PARTY-LICENSES.md for full license text.
 
-use once_cell::sync::Lazy;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
@@ -35,14 +34,14 @@ static IDB_COMPANION_BYTES: &[u8] = &[];
 static IDB_FRAMEWORKS_ARCHIVE: &[u8] = &[];
 
 // Global path to extracted binary
-static EXTRACTED_IDB_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
+static EXTRACTED_IDB_PATH: std::sync::LazyLock<Mutex<Option<PathBuf>>> = std::sync::LazyLock::new(|| Mutex::new(None));
 
 // Track connected devices for idb_companion
-pub(crate) static CONNECTED_DEVICES: Lazy<Mutex<std::collections::HashSet<String>>> =
-    Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+pub(crate) static CONNECTED_DEVICES: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
 // Track if we should use system IDB due to framework conflicts
-static USE_SYSTEM_IDB: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+static USE_SYSTEM_IDB: std::sync::LazyLock<Mutex<bool>> = std::sync::LazyLock::new(|| Mutex::new(false));
 
 /// Wrapper around the embedded idb_companion binary
 pub struct IdbWrapper;
@@ -107,13 +106,12 @@ impl IdbWrapper {
                         existing_path.display()
                     );
                     return Ok(());
-                } else {
-                    eprintln!(
-                        "[IdbWrapper::initialize_with_preference] Previous extraction at {} no longer exists, re-extracting...",
-                        existing_path.display()
-                    );
-                    *path_guard = None;
                 }
+                eprintln!(
+                    "[IdbWrapper::initialize_with_preference] Previous extraction at {} no longer exists, re-extracting...",
+                    existing_path.display()
+                );
+                *path_guard = None;
             }
 
             // Check if we have a real binary or just a placeholder
@@ -191,7 +189,13 @@ impl IdbWrapper {
             // Extract embedded frameworks
             #[cfg(target_os = "macos")]
             {
-                if !IDB_FRAMEWORKS_ARCHIVE.is_empty() {
+                if IDB_FRAMEWORKS_ARCHIVE.is_empty() {
+                    eprintln!("[IdbWrapper] Warning: No embedded frameworks archive found");
+                    // Try to set up framework symlinks to system frameworks
+                    if let Err(e) = frameworks_data::setup_framework_links(&temp_dir) {
+                        eprintln!("[IdbWrapper] Warning: {e}");
+                    }
+                } else {
                     eprintln!(
                         "[IdbWrapper] Extracting embedded frameworks archive ({} bytes)",
                         IDB_FRAMEWORKS_ARCHIVE.len()
@@ -243,12 +247,6 @@ impl IdbWrapper {
                         eprintln!(
                             "[IdbWrapper] IDB companion may fail due to missing framework dependencies"
                         );
-                    }
-                } else {
-                    eprintln!("[IdbWrapper] Warning: No embedded frameworks archive found");
-                    // Try to set up framework symlinks to system frameworks
-                    if let Err(e) = frameworks_data::setup_framework_links(&temp_dir) {
-                        eprintln!("[IdbWrapper] Warning: {e}");
                     }
                 }
             }
@@ -443,12 +441,12 @@ impl IdbWrapper {
 
     /// Ensure the companion server is running for a specific device
     pub async fn ensure_companion_running(device_id: &str) -> Result<std::process::Child> {
-        use once_cell::sync::Lazy;
+        
         use std::sync::Mutex;
 
         // Track running companion processes by device
-        static COMPANION_PROCESSES: Lazy<Mutex<HashMap<String, std::process::Child>>> =
-            Lazy::new(|| Mutex::new(HashMap::new()));
+        static COMPANION_PROCESSES: std::sync::LazyLock<Mutex<HashMap<String, std::process::Child>>> =
+            std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
         // Check and start companion in a separate scope to release the lock before await
         let _device_id_owned = device_id.to_string();
@@ -750,11 +748,10 @@ impl IdbWrapper {
             if let Ok(targets) = serde_json::from_str::<serde_json::Value>(&output_str) {
                 let device_found = targets
                     .as_array()
-                    .map(|arr| {
+                    .is_some_and(|arr| {
                         arr.iter()
                             .any(|t| t.get("udid").and_then(|u| u.as_str()) == Some(device_id))
-                    })
-                    .unwrap_or(false);
+                    });
 
                 if device_found {
                     // For simulators, try to explicitly connect to ensure IDB companion is ready
@@ -994,12 +991,11 @@ impl IdbWrapper {
                             "System idb_companion tap also failed: {retry_stderr}"
                         )));
                     }
-                } else {
-                    return Err(TestError::Mcp(
-                        "Framework conflict detected: IDB frameworks conflicting with system frameworks. \
-                         System IDB not found. Please install it via 'brew install facebook/fb/idb-companion'.".to_string()
-                    ));
                 }
+                return Err(TestError::Mcp(
+                    "Framework conflict detected: IDB frameworks conflicting with system frameworks. \
+                     System IDB not found. Please install it via 'brew install facebook/fb/idb-companion'.".to_string()
+                ));
             }
 
             // Check for port binding issues

@@ -1,11 +1,10 @@
 use crate::{Result, TestError};
-use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::net::TcpListener;
 use std::process::Command;
 use std::sync::Mutex;
 
-static ALLOCATED_PORTS: Lazy<Mutex<HashSet<u16>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static ALLOCATED_PORTS: std::sync::LazyLock<Mutex<HashSet<u16>>> = std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
 
 pub struct IdbPortManager;
 
@@ -76,18 +75,17 @@ impl IdbPortManager {
         let max_port = 10892;
 
         // First, try to clean up any existing IDB on default port
-        if !Self::is_port_available(default_port) {
-            eprintln!(
-                "[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",
-            );
-            Self::kill_idb_on_port(default_port)?;
+        if Self::is_port_available(default_port) {
+            Self::allocate_port(default_port);
+            return Ok(default_port);
+        }
+        eprintln!(
+            "[IdbPortManager] Default port {default_port} is in use, attempting cleanup...",
+        );
+        Self::kill_idb_on_port(default_port)?;
 
-            // Check again after cleanup
-            if Self::is_port_available(default_port) {
-                Self::allocate_port(default_port);
-                return Ok(default_port);
-            }
-        } else {
+        // Check again after cleanup
+        if Self::is_port_available(default_port) {
             Self::allocate_port(default_port);
             return Ok(default_port);
         }

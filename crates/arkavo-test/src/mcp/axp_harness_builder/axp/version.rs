@@ -1,5 +1,5 @@
 /// iOS version parsing and detection utilities
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IosVersion {
     pub major: u32,
     pub minor: u32,
@@ -10,7 +10,7 @@ pub struct IosVersion {
 impl IosVersion {
     /// Parse iOS version from runtime string
     /// Examples: "iOS-17-4", "iOS-26-0", "iOS 17.4", "iOS-18-0-beta"
-    pub fn parse(runtime: &str) -> Option<Self> {
+    pub(crate) fn parse(runtime: &str) -> Option<Self> {
         // Handle various formats - normalize spaces and dots
         let normalized = runtime.replace([' ', '.'], "-");
 
@@ -45,7 +45,7 @@ impl IosVersion {
         // Check if beta
         let is_beta = normalized.to_lowercase().contains("beta") || major >= 26; // Assume iOS 26+ are beta for now
 
-        Some(IosVersion {
+        Some(Self {
             major,
             minor,
             patch,
@@ -54,13 +54,13 @@ impl IosVersion {
     }
 
     /// Check if this is iOS 26 or later
-    pub fn is_ios26_or_later(&self) -> bool {
+    pub(crate) const fn is_ios26_or_later(&self) -> bool {
         self.major >= 26
     }
 
     /// Get the SDK target string
     #[cfg(test)]
-    pub fn sdk_target(&self) -> String {
+    pub(crate) fn sdk_target(&self) -> String {
         if self.is_beta && self.major >= 26 {
             // Use iOS 18 target for iOS 26 beta
             "arm64-apple-ios18.0-simulator".to_string()
@@ -70,7 +70,7 @@ impl IosVersion {
     }
 
     /// Get version string for display
-    pub fn display_string(&self) -> String {
+    pub(crate) fn display_string(&self) -> String {
         let mut s = format!("iOS {}.{}", self.major, self.minor);
         if let Some(patch) = self.patch {
             s.push_str(&format!(".{patch}"));

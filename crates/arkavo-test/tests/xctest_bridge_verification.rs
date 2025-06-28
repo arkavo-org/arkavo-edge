@@ -45,7 +45,7 @@ async fn test_xctest_device_verification() {
                             device_id = device
                                 .get("udid")
                                 .and_then(|u| u.as_str())
-                                .map(|s| s.to_string());
+                                .map(std::string::ToString::to_string);
                             break;
                         }
                     }

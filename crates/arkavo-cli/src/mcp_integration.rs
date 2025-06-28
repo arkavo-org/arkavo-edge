@@ -59,7 +59,7 @@ impl McpConnection {
             Box::new(ui_interaction),
         );
 
-        let ui_query = UiQueryKit::new(device_manager.clone());
+        let ui_query = UiQueryKit::new(device_manager);
         tools.insert(ui_query.schema().name.clone(), Box::new(ui_query));
 
         // Add Git tools
@@ -92,21 +92,21 @@ impl McpConnection {
             tools.insert(name, tool);
         }
 
-        Ok(McpConnection::InProcess(InProcessMcp {
+        Ok(Self::InProcess(InProcessMcp {
             tools: Arc::new(tools),
             runtime,
         }))
     }
 
     pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(McpConnection::External(crate::mcp_client::McpClient::new(
+        Ok(Self::External(crate::mcp_client::McpClient::new(
             mcp_url,
         )?))
     }
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         match self {
-            McpConnection::InProcess(mcp) => {
+            Self::InProcess(mcp) => {
                 let tools: Vec<Tool> = mcp
                     .tools
                     .values()
@@ -121,7 +121,7 @@ impl McpConnection {
                     .collect();
                 Ok(tools)
             }
-            McpConnection::External(client) => client.list_tools(),
+            Self::External(client) => client.list_tools(),
         }
     }
 
@@ -132,7 +132,7 @@ impl McpConnection {
         _llm_origin: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
-            McpConnection::InProcess(mcp) => {
+            Self::InProcess(mcp) => {
                 // Create a oneshot channel to get the result
                 let (tx, rx) = std::sync::mpsc::channel::<Result<Value, String>>();
 
@@ -160,7 +160,7 @@ impl McpConnection {
                     .map_err(|_| "Failed to receive tool result")?
                     .map_err(|e: String| e.into())
             }
-            McpConnection::External(client) => client.call_tool(tool_name, args, _llm_origin),
+            Self::External(client) => client.call_tool(tool_name, args, _llm_origin),
         }
     }
 }

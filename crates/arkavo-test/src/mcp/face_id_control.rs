@@ -315,7 +315,7 @@ impl Tool for FaceIdStatusChecker {
             .map_err(|e| TestError::Mcp(format!("Failed to check Face ID status: {e}")))?;
 
         let status_output = String::from_utf8_lossy(&biometric_check.stdout);
-        let is_enrolled = status_output.contains("1");
+        let is_enrolled = status_output.contains('1');
 
         Ok(json!({
             "success": true,

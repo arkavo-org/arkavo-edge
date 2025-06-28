@@ -292,7 +292,7 @@ impl RepositoryContextManager {
             if let Ok(content) = self.read_file_cached(&root.join("requirements.txt")).await {
                 context.dependencies.insert(
                     "pip".to_string(),
-                    content.lines().map(|s| s.to_string()).collect(),
+                    content.lines().map(std::string::ToString::to_string).collect(),
                 );
             }
         }

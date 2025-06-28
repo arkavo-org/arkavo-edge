@@ -132,8 +132,8 @@ impl SimulatorTap {
 
         // Move through intermediate points
         for i in 1..steps {
-            let x = start_x + (step_x * i as f64);
-            let y = start_y + (step_y * i as f64);
+            let x = step_x.mul_add(i as f64, start_x);
+            let y = step_y.mul_add(i as f64, start_y);
 
             // Small delay between moves
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;

@@ -161,8 +161,7 @@ impl Tool for CoordinateValidator {
         let device_info = self.device_manager.get_device(&device_id);
         let device_type = device_info
             .as_ref()
-            .map(|d| d.device_type.as_str())
-            .unwrap_or("unknown");
+            .map_or("unknown", |d| d.device_type.as_str());
 
         let (width, height) = self.get_device_bounds(device_type);
 
@@ -191,12 +190,12 @@ impl Tool for CoordinateValidator {
 
                 let x = coordinates
                     .get("x")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
                 let y = coordinates
                     .get("y")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
                 let (is_valid, message) = self.validate_coordinates(x, y, width, height);
@@ -218,12 +217,12 @@ impl Tool for CoordinateValidator {
 
                 let x = coordinates
                     .get("x")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing x coordinate".to_string()))?;
 
                 let y = coordinates
                     .get("y")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .ok_or_else(|| TestError::Mcp("Missing y coordinate".to_string()))?;
 
                 let (adjusted_x, adjusted_y, adjustments) =

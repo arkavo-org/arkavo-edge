@@ -34,7 +34,7 @@ impl Tool for XcodeInfoTool {
     async fn execute(&self, params: Value) -> Result<Value> {
         let check_features = params
             .get("check_features")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(true);
 
         match XcodeVersion::detect() {

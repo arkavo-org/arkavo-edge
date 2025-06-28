@@ -33,13 +33,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Check if we're in a git repository
-    let repo = match git_manager.open_repo(&current_dir) {
-        Ok(repo) => repo,
-        Err(_) => {
-            eprintln!("Warning: Not in a git repository. Skipping git operations.");
-            println!("Apply command completed (no git operations performed)");
-            return Ok(());
-        }
+    let repo = if let Ok(repo) = git_manager.open_repo(&current_dir) { repo } else {
+        eprintln!("Warning: Not in a git repository. Skipping git operations.");
+        println!("Apply command completed (no git operations performed)");
+        return Ok(());
     };
 
     // Get repository status
@@ -102,7 +99,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 if push {
                     println!("\nPushing to remote...");
                     match git_manager.publish(&repo) {
-                        Ok(_) => println!("Successfully pushed to remote"),
+                        Ok(()) => println!("Successfully pushed to remote"),
                         Err(e) => {
                             eprintln!("Failed to push: {e}");
                             eprintln!("You can manually push with: git push");

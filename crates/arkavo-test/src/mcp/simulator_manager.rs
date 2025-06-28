@@ -82,7 +82,7 @@ impl SimulatorManager {
                                 runtime: runtime.clone(),
                                 is_available: device
                                     .get("isAvailable")
-                                    .and_then(|a| a.as_bool())
+                                    .and_then(serde_json::Value::as_bool)
                                     .unwrap_or(false),
                             };
                             self.devices.insert(udid.to_string(), sim_device);
@@ -160,7 +160,7 @@ impl SimulatorManager {
                 Ok(paths) => {
                     // Collect all matching paths
                     let mut matches: Vec<std::path::PathBuf> =
-                        paths.filter_map(|r| r.ok()).collect();
+                        paths.filter_map(std::result::Result::ok).collect();
 
                     if matches.is_empty() {
                         return Err(TestError::Mcp(format!(
@@ -412,7 +412,7 @@ impl SimulatorManager {
             .map_err(|e| TestError::Mcp(format!("Failed to start video recording: {e}")))
     }
 
-    pub fn get_xcode_version(&self) -> Option<&XcodeVersion> {
+    pub const fn get_xcode_version(&self) -> Option<&XcodeVersion> {
         self.xcode_version.as_ref()
     }
 

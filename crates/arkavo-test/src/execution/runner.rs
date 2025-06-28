@@ -75,7 +75,7 @@ impl TestRunner {
         };
 
         match self.execute_step_action(step).await {
-            Ok(_) => {
+            Ok(()) => {
                 result.status = TestStatus::Passed;
             }
             Err(e) => {

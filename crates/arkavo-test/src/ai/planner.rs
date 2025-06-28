@@ -105,7 +105,7 @@ pub struct TestPlanner {
 }
 
 impl TestPlanner {
-    pub fn new(claude: ClaudeClient, tool_registry: Arc<ToolRegistry>) -> Self {
+    pub const fn new(claude: ClaudeClient, tool_registry: Arc<ToolRegistry>) -> Self {
         Self {
             claude,
             tool_registry,
@@ -113,7 +113,7 @@ impl TestPlanner {
         }
     }
 
-    pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
+    pub const fn tool_registry(&self) -> &Arc<ToolRegistry> {
         &self.tool_registry
     }
 
@@ -397,7 +397,7 @@ pub struct StateTracker {
 }
 
 impl StateTracker {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             actions: std::sync::RwLock::new(Vec::new()),
         }

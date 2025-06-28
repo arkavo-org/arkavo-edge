@@ -65,7 +65,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize repository context manager
     let repo_context_manager =
-        runtime.block_on(RepositoryContextManager::new(memory_storage.clone()))?;
+        runtime.block_on(RepositoryContextManager::new(memory_storage))?;
 
     // Initialize LLM client with fallback to prompt for remote server
     let client = runtime.block_on(initialize_llm_client(print_mode))?;
@@ -95,7 +95,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize MCP client - attempt by default unless explicitly disabled
-    let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() != "true" {
+    let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
+        None
+    } else {
         let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
         let result = match mcp_url {
             Some(url) => McpConnection::new_external(Some(url)),
@@ -108,7 +110,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     match &client {
                         McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
                         McpConnection::External(_) => {
-                            eprintln!("✓ Connected to external MCP server")
+                            eprintln!("✓ Connected to external MCP server");
                         }
                     }
                 }
@@ -121,8 +123,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 None
             }
         }
-    } else {
-        None
     };
 
     // Show MCP tools help if connected
@@ -397,7 +397,7 @@ Repository details:
         // Clean up
         llm_handle.abort();
 
-        return tui_result.map_err(|e| e.into());
+        return tui_result.map_err(std::convert::Into::into);
     }
 
     // Interactive chat loop
@@ -454,7 +454,7 @@ Repository details:
                 let session_id_str = parts[1];
                 if let Ok(session_id) = uuid::Uuid::parse_str(session_id_str) {
                     match runtime.block_on(conversation_manager.switch_session(session_id)) {
-                        Ok(_) => {
+                        Ok(()) => {
                             messages = runtime.block_on(
                                 conversation_manager
                                     .get_context_messages(Some(system_message.clone())),
@@ -539,27 +539,26 @@ Repository details:
             let after_command = &input[screenshot_pos + "@screenshot ".len()..];
             let img_path = after_command.trim();
 
-            if !img_path.is_empty() {
-                match encode_image_file(img_path) {
-                    Ok(encoded_image) => {
-                        // Use the text before @screenshot as the prompt, or a default
-                        let prompt = if screenshot_pos > 0 {
-                            input[..screenshot_pos].trim()
-                        } else {
-                            "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features."
-                        };
-                        let msg = Message::user_with_images(prompt, vec![encoded_image]);
-                        runtime.block_on(conversation_manager.add_message(&msg))?;
-                        messages.push(msg);
-                    }
-                    Err(e) => {
-                        eprintln!("Error loading screenshot: {e}");
-                        continue;
-                    }
-                }
-            } else {
+            if img_path.is_empty() {
                 eprintln!("Usage: @screenshot <path>");
                 continue;
+            }
+            match encode_image_file(img_path) {
+                Ok(encoded_image) => {
+                    // Use the text before @screenshot as the prompt, or a default
+                    let prompt = if screenshot_pos > 0 {
+                        input[..screenshot_pos].trim()
+                    } else {
+                        "Analyze this screenshot and describe what you see. Focus on UI elements, their states, and any notable features."
+                    };
+                    let msg = Message::user_with_images(prompt, vec![encoded_image]);
+                    runtime.block_on(conversation_manager.add_message(&msg))?;
+                    messages.push(msg);
+                }
+                Err(e) => {
+                    eprintln!("Error loading screenshot: {e}");
+                    continue;
+                }
             }
         }
         // Check for "analyze_screenshot on path" syntax and convert it to "@analyze_screenshot path"
@@ -568,15 +567,15 @@ Repository details:
             let after_command = &input[analyze_pos + "analyze_screenshot on ".len()..];
             let img_path = after_command.trim();
 
-            if !img_path.is_empty() {
+            if img_path.is_empty() {
+                eprintln!("Usage: analyze_screenshot on <path>");
+                continue;
+            } else {
                 // Convert to "@analyze_screenshot path" syntax
                 let converted_input = format!("@analyze_screenshot {img_path}");
                 let msg = Message::user(&converted_input);
                 runtime.block_on(conversation_manager.add_message(&msg))?;
                 messages.push(msg);
-            } else {
-                eprintln!("Usage: analyze_screenshot on <path>");
-                continue;
             }
         } else {
             // Add regular user message
@@ -700,7 +699,7 @@ async fn process_message(
 
             // Now continue the conversation with the tool results
             // Add the tool results to the response for context
-            let mut response_with_results = response_text.clone();
+            let mut response_with_results = response_text;
             response_with_results.push_str("\n\n[Tool execution completed. Results shown above.]");
 
             return Ok(response_with_results);
@@ -951,7 +950,7 @@ fn handle_tool_calls_in_response(
 
     // Use a more robust approach to find @tool calls
     // First, remove markdown code blocks to find tools within them
-    let cleaned_response = response.replace("```", "").replace("`", "");
+    let cleaned_response = response.replace("```", "").replace('`', "");
 
     debug_println!(
         "DEBUG: Cleaned response first 200 chars: {}",
@@ -1142,7 +1141,7 @@ fn list_files(path: &str) -> Option<String> {
             let mut files = Vec::new();
             let mut dirs = Vec::new();
 
-            for entry in entries.filter_map(|e| e.ok()) {
+            for entry in entries.filter_map(std::result::Result::ok) {
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                     dirs.push(format!("{file_name}/ (dir)"));

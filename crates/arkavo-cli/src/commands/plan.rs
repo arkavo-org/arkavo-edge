@@ -49,12 +49,12 @@ pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|f| f.ends_with(".rs") || f.ends_with(".toml") || f.ends_with(".md"))
                     .collect();
 
-                if !source_files.is_empty() {
+                if source_files.is_empty() {
+                    println!("  No source files found in current directory");
+                } else {
                     for file in source_files {
                         println!("  {file}");
                     }
-                } else {
-                    println!("  No source files found in current directory");
                 }
             }
         }

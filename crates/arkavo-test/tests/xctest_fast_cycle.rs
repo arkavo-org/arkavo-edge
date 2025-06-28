@@ -153,7 +153,7 @@ async fn test_xctest_setup_and_verify() {
                 Ok(result) => {
                     if result
                         .get("success")
-                        .and_then(|v| v.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false)
                     {
                         println!("   ✅ XCTest setup successful!");

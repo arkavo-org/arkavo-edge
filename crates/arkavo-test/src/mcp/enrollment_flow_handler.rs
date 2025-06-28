@@ -51,16 +51,11 @@ impl EnrollmentFlowHandler {
                 return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+        } else if let Some(device) = self.device_manager.get_active_device() { Ok(device.id) } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }
@@ -188,7 +183,7 @@ impl Tool for EnrollmentFlowHandler {
 
                 // Step 2: Enroll biometrics
                 match self.enroll_biometrics(&device_id) {
-                    Ok(_) => {
+                    Ok(()) => {
                         steps_completed.push("Enrolled Face ID");
                         thread::sleep(Duration::from_millis(1000));
                     }
@@ -209,7 +204,7 @@ impl Tool for EnrollmentFlowHandler {
                 thread::sleep(Duration::from_millis(500));
 
                 match self.launch_app(&device_id, bundle_id) {
-                    Ok(_) => {
+                    Ok(()) => {
                         steps_completed.push("Relaunched app");
                         Ok(json!({
                             "success": true,
@@ -245,7 +240,7 @@ impl Tool for EnrollmentFlowHandler {
                 thread::sleep(Duration::from_millis(500));
 
                 match self.launch_app(&device_id, bundle_id) {
-                    Ok(_) => {
+                    Ok(()) => {
                         steps_completed.push("Relaunched app");
                         Ok(json!({
                             "success": true,
@@ -268,7 +263,7 @@ impl Tool for EnrollmentFlowHandler {
             "enroll_and_continue" => {
                 // Enroll biometrics without dismissing dialog or relaunching
                 match self.enroll_biometrics(&device_id) {
-                    Ok(_) => Ok(json!({
+                    Ok(()) => Ok(json!({
                         "success": true,
                         "action": "enroll_and_continue",
                         "device_id": device_id,

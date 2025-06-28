@@ -361,24 +361,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(tool_response) => {
                                 // Check if the tool returned an error object (and it's not null)
                                 if let Some(error_obj) = tool_response.result.get("error") {
-                                    if !error_obj.is_null() {
-                                        // Tool returned an actual error - convert to JSON-RPC error
-                                        let error_code = error_obj
-                                            .get("code")
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or("TOOL_ERROR");
-                                        let error_msg = error_obj
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .unwrap_or("Tool execution failed");
-
-                                        error_response(
-                                            request_id.clone(),
-                                            INTERNAL_ERROR,
-                                            format!("{error_code}: {error_msg}"),
-                                            Some(tool_response.result),
-                                        )
-                                    } else {
+                                    if error_obj.is_null() {
                                         // error field is null, treat as success
                                         // Check response size before formatting
                                         let result_str =
@@ -411,6 +394,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     "text": trimmed_result
                                                 }]
                                             }),
+                                        )
+                                    } else {
+                                        // Tool returned an actual error - convert to JSON-RPC error
+                                        let error_code = error_obj
+                                            .get("code")
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("TOOL_ERROR");
+                                        let error_msg = error_obj
+                                            .get("message")
+                                            .and_then(|m| m.as_str())
+                                            .unwrap_or("Tool execution failed");
+
+                                        error_response(
+                                            request_id.clone(),
+                                            INTERNAL_ERROR,
+                                            format!("{error_code}: {error_msg}"),
+                                            Some(tool_response.result),
                                         )
                                     }
                                 } else {

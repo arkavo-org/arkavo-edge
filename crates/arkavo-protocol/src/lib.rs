@@ -5,7 +5,7 @@ pub struct Client;
 
 impl Default for Client {
     fn default() -> Self {
-        return Self::new();
+        Self::new()
     }
 }
 
@@ -15,6 +15,6 @@ impl Client {
     }
 
     pub fn send_message(&self, message: &str) -> Result<String, Box<dyn std::error::Error>> {
-        return Ok(format!("Response to: {message}"));
+        Ok(format!("Response to: {message}"))
     }
 }

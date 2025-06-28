@@ -1,4 +1,4 @@
-use super::*;
+use super::{Serialize, Deserialize, GroundTruth, ValidationReport, ValidationIssue, IssueSeverity, StateChange, CalibrationResult, InteractionAdjustment, InteractionResult, UIElement, CalibrationAction, ActionType, ActionTarget, ElementType};
 use std::collections::HashMap;
 
 pub struct CalibrationValidator {
@@ -35,7 +35,7 @@ impl CalibrationValidator {
         }
     }
 
-    pub fn with_tolerance(mut self, tolerance: ValidationTolerance) -> Self {
+    pub const fn with_tolerance(mut self, tolerance: ValidationTolerance) -> Self {
         self.tolerance = tolerance;
         self
     }
@@ -109,9 +109,7 @@ impl CalibrationValidator {
         // Validate coordinates if available
         if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates {
             if let Some(expected_coords) = test_result.expected_coordinates {
-                let distance = ((actual_x - expected_coords.0).powi(2)
-                    + (actual_y - expected_coords.1).powi(2))
-                .sqrt();
+                let distance = (actual_x - expected_coords.0).hypot(actual_y - expected_coords.1);
 
                 if distance > self.tolerance.coordinate_tolerance_pixels {
                     return ValidationOutcome::Failure(ValidationIssue {

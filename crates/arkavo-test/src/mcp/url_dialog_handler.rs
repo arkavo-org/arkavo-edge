@@ -46,16 +46,11 @@ impl UrlDialogHandler {
     fn get_device_id(&self, params: &Value) -> Result<String> {
         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             Ok(id.to_string())
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted iOS device found".to_string())),
-                    }
-                }
+        } else if let Some(device) = self.device_manager.get_active_device() { Ok(device.id) } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted iOS device found".to_string())),
             }
         }
     }
@@ -200,7 +195,7 @@ impl Tool for UrlDialogHandler {
                 // Wait briefly for dialog to appear
                 let wait_timeout = params
                     .get("wait_timeout")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(2);
 
                 eprintln!("[UrlDialogHandler] Waiting {wait_timeout}s for URL dialog to appear...");

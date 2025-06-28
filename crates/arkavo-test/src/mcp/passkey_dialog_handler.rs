@@ -43,16 +43,11 @@ impl PasskeyDialogHandler {
                 return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+        } else if let Some(device) = self.device_manager.get_active_device() { Ok(device.id) } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }

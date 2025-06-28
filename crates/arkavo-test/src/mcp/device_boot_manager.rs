@@ -14,7 +14,7 @@ pub struct BootStatus {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BootState {
     NotStarted,
     Booting,

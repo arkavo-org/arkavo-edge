@@ -1,5 +1,3 @@
-#![allow(clippy::implicit_return)]
-
 pub mod chat;
 pub mod client;
 pub mod error;

@@ -1,4 +1,4 @@
-use super::*;
+use super::{Serialize, Deserialize, CalibrationConfig, CalibrationError, CalibrationResult, InteractionAdjustment};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -219,8 +219,7 @@ impl CalibrationDataStore {
                     && path
                         .file_stem()
                         .and_then(|s| s.to_str())
-                        .map(|s| s.ends_with("_config"))
-                        .unwrap_or(false)
+                        .is_some_and(|s| s.ends_with("_config"))
                 {
                     if let Ok(data) = fs::read_to_string(&path) {
                         if let Ok(config) = serde_json::from_str::<CalibrationConfig>(&data) {

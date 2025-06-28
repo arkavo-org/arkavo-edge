@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Mutex;
@@ -49,8 +48,8 @@ impl CompanionHealthMetrics {
 }
 
 /// Global health tracking for all IDB companions
-static COMPANION_HEALTH: Lazy<Mutex<HashMap<String, CompanionHealthMetrics>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static COMPANION_HEALTH: std::sync::LazyLock<Mutex<HashMap<String, CompanionHealthMetrics>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Manages IDB companion health and recovery
 pub struct IdbCompanionHealth;

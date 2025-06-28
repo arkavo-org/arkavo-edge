@@ -52,13 +52,13 @@ impl DeviceHealthManager {
                 ) {
                     let is_available = runtime
                         .get("isAvailable")
-                        .and_then(|a| a.as_bool())
+                        .and_then(serde_json::Value::as_bool)
                         .unwrap_or(false);
 
                     let build_version = runtime
                         .get("buildversion")
                         .and_then(|b| b.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
 
                     runtimes.push(RuntimeInfo {
                         identifier: identifier.to_string(),
@@ -114,7 +114,7 @@ impl DeviceHealthManager {
                             // Check if device is available
                             let is_available = device
                                 .get("isAvailable")
-                                .and_then(|a| a.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(true); // Default to true for backwards compatibility
 
                             if !is_available {

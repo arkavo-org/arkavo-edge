@@ -80,7 +80,7 @@ impl Tool for CalibrationTool {
                 let device_id = params["device_id"].as_str().ok_or_else(|| {
                     TestError::Mcp("device_id is required for start_calibration".to_string())
                 })?;
-                let bundle_id = params["bundle_id"].as_str().map(|s| s.to_string());
+                let bundle_id = params["bundle_id"].as_str().map(std::string::ToString::to_string);
 
                 // Check if ArkavoReference app is installed
                 let app_check = Command::new("xcrun")
@@ -103,7 +103,7 @@ impl Tool for CalibrationTool {
                     let install_result = self.build_and_install_reference_app(device_id).await?;
 
                     // Check if installation was successful
-                    if let Some(success) = install_result.get("success").and_then(|v| v.as_bool()) {
+                    if let Some(success) = install_result.get("success").and_then(serde_json::Value::as_bool) {
                         if !success {
                             return Ok(json!({
                                 "success": false,
@@ -301,8 +301,7 @@ impl Tool for CalibrationTool {
                                 .idb_status
                                 .last_error
                                 .as_ref()
-                                .map(|e| e.contains("FBControlCore"))
-                                .unwrap_or(false)
+                                .is_some_and(|e| e.contains("FBControlCore"))
                             {
                                 response["recommended_action"] = json!({
                                     "tool": "idb_management",
@@ -340,7 +339,23 @@ impl Tool for CalibrationTool {
                         // Add guidance based on status
                         match status.status.as_str() {
                             "initializing" => {
-                                if !app_running {
+                                if app_running {
+                                    let elapsed = status.elapsed_seconds;
+                                    response["message"] = json!(format!(
+                                        "Calibration Phase 1: Initialization ({}s elapsed)",
+                                        elapsed
+                                    ));
+                                    response["phase"] = json!({
+                                        "current": 1,
+                                        "name": "Initialization",
+                                        "status": "in_progress",
+                                        "description": "App launched, waiting for calibration view",
+                                        "expected_duration": "3-5 seconds",
+                                        "warning": if elapsed > 10 { "Taking longer than expected" } else { "" }
+                                    });
+                                    response["next_action"] =
+                                        json!("Wait a few seconds and check status again");
+                                } else {
                                     response["message"] =
                                         json!("Calibration Phase 1: App launch failed");
                                     response["phase"] = json!({
@@ -357,22 +372,6 @@ impl Tool for CalibrationTool {
                                         "Try launching manually: xcrun simctl launch <device_id> com.arkavo.reference",
                                         "Check device logs for launch errors"
                                     ]);
-                                } else {
-                                    let elapsed = status.elapsed_seconds;
-                                    response["message"] = json!(format!(
-                                        "Calibration Phase 1: Initialization ({}s elapsed)",
-                                        elapsed
-                                    ));
-                                    response["phase"] = json!({
-                                        "current": 1,
-                                        "name": "Initialization",
-                                        "status": "in_progress",
-                                        "description": "App launched, waiting for calibration view",
-                                        "expected_duration": "3-5 seconds",
-                                        "warning": if elapsed > 10 { "Taking longer than expected" } else { "" }
-                                    });
-                                    response["next_action"] =
-                                        json!("Wait a few seconds and check status again");
                                 }
                             }
                             "validating" => {
@@ -695,12 +694,12 @@ impl CalibrationTool {
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to launch app: {e}")))?;
 
-        if !launch_output.status.success() {
+        if launch_output.status.success() {
+            eprintln!("[CalibrationTool] Successfully launched ArkavoReference app");
+        } else {
             let error_msg = String::from_utf8_lossy(&launch_output.stderr);
             eprintln!("[CalibrationTool] Warning: Failed to launch app: {error_msg}");
             // Don't fail the operation, just warn
-        } else {
-            eprintln!("[CalibrationTool] Successfully launched ArkavoReference app");
         }
 
         Ok(json!({

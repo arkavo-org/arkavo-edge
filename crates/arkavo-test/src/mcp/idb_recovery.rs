@@ -174,9 +174,9 @@ impl IdbRecovery {
 
             for path in &cache_paths {
                 eprintln!("[IdbRecovery] Clearing cache: {path}");
-                let expanded = if path.starts_with("~") {
+                let expanded = if path.starts_with('~') {
                     let home = std::env::var("HOME").unwrap_or_default();
-                    path.replacen("~", &home, 1)
+                    path.replacen('~', &home, 1)
                 } else {
                     path.to_string()
                 };

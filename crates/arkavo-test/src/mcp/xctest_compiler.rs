@@ -1293,10 +1293,10 @@ int main(int argc, char * argv[]) {
             .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
         let apps_output = String::from_utf8_lossy(&check_cmd.stdout);
-        if !apps_output.contains("com.arkavo.testhost") {
-            eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");
-        } else {
+        if apps_output.contains("com.arkavo.testhost") {
             eprintln!("[XCTestCompiler] Test host app confirmed in apps list");
+        } else {
+            eprintln!("[XCTestCompiler] WARNING: Test host app not found in running apps list");
         }
 
         eprintln!("[XCTestCompiler] Test runner started successfully");

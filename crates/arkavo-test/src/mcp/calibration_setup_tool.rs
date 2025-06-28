@@ -128,12 +128,12 @@ impl Tool for CalibrationSetupKit {
             .args(["simctl", "io", &device_id, "tap", "195", "490"])
             .output()?;
 
-        if !tap_output.status.success() {
+        if tap_output.status.success() {
+            eprintln!("[CalibrationSetupKit] Successfully handled URL confirmation dialog");
+        } else {
             eprintln!(
                 "[CalibrationSetupKit] Warning: Failed to tap URL dialog, it may not have appeared"
             );
-        } else {
-            eprintln!("[CalibrationSetupKit] Successfully handled URL confirmation dialog");
         }
 
         // Wait for app to load

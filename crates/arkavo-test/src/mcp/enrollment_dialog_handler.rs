@@ -45,16 +45,11 @@ impl EnrollmentDialogHandler {
                 return Err(TestError::Mcp(format!("Device '{id}' not found")));
             }
             Ok(id.to_string())
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => Ok(device.id),
-                None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => Ok(device.id.clone()),
-                        None => Err(TestError::Mcp("No booted device found".to_string())),
-                    }
-                }
+        } else if let Some(device) = self.device_manager.get_active_device() { Ok(device.id) } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => Ok(device.id.clone()),
+                None => Err(TestError::Mcp("No booted device found".to_string())),
             }
         }
     }
@@ -157,8 +152,7 @@ impl Tool for EnrollmentDialogHandler {
         let device_info = self.device_manager.get_device(&device_id);
         let device_type = device_info
             .as_ref()
-            .map(|d| d.device_type.as_str())
-            .unwrap_or("unknown");
+            .map_or("unknown", |d| d.device_type.as_str());
 
         match action {
             "get_cancel_coordinates" => {

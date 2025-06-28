@@ -205,7 +205,7 @@ impl LogStreamKit {
                 .map_err(|e| TestError::Mcp(format!("Failed to read log directory: {e}")))?;
 
             let mut log_files: Vec<_> = entries
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| e.file_name().to_string_lossy().starts_with("arkavo_logs_"))
                 .collect();
 
@@ -229,7 +229,7 @@ impl LogStreamKit {
         let lines: Vec<&str> = contents.lines().collect();
         let limit = limit.unwrap_or(100);
         let start = lines.len().saturating_sub(limit);
-        let recent_lines: Vec<String> = lines[start..].iter().map(|s| s.to_string()).collect();
+        let recent_lines: Vec<String> = lines[start..].iter().map(|s| (*s).to_string()).collect();
 
         // Parse JSON logs if possible
         let mut parsed_logs = Vec::new();
@@ -264,22 +264,17 @@ impl Tool for LogStreamKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else {
-                    match self.device_manager.get_active_device() {
-                        Some(device) => device.id,
+                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                    self.device_manager.refresh_devices().ok();
+                    match self.device_manager.get_booted_devices().first() {
+                        Some(device) => device.id.clone(),
                         None => {
-                            self.device_manager.refresh_devices().ok();
-                            match self.device_manager.get_booted_devices().first() {
-                                Some(device) => device.id.clone(),
-                                None => {
-                                    return Ok(json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
-                                        }
-                                    }));
+                            return Ok(json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
                                 }
-                            }
+                            }));
                         }
                     }
                 };
@@ -308,7 +303,7 @@ impl Tool for LogStreamKit {
                 let stream_id = params.get("stream_id").and_then(|v| v.as_str());
                 let limit = params
                     .get("limit")
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                     .map(|n| n as usize);
 
                 self.read_recent_logs(stream_id, limit).await
@@ -360,22 +355,17 @@ impl Tool for AppDiagnosticExporter {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };

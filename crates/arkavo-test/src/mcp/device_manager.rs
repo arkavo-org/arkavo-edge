@@ -14,7 +14,7 @@ pub struct IOSDevice {
     pub is_physical: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DeviceState {
     Shutdown,
     Booted,
@@ -73,7 +73,7 @@ impl DeviceManager {
                         if filter_healthy {
                             let is_available = device_json
                                 .get("isAvailable")
-                                .and_then(|a| a.as_bool())
+                                .and_then(serde_json::Value::as_bool)
                                 .unwrap_or(true);
 
                             if !is_available {

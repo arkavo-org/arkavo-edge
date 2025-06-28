@@ -138,11 +138,10 @@ impl UiInteractionKit {
                             }
 
                             return Some((socket_path_str, true));
-                        } else {
-                            eprintln!(
-                                "[AXP] Socket exists but connection failed - harness may not be running"
-                            );
                         }
+                        eprintln!(
+                            "[AXP] Socket exists but connection failed - harness may not be running"
+                        );
                     }
                 }
             }
@@ -241,12 +240,12 @@ impl UiInteractionKit {
 
         if response
             .get("success")
-            .and_then(|s| s.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
             let tap_time = response
                 .get("tapTime")
-                .and_then(|t| t.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0);
             eprintln!("[AXP] Tap completed in {tap_time:.1}ms");
 
@@ -255,9 +254,7 @@ impl UiInteractionKit {
                 "action": "tap",
                 "method": "axp",
                 "coordinates": {"x": x, "y": y},
-                "device_id": self.device_manager.get_active_device()
-                    .map(|d| d.id.clone())
-                    .unwrap_or_else(|| "unknown".to_string()),
+                "device_id": self.device_manager.get_active_device().map_or_else(|| "unknown".to_string(), |d| d.id),
                 "performance": {
                     "tap_time_ms": tap_time,
                     "fast": tap_time < 50.0
@@ -559,8 +556,7 @@ impl Tool for UiInteractionKit {
                 let device_info = self.device_manager.get_device(&device_id);
                 let device_type = device_info
                     .as_ref()
-                    .map(|d| d.device_type.as_str())
-                    .unwrap_or("unknown");
+                    .map_or("unknown", |d| d.device_type.as_str());
 
                 // Check if XCUITest is actually available
                 let xctest_available = self.get_existing_xctest_bridge().await.is_some();
@@ -693,8 +689,8 @@ impl Tool for UiInteractionKit {
                         }
                     } else {
                         // Direct coordinates - check if we should use AXP, XCUITest, or fallback
-                        let x = target.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        let y = target.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let x = target.get("x").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                        let y = target.get("y").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
 
                         // First try AXP if available (fastest)
                         if let Some((socket_path, _)) = &axp_available {
@@ -730,23 +726,7 @@ impl Tool for UiInteractionKit {
                                 bridge.is_connected()
                             };
 
-                            if !is_connected {
-                                eprintln!(
-                                    "XCUITest bridge not connected, falling back to AppleScript"
-                                );
-                                if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
-                                    tap_params["x"] = x.clone();
-                                    tap_params["y"] = y.clone();
-                                } else {
-                                    return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "XCUITEST_NOT_CONNECTED",
-                                            "message": "XCUITest bridge not connected",
-                                            "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
-                                        }
-                                    }));
-                                }
-                            } else {
+                            if is_connected {
                                 // Send the tap command using our helper method
                                 match self.send_xctest_tap(bridge_arc, command).await {
                                     Ok(response) => {
@@ -759,27 +739,26 @@ impl Tool for UiInteractionKit {
                                                 "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active"),
                                                 "confidence": "high"
                                             }));
+                                        }
+                                        // XCUITest failed, fall back to AppleScript for coordinates
+                                        eprintln!(
+                                            "XCUITest tap failed: {:?}, falling back to AppleScript",
+                                            response.error
+                                        );
+                                        if let (Some(x), Some(y)) =
+                                            (target.get("x"), target.get("y"))
+                                        {
+                                            tap_params["x"] = x.clone();
+                                            tap_params["y"] = y.clone();
                                         } else {
-                                            // XCUITest failed, fall back to AppleScript for coordinates
-                                            eprintln!(
-                                                "XCUITest tap failed: {:?}, falling back to AppleScript",
-                                                response.error
-                                            );
-                                            if let (Some(x), Some(y)) =
-                                                (target.get("x"), target.get("y"))
-                                            {
-                                                tap_params["x"] = x.clone();
-                                                tap_params["y"] = y.clone();
-                                            } else {
-                                                // Can't fall back for text/accessibility taps
-                                                return Ok(serde_json::json!({
-                                                    "error": {
-                                                        "code": "XCUITEST_TAP_FAILED",
-                                                        "message": response.error.unwrap_or_else(|| "XCUITest tap failed".to_string()),
-                                                        "suggestion": "For text/accessibility taps, use screen_capture and tap with coordinates instead"
-                                                    }
-                                                }));
-                                            }
+                                            // Can't fall back for text/accessibility taps
+                                            return Ok(serde_json::json!({
+                                                "error": {
+                                                    "code": "XCUITEST_TAP_FAILED",
+                                                    "message": response.error.unwrap_or_else(|| "XCUITest tap failed".to_string()),
+                                                    "suggestion": "For text/accessibility taps, use screen_capture and tap with coordinates instead"
+                                                }
+                                            }));
                                         }
                                     }
                                     Err(e) => {
@@ -804,6 +783,22 @@ impl Tool for UiInteractionKit {
                                         }
                                     }
                                 }
+                            } else {
+                                eprintln!(
+                                    "XCUITest bridge not connected, falling back to AppleScript"
+                                );
+                                if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                    tap_params["x"] = x.clone();
+                                    tap_params["y"] = y.clone();
+                                } else {
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "XCUITEST_NOT_CONNECTED",
+                                            "message": "XCUITest bridge not connected",
+                                            "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                        }
+                                    }));
+                                }
                             }
                         } else {
                             // No XCUITest bridge available
@@ -821,8 +816,7 @@ impl Tool for UiInteractionKit {
                                 let device_info = self.device_manager.get_device(device_id);
                                 let device_type = device_info
                                     .as_ref()
-                                    .map(|d| d.device_type.as_str())
-                                    .unwrap_or("unknown");
+                                    .map_or("unknown", |d| d.device_type.as_str());
 
                                 // Provide device-specific coordinate tips
                                 let (width, height) = match device_type {
@@ -890,22 +884,17 @@ impl Tool for UiInteractionKit {
                     let device_id =
                         if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                             id.to_string()
-                        } else {
-                            match self.device_manager.get_active_device() {
-                                Some(device) => device.id,
+                        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                            self.device_manager.refresh_devices().ok();
+                            match self.device_manager.get_booted_devices().first() {
+                                Some(device) => device.id.clone(),
                                 None => {
-                                    self.device_manager.refresh_devices().ok();
-                                    match self.device_manager.get_booted_devices().first() {
-                                        Some(device) => device.id.clone(),
-                                        None => {
-                                            return Ok(serde_json::json!({
-                                                "error": {
-                                                    "code": "NO_BOOTED_DEVICE",
-                                                    "message": "No booted iOS device found"
-                                                }
-                                            }));
+                                    return Ok(serde_json::json!({
+                                        "error": {
+                                            "code": "NO_BOOTED_DEVICE",
+                                            "message": "No booted iOS device found"
                                         }
-                                    }
+                                    }));
                                 }
                             }
                         };
@@ -918,8 +907,7 @@ impl Tool for UiInteractionKit {
                     let device_info = self.device_manager.get_device(&device_id);
                     let device_type = device_info
                         .as_ref()
-                        .map(|d| d.device_type.as_str())
-                        .unwrap_or("unknown");
+                        .map_or("unknown", |d| d.device_type.as_str());
 
                     // Try to get actual device dimensions from simulator
                     let (max_x, max_y) = self
@@ -1093,8 +1081,8 @@ impl Tool for UiInteractionKit {
                             end tell"#,
                             // Convert logical coordinates to approximate screen coordinates
                             // This is a simple approximation - calibration will help determine exact mapping
-                            70.0 + adjusted_x * 1.5, // Rough estimate with bezel offset
-                            113.0 + adjusted_y * 1.5  // Rough estimate with title bar + bezel
+                            adjusted_x.mul_add(1.5, 70.0), // Rough estimate with bezel offset
+                            adjusted_y.mul_add(1.5, 113.0)  // Rough estimate with title bar + bezel
                         );
 
                         let applescript_output = Command::new("osascript")
@@ -1170,9 +1158,8 @@ impl Tool for UiInteractionKit {
                             }
                         }));
                     }
-                } else {
-                    Err(TestError::Mcp("Missing target for tap action".to_string()))
                 }
+                Err(TestError::Mcp("Missing target for tap action".to_string()))
             }
             "type_text" => {
                 // Check iOS availability first
@@ -1208,22 +1195,17 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else {
-                    match self.device_manager.get_active_device() {
-                        Some(device) => device.id,
+                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                    self.device_manager.refresh_devices().ok();
+                    match self.device_manager.get_booted_devices().first() {
+                        Some(device) => device.id.clone(),
                         None => {
-                            self.device_manager.refresh_devices().ok();
-                            match self.device_manager.get_booted_devices().first() {
-                                Some(device) => device.id.clone(),
-                                None => {
-                                    return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
-                                        }
-                                    }));
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
                                 }
-                            }
+                            }));
                         }
                     }
                 };
@@ -1294,7 +1276,7 @@ impl Tool for UiInteractionKit {
                             keystroke "{}"
                         end tell
                     end tell"#,
-                    text.replace("\"", "\\\"").replace("\\", "\\\\")
+                    text.replace('"', "\\\"").replace('\\', "\\\\")
                 );
 
                 let output = Command::new("osascript")
@@ -1309,10 +1291,10 @@ impl Tool for UiInteractionKit {
                     "text": text,
                     "device_id": device_id,
                     "method": "applescript_keystroke",
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).to_string())
                     },
                     "note": "Text typed using AppleScript keystroke simulation.",
                     "ai_hint": "IMPORTANT: You must tap on a text field first to focus it before using type_text. ALWAYS use COORDINATES to tap! Workflow: 1) screen_capture, 2) Read screenshot to find field position, 3) tap using {\"target\":{\"x\":X,\"y\":Y}}, 4) clear_text, 5) type_text. NEVER use text-based tapping - coordinates work better!"
@@ -1404,7 +1386,7 @@ impl Tool for UiInteractionKit {
                 }
 
                 // Get repeat count (how many times to press delete)
-                let count = params.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+                let count = params.get("count").and_then(serde_json::Value::as_u64).unwrap_or(1) as usize;
 
                 // Press delete key using key code 51
                 let mut delete_script = r#"
@@ -1421,10 +1403,10 @@ impl Tool for UiInteractionKit {
                 }
 
                 delete_script.push_str(
-                    r#"
+                    r"
                         end tell
                     end tell
-                "#,
+                ",
                 );
 
                 let output = Command::new("osascript")
@@ -1508,7 +1490,7 @@ impl Tool for UiInteractionKit {
                     .and_then(|v| v.as_str())
                     .unwrap_or("down");
 
-                let amount = params.get("amount").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+                let amount = params.get("amount").and_then(serde_json::Value::as_u64).unwrap_or(5) as usize;
 
                 // Map direction to key codes
                 let key_code = match direction {
@@ -1549,10 +1531,10 @@ impl Tool for UiInteractionKit {
                     "amount": amount,
                     "method": "arrow_keys",
                     "note": "Scrolled using arrow key simulation",
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).to_string())
                     }
                 }))
             }
@@ -1609,45 +1591,40 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else {
-                    match self.device_manager.get_active_device() {
-                        Some(device) => device.id,
+                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                    self.device_manager.refresh_devices().ok();
+                    match self.device_manager.get_booted_devices().first() {
+                        Some(device) => device.id.clone(),
                         None => {
-                            self.device_manager.refresh_devices().ok();
-                            match self.device_manager.get_booted_devices().first() {
-                                Some(device) => device.id.clone(),
-                                None => {
-                                    return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
-                                        }
-                                    }));
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
                                 }
-                            }
+                            }));
                         }
                     }
                 };
 
                 let x1 = swipe_data
                     .get("x1")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(100.0);
                 let y1 = swipe_data
                     .get("y1")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(300.0);
                 let x2 = swipe_data
                     .get("x2")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(100.0);
                 let y2 = swipe_data
                     .get("y2")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(100.0);
                 let duration = swipe_data
                     .get("duration")
-                    .and_then(|v| v.as_f64())
+                    .and_then(serde_json::Value::as_f64)
                     .unwrap_or(0.5);
 
                 // Try idb_companion swipe first
@@ -1762,10 +1739,10 @@ impl Tool for UiInteractionKit {
                     "device_id": device_id,
                     "note": "Swipe simulated using arrow keys. For better scrolling, use the 'scroll' action instead.",
                     "suggestion": "Use {\"action\":\"scroll\",\"direction\":\"down\",\"amount\":10} for more reliable scrolling",
-                    "error": if !output.status.success() {
-                        Some(String::from_utf8_lossy(&output.stderr).to_string())
-                    } else {
+                    "error": if output.status.success() {
                         None
+                    } else {
+                        Some(String::from_utf8_lossy(&output.stderr).to_string())
                     }
                 }))
             }
@@ -1784,22 +1761,17 @@ impl Tool for UiInteractionKit {
                 // Get device ID
                 let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
                     id.to_string()
-                } else {
-                    match self.device_manager.get_active_device() {
-                        Some(device) => device.id,
+                } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+                    self.device_manager.refresh_devices().ok();
+                    match self.device_manager.get_booted_devices().first() {
+                        Some(device) => device.id.clone(),
                         None => {
-                            self.device_manager.refresh_devices().ok();
-                            match self.device_manager.get_booted_devices().first() {
-                                Some(device) => device.id.clone(),
-                                None => {
-                                    return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "NO_BOOTED_DEVICE",
-                                            "message": "No booted iOS device found"
-                                        }
-                                    }));
+                            return Ok(serde_json::json!({
+                                "error": {
+                                    "code": "NO_BOOTED_DEVICE",
+                                    "message": "No booted iOS device found"
                                 }
-                            }
+                            }));
                         }
                     }
                 };
@@ -1825,60 +1797,59 @@ impl Tool for UiInteractionKit {
                                 "note": "Hardware button simulation requires idb_companion"
                             }
                         }));
-                    } else {
-                        // Ensure companion is running for this device
-                        eprintln!(
-                            "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
-                        );
-                        match IdbWrapper::ensure_companion_running(&device_id).await {
-                            Ok(_) => {
-                                eprintln!(
-                                    "[ui_interaction] IDB companion ready, attempting press_button..."
-                                );
-                                // Try idb_companion press_button
-                                match IdbWrapper::press_button(&device_id, button).await {
-                                    Ok(result) => {
-                                        eprintln!(
-                                            "[ui_interaction] IDB press_button succeeded: '{button}'"
-                                        );
-                                        return Ok(result);
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "[ui_interaction] IDB press_button failed: {e}, no fallback available"
-                                        );
-                                        return Ok(serde_json::json!({
-                                            "success": false,
-                                            "action": "press_button",
-                                            "button": button,
-                                            "device_id": device_id,
-                                            "error": {
-                                                "code": "BUTTON_PRESS_FAILED",
-                                                "message": format!("Failed to press button '{}': {}", button, e),
-                                                "supported_buttons": ["home", "power", "volumeup", "volumedown"],
-                                                "note": "Hardware button simulation requires idb_companion"
-                                            }
-                                        }));
-                                    }
+                    }
+                    // Ensure companion is running for this device
+                    eprintln!(
+                        "[ui_interaction] Ensuring IDB companion is running for device {device_id}..."
+                    );
+                    match IdbWrapper::ensure_companion_running(&device_id).await {
+                        Ok(_) => {
+                            eprintln!(
+                                "[ui_interaction] IDB companion ready, attempting press_button..."
+                            );
+                            // Try idb_companion press_button
+                            match IdbWrapper::press_button(&device_id, button).await {
+                                Ok(result) => {
+                                    eprintln!(
+                                        "[ui_interaction] IDB press_button succeeded: '{button}'"
+                                    );
+                                    return Ok(result);
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[ui_interaction] IDB press_button failed: {e}, no fallback available"
+                                    );
+                                    return Ok(serde_json::json!({
+                                        "success": false,
+                                        "action": "press_button",
+                                        "button": button,
+                                        "device_id": device_id,
+                                        "error": {
+                                            "code": "BUTTON_PRESS_FAILED",
+                                            "message": format!("Failed to press button '{}': {}", button, e),
+                                            "supported_buttons": ["home", "power", "volumeup", "volumedown"],
+                                            "note": "Hardware button simulation requires idb_companion"
+                                        }
+                                    }));
                                 }
                             }
-                            Err(e) => {
-                                eprintln!(
-                                    "[ui_interaction] Failed to ensure companion running: {e}"
-                                );
-                                return Ok(serde_json::json!({
-                                    "success": false,
-                                    "action": "press_button",
-                                    "button": button,
-                                    "device_id": device_id,
-                                    "error": {
-                                        "code": "IDB_NOT_AVAILABLE",
-                                        "message": format!("IDB companion not available: {}", e),
-                                        "supported_buttons": ["home", "power", "volumeup", "volumedown"],
-                                        "note": "Hardware button simulation requires idb_companion"
-                                    }
-                                }));
-                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[ui_interaction] Failed to ensure companion running: {e}"
+                            );
+                            return Ok(serde_json::json!({
+                                "success": false,
+                                "action": "press_button",
+                                "button": button,
+                                "device_id": device_id,
+                                "error": {
+                                    "code": "IDB_NOT_AVAILABLE",
+                                    "message": format!("IDB companion not available: {}", e),
+                                    "supported_buttons": ["home", "power", "volumeup", "volumedown"],
+                                    "note": "Hardware button simulation requires idb_companion"
+                                }
+                            }));
                         }
                     }
                 }
@@ -1976,26 +1947,21 @@ impl Tool for ScreenCaptureKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+            // Try to find any booted device
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    // Try to find any booted device
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found",
-                                    "details": {
-                                        "suggestion": "Boot a simulator with 'xcrun simctl boot <device-id>'"
-                                    }
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found",
+                            "details": {
+                                "suggestion": "Boot a simulator with 'xcrun simctl boot <device-id>'"
+                            }
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -2025,7 +1991,7 @@ impl Tool for ScreenCaptureKit {
         // If analyze is requested, add analysis placeholder
         if params
             .get("analyze")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
             result["analysis"] = serde_json::json!({
@@ -2100,22 +2066,17 @@ impl Tool for UiQueryKit {
         // Get device ID
         let device_id = if let Some(id) = params.get("device_id").and_then(|v| v.as_str()) {
             id.to_string()
-        } else {
-            match self.device_manager.get_active_device() {
-                Some(device) => device.id,
+        } else if let Some(device) = self.device_manager.get_active_device() { device.id } else {
+            self.device_manager.refresh_devices().ok();
+            match self.device_manager.get_booted_devices().first() {
+                Some(device) => device.id.clone(),
                 None => {
-                    self.device_manager.refresh_devices().ok();
-                    match self.device_manager.get_booted_devices().first() {
-                        Some(device) => device.id.clone(),
-                        None => {
-                            return Ok(serde_json::json!({
-                                "error": {
-                                    "code": "NO_BOOTED_DEVICE",
-                                    "message": "No booted iOS device found"
-                                }
-                            }));
+                    return Ok(serde_json::json!({
+                        "error": {
+                            "code": "NO_BOOTED_DEVICE",
+                            "message": "No booted iOS device found"
                         }
-                    }
+                    }));
                 }
             }
         };
@@ -2170,7 +2131,7 @@ fn get_active_device_id() -> Result<String> {
 
     // Parse device ID from output
     for line in stdout.lines() {
-        if line.contains("(") && line.contains(")") && line.contains("Booted") {
+        if line.contains('(') && line.contains(')') && line.contains("Booted") {
             if let Some(start) = line.find('(') {
                 if let Some(end) = line.find(')') {
                     return Ok(line[start + 1..end].to_string());
@@ -2188,7 +2149,7 @@ fn get_active_device_id() -> Result<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
-        if line.contains("iPhone") && line.contains("(") && line.contains(")") {
+        if line.contains("iPhone") && line.contains('(') && line.contains(')') {
             if let Some(start) = line.find('(') {
                 if let Some(end) = line.find(')') {
                     let device_id = line[start + 1..end].to_string();

@@ -170,7 +170,7 @@ impl Tool for BiometricDialogHandler {
             "cancel" => {
                 // Specifically try to cancel the dialog
                 match self.simulate_cancel_button(&device_id) {
-                    Ok(_) => Ok(json!({
+                    Ok(()) => Ok(json!({
                         "success": true,
                         "action": "cancel",
                         "method": "escape_key",
@@ -210,7 +210,7 @@ impl Tool for BiometricDialogHandler {
                     .unwrap_or("1234");
 
                 match self.simulate_passcode_entry(&device_id, passcode) {
-                    Ok(_) => {
+                    Ok(()) => {
                         // After typing passcode, send return key
                         self.send_key_event(&device_id, "return").ok();
 

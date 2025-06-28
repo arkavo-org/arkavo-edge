@@ -11,11 +11,11 @@ impl Vault {
 
     pub fn import(&self, _content: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("Importing to vault at {}", self.path);
-        return Ok(());
+        Ok(())
     }
 
     pub fn export(&self) -> Result<String, Box<dyn std::error::Error>> {
         println!("Exporting from vault at {}", self.path);
-        return Ok("Exported content".to_string());
+        Ok("Exported content".to_string())
     }
 }

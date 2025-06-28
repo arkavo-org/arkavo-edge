@@ -9,7 +9,7 @@ pub struct HarnessCompiler;
 
 impl HarnessCompiler {
     /// Compile harness using Swift Package Manager
-    pub async fn compile_with_spm(
+    pub(crate) async fn compile_with_spm(
         build_dir: &Path,
         plist_path: &Path,
         sim_version: &str,
@@ -77,7 +77,7 @@ impl HarnessCompiler {
     }
 
     /// Direct compilation using swiftc
-    pub async fn compile_direct(
+    pub(crate) async fn compile_direct(
         build_dir: &Path,
         plist_path: &Path,
         sim_version: &str,
@@ -151,7 +151,10 @@ impl HarnessCompiler {
         ]);
 
         // Add XCTest framework only if not iOS 26 beta
-        if !is_ios26_beta {
+        if is_ios26_beta {
+            eprintln!("[AxpHarnessBuilder] iOS 26 beta detected - skipping XCTest framework");
+            cmd.args(["-D", "IOS_26_BETA"]);
+        } else {
             cmd.args([
                 "-framework",
                 "XCTest",
@@ -178,9 +181,6 @@ impl HarnessCompiler {
                 "-Xlinker",
                 "@loader_path/Frameworks",
             ]);
-        } else {
-            eprintln!("[AxpHarnessBuilder] iOS 26 beta detected - skipping XCTest framework");
-            cmd.args(["-D", "IOS_26_BETA"]);
         }
 
         // Add Swift files
