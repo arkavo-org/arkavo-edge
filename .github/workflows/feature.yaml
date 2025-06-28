@@ -13,6 +13,80 @@ env:
   CARGO_NET_TIMEOUT: 10
 
 jobs:
+  # Version check from PR
+  version-check:
+    name: Verify Version Increment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Get PR branch version
+        id: pr_version
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "PR branch version: $VERSION"
+          
+      - name: Get main branch version
+        id: main_version
+        run: |
+          git fetch origin main:main
+          MAIN_VERSION=$(git show main:Cargo.toml | grep '^version =' | head -n 1 | cut -d'"' -f2)
+          echo "version=$MAIN_VERSION" >> $GITHUB_OUTPUT
+          echo "Main branch version: $MAIN_VERSION"
+          
+      - name: Compare versions
+        run: |
+          PR_VERSION="${{ steps.pr_version.outputs.version }}"
+          MAIN_VERSION="${{ steps.main_version.outputs.version }}"
+          
+          echo "Comparing versions:"
+          echo "  Main branch: $MAIN_VERSION"
+          echo "  PR branch:   $PR_VERSION"
+          
+          # Function to compare semantic versions
+          version_gt() {
+            test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"
+          }
+          
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "❌ ERROR: Version has not been incremented!"
+            echo "The version in Cargo.toml must be greater than the current version on main branch."
+            echo ""
+            echo "Current version on main: $MAIN_VERSION"
+            echo "Your PR version:        $PR_VERSION"
+            echo ""
+            echo "Please update the version in Cargo.toml to a higher version number."
+            echo "For example, if current is 0.1.0, you could use 0.1.1, 0.2.0, or 1.0.0"
+            exit 1
+          elif version_gt "$MAIN_VERSION" "$PR_VERSION"; then
+            echo "❌ ERROR: PR version is lower than main branch version!"
+            echo "The version in Cargo.toml must be greater than the current version on main branch."
+            echo ""
+            echo "Current version on main: $MAIN_VERSION"
+            echo "Your PR version:        $PR_VERSION"
+            exit 1
+          else
+            echo "✅ Version has been properly incremented from $MAIN_VERSION to $PR_VERSION"
+          fi
+          
+      - name: Check version format
+        run: |
+          VERSION="${{ steps.pr_version.outputs.version }}"
+          
+          # Verify semantic versioning format (X.Y.Z)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ ERROR: Invalid version format!"
+            echo "Version must follow semantic versioning (X.Y.Z)"
+            echo "Current version: $VERSION"
+            exit 1
+          fi
+          
+          echo "✅ Version format is valid: $VERSION"
+
   # Quick checks that can run in parallel
   format:
     name: Format Check
@@ -57,6 +131,16 @@ jobs:
           cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
           # Run arkavo-test without embeddings
           cargo test -p arkavo-test --no-default-features
+
+  test-coverage:
+    name: Test with Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-coverage"
       
       - name: Install cargo-tarpaulin
         run: |
@@ -195,17 +279,6 @@ jobs:
         with:
           shared-key: "perf"
       
-      - name: Check binary size
-        run: |
-          cargo build --release --no-default-features
-          SIZE=$(du -b target/release/arkavo | cut -f1)
-          SIZE_MB=$(( SIZE / 1024 / 1024 ))
-          echo "Binary size: $SIZE_MB MB"
-          
-          if [ $SIZE_MB -gt 100 ]; then
-            echo "Warning: Binary size exceeds 100 MB"
-          fi
-          
       - name: Check build time
         run: |
           cargo clean
@@ -218,6 +291,17 @@ jobs:
           
           if [ $BUILD_TIME -gt 300 ]; then
             echo "Warning: Build time exceeds 5 minutes"
+          fi
+          
+      - name: Check binary size
+        run: |
+          # Use the binary from the previous build step
+          SIZE=$(du -b target/release/arkavo | cut -f1)
+          SIZE_MB=$(( SIZE / 1024 / 1024 ))
+          echo "Binary size: $SIZE_MB MB"
+          
+          if [ $SIZE_MB -gt 100 ]; then
+            echo "Warning: Binary size exceeds 100 MB"
           fi
 
   # Smoke tests depend on builds
@@ -263,15 +347,17 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
+    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check job results
         run: |
-          if [[ "${{ needs.format.result }}" != "success" || \
+          if [[ "${{ needs.version-check.result }}" != "success" || \
+                "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
                 "${{ needs.test.result }}" != "success" || \
+                "${{ needs.test-coverage.result }}" != "success" || \
                 "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \

@@ -80,9 +80,6 @@ walkdir = "2.5"
 # JSON Schema validation
 jsonschema = "0.26"
 
-# XCTest bridge dependencies
-warp = "0.3"
-
 [build-dependencies]
 cc = "1.0"
 
