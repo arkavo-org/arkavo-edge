@@ -424,7 +424,10 @@ impl Provider for AnthropicProvider {
                     Ok(bytes) => {
                         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
-                        let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+                        let lines: Vec<String> = buffer
+                            .lines()
+                            .map(std::string::ToString::to_string)
+                            .collect();
 
                         for line in &lines {
                             if let Some(data) = line.strip_prefix("data: ") {

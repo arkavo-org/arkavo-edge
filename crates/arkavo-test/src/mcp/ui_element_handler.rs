@@ -307,7 +307,9 @@ impl Tool for UiElementHandler {
                 let retry_count = params
                     .get("retry_count")
                     .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(3) as usize;
+                    .unwrap_or(3)
+                    .try_into()
+                    .unwrap_or(3);
 
                 let mut last_error = None;
                 for attempt in 1..=retry_count {

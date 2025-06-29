@@ -180,7 +180,7 @@ impl IdbWrapper {
                 IDB_COMPANION_BYTES.len()
             );
 
-            if file_size != IDB_COMPANION_BYTES.len() as u64 {
+            if file_size != IDB_COMPANION_BYTES.len().try_into().unwrap_or(u64::MAX) {
                 return Err(TestError::Mcp(format!(
                     "Binary extraction failed: expected {} bytes, got {}",
                     IDB_COMPANION_BYTES.len(),

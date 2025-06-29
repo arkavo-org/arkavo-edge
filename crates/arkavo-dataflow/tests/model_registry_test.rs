@@ -68,7 +68,7 @@ fn test_model_info_serialization() {
 #[tokio::test]
 async fn test_model_search_by_capability() {
     // Create a test model with specific capabilities
-    let mut code_model = ModelInfo {
+    let code_model = ModelInfo {
         model_id: "code-model".to_string(),
         provider_name: "test".to_string(),
         display_name: "Code Model".to_string(),
@@ -92,7 +92,7 @@ async fn test_model_search_by_capability() {
         metadata: None,
     };
 
-    let mut vision_model = ModelInfo {
+    let vision_model = ModelInfo {
         model_id: "vision-model".to_string(),
         provider_name: "test".to_string(),
         display_name: "Vision Model".to_string(),
@@ -117,7 +117,7 @@ async fn test_model_search_by_capability() {
     };
 
     // Test capability filtering
-    let models = vec![code_model.clone(), vision_model.clone()];
+    let models = vec![code_model, vision_model];
 
     let streaming_models: Vec<_> = models
         .iter()

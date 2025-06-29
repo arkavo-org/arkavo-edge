@@ -1399,7 +1399,9 @@ impl Tool for UiInteractionKit {
                 let count = params
                     .get("count")
                     .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(1) as usize;
+                    .unwrap_or(1)
+                    .try_into()
+                    .unwrap_or(usize::MAX);
 
                 // Press delete key using key code 51
                 let mut delete_script = r#"

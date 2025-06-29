@@ -62,7 +62,7 @@ impl Tool for StoreMemoryTool {
         let category = params
             .get("category")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
 
         let request = CreateMemoryRequest {
             content,
@@ -165,9 +165,8 @@ impl Tool for SearchMemoryTool {
 
         let limit = params
             .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(10)
+            .and_then(serde_json::Value::as_u64)
+            .map_or(10, |v| v.try_into().unwrap_or(10))
             .min(100);
 
         let category = params.get("category").and_then(|v| v.as_str());

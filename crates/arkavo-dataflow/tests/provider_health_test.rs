@@ -1,6 +1,4 @@
-use arkavo_dataflow::nodes::provider_health::{
-    CircuitBreaker, HealthStatus, ProviderHealthMonitor, ProviderMetrics,
-};
+use arkavo_dataflow::nodes::provider_health::{CircuitBreaker, ProviderHealthMonitor};
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]
@@ -111,10 +109,8 @@ async fn test_healthiest_provider_selection() {
     }
 
     // Manually set health statuses (in real scenario, this would be from health checks)
-    use arkavo_dataflow::nodes::provider_health::HealthCheckResult;
-    use chrono::Utc;
 
-    let providers = vec!["provider1", "provider2", "provider3"];
+    let providers = ["provider1", "provider2", "provider3"];
 
     // Provider 1 should be selected as healthiest (high uptime, low latency)
     // Note: In actual implementation, this would consider health status too

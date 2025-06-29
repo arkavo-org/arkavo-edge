@@ -631,7 +631,7 @@ impl Tool for TestProviderConnectionTool {
         // Test the connection
         let start_time = std::time::Instant::now();
         let test_successful = provider_config.base_url.contains("localhost");
-        let latency_ms = start_time.elapsed().as_millis() as u64;
+        let latency_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
 
         // Record the test result
         monitor

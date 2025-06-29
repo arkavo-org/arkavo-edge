@@ -218,7 +218,8 @@ impl Renderable for CodeView {
         // Render scroll indicator
         if highlighted_lines.len() > visible_height {
             let scroll_percentage = if highlighted_lines.len() > 1 {
-                (self.scroll_offset as f32 / (highlighted_lines.len() - 1) as f32 * 100.0) as u16
+                (f32::from(self.scroll_offset) / (highlighted_lines.len() - 1) as f32 * 100.0)
+                    as u16
             } else {
                 0
             };

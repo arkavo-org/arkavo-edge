@@ -148,13 +148,13 @@ impl MetricsCollector {
 
         let first_throughput = snapshots
             .first()
-            .map(|s| s.system_metrics.total_messages_processed)
-            .unwrap_or(0) as f64;
+            .map_or(0, |s| s.system_metrics.total_messages_processed)
+            as f64;
 
         let last_throughput = snapshots
             .last()
-            .map(|s| s.system_metrics.total_messages_processed)
-            .unwrap_or(0) as f64;
+            .map_or(0, |s| s.system_metrics.total_messages_processed)
+            as f64;
 
         let change_percent = if first_throughput > 0.0 {
             ((last_throughput - first_throughput) / first_throughput) * 100.0
@@ -177,7 +177,7 @@ impl MetricsCollector {
         let error_rates: Vec<f64> = snapshots
             .iter()
             .map(|s| {
-                let total_errors: u64 = s.pipelines.iter().map(|p| p.total_errors()).sum();
+                let total_errors: u64 = s.pipelines.iter().map(PipelineMetrics::total_errors).sum();
                 let total_processed = s.system_metrics.total_messages_processed;
 
                 if total_processed > 0 {

@@ -197,25 +197,20 @@ impl TaskManager {
         if !self.tasks.is_empty() {
             self.active_task = Some(
                 self.active_task
-                    .map(|idx| (idx + 1) % self.tasks.len())
-                    .unwrap_or(0),
+                    .map_or(0, |idx| (idx + 1) % self.tasks.len()),
             );
         }
     }
 
     pub fn prev_task(&mut self) {
         if !self.tasks.is_empty() {
-            self.active_task = Some(
-                self.active_task
-                    .map(|idx| {
-                        if idx == 0 {
-                            self.tasks.len() - 1
-                        } else {
-                            idx - 1
-                        }
-                    })
-                    .unwrap_or(0),
-            );
+            self.active_task = Some(self.active_task.map_or(0, |idx| {
+                if idx == 0 {
+                    self.tasks.len() - 1
+                } else {
+                    idx - 1
+                }
+            }));
         }
     }
 

@@ -147,7 +147,9 @@ impl MessageRouter {
             SplitStrategy::Conditional => "conditional", // Not implemented yet
         };
 
-        self.split_strategies.get(name).map(|s| s.as_ref())
+        self.split_strategies
+            .get(name)
+            .map(std::convert::AsRef::as_ref)
     }
 
     pub fn get_merge_router(&self, strategy: &MergeStrategy) -> Option<&dyn MergeRouter> {
@@ -158,7 +160,9 @@ impl MessageRouter {
             MergeStrategy::Vote => "vote", // Not implemented yet
         };
 
-        self.merge_strategies.get(name).map(|s| s.as_ref())
+        self.merge_strategies
+            .get(name)
+            .map(std::convert::AsRef::as_ref)
     }
 }
 

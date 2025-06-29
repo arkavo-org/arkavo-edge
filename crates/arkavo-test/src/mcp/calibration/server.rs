@@ -1023,9 +1023,9 @@ impl CalibrationServer {
         }
 
         let validation_report = ValidationReport {
-            total_interactions: expected_taps as usize,
-            successful_interactions: tap_count as usize,
-            failed_interactions: failed_taps as usize,
+            total_interactions: expected_taps.try_into().unwrap_or(usize::MAX),
+            successful_interactions: tap_count.try_into().unwrap_or(usize::MAX),
+            failed_interactions: failed_taps.try_into().unwrap_or(usize::MAX),
             accuracy_percentage: accuracy,
             issues,
         };
@@ -1058,7 +1058,10 @@ impl CalibrationServer {
                 session_id: session_id.to_string(),
                 device_id: session.device_id.clone(),
                 start_time: session.start_time,
-                elapsed_seconds: (chrono::Utc::now() - session.start_time).num_seconds() as u64,
+                elapsed_seconds: (chrono::Utc::now() - session.start_time)
+                    .num_seconds()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
                 status: match &session.status {
                     CalibrationStatus::Initializing => "initializing".to_string(),
                     CalibrationStatus::Validating => "validating".to_string(),
