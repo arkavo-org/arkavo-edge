@@ -134,7 +134,10 @@ async fn test_provider_creation() {
     assert!(result.is_err());
     let err = result.err().unwrap();
     // Should fail because credentials can't be found
-    assert!(err.to_string().contains("test-api-key") || err.to_string().contains("environment variable"));
+    assert!(
+        err.to_string().contains("test-api-key")
+            || err.to_string().contains("environment variable")
+    );
 
     // Test with truly unregistered provider type
     let config = ProviderConfig {
