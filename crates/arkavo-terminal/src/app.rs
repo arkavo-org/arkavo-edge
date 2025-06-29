@@ -9,6 +9,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
 };
+use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -44,6 +45,39 @@ pub enum FocusedPane {
     Chat,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigurationMode {
+    None,
+    OllamaServer { input: String, testing: bool },
+    OpenAIKey { input: String },
+    AnthropicKey { input: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderInfo {
+    pub name: String,
+    pub provider_type: ProviderType,
+    pub url: Option<String>,
+    pub status: ProviderStatus,
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderType {
+    Ollama,
+    OpenAI,
+    Anthropic,
+    Claude,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderStatus {
+    Connected,
+    Disconnected,
+    NotConfigured,
+    Error(String),
+}
+
 pub struct App {
     pub should_quit: bool,
     pub view_mode: ViewMode,
@@ -73,6 +107,9 @@ pub struct App {
     pub last_quit_attempt: Option<Instant>,
     pub active_model: Option<String>, // The actual model being used
     pub main_task_id: Option<uuid::Uuid>, // ID of the main conversation task
+    pub server_urls: HashMap<String, String>, // Map server names to URLs
+    pub configuration_mode: ConfigurationMode, // Configuration dialog state
+    pub providers: Vec<ProviderInfo>, // All available providers and their status
 }
 
 impl App {
@@ -106,18 +143,30 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![
-                "llava:7b".to_string(),
-                "devstral:latest".to_string(),
-                "deepseek-r1:14b".to_string(),
-                "qwen3:0.6b".to_string(),
-                "dolphin3:latest".to_string(),
-            ],
+            available_models: vec![],
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
-            active_model: Some("devstral:latest".to_string()),
+            active_model: None, // Will be set when models are fetched
             main_task_id: None,
+            server_urls: HashMap::new(),
+            configuration_mode: ConfigurationMode::None,
+            providers: vec![
+                ProviderInfo {
+                    name: "OpenAI".to_string(),
+                    provider_type: ProviderType::OpenAI,
+                    url: Some("https://api.openai.com".to_string()),
+                    status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+                ProviderInfo {
+                    name: "Anthropic".to_string(),
+                    provider_type: ProviderType::Anthropic,
+                    url: Some("https://api.anthropic.com".to_string()),
+                    status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+            ],
         }
     }
 
@@ -154,18 +203,30 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![
-                "llava:7b".to_string(),
-                "devstral:latest".to_string(),
-                "deepseek-r1:14b".to_string(),
-                "qwen3:0.6b".to_string(),
-                "dolphin3:latest".to_string(),
-            ],
+            available_models: vec![],
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
-            active_model: Some("devstral:latest".to_string()),
+            active_model: None, // Will be set when models are fetched
             main_task_id: None,
+            server_urls: HashMap::new(),
+            configuration_mode: ConfigurationMode::None,
+            providers: vec![
+                ProviderInfo {
+                    name: "OpenAI".to_string(),
+                    provider_type: ProviderType::OpenAI,
+                    url: Some("https://api.openai.com".to_string()),
+                    status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+                ProviderInfo {
+                    name: "Anthropic".to_string(),
+                    provider_type: ProviderType::Anthropic,
+                    url: Some("https://api.anthropic.com".to_string()),
+                    status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+            ],
         }
     }
 
@@ -208,10 +269,233 @@ impl App {
         Ok(())
     }
 
+    pub fn get_server_url_for_model(&self, model_name: &str) -> String {
+        if let Some((server_prefix, _)) = model_name.split_once('/') {
+            self.server_urls
+                .get(server_prefix)
+                .cloned()
+                .unwrap_or_else(|| "http://localhost:11434".to_string())
+        } else {
+            "http://localhost:11434".to_string()
+        }
+    }
+
+    pub async fn fetch_available_models(&mut self) {
+        // Try to fetch models from discovered Ollama servers
+        use arkavo_llm::ollama::OllamaClient;
+        use arkavo_memory::storage::MemoryStorage;
+        use std::sync::Arc;
+
+        let mut all_models = Vec::new();
+
+        // Clear existing Ollama providers but keep frontier providers
+        self.providers
+            .retain(|p| p.provider_type != ProviderType::Ollama);
+
+        // Initialize memory storage to check for saved Ollama configurations
+        let storage = match MemoryStorage::new().await {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Error,
+                    format!("[Storage] Failed to initialize: {e}"),
+                );
+                return;
+            }
+        };
+
+        // Search for saved Ollama server configurations
+        // Search directly for the type marker like the chat command does
+        let saved_configs = match storage
+            .search("arkavo_ollama_server_config", 20, Some("config"))
+            .await
+        {
+            Ok(configs) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Debug,
+                    format!("[Storage] Found {} saved Ollama configs", configs.len()),
+                );
+                configs
+            }
+            Err(e) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Error,
+                    format!("[Storage] Failed to search configs: {e}"),
+                );
+                vec![]
+            }
+        };
+
+        // Always try localhost first
+        let localhost_client = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
+        match localhost_client.list_models().await {
+            Ok(models) => {
+                self.server_urls.insert(
+                    "localhost".to_string(),
+                    "http://localhost:11434".to_string(),
+                );
+                let model_count = models.len();
+                let mut provider_models = Vec::new();
+                for model in models {
+                    let full_name = format!("localhost/{model}");
+                    all_models.push(full_name.clone());
+                    provider_models.push(model);
+                }
+
+                // Add localhost provider info
+                self.providers.push(ProviderInfo {
+                    name: "Ollama (localhost)".to_string(),
+                    provider_type: ProviderType::Ollama,
+                    url: Some("http://localhost:11434".to_string()),
+                    status: ProviderStatus::Connected,
+                    models: provider_models,
+                });
+
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Info,
+                    format!(
+                        "[Ollama] Connected to localhost, found {} models",
+                        model_count
+                    ),
+                );
+            }
+            Err(e) => {
+                // Add disconnected localhost provider
+                self.providers.push(ProviderInfo {
+                    name: "Ollama (localhost)".to_string(),
+                    provider_type: ProviderType::Ollama,
+                    url: Some("http://localhost:11434".to_string()),
+                    status: ProviderStatus::Disconnected,
+                    models: vec![],
+                });
+
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Debug,
+                    format!("[Ollama] Localhost not available: {e}"),
+                );
+            }
+        }
+
+        // Try saved configurations - filter for Ollama server configs
+        let mut server_idx = 1;
+        self.add_debug_log(
+            crate::ui::debug::LogLevel::Debug,
+            format!("[Models] Checking {} saved configs", saved_configs.len()),
+        );
+        for config in saved_configs.iter() {
+            let server_url = &config.memory.content;
+
+            // Skip cleared configs and localhost (we already tried it)
+            if server_url == "CLEARED" || server_url == "http://localhost:11434" {
+                continue;
+            }
+
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Debug,
+                format!("[Storage] Found saved Ollama config: {}", server_url),
+            );
+
+            if server_url.starts_with("http") {
+                let client = OllamaClient::new(Some(server_url.clone()), None);
+
+                match client.list_models().await {
+                    Ok(models) => {
+                        let server_name = format!("server{server_idx}");
+                        self.server_urls
+                            .insert(server_name.clone(), server_url.clone());
+
+                        let model_count = models.len();
+                        let mut provider_models = Vec::new();
+                        for model in models {
+                            let full_name = format!("{server_name}/{model}");
+                            all_models.push(full_name);
+                            provider_models.push(model);
+                        }
+
+                        // Add remote Ollama provider info
+                        // Extract just the host:port from the URL for cleaner display
+                        let display_url = server_url
+                            .strip_prefix("http://")
+                            .or_else(|| server_url.strip_prefix("https://"))
+                            .unwrap_or(&server_url);
+                        self.providers.push(ProviderInfo {
+                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            provider_type: ProviderType::Ollama,
+                            url: Some(server_url.clone()),
+                            status: ProviderStatus::Connected,
+                            models: provider_models,
+                        });
+
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!("[Ollama] Connected to {server_name}: {server_url}, found {} models", model_count),
+                        );
+                        server_idx += 1;
+                    }
+                    Err(e) => {
+                        // Add disconnected remote Ollama provider
+                        let server_name = format!("server{server_idx}");
+                        let display_url = server_url
+                            .strip_prefix("http://")
+                            .or_else(|| server_url.strip_prefix("https://"))
+                            .unwrap_or(&server_url);
+                        self.providers.push(ProviderInfo {
+                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            provider_type: ProviderType::Ollama,
+                            url: Some(server_url.clone()),
+                            status: ProviderStatus::Error(e.to_string()),
+                            models: vec![],
+                        });
+
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[Ollama] Failed to connect to {server_url}: {e}"),
+                        );
+                        server_idx += 1;
+                    }
+                }
+            }
+        }
+
+        if !all_models.is_empty() {
+            self.available_models = all_models.clone();
+            // If we have models and none selected, select the first one
+            if self.selected_model >= self.available_models.len() {
+                self.selected_model = 0;
+            }
+            if self.active_model.is_none() && !self.available_models.is_empty() {
+                self.active_model = Some(self.available_models[0].clone());
+            }
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                format!(
+                    "[Models] Found {} models: {:?}",
+                    all_models.len(),
+                    all_models
+                ),
+            );
+        } else {
+            // No models found, prompt for configuration
+            self.available_models = vec![
+                "Configure Ollama Server...".to_string(),
+                "Configure OpenAI API...".to_string(),
+                "Configure Anthropic API...".to_string(),
+            ];
+            self.selected_model = 0;
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Warning,
+                "[Models] No models found, showing configuration options".to_string(),
+            );
+        }
+    }
+
     async fn run_app<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<()> {
+        // Fetch available models from Ollama server
+        self.fetch_available_models().await;
+
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
 
@@ -315,9 +599,55 @@ impl App {
                 match event::read()? {
                     Event::Key(key) => {
                         self.telemetry.track_key_event();
+
+                        // Handle configuration mode input
+                        if self.configuration_mode != ConfigurationMode::None {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    self.configuration_mode = ConfigurationMode::None;
+                                }
+                                KeyCode::Enter => {
+                                    self.handle_configuration_submit().await;
+                                }
+                                KeyCode::Char(c) => match &mut self.configuration_mode {
+                                    ConfigurationMode::OllamaServer { input, .. }
+                                    | ConfigurationMode::OpenAIKey { input }
+                                    | ConfigurationMode::AnthropicKey { input } => {
+                                        input.push(c);
+                                    }
+                                    _ => {}
+                                },
+                                KeyCode::Backspace => match &mut self.configuration_mode {
+                                    ConfigurationMode::OllamaServer { input, .. }
+                                    | ConfigurationMode::OpenAIKey { input }
+                                    | ConfigurationMode::AnthropicKey { input } => {
+                                        input.pop();
+                                    }
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                            continue;
+                        }
+
                         match key.code {
                             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 self.should_quit = true;
+                            }
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.view_mode = ViewMode::Debug;
+                            }
+                            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+S: Save/export UI state to file
+                                self.export_ui_state().await;
+                            }
+                            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+R: Refresh model list
+                                self.add_debug_log(
+                                    crate::ui::debug::LogLevel::Info,
+                                    "[UI] Refreshing model list...".to_string(),
+                                );
+                                self.fetch_available_models().await;
                             }
                             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                                 self.vim_enabled = !self.vim_enabled;
@@ -343,8 +673,29 @@ impl App {
                                 terminal.draw(|f| self.render(f))?;
                             }
                             KeyCode::Tab => {
-                                // Tab key disabled - model switching not yet implemented
-                                // See issue #86 for multi-model support
+                                // Cycle through available models (only if we have models)
+                                if !self.available_models.is_empty() {
+                                    self.selected_model =
+                                        (self.selected_model + 1) % self.available_models.len();
+                                    self.active_model =
+                                        Some(self.available_models[self.selected_model].clone());
+
+                                    // If we selected a configuration option, show a hint
+                                    if self
+                                        .active_model
+                                        .as_ref()
+                                        .map(|m| m.ends_with("..."))
+                                        .unwrap_or(false)
+                                    {
+                                        self.add_debug_log(
+                                            crate::ui::debug::LogLevel::Info,
+                                            format!(
+                                                "[UI] Press Enter to {}",
+                                                self.active_model.as_ref().unwrap()
+                                            ),
+                                        );
+                                    }
+                                }
                             }
                             KeyCode::BackTab => {
                                 if matches!(self.layout_mode, LayoutMode::Portrait) {
@@ -363,11 +714,40 @@ impl App {
                                     if !self.input_buffer.is_empty() {
                                         // Use the actual model being used (from the LLM client)
                                         let displayed_model =
-                                            if let Some(ref active) = self.active_model {
-                                                active.clone()
-                                            } else {
-                                                "devstral:latest".to_string()
+                                            self.active_model.clone().unwrap_or_else(|| {
+                                                // If no model selected, try to use first available
+                                                self.available_models
+                                                    .first()
+                                                    .cloned()
+                                                    .unwrap_or_else(|| "unknown".to_string())
+                                            });
+
+                                        // Check if the selected model is actually a configuration option
+                                        if displayed_model.ends_with("...") {
+                                            // Enter configuration mode
+                                            self.configuration_mode = match displayed_model.as_str()
+                                            {
+                                                "Configure Ollama Server..." => {
+                                                    ConfigurationMode::OllamaServer {
+                                                        input: String::new(),
+                                                        testing: false,
+                                                    }
+                                                }
+                                                "Configure OpenAI API..." => {
+                                                    ConfigurationMode::OpenAIKey {
+                                                        input: String::new(),
+                                                    }
+                                                }
+                                                "Configure Anthropic API..." => {
+                                                    ConfigurationMode::AnthropicKey {
+                                                        input: String::new(),
+                                                    }
+                                                }
+                                                _ => ConfigurationMode::None,
                                             };
+                                            self.input_buffer.clear();
+                                            continue;
+                                        }
 
                                         // Check if we have a main task, if not create one
                                         let task_id = if let Some(id) = self.main_task_id {
@@ -383,6 +763,21 @@ impl App {
                                             self.task_manager.active_task = Some(0); // Make it the active task
                                             id
                                         };
+
+                                        // Check for natural language Ollama commands
+                                        let input_lower = self.input_buffer.to_lowercase();
+                                        if input_lower.contains("add ollama server")
+                                            || input_lower.contains("connect to ollama")
+                                        {
+                                            // Extract server address from the message
+                                            if let Some(server_url) =
+                                                self.extract_server_url(&self.input_buffer)
+                                            {
+                                                self.add_ollama_server(server_url).await;
+                                                self.input_buffer.clear();
+                                                continue;
+                                            }
+                                        }
 
                                         // Add user message to the task
                                         if let Some(task) =
@@ -574,17 +969,22 @@ impl App {
     fn render(&self, frame: &mut ratatui::Frame) {
         // Always use the new task-based layout
         self.render_task_layout(frame);
+
+        // Render configuration dialog if active
+        if self.configuration_mode != ConfigurationMode::None {
+            self.render_configuration_dialog(frame);
+        }
     }
 
     fn render_task_layout(&self, frame: &mut ratatui::Frame) {
-        use ratatui::style::{Color, Style};
+        use ratatui::style::{Color, Modifier, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Input area at top
-                Constraint::Length(3), // Model selector
+                Constraint::Length(8), // Model/Provider selector (increased for more info)
                 Constraint::Min(10),   // Task windows
                 Constraint::Length(1), // Status bar
             ])
@@ -663,24 +1063,136 @@ impl App {
         let active_model_display = if let Some(ref active) = self.active_model {
             format!("Active Model: {active}")
         } else {
-            "Active Model: devstral:latest".to_string()
+            "Active Model: None".to_string()
         };
 
-        // Create a block for the model selector area
+        // Create a block for the provider/model area
         let model_selector_block = Block::default()
             .borders(Borders::ALL)
-            .title(active_model_display)
+            .title(format!(" Providers & Models | {} ", active_model_display))
             .border_style(Style::default().fg(Color::Yellow));
 
         let model_inner = model_selector_block.inner(chunks[1]);
         frame.render_widget(model_selector_block, chunks[1]);
 
-        // Add info text about model selection
-        let info_text = "Model selection coming soon (see issue #86)";
-        let info_paragraph = Paragraph::new(info_text)
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(info_paragraph, model_inner);
+        // Render provider and model information
+        use ratatui::text::{Line, Span};
+
+        let mut lines = Vec::new();
+
+        // Group providers by type
+        let mut ollama_providers = Vec::new();
+        let mut frontier_providers = Vec::new();
+
+        for provider in &self.providers {
+            match provider.provider_type {
+                ProviderType::Ollama => ollama_providers.push(provider),
+                ProviderType::OpenAI | ProviderType::Anthropic | ProviderType::Claude => {
+                    frontier_providers.push(provider)
+                }
+            }
+        }
+
+        // Display Ollama providers
+        if !ollama_providers.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "Ollama Servers",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+
+            for provider in ollama_providers {
+                let status_symbol = match &provider.status {
+                    ProviderStatus::Connected => "✓",
+                    ProviderStatus::Disconnected => "✗",
+                    ProviderStatus::NotConfigured => "○",
+                    ProviderStatus::Error(_) => "!",
+                };
+
+                let status_color = match &provider.status {
+                    ProviderStatus::Connected => Color::Green,
+                    ProviderStatus::Disconnected => Color::Red,
+                    ProviderStatus::NotConfigured => Color::DarkGray,
+                    ProviderStatus::Error(_) => Color::Red,
+                };
+
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(status_symbol, Style::default().fg(status_color)),
+                    Span::raw(" "),
+                    Span::raw(&provider.name),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("({} models)", provider.models.len()),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
+
+        // Display frontier providers
+        if !frontier_providers.is_empty() {
+            if !lines.is_empty() {
+                lines.push(Line::from("")); // Add spacing
+            }
+
+            lines.push(Line::from(vec![Span::styled(
+                "Frontier Providers",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+
+            for provider in frontier_providers {
+                let status_symbol = match &provider.status {
+                    ProviderStatus::Connected => "✓",
+                    ProviderStatus::Disconnected => "✗",
+                    ProviderStatus::NotConfigured => "○",
+                    ProviderStatus::Error(_) => "!",
+                };
+
+                let status_color = match &provider.status {
+                    ProviderStatus::Connected => Color::Green,
+                    ProviderStatus::Disconnected => Color::Red,
+                    ProviderStatus::NotConfigured => Color::DarkGray,
+                    ProviderStatus::Error(_) => Color::Red,
+                };
+
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(status_symbol, Style::default().fg(status_color)),
+                    Span::raw(" "),
+                    Span::raw(&provider.name),
+                    Span::raw(" "),
+                    Span::styled(
+                        if provider.status == ProviderStatus::NotConfigured {
+                            "(not configured)".to_string()
+                        } else {
+                            format!("({} models)", provider.models.len())
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
+
+        // Add help text at bottom
+        if lines.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "No providers available. Press Enter to configure.",
+                Style::default().fg(Color::DarkGray),
+            )]));
+        } else {
+            lines.push(Line::from("")); // Add spacing
+            lines.push(Line::from(vec![Span::styled(
+                "Tab: cycle models | Enter: configure",
+                Style::default().fg(Color::DarkGray),
+            )]));
+        }
+
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, model_inner);
 
         // Render task windows
         if self.task_manager.tasks.is_empty() {
@@ -688,9 +1200,15 @@ impl App {
 Welcome to Arkavo Terminal UI
 
 • Type your prompt and press Enter to start a conversation
+• Press Tab to cycle through available models
 • Press Ctrl+E to open Helix editor
 • Press Ctrl+I to toggle input/scroll mode
+• Press Ctrl+R to refresh model list
 • Press Ctrl+Q to quit
+
+Natural Language Commands:
+• "Add Ollama server 192.168.1.100:11434" - Connect to a new Ollama server
+• "Connect to Ollama at server.local:11434" - Alternative syntax
 
 Scrolling (when in scroll mode):
 • Arrow Up/Down or j/k to scroll line by line
@@ -932,11 +1450,10 @@ Scrolling (when in scroll mode):
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
-        let active_model = if let Some(ref model) = self.active_model {
-            model.clone()
-        } else {
-            "devstral:latest".to_string()
-        };
+        let active_model = self
+            .active_model
+            .clone()
+            .unwrap_or_else(|| "No model selected".to_string());
 
         let mode_indicator = if self.input_focused {
             "INPUT MODE"
@@ -945,7 +1462,7 @@ Scrolling (when in scroll mode):
         };
 
         let status = format!(
-            " {mode_indicator} | Model: {active_model} | Ctrl+E: Helix | Enter: Send | Ctrl+I: Toggle Mode | Ctrl+Q: Quit "
+            " {mode_indicator} | Model: {active_model} | Ctrl+R: Refresh | Ctrl+D: Debug | Ctrl+S: Export | Ctrl+Q: Quit "
         );
 
         let paragraph = Paragraph::new(status)
@@ -1072,6 +1589,364 @@ Scrolling (when in scroll mode):
 
     pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {
         self.debug_view.add_log(level, message);
+    }
+
+    fn extract_server_url(&self, input: &str) -> Option<String> {
+        // Look for patterns like IP:port, hostname:port, or URLs
+        let patterns = [
+            // IP address with port
+            r"\b(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b",
+            // Hostname with port
+            r"\b[a-zA-Z0-9\-\.]+:\d{1,5}\b",
+            // Full URL
+            r"https?://[^\s]+",
+        ];
+
+        for pattern in patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(mat) = re.find(input) {
+                    return Some(mat.as_str().to_string());
+                }
+            }
+        }
+        None
+    }
+
+    async fn add_ollama_server(&mut self, server_url: String) {
+        use arkavo_llm::ollama::OllamaClient;
+        use arkavo_memory::storage::MemoryStorage;
+        use std::sync::Arc;
+
+        // Normalize URL
+        let mut url = server_url.trim().to_string();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            url = format!("http://{}", url);
+        }
+
+        self.add_debug_log(
+            crate::ui::debug::LogLevel::Info,
+            format!("[Config] Testing connection to {}", url),
+        );
+
+        // Test connection
+        let client = OllamaClient::new(Some(url.clone()), None);
+        match client.list_models().await {
+            Ok(models) => {
+                // Save configuration
+                if let Ok(storage) = MemoryStorage::new().await {
+                    let storage = Arc::new(storage);
+                    let embedding = vec![0.0; 384]; // Placeholder
+
+                    let memory = arkavo_memory::models::Memory {
+                        id: uuid::Uuid::new_v4(),
+                        content: url.clone(),
+                        metadata: Some(serde_json::json!({
+                            "type": "arkavo_ollama_server_config",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "model_count": models.len(),
+                        })),
+                        category: Some("config".to_string()),
+                        embedding,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    };
+
+                    if let Err(e) = storage.store(memory).await {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[Config] Failed to save: {}", e),
+                        );
+                    } else {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!(
+                                "[Config] Added Ollama server {} with {} models",
+                                url,
+                                models.len()
+                            ),
+                        );
+
+                        // Refresh model list
+                        self.fetch_available_models().await;
+                    }
+                }
+            }
+            Err(e) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Error,
+                    format!("[Config] Failed to connect to {}: {}", url, e),
+                );
+            }
+        }
+    }
+
+    async fn export_ui_state(&mut self) {
+        use chrono::Local;
+        use serde_json::json;
+        use std::fs;
+
+        // Create a comprehensive UI state dump
+        let ui_state = json!({
+            "timestamp": Local::now().to_rfc3339(),
+            "providers": self.providers.iter().map(|p| {
+                json!({
+                    "name": p.name,
+                    "type": format!("{:?}", p.provider_type),
+                    "url": p.url,
+                    "status": format!("{:?}", p.status),
+                    "models": p.models,
+                })
+            }).collect::<Vec<_>>(),
+            "active_model": self.active_model,
+            "available_models": self.available_models,
+            "selected_model": self.selected_model,
+            "server_urls": self.server_urls,
+            "debug_logs": self.debug_view.get_all_logs(),
+            "tasks": self.task_manager.tasks.iter().map(|t| {
+                json!({
+                    "id": t.id.to_string(),
+                    "agent": t.agent_name,
+                    "model": t.model_name,
+                    "status": format!("{:?}", t.status),
+                    "messages": t.messages.iter().map(|m| {
+                        json!({
+                            "role": format!("{:?}", m.role),
+                            "content": m.content,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+        });
+
+        // Generate filename with timestamp
+        let filename = format!(
+            "arkavo-ui-state-{}.json",
+            Local::now().format("%Y%m%d-%H%M%S")
+        );
+
+        match fs::write(
+            &filename,
+            serde_json::to_string_pretty(&ui_state).unwrap_or_default(),
+        ) {
+            Ok(_) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Info,
+                    format!("[Export] UI state saved to {}", filename),
+                );
+            }
+            Err(e) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Error,
+                    format!("[Export] Failed to save UI state: {}", e),
+                );
+            }
+        }
+    }
+
+    fn render_configuration_dialog(&self, frame: &mut ratatui::Frame) {
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+
+        // Create a centered modal dialog
+        let area = frame.area();
+        let dialog_width = 60.min(area.width - 4);
+        let dialog_height = 12.min(area.height - 4);
+
+        let x = (area.width.saturating_sub(dialog_width)) / 2;
+        let y = (area.height.saturating_sub(dialog_height)) / 2;
+
+        let dialog_area = ratatui::layout::Rect::new(x, y, dialog_width, dialog_height);
+
+        // Clear the area behind the dialog
+        frame.render_widget(Clear, dialog_area);
+
+        // Determine dialog title and content based on configuration mode
+        let (title, prompt, input_value, status) = match &self.configuration_mode {
+            ConfigurationMode::OllamaServer { input, testing } => {
+                let status = if *testing {
+                    "Testing connection..."
+                } else {
+                    ""
+                };
+                (
+                    " Configure Ollama Server ",
+                    "Enter server address (e.g., 192.168.1.100:11434):",
+                    input.as_str(),
+                    status,
+                )
+            }
+            ConfigurationMode::OpenAIKey { input } => (
+                " Configure OpenAI API ",
+                "Enter your OpenAI API key:",
+                input.as_str(),
+                "Note: OpenAI provider not yet implemented",
+            ),
+            ConfigurationMode::AnthropicKey { input } => (
+                " Configure Anthropic API ",
+                "Enter your Anthropic API key:",
+                input.as_str(),
+                "Note: Anthropic provider not yet implemented",
+            ),
+            ConfigurationMode::None => return,
+        };
+
+        // Create the dialog block
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let inner = block.inner(dialog_area);
+        frame.render_widget(block, dialog_area);
+
+        // Create dialog content
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(prompt, Style::default().fg(Color::White))),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("> "),
+                Span::styled(input_value, Style::default().fg(Color::Yellow)),
+                Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+            ]),
+            Line::from(""),
+        ];
+
+        if !status.is_empty() {
+            lines.push(Line::from(Span::styled(
+                status,
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            lines.push(Line::from(""));
+        }
+
+        lines.push(Line::from(Span::styled(
+            "Press Enter to submit, Esc to cancel",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        let paragraph = Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .alignment(ratatui::layout::Alignment::Left);
+
+        frame.render_widget(paragraph, inner);
+    }
+
+    async fn handle_configuration_submit(&mut self) {
+        use arkavo_memory::storage::MemoryStorage;
+
+        // Clone the configuration mode to avoid borrow checker issues
+        let config_mode = self.configuration_mode.clone();
+
+        match config_mode {
+            ConfigurationMode::OllamaServer { input, .. } => {
+                if input.is_empty() {
+                    self.configuration_mode = ConfigurationMode::None;
+                    return;
+                }
+
+                let base_url = if input.starts_with("http://") || input.starts_with("https://") {
+                    input.clone()
+                } else {
+                    format!("http://{input}")
+                };
+
+                // Set testing mode
+                if let ConfigurationMode::OllamaServer { testing, .. } =
+                    &mut self.configuration_mode
+                {
+                    *testing = true;
+                }
+
+                // Test the connection
+                let test_client =
+                    arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
+
+                match test_client.list_models().await {
+                    Ok(models) => {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!(
+                                "[Config] Connected to {base_url}, found {} models",
+                                models.len()
+                            ),
+                        );
+
+                        // Save the configuration
+                        if let Ok(storage) = MemoryStorage::new().await {
+                            let embedding_service =
+                                arkavo_memory::embeddings::EmbeddingService::new();
+                            let embedding =
+                                match embedding_service.generate_embedding(&base_url).await {
+                                    Ok(e) => e,
+                                    Err(_) => vec![0.0; 384],
+                                };
+
+                            let memory = arkavo_memory::models::Memory {
+                                id: uuid::Uuid::new_v4(),
+                                content: base_url.clone(),
+                                metadata: Some(serde_json::json!({
+                                    "type": "arkavo_ollama_server_config",
+                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                })),
+                                category: Some("config".to_string()),
+                                embedding,
+                                created_at: chrono::Utc::now(),
+                                updated_at: chrono::Utc::now(),
+                            };
+
+                            if let Err(e) = storage.store(memory).await {
+                                self.add_debug_log(
+                                    crate::ui::debug::LogLevel::Error,
+                                    format!("[Config] Failed to save configuration: {e}"),
+                                );
+                            } else {
+                                self.add_debug_log(
+                                    crate::ui::debug::LogLevel::Info,
+                                    "[Config] Configuration saved successfully".to_string(),
+                                );
+                            }
+                        }
+
+                        // Exit configuration mode
+                        self.configuration_mode = ConfigurationMode::None;
+
+                        // Refresh available models
+                        self.fetch_available_models().await;
+                    }
+                    Err(e) => {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[Config] Failed to connect to {base_url}: {e}"),
+                        );
+                        // Reset testing state but stay in config mode
+                        if let ConfigurationMode::OllamaServer { testing, .. } =
+                            &mut self.configuration_mode
+                        {
+                            *testing = false;
+                        }
+                    }
+                }
+            }
+            ConfigurationMode::OpenAIKey { .. } => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Warning,
+                    "[Config] OpenAI provider not yet implemented".to_string(),
+                );
+                self.configuration_mode = ConfigurationMode::None;
+            }
+            ConfigurationMode::AnthropicKey { .. } => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Warning,
+                    "[Config] Anthropic provider not yet implemented".to_string(),
+                );
+                self.configuration_mode = ConfigurationMode::None;
+            }
+            ConfigurationMode::None => {}
+        }
     }
 }
 

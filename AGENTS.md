@@ -160,3 +160,4 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - keep PR titles short and not "feat:". the reason is this is shown prominently in Github next to files and folders
 - each feature branch needs to bump the appropriate semver version. No release branches
 - Do not keep a change log file; github handles that functionality
+- minimize key mappings.  Ideally the app works intuitively.  a power user can use Natural Language to set a key mapping.
