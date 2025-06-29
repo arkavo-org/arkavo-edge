@@ -1,4 +1,5 @@
 pub mod llm;
+pub mod llm_config;
 pub mod sink;
 pub mod source;
 pub mod transform;

@@ -1,4 +1,7 @@
-use super::NodeProcessor;
+use super::{
+    NodeProcessor,
+    llm_config::{LlmConfiguration, load_llm_config},
+};
 use anyhow::Result;
 use arkavo_llm::ollama::OllamaClient;
 use arkavo_llm::{Message, Provider};
@@ -9,16 +12,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, timeout};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
+#[derive(Clone)]
 pub struct LlmTransform {
     providers: Arc<RwLock<HashMap<String, Box<dyn Provider>>>>,
+    config: Arc<RwLock<Option<LlmConfiguration>>>,
 }
 
 impl LlmTransform {
     pub fn new() -> Self {
         Self {
             providers: Arc::new(RwLock::new(HashMap::new())),
+            config: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -27,46 +33,78 @@ impl LlmTransform {
         providers.insert(name, provider);
     }
 
-    pub async fn initialize_default_providers(&self) -> Result<()> {
-        // Initialize local Ollama if available
-        let local_ollama = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
-        self.add_provider("local-ollama".to_string(), Box::new(local_ollama))
-            .await;
+    pub async fn initialize_providers(&self) -> Result<()> {
+        // Try to load configuration from memory storage
+        if let Ok(Some(stored_config)) = load_llm_config().await {
+            info!("Loaded LLM configuration from memory storage");
+            *self.config.write().await = Some(stored_config.clone());
 
-        // Check for remote Ollama from env or config
-        if let Ok(remote_url) = std::env::var("REMOTE_OLLAMA_URL") {
-            let remote_ollama = OllamaClient::new(Some(remote_url), None);
-            self.add_provider("remote-ollama".to_string(), Box::new(remote_ollama))
+            // Initialize providers from stored configuration
+            for provider_config in &stored_config.providers {
+                let ollama_client = OllamaClient::new(
+                    Some(provider_config.base_url.clone()),
+                    provider_config.default_model.clone(),
+                );
+                self.add_provider(provider_config.name.clone(), Box::new(ollama_client))
+                    .await;
+                debug!(
+                    "Initialized provider: {} at {}",
+                    provider_config.name, provider_config.base_url
+                );
+            }
+        } else {
+            info!("No stored LLM configuration found, initializing defaults");
+
+            // Initialize with default local Ollama
+            let local_ollama = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
+            self.add_provider("local-ollama".to_string(), Box::new(local_ollama))
                 .await;
+
+            // Check for remote Ollama from env (for backward compatibility)
+            if let Ok(remote_url) = std::env::var("REMOTE_OLLAMA_URL") {
+                let remote_ollama = OllamaClient::new(Some(remote_url.clone()), None);
+                self.add_provider("remote-ollama".to_string(), Box::new(remote_ollama))
+                    .await;
+                info!("Added remote Ollama from environment: {}", remote_url);
+            }
         }
 
         Ok(())
     }
 
-    async fn get_provider(&self, provider_name: &str) -> Result<Box<dyn Provider>> {
-        let providers = self.providers.read().await;
+    async fn get_provider_config(&self, provider_name: &str) -> Result<(String, Option<String>)> {
+        {
+            let config = self.config.read().await;
 
-        // If specific provider requested, use it
-        if let Some(_provider) = providers.get(provider_name) {
-            // Clone the provider by creating a new instance with same config
-            match provider_name {
-                "local-ollama" => Ok(Box::new(OllamaClient::new(
-                    Some("http://localhost:11434".to_string()),
-                    None,
-                ))),
-                "remote-ollama" => {
-                    let remote_url = std::env::var("REMOTE_OLLAMA_URL")
-                        .unwrap_or_else(|_| "http://10.0.0.101:11434".to_string());
-                    Ok(Box::new(OllamaClient::new(Some(remote_url), None)))
+            if let Some(ref llm_config) = *config {
+                if let Some(provider_config) = llm_config.get_provider(provider_name) {
+                    return Ok((
+                        provider_config.base_url.clone(),
+                        provider_config.default_model.clone(),
+                    ));
                 }
-                _ => Err(anyhow::anyhow!("Unknown provider: {}", provider_name)),
             }
+        }
+
+        // Fallback to defaults
+        match provider_name {
+            "local-ollama" => Ok(("http://localhost:11434".to_string(), None)),
+            "remote-ollama" => {
+                let remote_url = std::env::var("REMOTE_OLLAMA_URL")
+                    .unwrap_or_else(|_| "http://10.0.0.101:11434".to_string());
+                Ok((remote_url, None))
+            }
+            _ => Err(anyhow::anyhow!("Unknown provider: {}", provider_name)),
+        }
+    }
+
+    async fn get_model_for_task(&self, task_type: &str) -> Option<String> {
+        let config = self.config.read().await;
+
+        if let Some(ref llm_config) = *config {
+            llm_config.get_model_for_task(task_type).cloned()
         } else {
-            // Default to local Ollama
-            Ok(Box::new(OllamaClient::new(
-                Some("http://localhost:11434".to_string()),
-                None,
-            )))
+            None
         }
     }
 }
@@ -127,107 +165,100 @@ impl NodeProcessor for LlmTransform {
             .and_then(|v| v.as_u64())
             .unwrap_or(30);
 
-        // Get provider
-        let provider = self.get_provider(provider_name).await?;
+        // Get task type from params for model preference lookup
+        let task_type = params.get("task_type").and_then(|v| v.as_str());
+
+        // Get provider configuration
+        let (base_url, default_model) = self.get_provider_config(provider_name).await?;
+
+        // Determine which model to use
+        let model_to_use = if let Some(explicit_model) = model {
+            explicit_model.to_string()
+        } else if let Some(task) = task_type {
+            // Check if we have a model preference for this task type
+            if let Some(preferred_model) = self.get_model_for_task(task).await {
+                preferred_model
+            } else {
+                default_model.unwrap_or_else(|| "llama3.2:latest".to_string())
+            }
+        } else {
+            default_model.unwrap_or_else(|| "llama3.2:latest".to_string())
+        };
 
         // Create message
         let message = Message::user(prompt);
 
-        // If model specified, we need to use OllamaClient directly
-        if let Some(model_name) = model {
-            let ollama_client = OllamaClient::new(
-                match provider_name {
-                    "remote-ollama" => Some(
-                        std::env::var("REMOTE_OLLAMA_URL")
-                            .unwrap_or_else(|_| "http://10.0.0.101:11434".to_string()),
-                    ),
-                    _ => Some("http://localhost:11434".to_string()),
-                },
-                Some(model_name.to_string()),
-            );
+        // Create Ollama client with determined configuration
+        let ollama_client = OllamaClient::new(Some(base_url.clone()), Some(model_to_use.clone()));
 
-            debug!(
-                "Executing LLM transform with provider: {}, model: {}",
-                provider_name, model_name
-            );
+        debug!(
+            "Executing LLM transform with provider: {}, model: {}",
+            provider_name, model_to_use
+        );
 
-            let response = if stream {
-                // For streaming, collect all chunks and return final result
-                match timeout(Duration::from_secs(timeout_secs), async {
-                    let mut stream = ollama_client.stream(vec![message]).await?;
-                    let mut content = String::new();
+        let response = if stream {
+            // For streaming, collect all chunks and return final result
+            match timeout(Duration::from_secs(timeout_secs), async {
+                let mut stream = ollama_client.stream(vec![message]).await?;
+                let mut content = String::new();
 
-                    while let Some(chunk) = stream.next().await {
-                        match chunk {
-                            Ok(response) => {
-                                content.push_str(&response.content);
-                                if response.done {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error in LLM stream: {}", e);
-                                return Err(e.into());
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(response) => {
+                            content.push_str(&response.content);
+                            if response.done {
+                                break;
                             }
                         }
+                        Err(e) => {
+                            error!("Error in LLM stream: {}", e);
+                            return Err(e.into());
+                        }
                     }
+                }
 
-                    Ok::<String, anyhow::Error>(content)
-                })
-                .await
-                {
-                    Ok(Ok(content)) => content,
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => {
-                        warn!("LLM request timed out after {} seconds", timeout_secs);
-                        return Err(anyhow::anyhow!("LLM request timed out"));
-                    }
+                Ok::<String, anyhow::Error>(content)
+            })
+            .await
+            {
+                Ok(Ok(content)) => content,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    warn!("LLM request timed out after {} seconds", timeout_secs);
+                    return Err(anyhow::anyhow!("LLM request timed out"));
                 }
-            } else {
-                match timeout(
-                    Duration::from_secs(timeout_secs),
-                    ollama_client.complete(vec![message]),
-                )
-                .await
-                {
-                    Ok(Ok(response)) => response,
-                    Ok(Err(e)) => {
-                        error!("LLM completion error: {}", e);
-                        return Err(e.into());
-                    }
-                    Err(_) => {
-                        warn!("LLM request timed out after {} seconds", timeout_secs);
-                        return Err(anyhow::anyhow!("LLM request timed out"));
-                    }
-                }
-            };
-
-            Ok(Some(json!({
-                "original": data,
-                "llm_response": response,
-                "provider": provider_name,
-                "model": model_name,
-                "metadata": {
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                }
-            })))
+            }
         } else {
-            // Use provider without specific model
-            let response = provider.complete(vec![message]).await?;
-
-            Ok(Some(json!({
-                "original": data,
-                "llm_response": response,
-                "provider": provider_name,
-                "metadata": {
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+            match timeout(
+                Duration::from_secs(timeout_secs),
+                ollama_client.complete(vec![message]),
+            )
+            .await
+            {
+                Ok(Ok(response)) => response,
+                Ok(Err(e)) => {
+                    error!("LLM completion error: {}", e);
+                    return Err(e.into());
                 }
-            })))
-        }
+                Err(_) => {
+                    warn!("LLM request timed out after {} seconds", timeout_secs);
+                    return Err(anyhow::anyhow!("LLM request timed out"));
+                }
+            }
+        };
+
+        Ok(Some(json!({
+            "original": data,
+            "llm_response": response,
+            "provider": provider_name,
+            "model": model_to_use,
+            "metadata": {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "task_type": task_type,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }
+        })))
     }
 
     fn node_type(&self) -> &'static str {
@@ -237,7 +268,15 @@ impl NodeProcessor for LlmTransform {
 
 impl Default for LlmTransform {
     fn default() -> Self {
-        Self::new()
+        let transform = Self::new();
+        // Initialize providers asynchronously when first created
+        let transform_clone = transform.clone();
+        tokio::spawn(async move {
+            if let Err(e) = transform_clone.initialize_providers().await {
+                warn!("Failed to initialize LLM providers: {}", e);
+            }
+        });
+        transform
     }
 }
 

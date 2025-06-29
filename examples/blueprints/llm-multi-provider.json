@@ -22,6 +22,7 @@
         "type": "llm_transform",
         "provider": "local-ollama",
         "model": "llama3:latest",
+        "task_type": "sentiment_analysis",
         "prompt": "Analyze the sentiment and key themes in this text: {{input}}",
         "temperature": 0.7
       }
@@ -33,6 +34,7 @@
         "type": "llm_transform",
         "provider": "remote-ollama",
         "model": "devstral:latest",
+        "task_type": "translation",
         "prompt": "Translate the following text to Spanish: {{input}}",
         "temperature": 0.3,
         "auth_ref": "${REMOTE_OLLAMA_API_KEY}"

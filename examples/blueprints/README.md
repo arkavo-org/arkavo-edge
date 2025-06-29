@@ -57,11 +57,45 @@ The `llm_transform` node supports the following parameters:
 
 - `provider`: LLM provider to use (e.g., "local-ollama", "remote-ollama")
 - `model`: Specific model to use (e.g., "llama3.2:latest", "devstral:latest")
+- `task_type`: Optional task type for model preference lookup (e.g., "code_review", "translation")
 - `prompt`: Prompt template with {{input}} placeholder
 - `temperature`: Controls randomness (0.0-1.0)
 - `max_tokens`: Maximum response length
+- `timeout_secs`: Request timeout in seconds (default: 30)
 - `stream`: Enable streaming responses (default: false)
 - `auth_ref`: Authentication reference for API keys
+
+## Dynamic Configuration
+
+The LLM transform node supports AI-driven configuration through memory storage:
+
+1. **Provider Configuration**: The agent can store multiple Ollama provider configurations in memory
+2. **Task-Based Model Selection**: Models can be associated with specific task types
+3. **Runtime Discovery**: The agent can discover and configure new Ollama instances at runtime
+
+Example memory-stored configuration:
+```json
+{
+  "providers": [
+    {
+      "name": "local-ollama",
+      "base_url": "http://localhost:11434",
+      "description": "Local development instance"
+    },
+    {
+      "name": "edge-box",
+      "base_url": "http://10.0.0.101:11434",
+      "default_model": "devstral:latest",
+      "description": "Edge box with specialized models"
+    }
+  ],
+  "model_preferences": {
+    "code_review": "devstral:latest",
+    "translation": "qwen3:latest",
+    "summarization": "llama3.2:latest"
+  }
+}
+```
 
 ## Running Examples
 
