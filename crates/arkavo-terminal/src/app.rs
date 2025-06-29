@@ -11,6 +11,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::event::{AppEvent, EventHandler};
@@ -73,6 +74,7 @@ pub struct App {
     pub last_quit_attempt: Option<Instant>,
     pub active_model: Option<String>, // The actual model being used
     pub main_task_id: Option<uuid::Uuid>, // ID of the main conversation task
+    pub server_urls: HashMap<String, String>, // Map server names to URLs
 }
 
 impl App {
@@ -112,6 +114,7 @@ impl App {
             last_quit_attempt: None,
             active_model: None, // Will be set when models are fetched
             main_task_id: None,
+            server_urls: HashMap::new(),
         }
     }
 
@@ -154,6 +157,7 @@ impl App {
             last_quit_attempt: None,
             active_model: None, // Will be set when models are fetched
             main_task_id: None,
+            server_urls: HashMap::new(),
         }
     }
 
@@ -196,44 +200,89 @@ impl App {
         Ok(())
     }
 
+    pub fn get_server_url_for_model(&self, model_name: &str) -> String {
+        if let Some((server_prefix, _)) = model_name.split_once('/') {
+            self.server_urls.get(server_prefix)
+                .cloned()
+                .unwrap_or_else(|| "http://localhost:11434".to_string())
+        } else {
+            "http://localhost:11434".to_string()
+        }
+    }
+
     pub async fn fetch_available_models(&mut self) {
-        // Try to fetch models from multiple Ollama servers
+        // Try to fetch models from discovered Ollama servers
         use arkavo_llm::ollama::OllamaClient;
+        use arkavo_memory::storage::MemoryStorage;
+        use std::sync::Arc;
         
         let mut all_models = Vec::new();
         
-        // Primary Ollama server
-        let primary_url = std::env::var("OLLAMA_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        let primary_client = OllamaClient::new(Some(primary_url.clone()), None);
-        
-        match primary_client.list_models().await {
-            Ok(models) => {
-                for model in models {
-                    // Add server prefix to distinguish models
-                    all_models.push(format!("primary/{}", model));
-                }
-                eprintln!("✓ Connected to primary Ollama server: {}", primary_url);
-            }
+        // Initialize memory storage to check for saved Ollama configurations
+        let storage = match MemoryStorage::new().await {
+            Ok(s) => Arc::new(s),
             Err(e) => {
-                eprintln!("Failed to fetch models from primary Ollama ({}): {}", primary_url, e);
+                eprintln!("Failed to initialize memory storage: {}", e);
+                return;
+            }
+        };
+        
+        // Search for saved Ollama server configurations
+        // The search looks for content containing "http" in the config category
+        let saved_configs = match storage
+            .search("http", 20, Some("config"))
+            .await {
+            Ok(configs) => configs,
+            Err(e) => {
+                eprintln!("Failed to search for Ollama configs: {}", e);
+                vec![]
+            }
+        };
+        
+        // Always try localhost first
+        let localhost_client = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
+        match localhost_client.list_models().await {
+            Ok(models) => {
+                self.server_urls.insert("localhost".to_string(), "http://localhost:11434".to_string());
+                for model in models {
+                    all_models.push(format!("localhost/{}", model));
+                }
+                eprintln!("✓ Connected to localhost Ollama server");
+            }
+            Err(_) => {
+                // Silently ignore localhost if not available
             }
         }
         
-        // Secondary Ollama server (if configured)
-        if let Ok(secondary_url) = std::env::var("OLLAMA_BASE_URL_2") {
-            let secondary_client = OllamaClient::new(Some(secondary_url.clone()), None);
+        // Try saved configurations - filter for Ollama server configs
+        let mut server_idx = 1;
+        for config in saved_configs.iter() {
+            let server_url = &config.memory.content;
             
-            match secondary_client.list_models().await {
-                Ok(models) => {
-                    for model in models {
-                        // Add server prefix to distinguish models
-                        all_models.push(format!("secondary/{}", model));
+            // Check if this is an Ollama server config by checking metadata
+            let is_ollama_config = config.memory.metadata
+                .as_ref()
+                .and_then(|m| m.get("type"))
+                .and_then(|t| t.as_str())
+                .map(|t| t == "arkavo_ollama_server_config")
+                .unwrap_or(false);
+            
+            if is_ollama_config && server_url.starts_with("http") && server_url != "http://localhost:11434" {
+                let client = OllamaClient::new(Some(server_url.clone()), None);
+                
+                match client.list_models().await {
+                    Ok(models) => {
+                        let server_name = format!("server{}", server_idx);
+                        self.server_urls.insert(server_name.clone(), server_url.clone());
+                        for model in models {
+                            all_models.push(format!("{}/{}", server_name, model));
+                        }
+                        eprintln!("✓ Connected to {} Ollama server: {}", server_name, server_url);
+                        server_idx += 1;
                     }
-                    eprintln!("✓ Connected to secondary Ollama server: {}", secondary_url);
-                }
-                Err(e) => {
-                    eprintln!("Failed to fetch models from secondary Ollama ({}): {}", secondary_url, e);
+                    Err(e) => {
+                        eprintln!("Failed to fetch models from Ollama server {} ({}): {}", server_url, server_url, e);
+                    }
                 }
             }
         }
@@ -247,6 +296,9 @@ impl App {
             if self.active_model.is_none() && !self.available_models.is_empty() {
                 self.active_model = Some(self.available_models[0].clone());
             }
+        } else {
+            // If no servers found, prompt user to configure
+            eprintln!("No Ollama servers found. Use 'arkavo chat' to configure servers.");
         }
     }
 

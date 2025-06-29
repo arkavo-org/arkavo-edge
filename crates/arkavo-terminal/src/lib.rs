@@ -86,21 +86,55 @@ pub async fn run() -> Result<()> {
             messages_clone.push(user_message.clone());
 
             // Parse the model name to extract server and actual model
-            let (server_url, actual_model) = if request.model_name.starts_with("primary/") {
-                let model = request.model_name.strip_prefix("primary/").unwrap_or(&request.model_name);
-                let url = std::env::var("OLLAMA_BASE_URL")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
-                (url, model.to_string())
-            } else if request.model_name.starts_with("secondary/") {
-                let model = request.model_name.strip_prefix("secondary/").unwrap_or(&request.model_name);
-                let url = std::env::var("OLLAMA_BASE_URL_2")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+            let (server_url, actual_model) = if let Some((server_prefix, model)) = request.model_name.split_once('/') {
+                // Model has server prefix - need to resolve the URL
+                let url = if server_prefix == "localhost" {
+                    "http://localhost:11434".to_string()
+                } else if server_prefix.starts_with("server") {
+                    // Look up saved server configuration from memory storage
+                    if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
+                        if let Ok(all_configs) = storage.search("http", 20, Some("config")).await {
+                            // Filter for Ollama server configs only
+                            let ollama_configs: Vec<_> = all_configs.into_iter()
+                                .filter(|config| {
+                                    config.memory.metadata
+                                        .as_ref()
+                                        .and_then(|m| m.get("type"))
+                                        .and_then(|t| t.as_str())
+                                        .map(|t| t == "arkavo_ollama_server_config")
+                                        .unwrap_or(false)
+                                })
+                                .filter(|config| config.memory.content != "http://localhost:11434")
+                                .collect();
+                            
+                            // Extract server number from prefix (e.g., "server1" -> 1)
+                            if let Some(num_str) = server_prefix.strip_prefix("server") {
+                                if let Ok(idx) = num_str.parse::<usize>() {
+                                    if idx > 0 && idx <= ollama_configs.len() {
+                                        ollama_configs[idx - 1].memory.content.clone()
+                                    } else {
+                                        "http://localhost:11434".to_string()
+                                    }
+                                } else {
+                                    "http://localhost:11434".to_string()
+                                }
+                            } else {
+                                "http://localhost:11434".to_string()
+                            }
+                        } else {
+                            "http://localhost:11434".to_string()
+                        }
+                    } else {
+                        "http://localhost:11434".to_string()
+                    }
+                } else {
+                    // Unknown prefix, use localhost as fallback
+                    "http://localhost:11434".to_string()
+                };
                 (url, model.to_string())
             } else {
-                // Fallback to primary server for backward compatibility
-                let url = std::env::var("OLLAMA_BASE_URL")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
-                (url, request.model_name.clone())
+                // No server prefix, use default
+                ("http://localhost:11434".to_string(), request.model_name.clone())
             };
             
             // Create a new Ollama client with the specific model and server
