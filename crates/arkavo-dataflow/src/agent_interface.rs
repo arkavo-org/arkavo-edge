@@ -30,7 +30,7 @@ impl LlmDataflowAgent {
     }
 
     /// Configure LLM providers based on discovered or known endpoints
-    pub fn configure_providers(&self, providers: Vec<(String, String)>) -> Result<String> {
+    pub async fn configure_providers(&self, providers: Vec<(String, String)>) -> Result<String> {
         let mut config_builder = LlmConfigBuilder::new();
 
         for (name, url) in providers {
@@ -43,7 +43,7 @@ impl LlmDataflowAgent {
         let config = config_builder.build();
 
         // Store configuration
-        let _stored = store_llm_config(&config)?;
+        let _stored = store_llm_config(&config).await?;
 
         Ok(format!(
             "Configured {} providers. Configuration stored in memory.",
@@ -119,7 +119,7 @@ impl LlmDataflowAgent {
         let mut config: LlmConfiguration = load_llm_config().await?.unwrap_or_default();
 
         config.set_model_preference(task_type.to_string(), model.to_string());
-        store_llm_config(&config)?;
+        store_llm_config(&config).await?;
 
         Ok(format!(
             "Set model preference for task '{task_type}' to '{model}'"

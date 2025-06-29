@@ -30,8 +30,11 @@ lazy-regex = "3.3"
 flate2 = "1.0"
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-memory = { path = "../arkavo-memory" }
 tokio-stream = "0.1"
 tracing = "0.1"
+base64 = "0.22"
+url = "2.5"
 
 [dev-dependencies]
 tokio-test = "0.4"

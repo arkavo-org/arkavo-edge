@@ -2,6 +2,16 @@
 
 This guide is specifically for AI agents to understand and use the LLM dataflow capabilities.
 
+## Phase 2 Features (v0.18.0)
+
+The LLM dataflow system now includes enhanced configuration and management capabilities:
+
+1. **Provider Factory System**: Dynamic provider instantiation with validation
+2. **Model Registry**: Persistent storage of model information and capabilities
+3. **Authentication Management**: Secure credential storage for API keys
+4. **Health Monitoring**: Provider health checks with circuit breaker pattern
+5. **Enhanced MCP Tools**: Comprehensive tools for discovery, validation, and management
+
 ## Available MCP Tools
 
 The following MCP tools are available for LLM dataflow operations:
@@ -62,6 +72,62 @@ Sets preferred models for specific task types.
   "params": {
     "task_type": "code_review",
     "model": "devstral:latest"
+  }
+}
+```
+
+### 5. list_available_models
+Lists all available models from the model registry.
+
+**Usage:**
+```json
+{
+  "tool": "list_available_models",
+  "params": {
+    "provider": "ollama"  // optional, omit to list all
+  }
+}
+```
+
+### 6. validate_provider_config
+Validates LLM provider configuration before use.
+
+**Usage:**
+```json
+{
+  "tool": "validate_provider_config",
+  "params": {
+    "url": "http://10.0.0.101:11434",
+    "type": "ollama"
+  }
+}
+```
+
+### 7. test_provider_connection
+Tests connection to a configured LLM provider.
+
+**Usage:**
+```json
+{
+  "tool": "test_provider_connection",
+  "params": {
+    "provider": "edge-box"
+  }
+}
+```
+
+### 8. manage_auth_credentials
+Manages authentication credentials for LLM providers.
+
+**Usage:**
+```json
+{
+  "tool": "manage_auth_credentials",
+  "params": {
+    "action": "store",  // actions: store, list, remove
+    "provider": "openai",
+    "api_key": "sk-...",
+    "description": "Production API key"
   }
 }
 ```
