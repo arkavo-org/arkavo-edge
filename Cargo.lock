@@ -227,6 +227,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-test",
+ "tracing",
  "uuid",
 ]
 

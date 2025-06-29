@@ -1,3 +1,4 @@
+pub mod llm;
 pub mod sink;
 pub mod source;
 pub mod transform;
@@ -41,6 +42,7 @@ impl NodeRegistry {
         // Transforms
         self.register("json_transform", Box::new(transform::JsonTransform));
         self.register("filter_transform", Box::new(transform::FilterTransform));
+        self.register("llm_transform", Box::new(llm::LlmTransform::new()));
 
         // Sinks
         self.register("console_sink", Box::new(sink::ConsoleSink));
