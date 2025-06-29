@@ -88,17 +88,17 @@ async fn test_ollama_factory_validation() {
 async fn test_provider_factory_registry() {
     let registry = ProviderFactoryRegistry::new();
 
-    // Check that Ollama factory is registered by default
+    // Check that all factories are registered by default
     assert!(registry.get_factory(&ProviderType::Ollama).is_some());
-
-    // Check that unregistered types return None
-    assert!(registry.get_factory(&ProviderType::OpenAI).is_none());
-    assert!(registry.get_factory(&ProviderType::Anthropic).is_none());
+    assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
+    assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
 
     // Test registered types
     let types = registry.registered_types();
     assert!(types.contains(&ProviderType::Ollama));
-    assert_eq!(types.len(), 1);
+    assert!(types.contains(&ProviderType::OpenAI));
+    assert!(types.contains(&ProviderType::Anthropic));
+    assert_eq!(types.len(), 3);
 }
 
 #[tokio::test]

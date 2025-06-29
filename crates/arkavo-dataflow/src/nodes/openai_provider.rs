@@ -360,8 +360,7 @@ impl Provider for OpenAIProvider {
                         let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
 
                         for line in &lines {
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
 
                                 if data == "[DONE]" {
                                     let _ = tx.send(Ok(StreamResponse {
@@ -400,7 +399,7 @@ impl Provider for OpenAIProvider {
         ))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "openai"
     }
 }

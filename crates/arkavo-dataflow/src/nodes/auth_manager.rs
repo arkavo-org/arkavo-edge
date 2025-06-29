@@ -85,7 +85,7 @@ impl AuthManager {
 
         // Load existing credentials from storage
         manager.load_credentials().await?;
-        
+
         // Log startup message
         tracing::info!(
             "Credential vault initialized with software-only AES-256-GCM encryption (demo)"
@@ -132,6 +132,11 @@ impl AuthManager {
     }
 
     /// Retrieve a credential value
+    /// Get a credential by ID
+    ///
+    /// # Panics
+    /// 
+    /// Panics if the credential metadata is not found after the secure data is retrieved.
     pub async fn get_credential(&self, credential_id: &str) -> Result<DecryptedCredential> {
         // Check if credential exists
         let creds = self.credentials.read().await;
@@ -262,11 +267,12 @@ impl AuthManager {
             .search("", 100, Some("auth_credential"))
             .await?;
 
-        let mut creds = self.credentials.write().await;
-
-        for result in results {
-            if let Ok(credential) = serde_json::from_str::<AuthCredential>(&result.memory.content) {
-                creds.insert(credential.id.clone(), credential);
+        {
+            let mut creds = self.credentials.write().await;
+            for result in results {
+                if let Ok(credential) = serde_json::from_str::<AuthCredential>(&result.memory.content) {
+                    creds.insert(credential.id.clone(), credential);
+                }
             }
         }
 
@@ -342,8 +348,8 @@ impl AuthManager {
         let secure_data = SecureCredentialData {
             credential_id: credential_id.to_string(),
             encrypted_data: base64::engine::general_purpose::STANDARD.encode(&in_out),
-            nonce: base64::engine::general_purpose::STANDARD.encode(&nonce),
-            salt: base64::engine::general_purpose::STANDARD.encode(&salt),
+            nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
+            salt: base64::engine::general_purpose::STANDARD.encode(salt),
         };
 
         let content = serde_json::to_string(&secure_data)?;
@@ -431,7 +437,7 @@ impl AuthManager {
                 return Err(anyhow::anyhow!("Invalid encrypted data"));
             }
 
-            let mut in_out = encrypted_data.to_vec();
+            let mut in_out = encrypted_data.clone();
 
             // Decrypt
             let decrypted = opening_key

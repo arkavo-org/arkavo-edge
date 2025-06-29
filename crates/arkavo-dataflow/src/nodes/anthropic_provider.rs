@@ -422,8 +422,7 @@ impl Provider for AnthropicProvider {
                         let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
 
                         for line in &lines {
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
 
                                 if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
                                     match event {
@@ -470,7 +469,7 @@ impl Provider for AnthropicProvider {
         ))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "anthropic"
     }
 }

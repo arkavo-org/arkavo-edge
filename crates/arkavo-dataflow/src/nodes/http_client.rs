@@ -79,7 +79,7 @@ impl HttpClientBuilder {
         if let Some(ref token) = self.config.auth_token {
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))?,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))?,
             );
         }
 
@@ -91,13 +91,13 @@ impl HttpClientBuilder {
     /// Calculate retry delay with exponential backoff and jitter
     pub fn calculate_retry_delay(&self, attempt: u32) -> Duration {
         let base_delay = self.config.initial_retry_delay_ms as f64
-            * self.config.backoff_factor.powi(attempt as i32);
+            * self.config.backoff_factor.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
 
         let capped_delay = base_delay.min(self.config.max_retry_delay_ms as f64);
 
         // Add jitter
         let jitter_range = capped_delay * self.config.jitter_factor;
-        let jitter = rand::random::<f64>() * jitter_range * 2.0 - jitter_range;
+        let jitter = (rand::random::<f64>() * jitter_range).mul_add(2.0, -jitter_range);
         let final_delay = (capped_delay + jitter).max(0.0) as u64;
 
         Duration::from_millis(final_delay)
