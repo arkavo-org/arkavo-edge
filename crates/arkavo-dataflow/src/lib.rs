@@ -28,8 +28,7 @@
 //!     #[cfg(feature = "nl")]
 //!     {
 //!         let pipeline_id = engine
-//!             .create_pipeline_from_nl("Connect input to output when message contains 'error'")
-//!             .await?;
+//!             .create_pipeline_from_nl("Connect input to output when message contains 'error'")?;
 //!         
 //!         // Start the pipeline
 //!         engine.start_pipeline(pipeline_id).await?;

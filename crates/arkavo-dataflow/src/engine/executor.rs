@@ -390,7 +390,6 @@ mod tests {
                 },
                 &condition
             )
-            .await
         );
 
         // Test nested field access
@@ -407,7 +406,6 @@ mod tests {
                 },
                 &condition
             )
-            .await
         );
     }
 }
