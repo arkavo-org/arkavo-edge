@@ -7,10 +7,12 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 
+type OutputChannels = Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>;
+
 pub struct NodeExecutor {
     node: Node,
     receiver: Arc<RwLock<mpsc::Receiver<Message>>>,
-    outputs: Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>,
+    outputs: OutputChannels,
     config: Arc<crate::DataflowConfig>,
     task_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     metrics: Arc<RwLock<NodeMetrics>>,
@@ -21,7 +23,7 @@ impl Debug for NodeExecutor {
         f.debug_struct("NodeExecutor")
             .field("node", &self.node)
             .field("metrics", &self.metrics)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -70,14 +72,17 @@ impl NodeExecutor {
             Self::run_node(node, receiver, outputs, config, metrics).await;
         });
 
-        let mut task_handle = self.task_handle.write().await;
-        *task_handle = Some(handle);
+        {
+            let mut task_handle = self.task_handle.write().await;
+            *task_handle = Some(handle);
+        }
 
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
-        if let Some(handle) = self.task_handle.write().await.take() {
+        let handle = self.task_handle.write().await.take();
+        if let Some(handle) = handle {
             handle.abort();
         }
         Ok(())
@@ -90,7 +95,7 @@ impl NodeExecutor {
     async fn run_node(
         node: Node,
         receiver: Arc<RwLock<mpsc::Receiver<Message>>>,
-        outputs: Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>,
+        outputs: OutputChannels,
         _config: Arc<crate::DataflowConfig>,
         metrics: Arc<RwLock<NodeMetrics>>,
     ) {
@@ -109,11 +114,9 @@ impl NodeExecutor {
                 }
                 Some(Message::Control(ControlMessage::Flush)) => {
                     // Process any remaining messages
-                    continue;
                 }
                 Some(Message::Control(ControlMessage::Metrics)) => {
                     // Metrics are collected passively
-                    continue;
                 }
                 Some(Message::Data {
                     payload, metadata, ..
@@ -134,13 +137,13 @@ impl NodeExecutor {
                         }
                         NodeKind::Transform => {
                             // Apply transformation logic
-                            Self::transform_message(payload, &node).await.map(|p| {
+                            Self::transform_message(payload, &node).map(|p| {
                                 Message::new_data(p, &node.id).with_trace_id(metadata.trace_id)
                             })
                         }
                         NodeKind::Sink => {
                             // Sinks consume data, potentially storing or outputting it
-                            Self::sink_message(payload, &node).await;
+                            Self::sink_message(payload, &node);
                             None
                         }
                         NodeKind::Router => {
@@ -154,19 +157,21 @@ impl NodeExecutor {
 
                     // Send to outputs based on rules
                     if let Some(msg) = processed_message {
-                        let outputs = outputs.read().await;
                         let mut sent_count = 0;
                         let mut filtered_count = 0;
 
-                        for (link, sender) in outputs.iter() {
-                            if Self::should_send(&msg, &link.rule).await {
-                                if sender.send(msg.clone()).await.is_ok() {
-                                    sent_count += 1;
+                        {
+                            let outputs = outputs.read().await;
+                            for (link, sender) in outputs.iter() {
+                                if Self::should_send(&msg, link.rule.as_ref()) {
+                                    if sender.send(msg.clone()).await.is_ok() {
+                                        sent_count += 1;
+                                    } else {
+                                        metrics.write().await.messages_errored += 1;
+                                    }
                                 } else {
-                                    metrics.write().await.messages_errored += 1;
+                                    filtered_count += 1;
                                 }
-                            } else {
-                                filtered_count += 1;
                             }
                         }
 
@@ -190,10 +195,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn transform_message(
-        payload: serde_json::Value,
-        node: &Node,
-    ) -> Option<serde_json::Value> {
+    fn transform_message(payload: serde_json::Value, node: &Node) -> Option<serde_json::Value> {
         // Basic transformation logic - can be extended
         match node.params.get("transform_type") {
             Some(serde_json::Value::String(t)) if t == "uppercase" => {
@@ -210,7 +212,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn sink_message(payload: serde_json::Value, node: &Node) {
+    fn sink_message(payload: serde_json::Value, node: &Node) {
         // Basic sink logic - can be extended
         if let Some(serde_json::Value::String(sink_type)) = node.params.get("type") {
             match sink_type.as_str() {
@@ -229,7 +231,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn should_send(message: &Message, rule: &Option<Rule>) -> bool {
+    fn should_send(message: &Message, rule: Option<&Rule>) -> bool {
         let Some(rule) = rule else {
             return true; // No rule means always send
         };
@@ -238,7 +240,7 @@ impl NodeExecutor {
             RuleType::Passthrough => true,
             RuleType::Filter => {
                 if let Some(conditions) = &rule.conditions {
-                    Self::evaluate_conditions(message, conditions).await
+                    Self::evaluate_conditions(message, conditions)
                 } else {
                     true
                 }
@@ -247,14 +249,14 @@ impl NodeExecutor {
         }
     }
 
-    async fn evaluate_conditions(message: &Message, conditions: &[Condition]) -> bool {
+    fn evaluate_conditions(message: &Message, conditions: &[Condition]) -> bool {
         let Message::Data { payload, .. } = message else {
             return false;
         };
 
         // All conditions must match (AND logic)
         for condition in conditions {
-            if !Self::evaluate_condition(payload, condition).await {
+            if !Self::evaluate_condition(payload, condition) {
                 return false;
             }
         }
@@ -262,7 +264,7 @@ impl NodeExecutor {
         true
     }
 
-    async fn evaluate_condition(payload: &serde_json::Value, condition: &Condition) -> bool {
+    fn evaluate_condition(payload: &serde_json::Value, condition: &Condition) -> bool {
         // Extract field value using dot notation
         let field_value = Self::extract_field(payload, &condition.field);
 
@@ -278,7 +280,7 @@ impl NodeExecutor {
                     false
                 }
             }
-            ConditionOperator::Equals => field_value.map_or(false, |v| v == &condition.value),
+            ConditionOperator::Equals => field_value == Some(&condition.value),
             ConditionOperator::Exists => field_value.is_some(),
             ConditionOperator::NotExists => field_value.is_none(),
             ConditionOperator::Gt => {
@@ -380,16 +382,13 @@ mod tests {
             operator: ConditionOperator::Contains,
             value: serde_json::json!("error"),
         };
-        assert!(
-            NodeExecutor::evaluate_condition(
-                match &message {
-                    Message::Data { payload, .. } => payload,
-                    _ => panic!("Expected data message"),
-                },
-                &condition
-            )
-            .await
-        );
+        assert!(NodeExecutor::evaluate_condition(
+            match &message {
+                Message::Data { payload, .. } => payload,
+                _ => panic!("Expected data message"),
+            },
+            &condition
+        ));
 
         // Test nested field access
         let condition = Condition {
@@ -397,15 +396,12 @@ mod tests {
             operator: ConditionOperator::Equals,
             value: serde_json::json!(42),
         };
-        assert!(
-            NodeExecutor::evaluate_condition(
-                match &message {
-                    Message::Data { payload, .. } => payload,
-                    _ => panic!("Expected data message"),
-                },
-                &condition
-            )
-            .await
-        );
+        assert!(NodeExecutor::evaluate_condition(
+            match &message {
+                Message::Data { payload, .. } => payload,
+                _ => panic!("Expected data message"),
+            },
+            &condition
+        ));
     }
 }

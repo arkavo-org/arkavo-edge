@@ -10,8 +10,8 @@ pub fn run_performance_benchmark() {
     println!("Running Terminal UI Performance Benchmark...\n");
 
     // Create test data
-    let mut chat_view = create_test_chat_view(100);
-    let mut diff_view = create_test_diff_view(1000);
+    let chat_view = create_test_chat_view(100);
+    let diff_view = create_test_diff_view(1000);
 
     // Create a test buffer
     let area = Rect::new(0, 0, 120, 40);
@@ -20,21 +20,21 @@ pub fn run_performance_benchmark() {
     // Benchmark chat rendering
     let chat_start = Instant::now();
     for _ in 0..100 {
-        render_chat_to_buffer(&mut chat_view, &mut buffer, area);
+        render_chat_to_buffer(&chat_view, &mut buffer, area);
     }
     let chat_avg_us = chat_start.elapsed().as_micros() / 100;
 
     // Benchmark diff rendering
     let diff_start = Instant::now();
     for _ in 0..100 {
-        render_diff_to_buffer(&mut diff_view, &mut buffer, area);
+        render_diff_to_buffer(&diff_view, &mut buffer, area);
     }
     let diff_avg_us = diff_start.elapsed().as_micros() / 100;
 
     // Combined worst-case
     let combined_start = Instant::now();
-    render_chat_to_buffer(&mut chat_view, &mut buffer, Rect::new(0, 0, 60, 40));
-    render_diff_to_buffer(&mut diff_view, &mut buffer, Rect::new(60, 0, 60, 40));
+    render_chat_to_buffer(&chat_view, &mut buffer, Rect::new(0, 0, 60, 40));
+    render_diff_to_buffer(&diff_view, &mut buffer, Rect::new(60, 0, 60, 40));
     let combined_time_us = combined_start.elapsed().as_micros();
 
     // Report results
@@ -118,7 +118,7 @@ fn create_test_diff_view(line_count: usize) -> DiffView {
     diff
 }
 
-fn render_chat_to_buffer(chat: &mut ChatView, _buffer: &mut Buffer, _area: Rect) {
+fn render_chat_to_buffer(chat: &ChatView, _buffer: &mut Buffer, _area: Rect) {
     // Simulate render without actual frame
     use crate::renderer::Renderable;
     // This would normally call chat.render(frame, area)
@@ -126,7 +126,7 @@ fn render_chat_to_buffer(chat: &mut ChatView, _buffer: &mut Buffer, _area: Rect)
     let _ = chat.needs_redraw();
 }
 
-fn render_diff_to_buffer(diff: &mut DiffView, _buffer: &mut Buffer, _area: Rect) {
+fn render_diff_to_buffer(diff: &DiffView, _buffer: &mut Buffer, _area: Rect) {
     // Simulate render without actual frame
     use crate::renderer::Renderable;
     // This would normally call diff.render(frame, area)

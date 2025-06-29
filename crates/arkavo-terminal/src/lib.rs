@@ -91,8 +91,6 @@ pub async fn run() -> Result<()> {
                 // Get streaming response from LLM
                 match client.stream(messages_clone.clone()).await {
                     Ok(mut stream) => {
-                        let mut full_response = String::new();
-
                         // Send start streaming signal
                         let _ = llm_tx
                             .send(LlmResponse {
@@ -109,7 +107,6 @@ pub async fn run() -> Result<()> {
                             match chunk_result {
                                 Ok(chunk) => {
                                     if !chunk.content.is_empty() {
-                                        full_response.push_str(&chunk.content);
                                         // Send each chunk as it arrives
                                         let _ = llm_tx
                                             .send(LlmResponse {
@@ -345,8 +342,6 @@ pub async fn run_with_string_channels(
     let (new_ui_tx, mut new_ui_rx) = mpsc::channel::<LlmRequest>(100);
     let (new_llm_tx, new_llm_rx) = mpsc::channel::<LlmResponse>(100);
 
-    // Track pending requests for timeout handling
-    let mut pending_requests = std::collections::HashMap::new();
     // Track order of requests since current protocol doesn't include task IDs
     let mut request_queue = std::collections::VecDeque::new();
 
@@ -356,8 +351,7 @@ pub async fn run_with_string_channels(
             tokio::select! {
                 // Convert outgoing LlmRequest to String
                 Some(request) = new_ui_rx.recv() => {
-                    // Store the pending request
-                    pending_requests.insert(request.task_id, (request.model_name.clone(), tokio::time::Instant::now()));
+                    // Store the request in queue
                     request_queue.push_back((request.task_id, request.model_name.clone()));
 
                     // For compatibility, just send the prompt (without model prefix for now)
@@ -393,7 +387,6 @@ pub async fn run_with_string_channels(
                                 error: Some(format!("Channel error: {e}")),
                             };
                             let _ = new_llm_tx.send(error_response).await;
-                            pending_requests.remove(&request.task_id);
                         }
                     }
                 }
@@ -431,7 +424,6 @@ pub async fn run_with_string_channels(
                     } else if response == "<<STREAM_END>>" {
                         // Remove from queue and pending when complete
                         request_queue.pop_front();
-                        pending_requests.remove(&task_id);
 
                         LlmResponse {
                             task_id,
@@ -444,7 +436,6 @@ pub async fn run_with_string_channels(
                     } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
                         // Remove from queue and pending on error
                         request_queue.pop_front();
-                        pending_requests.remove(&task_id);
 
                         LlmResponse {
                             task_id,
@@ -457,7 +448,6 @@ pub async fn run_with_string_channels(
                     } else {
                         // Regular complete response
                         request_queue.pop_front();
-                        pending_requests.remove(&task_id);
 
                         LlmResponse {
                             task_id,

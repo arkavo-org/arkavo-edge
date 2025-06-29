@@ -17,6 +17,27 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
+        "dataflow" | "flow" => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async {
+                use clap::Parser;
+
+                #[derive(Parser)]
+                #[command(name = "dataflow")]
+                #[command(about = "Manage dataflow pipelines")]
+                struct Cli {
+                    #[command(subcommand)]
+                    command: commands::dataflow::DataflowCommand,
+                }
+
+                let cli = Cli::parse_from(
+                    std::iter::once("dataflow").chain(args[1..].iter().map(|s| s.as_str())),
+                );
+                commands::dataflow::handle_dataflow_command(cli.command)
+                    .await
+                    .map_err(|e| e.into())
+            })
+        }
         "serve" | "mcp" => {
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { commands::mcp::run().await })
@@ -54,6 +75,7 @@ fn print_usage() {
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run intelligent tests (use --help for modes)");
     println!("    vault     Import/export notes to Edge Vault");
+    println!("    dataflow  Manage dataflow pipelines (export/import blueprints)");
     println!("    serve     Run as MCP server for AI tools integration");
     println!("    help      Print this help message");
     println!();
