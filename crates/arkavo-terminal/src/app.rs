@@ -574,7 +574,7 @@ impl App {
         Ok(())
     }
 
-    fn render(&mut self, frame: &mut ratatui::Frame) {
+    fn render(&self, frame: &mut ratatui::Frame) {
         // Always use the new task-based layout
         self.render_task_layout(frame);
     }

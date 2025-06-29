@@ -41,11 +41,11 @@ impl Sandbox {
     #[cfg(target_os = "linux")]
     pub fn execute_transform(
         &self,
-        _code: &str,
-        _input: serde_json::Value,
+        code: &str,
+        input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // Linux implementation using seccomp
-        self.execute_linux_sandbox(_code, _input)
+        self.execute_linux_sandbox(code, input)
     }
 
     #[cfg(target_os = "macos")]
@@ -91,12 +91,12 @@ impl Sandbox {
         }
 
         if let Some(memory_mb) = self.config.memory_limit_mb {
-            cmd.arg(format!("--rlimit-as={}m", memory_mb));
+            cmd.arg(format!("--rlimit-as={memory_mb}m"));
         }
 
         // Add allowed paths
         for path in &self.config.allowed_paths {
-            cmd.arg(format!("--whitelist={}", path));
+            cmd.arg(format!("--whitelist={path}"));
         }
 
         // Execute node.js with the transform
