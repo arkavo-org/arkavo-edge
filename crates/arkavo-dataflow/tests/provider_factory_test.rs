@@ -119,12 +119,29 @@ async fn test_provider_creation() {
     let result = registry.create_provider(&config).await;
     assert!(result.is_ok());
 
-    // Test with unregistered provider type
+    // Test with OpenAI provider (should fail due to missing auth credentials)
     let config = ProviderConfig {
         provider_type: ProviderType::OpenAI,
         base_url: "https://api.openai.com/v1".to_string(),
         auth_ref: Some("test-api-key".to_string()),
         default_model: Some("gpt-4".to_string()),
+        timeout_secs: None,
+        max_retries: None,
+        metadata: None,
+    };
+
+    let result = registry.create_provider(&config).await;
+    assert!(result.is_err());
+    let err = result.err().unwrap();
+    // Should fail because credentials can't be found
+    assert!(err.to_string().contains("test-api-key") || err.to_string().contains("environment variable"));
+
+    // Test with truly unregistered provider type
+    let config = ProviderConfig {
+        provider_type: ProviderType::Custom("nonexistent".to_string()),
+        base_url: "https://api.example.com".to_string(),
+        auth_ref: None,
+        default_model: None,
         timeout_secs: None,
         max_retries: None,
         metadata: None,

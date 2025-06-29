@@ -357,9 +357,12 @@ mod tests {
         // Check default registered types
         let types = registry.registered_types();
         assert!(types.contains(&ProviderType::Ollama));
+        assert!(types.contains(&ProviderType::OpenAI));
+        assert!(types.contains(&ProviderType::Anthropic));
 
         // Get factory
         assert!(registry.get_factory(&ProviderType::Ollama).is_some());
-        assert!(registry.get_factory(&ProviderType::OpenAI).is_none());
+        assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
+        assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
     }
 }
