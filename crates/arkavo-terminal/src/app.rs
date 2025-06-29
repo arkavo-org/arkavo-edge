@@ -146,7 +146,7 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![],
+            available_models: vec![], // Models will be fetched dynamically
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
@@ -208,7 +208,7 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![],
+            available_models: vec![], // Models will be fetched dynamically
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
@@ -1320,6 +1320,37 @@ impl App {
                         ),
                     ]));
                 }
+            }
+        }
+
+        // Add available models section
+        if !self.available_models.is_empty() {
+            if !lines.is_empty() {
+                lines.push(Line::from("")); // Add spacing
+            }
+            lines.push(Line::from(vec![Span::styled(
+                "Available Models (Tab to cycle):",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            
+            for (idx, model) in self.available_models.iter().enumerate() {
+                let is_selected = idx == self.selected_model;
+                let prefix = if is_selected { "→ " } else { "  " };
+                
+                let style = if is_selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                
+                lines.push(Line::from(vec![
+                    Span::raw(prefix),
+                    Span::styled(model, style),
+                ]));
             }
         }
 
