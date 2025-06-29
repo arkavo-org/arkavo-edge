@@ -1,6 +1,7 @@
 pub mod executor;
 pub mod metrics;
 pub mod router;
+#[cfg(feature = "sandbox")]
 pub mod sandbox;
 
 use crate::dsl::Blueprint;
@@ -194,6 +195,10 @@ impl Pipeline {
             node_metrics,
             timestamp: chrono::Utc::now(),
         }
+    }
+
+    pub fn to_blueprint(&self) -> Blueprint {
+        (*self.blueprint).clone()
     }
 }
 

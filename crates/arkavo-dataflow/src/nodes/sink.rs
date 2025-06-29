@@ -28,10 +28,10 @@ impl NodeProcessor for ConsoleSink {
                     println!("{}", serde_json::to_string(&data)?);
                 }
                 "debug" => {
-                    println!("{:?}", data);
+                    println!("{data:?}");
                 }
                 _ => {
-                    println!("{}", data);
+                    println!("{data}");
                 }
             }
         }
@@ -161,7 +161,7 @@ impl NodeProcessor for MetricsSink {
             let value = data.get("value").and_then(|v| v.as_f64()).unwrap_or(1.0);
 
             // In a real implementation, this would send to a metrics system
-            eprintln!("[Metric] {} ({}) = {}", metric_name, metric_type, value);
+            eprintln!("[Metric] {metric_name} ({metric_type}) = {value}");
         }
 
         Ok(None)

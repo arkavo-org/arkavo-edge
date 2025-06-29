@@ -4,8 +4,8 @@ use semver::Version;
 use std::collections::BTreeMap;
 
 pub trait BlueprintMigration: Send + Sync {
-    fn from_version(&self) -> &Version;
-    fn to_version(&self) -> &Version;
+    fn source_version(&self) -> &Version;
+    fn target_version(&self) -> &Version;
     fn migrate(&self, blueprint: &mut Blueprint) -> Result<()>;
 }
 
@@ -22,8 +22,8 @@ impl MigrationRegistry {
 
     pub fn register<M: BlueprintMigration + 'static>(&mut self, migration: M) {
         let key = (
-            migration.from_version().clone(),
-            migration.to_version().clone(),
+            migration.source_version().clone(),
+            migration.target_version().clone(),
         );
         self.migrations.insert(key, Box::new(migration));
     }
@@ -34,7 +34,7 @@ impl MigrationRegistry {
         while current_version < *target_version {
             let migration = self.find_migration(&current_version, target_version)?;
             migration.migrate(blueprint)?;
-            current_version = migration.to_version().clone();
+            current_version = migration.target_version().clone();
             blueprint.version = current_version.clone();
         }
 
@@ -65,7 +65,7 @@ impl MigrationRegistry {
         let mut current = from.clone();
         while current < *to {
             if let Ok(migration) = self.find_migration(&current, to) {
-                current = migration.to_version().clone();
+                current = migration.target_version().clone();
             } else {
                 return false;
             }
@@ -86,15 +86,15 @@ impl Default for MigrationRegistry {
 pub struct Migration_1_0_to_1_1;
 
 impl BlueprintMigration for Migration_1_0_to_1_1 {
-    fn from_version(&self) -> &Version {
-        static VERSION: once_cell::sync::Lazy<Version> =
-            once_cell::sync::Lazy::new(|| Version::new(1, 0, 0));
+    fn source_version(&self) -> &Version {
+        static VERSION: std::sync::LazyLock<Version> =
+            std::sync::LazyLock::new(|| Version::new(1, 0, 0));
         &VERSION
     }
 
-    fn to_version(&self) -> &Version {
-        static VERSION: once_cell::sync::Lazy<Version> =
-            once_cell::sync::Lazy::new(|| Version::new(1, 1, 0));
+    fn target_version(&self) -> &Version {
+        static VERSION: std::sync::LazyLock<Version> =
+            std::sync::LazyLock::new(|| Version::new(1, 1, 0));
         &VERSION
     }
 

@@ -166,7 +166,7 @@ fn detect_cycle(blueprint: &Blueprint) -> Option<String> {
         // Find a node that's part of the cycle
         for (node, &degree) in &in_degree {
             if degree > 0 {
-                return Some(node.to_string());
+                return Some((*node).to_string());
             }
         }
     }
@@ -194,7 +194,7 @@ fn validate_rule(rule: &crate::dsl::Rule) -> Result<(), ValidationError> {
 
     match rule.rule_type {
         RuleType::Filter => {
-            if rule.conditions.as_ref().map_or(true, |c| c.is_empty()) {
+            if rule.conditions.as_ref().is_none_or(|c| c.is_empty()) {
                 return Err(ValidationError::InvalidRule(
                     "Filter rule must have at least one condition".to_string(),
                 ));

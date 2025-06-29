@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SandboxConfig {
     pub enable_network: bool,
     pub memory_limit_mb: Option<u64>,
@@ -39,27 +39,27 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "linux")]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
-        _code: &str,
-        _input: serde_json::Value,
+        code: &str,
+        input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // Linux implementation using seccomp
-        self.execute_linux_sandbox(_code, _input).await
+        self.execute_linux_sandbox(code, input)
     }
 
     #[cfg(target_os = "macos")]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
-        _code: &str,
-        _input: serde_json::Value,
+        code: &str,
+        input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // macOS implementation using sandbox-exec
-        self.execute_macos_sandbox(_code, _input).await
+        self.execute_macos_sandbox(code, input)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
         _code: &str,
         _input: serde_json::Value,
@@ -68,7 +68,7 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "linux")]
-    async fn execute_linux_sandbox(
+    fn execute_linux_sandbox(
         &self,
         code: &str,
         input: serde_json::Value,
@@ -91,12 +91,12 @@ impl Sandbox {
         }
 
         if let Some(memory_mb) = self.config.memory_limit_mb {
-            cmd.arg(format!("--rlimit-as={}m", memory_mb));
+            cmd.arg(format!("--rlimit-as={memory_mb}m"));
         }
 
         // Add allowed paths
         for path in &self.config.allowed_paths {
-            cmd.arg(format!("--whitelist={}", path));
+            cmd.arg(format!("--whitelist={path}"));
         }
 
         // Execute node.js with the transform
@@ -125,7 +125,7 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "macos")]
-    async fn execute_macos_sandbox(
+    fn execute_macos_sandbox(
         &self,
         code: &str,
         input: serde_json::Value,
@@ -189,7 +189,8 @@ impl Sandbox {
         }
 
         for path in &self.config.allowed_paths {
-            profile.push_str(&format!("(allow file-write* (regex #\"^{}.*\"))\n", path));
+            use std::fmt::Write;
+            writeln!(profile, "(allow file-write* (regex #\"^{path}.*\"))").unwrap();
         }
 
         profile

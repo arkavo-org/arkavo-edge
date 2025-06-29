@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "arkavo-cli",
@@ -177,9 +177,10 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
+ "arkavo-dataflow",
  "arkavo-git",
  "arkavo-llm",
  "arkavo-mcp",
@@ -189,6 +190,7 @@ dependencies = [
  "arkavo-test",
  "async-trait",
  "chrono",
+ "clap",
  "ignore",
  "indicatif",
  "jsonschema 0.26.2",
@@ -206,16 +208,17 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "dashmap",
+ "flate2",
  "futures",
- "jsonschema 0.18.3",
+ "jsonschema 0.19.1",
+ "lazy-regex",
  "once_cell",
- "regex",
  "semver",
  "serde",
  "serde_json",
@@ -228,11 +231,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.16.1"
+version = "0.16.2"
 
 [[package]]
 name = "arkavo-git"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "assert_cmd",
  "curl",
@@ -243,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -262,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -271,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -294,17 +297,18 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.16.1"
+version = "0.16.2"
 
 [[package]]
 name = "arkavo-repo"
-version = "0.16.1"
+version = "0.16.2"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
+ "arkavo-dataflow",
  "arkavo-llm",
  "arkavo-memory",
  "chrono",
@@ -312,6 +316,7 @@ dependencies = [
  "futures",
  "ratatui",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "syntect",
@@ -324,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -358,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.16.1"
+version = "0.16.2"
 
 [[package]]
 name = "arrayvec"
@@ -2541,15 +2546,14 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.18.3"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa0f4bea31643be4c6a678e9aa4ae44f0db9e5609d5ca9dc9083d06eb3e9a27a"
+checksum = "14a655181740aa66dfcb182daca1bc8109fda5c7c0399c4f30dcb155ab0d32a6"
 dependencies = [
  "ahash",
  "anyhow",
  "base64 0.22.1",
  "bytecount",
- "clap",
  "fancy-regex 0.13.0",
  "fraction",
  "getrandom 0.2.16",
@@ -2566,7 +2570,7 @@ dependencies = [
  "serde_json",
  "time",
  "url",
- "uuid",
+ "uuid-simd",
 ]
 
 [[package]]
@@ -2592,6 +2596,29 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid-simd",
+]
+
+[[package]]
+name = "lazy-regex"
+version = "3.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60c7310b93682b36b98fa7ea4de998d3463ccbebd94d935d6b48ba5b6ffa7126"
+dependencies = [
+ "lazy-regex-proc_macros",
+ "once_cell",
+ "regex",
+]
+
+[[package]]
+name = "lazy-regex-proc_macros"
+version = "3.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba01db5ef81e17eb10a5e0f2109d1b3a3e29bac3070fdbd7d156bf7dbd206a1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
 ]
 
 [[package]]
