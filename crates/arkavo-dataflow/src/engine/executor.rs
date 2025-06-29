@@ -382,15 +382,13 @@ mod tests {
             operator: ConditionOperator::Contains,
             value: serde_json::json!("error"),
         };
-        assert!(
-            NodeExecutor::evaluate_condition(
-                match &message {
-                    Message::Data { payload, .. } => payload,
-                    _ => panic!("Expected data message"),
-                },
-                &condition
-            )
-        );
+        assert!(NodeExecutor::evaluate_condition(
+            match &message {
+                Message::Data { payload, .. } => payload,
+                _ => panic!("Expected data message"),
+            },
+            &condition
+        ));
 
         // Test nested field access
         let condition = Condition {
@@ -398,14 +396,12 @@ mod tests {
             operator: ConditionOperator::Equals,
             value: serde_json::json!(42),
         };
-        assert!(
-            NodeExecutor::evaluate_condition(
-                match &message {
-                    Message::Data { payload, .. } => payload,
-                    _ => panic!("Expected data message"),
-                },
-                &condition
-            )
-        );
+        assert!(NodeExecutor::evaluate_condition(
+            match &message {
+                Message::Data { payload, .. } => payload,
+                _ => panic!("Expected data message"),
+            },
+            &condition
+        ));
     }
 }
