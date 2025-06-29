@@ -1,3 +1,4 @@
+use crate::mcp_integration::{McpConnection, Tool};
 use anyhow::Result;
 use crossterm::{
     cursor,
@@ -110,6 +111,8 @@ pub struct App {
     pub server_urls: HashMap<String, String>, // Map server names to URLs
     pub configuration_mode: ConfigurationMode, // Configuration dialog state
     pub providers: Vec<ProviderInfo>, // All available providers and their status
+    pub mcp_client: Option<McpConnection>, // MCP client for tools
+    pub mcp_tools: Vec<Tool>,         // Available MCP tools
 }
 
 impl App {
@@ -167,6 +170,8 @@ impl App {
                     models: vec![],
                 },
             ],
+            mcp_client: None,
+            mcp_tools: vec![],
         }
     }
 
@@ -227,6 +232,8 @@ impl App {
                     models: vec![],
                 },
             ],
+            mcp_client: None,
+            mcp_tools: vec![],
         }
     }
 
@@ -236,6 +243,9 @@ impl App {
 
         // Setup terminal
         self.setup_terminal()?;
+
+        // Initialize MCP connection
+        self.initialize_mcp_connection().await;
 
         // Ollama configuration is handled by arkavo chat command
 
@@ -277,6 +287,69 @@ impl App {
                 .unwrap_or_else(|| "http://localhost:11434".to_string())
         } else {
             "http://localhost:11434".to_string()
+        }
+    }
+
+    pub async fn initialize_mcp_connection(&mut self) {
+        // Initialize MCP client - attempt by default unless explicitly disabled
+        if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                "[MCP] MCP disabled by environment variable".to_string(),
+            );
+            return;
+        }
+
+        let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
+        let result = match mcp_url {
+            Some(url) => McpConnection::new_external(Some(url)),
+            None => McpConnection::new_in_process(),
+        };
+
+        match result {
+            Ok(client) => {
+                // List available tools
+                match client.list_tools() {
+                    Ok(tools) => {
+                        self.mcp_tools = tools.clone();
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!("[MCP] Connected with {} tools available", tools.len()),
+                        );
+
+                        // Add MCP provider info
+                        self.providers.push(ProviderInfo {
+                            name: "MCP Tools".to_string(),
+                            provider_type: ProviderType::Claude, // Using Claude as placeholder
+                            url: None,
+                            status: ProviderStatus::Connected,
+                            models: tools.iter().map(|t| t.name.clone()).collect(),
+                        });
+                    }
+                    Err(e) => {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Error,
+                            format!("[MCP] Failed to list tools: {}", e),
+                        );
+                    }
+                }
+                self.mcp_client = Some(client);
+            }
+            Err(e) => {
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Warning,
+                    format!("[MCP] Failed to connect: {}", e),
+                );
+
+                // Add disconnected MCP provider
+                self.providers.push(ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude,
+                    url: None,
+                    status: ProviderStatus::Disconnected,
+                    models: vec![],
+                });
+            }
         }
     }
 
@@ -648,6 +721,10 @@ impl App {
                                     "[UI] Refreshing model list...".to_string(),
                                 );
                                 self.fetch_available_models().await;
+                            }
+                            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                // Ctrl+T: Show all MCP tools
+                                self.show_mcp_tools_dialog();
                             }
                             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                                 self.vim_enabled = !self.vim_enabled;
@@ -1083,12 +1160,17 @@ impl App {
         // Group providers by type
         let mut ollama_providers = Vec::new();
         let mut frontier_providers = Vec::new();
+        let mut mcp_provider = None;
 
         for provider in &self.providers {
-            match provider.provider_type {
-                ProviderType::Ollama => ollama_providers.push(provider),
-                ProviderType::OpenAI | ProviderType::Anthropic | ProviderType::Claude => {
-                    frontier_providers.push(provider)
+            if provider.name == "MCP Tools" {
+                mcp_provider = Some(provider);
+            } else {
+                match provider.provider_type {
+                    ProviderType::Ollama => ollama_providers.push(provider),
+                    ProviderType::OpenAI | ProviderType::Anthropic | ProviderType::Claude => {
+                        frontier_providers.push(provider)
+                    }
                 }
             }
         }
@@ -1177,6 +1259,70 @@ impl App {
             }
         }
 
+        // Display MCP Tools section
+        if let Some(provider) = mcp_provider {
+            if !lines.is_empty() {
+                lines.push(Line::from("")); // Add spacing
+            }
+
+            lines.push(Line::from(vec![Span::styled(
+                "MCP Tools",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+
+            let status_symbol = match &provider.status {
+                ProviderStatus::Connected => "✓",
+                ProviderStatus::Disconnected => "✗",
+                _ => "○",
+            };
+
+            let status_color = match &provider.status {
+                ProviderStatus::Connected => Color::Green,
+                ProviderStatus::Disconnected => Color::Red,
+                _ => Color::DarkGray,
+            };
+
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(status_symbol, Style::default().fg(status_color)),
+                Span::raw(" "),
+                Span::raw(&provider.name),
+                Span::raw(" "),
+                Span::styled(
+                    if provider.status == ProviderStatus::Connected {
+                        format!("({} tools available)", self.mcp_tools.len())
+                    } else {
+                        "(not connected)".to_string()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+
+            // Show first few tools if connected
+            if provider.status == ProviderStatus::Connected && !self.mcp_tools.is_empty() {
+                let tools_to_show = self.mcp_tools.iter().take(3);
+                for tool in tools_to_show {
+                    lines.push(Line::from(vec![
+                        Span::raw("    • "),
+                        Span::styled(&tool.name, Style::default().fg(Color::Blue)),
+                    ]));
+                }
+                if self.mcp_tools.len() > 3 {
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(
+                            format!("... and {} more", self.mcp_tools.len() - 3),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ]));
+                }
+            }
+        }
+
         // Add help text at bottom
         if lines.is_empty() {
             lines.push(Line::from(vec![Span::styled(
@@ -1186,7 +1332,7 @@ impl App {
         } else {
             lines.push(Line::from("")); // Add spacing
             lines.push(Line::from(vec![Span::styled(
-                "Tab: cycle models | Enter: configure",
+                "Tab: cycle models | Enter: configure | Ctrl+T: show all MCP tools",
                 Style::default().fg(Color::DarkGray),
             )]));
         }
@@ -1461,8 +1607,14 @@ Scrolling (when in scroll mode):
             "SCROLL MODE (↑↓/jk/PgUp/PgDn/Home/End)"
         };
 
+        let mcp_status = if self.mcp_client.is_some() {
+            format!(" | MCP: ✓ {} tools", self.mcp_tools.len())
+        } else {
+            " | MCP: ✗".to_string()
+        };
+
         let status = format!(
-            " {mode_indicator} | Model: {active_model} | Ctrl+R: Refresh | Ctrl+D: Debug | Ctrl+S: Export | Ctrl+Q: Quit "
+            " {mode_indicator} | Model: {active_model}{mcp_status} | Ctrl+T: Tools | Ctrl+R: Refresh | Ctrl+Q: Quit "
         );
 
         let paragraph = Paragraph::new(status)
@@ -1947,6 +2099,99 @@ Scrolling (when in scroll mode):
             }
             ConfigurationMode::None => {}
         }
+    }
+
+    fn show_mcp_tools_dialog(&mut self) {
+        if self.mcp_tools.is_empty() {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Warning,
+                "[MCP] No tools available".to_string(),
+            );
+            return;
+        }
+
+        // Log all available tools to debug view
+        self.add_debug_log(
+            crate::ui::debug::LogLevel::Info,
+            format!("[MCP] Available tools ({}):", self.mcp_tools.len()),
+        );
+
+        // Group tools by category
+        let mut device_tools = Vec::new();
+        let mut ui_tools = Vec::new();
+        let mut git_tools = Vec::new();
+        let mut memory_tools = Vec::new();
+        let mut other_tools = Vec::new();
+
+        for tool in &self.mcp_tools {
+            let tool_info = format!("@{}: {}", tool.name, tool.description);
+
+            if tool.name.contains("device") || tool.name.contains("simulator") {
+                device_tools.push(tool_info);
+            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
+                ui_tools.push(tool_info);
+            } else if tool.name.contains("git_") {
+                git_tools.push(tool_info);
+            } else if tool.name.contains("memory")
+                || tool.name == "store_memory"
+                || tool.name == "search_memory"
+            {
+                memory_tools.push(tool_info);
+            } else {
+                other_tools.push(tool_info);
+            }
+        }
+
+        // Log tools by category
+        if !device_tools.is_empty() {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                "[Device Management Tools]".to_string(),
+            );
+            for tool in device_tools {
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+            }
+        }
+
+        if !ui_tools.is_empty() {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                "[UI Interaction Tools]".to_string(),
+            );
+            for tool in ui_tools {
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+            }
+        }
+
+        if !git_tools.is_empty() {
+            self.add_debug_log(crate::ui::debug::LogLevel::Info, "[Git Tools]".to_string());
+            for tool in git_tools {
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+            }
+        }
+
+        if !memory_tools.is_empty() {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                "[Memory Tools]".to_string(),
+            );
+            for tool in memory_tools {
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+            }
+        }
+
+        if !other_tools.is_empty() {
+            self.add_debug_log(
+                crate::ui::debug::LogLevel::Info,
+                "[Other Tools]".to_string(),
+            );
+            for tool in other_tools {
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+            }
+        }
+
+        // Switch to debug view to show the tools
+        self.view_mode = ViewMode::Debug;
     }
 }
 

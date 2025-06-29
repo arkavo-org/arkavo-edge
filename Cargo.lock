@@ -333,6 +333,7 @@ dependencies = [
  "arkavo-mcp-core",
  "arkavo-mcp-runtime",
  "arkavo-memory",
+ "arkavo-test",
  "chrono",
  "crossterm",
  "ratatui",

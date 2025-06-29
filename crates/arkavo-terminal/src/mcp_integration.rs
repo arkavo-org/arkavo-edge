@@ -1,0 +1,181 @@
+use arkavo_test::mcp::server::Tool as McpTool;
+use arkavo_test::mcp::{
+    device_manager::DeviceManager,
+    device_tools::DeviceManagementKit,
+    git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit},
+    ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit},
+    simulator_tools::SimulatorControl,
+};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+
+#[derive(Debug, Clone)]
+pub enum McpConnection {
+    InProcess(InProcessMcp),
+    External(ExternalMcp),
+}
+
+#[derive(Clone)]
+pub struct InProcessMcp {
+    tools: Arc<HashMap<String, Box<dyn McpTool>>>,
+    runtime: Arc<Runtime>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalMcp {
+    // Placeholder for external MCP client
+    url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+impl McpConnection {
+    pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
+        // Create tokio runtime for async operations
+        let runtime = Arc::new(Runtime::new()?);
+
+        // Create tools with shared device manager
+        let device_manager = Arc::new(DeviceManager::new());
+
+        let mut tools: HashMap<String, Box<dyn McpTool>> = HashMap::new();
+
+        // Register all tools
+        let simulator_control = SimulatorControl::new();
+        tools.insert(
+            simulator_control.schema().name.clone(),
+            Box::new(simulator_control),
+        );
+
+        let device_mgmt = DeviceManagementKit::new(device_manager.clone());
+        tools.insert(device_mgmt.schema().name.clone(), Box::new(device_mgmt));
+
+        let screen_capture = ScreenCaptureKit::new(device_manager.clone());
+        tools.insert(
+            screen_capture.schema().name.clone(),
+            Box::new(screen_capture),
+        );
+
+        let ui_interaction = UiInteractionKit::new(device_manager.clone());
+        tools.insert(
+            ui_interaction.schema().name.clone(),
+            Box::new(ui_interaction),
+        );
+
+        let ui_query = UiQueryKit::new(device_manager);
+        tools.insert(ui_query.schema().name.clone(), Box::new(ui_query));
+
+        // Add Git tools
+        let git_status = GitStatusKit::new();
+        tools.insert(git_status.schema().name.clone(), Box::new(git_status));
+
+        let git_diff = GitDiffKit::new();
+        tools.insert(git_diff.schema().name.clone(), Box::new(git_diff));
+
+        let git_commit = GitCommitKit::new();
+        tools.insert(git_commit.schema().name.clone(), Box::new(git_commit));
+
+        let git_branch = GitBranchKit::new();
+        tools.insert(git_branch.schema().name.clone(), Box::new(git_branch));
+
+        let git_log = GitLogKit::new();
+        tools.insert(git_log.schema().name.clone(), Box::new(git_log));
+
+        let git_remote = GitRemoteKit::new();
+        tools.insert(git_remote.schema().name.clone(), Box::new(git_remote));
+
+        // TODO: Add memory tools once we figure out how to access MemoryIntegration
+
+        Ok(Self::InProcess(InProcessMcp {
+            tools: Arc::new(tools),
+            runtime,
+        }))
+    }
+
+    pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
+        let url = mcp_url.unwrap_or_else(|| "http://localhost:3000".to_string());
+        Ok(Self::External(ExternalMcp { url }))
+    }
+
+    pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
+        match self {
+            Self::InProcess(mcp) => {
+                let tools: Vec<Tool> = mcp
+                    .tools
+                    .values()
+                    .map(|tool| {
+                        let schema = tool.schema();
+                        Tool {
+                            name: schema.name.clone(),
+                            description: schema.description.clone(),
+                            input_schema: schema.parameters.clone(),
+                        }
+                    })
+                    .collect();
+                Ok(tools)
+            }
+            Self::External(_) => {
+                // TODO: Implement external MCP client
+                Ok(vec![])
+            }
+        }
+    }
+
+    pub fn call_tool(
+        &self,
+        tool_name: &str,
+        args: Value,
+        _llm_origin: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        match self {
+            Self::InProcess(mcp) => {
+                // Create a oneshot channel to get the result
+                let (tx, rx) = std::sync::mpsc::channel::<Result<Value, String>>();
+
+                // Clone what we need
+                let tools = mcp.tools.clone();
+                let tool_name = tool_name.to_string();
+                let runtime = mcp.runtime.clone();
+
+                // Spawn a thread to run the async operation
+                std::thread::spawn(move || {
+                    let result = runtime.block_on(async move {
+                        if let Some(tool) = tools.get(&tool_name) {
+                            tool.execute(args)
+                                .await
+                                .map_err(|e| format!("Tool execution error: {e}"))
+                        } else {
+                            Err(format!("Tool '{tool_name}' not found"))
+                        }
+                    });
+                    tx.send(result).ok();
+                });
+
+                // Wait for the result
+                rx.recv()
+                    .map_err(|_| "Failed to receive tool result")?
+                    .map_err(|e: String| e.into())
+            }
+            Self::External(_) => {
+                // TODO: Implement external MCP client
+                Err("External MCP not implemented".into())
+            }
+        }
+    }
+}
+
+// Implement Debug manually for InProcessMcp
+impl std::fmt::Debug for InProcessMcp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InProcessMcp")
+            .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .field("runtime", &"Runtime")
+            .finish()
+    }
+}
