@@ -9,9 +9,9 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
 };
+use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::event::{AppEvent, EventHandler};
@@ -202,7 +202,8 @@ impl App {
 
     pub fn get_server_url_for_model(&self, model_name: &str) -> String {
         if let Some((server_prefix, _)) = model_name.split_once('/') {
-            self.server_urls.get(server_prefix)
+            self.server_urls
+                .get(server_prefix)
                 .cloned()
                 .unwrap_or_else(|| "http://localhost:11434".to_string())
         } else {
@@ -215,9 +216,9 @@ impl App {
         use arkavo_llm::ollama::OllamaClient;
         use arkavo_memory::storage::MemoryStorage;
         use std::sync::Arc;
-        
+
         let mut all_models = Vec::new();
-        
+
         // Initialize memory storage to check for saved Ollama configurations
         let storage = match MemoryStorage::new().await {
             Ok(s) => Arc::new(s),
@@ -226,24 +227,25 @@ impl App {
                 return;
             }
         };
-        
+
         // Search for saved Ollama server configurations
         // The search looks for content containing "http" in the config category
-        let saved_configs = match storage
-            .search("http", 20, Some("config"))
-            .await {
+        let saved_configs = match storage.search("http", 20, Some("config")).await {
             Ok(configs) => configs,
             Err(e) => {
                 eprintln!("Failed to search for Ollama configs: {}", e);
                 vec![]
             }
         };
-        
+
         // Always try localhost first
         let localhost_client = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
         match localhost_client.list_models().await {
             Ok(models) => {
-                self.server_urls.insert("localhost".to_string(), "http://localhost:11434".to_string());
+                self.server_urls.insert(
+                    "localhost".to_string(),
+                    "http://localhost:11434".to_string(),
+                );
                 for model in models {
                     all_models.push(format!("localhost/{}", model));
                 }
@@ -253,40 +255,52 @@ impl App {
                 // Silently ignore localhost if not available
             }
         }
-        
+
         // Try saved configurations - filter for Ollama server configs
         let mut server_idx = 1;
         for config in saved_configs.iter() {
             let server_url = &config.memory.content;
-            
+
             // Check if this is an Ollama server config by checking metadata
-            let is_ollama_config = config.memory.metadata
+            let is_ollama_config = config
+                .memory
+                .metadata
                 .as_ref()
                 .and_then(|m| m.get("type"))
                 .and_then(|t| t.as_str())
                 .map(|t| t == "arkavo_ollama_server_config")
                 .unwrap_or(false);
-            
-            if is_ollama_config && server_url.starts_with("http") && server_url != "http://localhost:11434" {
+
+            if is_ollama_config
+                && server_url.starts_with("http")
+                && server_url != "http://localhost:11434"
+            {
                 let client = OllamaClient::new(Some(server_url.clone()), None);
-                
+
                 match client.list_models().await {
                     Ok(models) => {
                         let server_name = format!("server{}", server_idx);
-                        self.server_urls.insert(server_name.clone(), server_url.clone());
+                        self.server_urls
+                            .insert(server_name.clone(), server_url.clone());
                         for model in models {
                             all_models.push(format!("{}/{}", server_name, model));
                         }
-                        eprintln!("✓ Connected to {} Ollama server: {}", server_name, server_url);
+                        eprintln!(
+                            "✓ Connected to {} Ollama server: {}",
+                            server_name, server_url
+                        );
                         server_idx += 1;
                     }
                     Err(e) => {
-                        eprintln!("Failed to fetch models from Ollama server {} ({}): {}", server_url, server_url, e);
+                        eprintln!(
+                            "Failed to fetch models from Ollama server {} ({}): {}",
+                            server_url, server_url, e
+                        );
                     }
                 }
             }
         }
-        
+
         if !all_models.is_empty() {
             self.available_models = all_models;
             // If we have models and none selected, select the first one
@@ -308,7 +322,7 @@ impl App {
     ) -> Result<()> {
         // Fetch available models from Ollama server
         self.fetch_available_models().await;
-        
+
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
 
@@ -442,8 +456,10 @@ impl App {
                             KeyCode::Tab => {
                                 // Cycle through available models (only if we have models)
                                 if !self.available_models.is_empty() {
-                                    self.selected_model = (self.selected_model + 1) % self.available_models.len();
-                                    self.active_model = Some(self.available_models[self.selected_model].clone());
+                                    self.selected_model =
+                                        (self.selected_model + 1) % self.available_models.len();
+                                    self.active_model =
+                                        Some(self.available_models[self.selected_model].clone());
                                 }
                             }
                             KeyCode::BackTab => {
@@ -462,10 +478,11 @@ impl App {
                                     // Send message to the single conversation window
                                     if !self.input_buffer.is_empty() {
                                         // Use the actual model being used (from the LLM client)
-                                        let displayed_model = self.active_model.clone()
-                                            .unwrap_or_else(|| {
+                                        let displayed_model =
+                                            self.active_model.clone().unwrap_or_else(|| {
                                                 // If no model selected, try to use first available
-                                                self.available_models.first()
+                                                self.available_models
+                                                    .first()
                                                     .cloned()
                                                     .unwrap_or_else(|| "unknown".to_string())
                                             });
@@ -784,27 +801,34 @@ impl App {
                 .alignment(ratatui::layout::Alignment::Center);
             frame.render_widget(loading_paragraph, model_inner);
         } else {
-            use ratatui::widgets::{List, ListItem};
             use ratatui::style::Modifier;
-            
-            let model_items: Vec<ListItem> = self.available_models
+            use ratatui::widgets::{List, ListItem};
+
+            let model_items: Vec<ListItem> = self
+                .available_models
                 .iter()
                 .enumerate()
                 .map(|(i, model)| {
                     let style = if i == self.selected_model {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::White)
                     };
-                    ListItem::new(format!(" {} {}", if i == self.selected_model { "▸" } else { " " }, model))
-                        .style(style)
+                    ListItem::new(format!(
+                        " {} {}",
+                        if i == self.selected_model { "▸" } else { " " },
+                        model
+                    ))
+                    .style(style)
                 })
                 .collect();
-            
+
             let model_list = List::new(model_items)
                 .style(Style::default().fg(Color::White))
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-                
+
             frame.render_widget(model_list, model_inner);
         }
 
@@ -1059,7 +1083,9 @@ Scrolling (when in scroll mode):
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
-        let active_model = self.active_model.clone()
+        let active_model = self
+            .active_model
+            .clone()
             .unwrap_or_else(|| "No model selected".to_string());
 
         let mode_indicator = if self.input_focused {

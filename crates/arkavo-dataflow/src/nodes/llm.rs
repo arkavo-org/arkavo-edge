@@ -174,21 +174,24 @@ impl LlmTransform {
             None
         }
     }
-    
+
     async fn resolve_server_url(&self, server_prefix: &str) -> Option<String> {
         use arkavo_memory::storage::MemoryStorage;
-        
+
         if server_prefix == "localhost" {
             return Some("http://localhost:11434".to_string());
         }
-        
+
         // Look up saved server configuration from memory storage
         if let Ok(storage) = MemoryStorage::new().await {
             if let Ok(all_configs) = storage.search("http", 20, Some("config")).await {
                 // Filter for Ollama server configs only
-                let ollama_configs: Vec<_> = all_configs.into_iter()
+                let ollama_configs: Vec<_> = all_configs
+                    .into_iter()
                     .filter(|config| {
-                        config.memory.metadata
+                        config
+                            .memory
+                            .metadata
                             .as_ref()
                             .and_then(|m| m.get("type"))
                             .and_then(|t| t.as_str())
@@ -197,7 +200,7 @@ impl LlmTransform {
                     })
                     .filter(|config| config.memory.content != "http://localhost:11434")
                     .collect();
-                
+
                 // Extract server number from prefix (e.g., "server1" -> 1)
                 if let Some(num_str) = server_prefix.strip_prefix("server") {
                     if let Ok(idx) = num_str.parse::<usize>() {
@@ -208,7 +211,7 @@ impl LlmTransform {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -231,7 +234,7 @@ impl NodeProcessor for LlmTransform {
             .unwrap_or("local-ollama");
 
         let model = params.get("model").and_then(|v| v.as_str());
-        
+
         // Check if model contains server prefix (e.g., "server1/llama3")
         let (effective_provider, effective_model) = if let Some(model_str) = model {
             if let Some((prefix, model_name)) = model_str.split_once('/') {
@@ -287,15 +290,18 @@ impl NodeProcessor for LlmTransform {
         let task_type = params.get("task_type").and_then(|v| v.as_str());
 
         // Get provider configuration based on effective provider
-        let (base_url, default_model) = if effective_provider.starts_with("server") || effective_provider == "localhost" {
-            // This is a server prefix from terminal UI, resolve it from memory storage
-            let url = self.resolve_server_url(effective_provider).await
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
-            (url, None)
-        } else {
-            // Regular provider name
-            self.get_provider_config(effective_provider).await?
-        };
+        let (base_url, default_model) =
+            if effective_provider.starts_with("server") || effective_provider == "localhost" {
+                // This is a server prefix from terminal UI, resolve it from memory storage
+                let url = self
+                    .resolve_server_url(effective_provider)
+                    .await
+                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                (url, None)
+            } else {
+                // Regular provider name
+                self.get_provider_config(effective_provider).await?
+            };
 
         // Determine which model to use
         let model_to_use = if let Some(explicit_model) = effective_model {

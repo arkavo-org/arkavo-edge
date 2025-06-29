@@ -86,7 +86,9 @@ pub async fn run() -> Result<()> {
             messages_clone.push(user_message.clone());
 
             // Parse the model name to extract server and actual model
-            let (server_url, actual_model) = if let Some((server_prefix, model)) = request.model_name.split_once('/') {
+            let (server_url, actual_model) = if let Some((server_prefix, model)) =
+                request.model_name.split_once('/')
+            {
                 // Model has server prefix - need to resolve the URL
                 let url = if server_prefix == "localhost" {
                     "http://localhost:11434".to_string()
@@ -95,9 +97,12 @@ pub async fn run() -> Result<()> {
                     if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
                         if let Ok(all_configs) = storage.search("http", 20, Some("config")).await {
                             // Filter for Ollama server configs only
-                            let ollama_configs: Vec<_> = all_configs.into_iter()
+                            let ollama_configs: Vec<_> = all_configs
+                                .into_iter()
                                 .filter(|config| {
-                                    config.memory.metadata
+                                    config
+                                        .memory
+                                        .metadata
                                         .as_ref()
                                         .and_then(|m| m.get("type"))
                                         .and_then(|t| t.as_str())
@@ -106,7 +111,7 @@ pub async fn run() -> Result<()> {
                                 })
                                 .filter(|config| config.memory.content != "http://localhost:11434")
                                 .collect();
-                            
+
                             // Extract server number from prefix (e.g., "server1" -> 1)
                             if let Some(num_str) = server_prefix.strip_prefix("server") {
                                 if let Ok(idx) = num_str.parse::<usize>() {
@@ -134,16 +139,16 @@ pub async fn run() -> Result<()> {
                 (url, model.to_string())
             } else {
                 // No server prefix, use default
-                ("http://localhost:11434".to_string(), request.model_name.clone())
+                (
+                    "http://localhost:11434".to_string(),
+                    request.model_name.clone(),
+                )
             };
-            
+
             // Create a new Ollama client with the specific model and server
-            let model_specific_client = arkavo_llm::LlmClient::new(
-                Box::new(arkavo_llm::ollama::OllamaClient::new(
-                    Some(server_url),
-                    Some(actual_model)
-                ))
-            );
+            let model_specific_client = arkavo_llm::LlmClient::new(Box::new(
+                arkavo_llm::ollama::OllamaClient::new(Some(server_url), Some(actual_model)),
+            ));
 
             // Spawn a task for each request
             tokio::spawn(async move {
