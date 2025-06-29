@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "name": "llm-summarizer",
+  "description": "Pipeline that summarizes incoming JSON data using LLM",
+  "nodes": [
+    {
+      "id": "webhook_input",
+      "kind": "source",
+      "params": {
+        "type": "webhook_source",
+        "port": 8080,
+        "path": "/data"
+      }
+    },
+    {
+      "id": "summarizer",
+      "kind": "transform",
+      "params": {
+        "type": "llm_transform",
+        "provider": "local-ollama",
+        "model": "llama3.2:latest",
+        "prompt": "Summarize the following data in 2-3 sentences:\n\n{{input}}",
+        "temperature": 0.5,
+        "max_tokens": 150
+      }
+    },
+    {
+      "id": "output",
+      "kind": "sink",
+      "params": {
+        "type": "console_sink",
+        "format": "json"
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "webhook_input",
+      "to": "summarizer"
+    },
+    {
+      "from": "summarizer",
+      "to": "output"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 use std::env;
+use std::io::IsTerminal;
 use std::process;
 
 fn main() {
@@ -39,7 +40,7 @@ fn maybe_relaunch_in_terminal() {
     use std::process::Command;
 
     // Check if we're already in a TTY
-    if atty::is(atty::Stream::Stdout) {
+    if std::io::stdout().is_terminal() {
         return; // Already in terminal
     }
 
