@@ -27,15 +27,12 @@ fastembed = { version = "4", optional = true }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.8.1", features = ["runtime-tokio-rustls", "sqlite"] }
-env_logger = "0.10"
 log = "0.4"
 thiserror = "1.0"
 anyhow = "1.0"
 hnsw_rs = "0.3"
-arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = "0.1"
 bytemuck = "1.14"
 
 [dev-dependencies]
-tokio-test = "0.4"

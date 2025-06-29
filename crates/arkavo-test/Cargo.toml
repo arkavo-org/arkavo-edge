@@ -23,18 +23,10 @@ tokio = { version = "1.41", features = ["full"] }
 
 # Error handling
 thiserror = "2.0"
-anyhow = "1.0"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# MCP protocol
-arkavo-protocol = { path = "../arkavo-protocol" }
 
 # Memory integration
 arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
@@ -47,9 +39,6 @@ arkavo-git = { path = "../arkavo-git" }
 
 # Gherkin parsing
 gherkin = "0.14"
-
-# State management
-bincode = "1.3"
 
 # HTTP client for AI integration
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -66,11 +55,7 @@ rand = "0.8"
 # Template engine for reporting
 handlebars = "6.3"
 
-# Lazy static initialization
-once_cell = "1.20"
-
 # Test utilities
-futures = "0.3"
 async-trait = "0.1"
 
 # File system
@@ -85,8 +70,6 @@ cc = "1.0"
 
 
 [dev-dependencies]
-criterion = "0.5"
-proptest = "1.6"
 tempfile = "3.14"
 [lints]
 workspace = true

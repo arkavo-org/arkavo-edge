@@ -159,3 +159,4 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - ProTip! Add .patch or .diff to the end of URLs for Git's plaintext views.
 - keep PR titles short and not "feat:". the reason is this is shown prominently in Github next to files and folders
 - each feature branch needs to bump the appropriate semver version. No release branches
+- Do not keep a change log file; github handles that functionality

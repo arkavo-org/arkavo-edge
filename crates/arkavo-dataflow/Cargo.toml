@@ -40,7 +40,6 @@ rand = "0.8"
 ring = "0.17"
 
 [dev-dependencies]
-tokio-test = "0.4"
 
 [lints]
 workspace = true
