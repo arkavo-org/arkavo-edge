@@ -16,7 +16,7 @@ impl NodeProcessor for TimerSource {
         // Timer source generates events at intervals
         let interval_ms = params
             .get("interval_ms")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(1000);
 
         // In a real implementation, this would be triggered by a timer

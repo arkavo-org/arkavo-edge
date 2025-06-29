@@ -143,15 +143,11 @@ impl EntityRecognizer {
                 // Check if this quoted string appears after a condition keyword
                 let text_before = &input[..quote_position];
                 let is_condition_value = condition_keywords.iter().any(|kw| {
-                    text_before
-                        .to_lowercase()
-                        .rfind(kw)
-                        .map(|kw_pos| {
-                            // Check if there's only whitespace between keyword and quote
-                            let between = &text_before[kw_pos + kw.len()..];
-                            between.trim().is_empty()
-                        })
-                        .unwrap_or(false)
+                    text_before.to_lowercase().rfind(kw).is_some_and(|kw_pos| {
+                        // Check if there's only whitespace between keyword and quote
+                        let between = &text_before[kw_pos + kw.len()..];
+                        between.trim().is_empty()
+                    })
                 });
 
                 // Only add as entity if it's not a condition value and not already found

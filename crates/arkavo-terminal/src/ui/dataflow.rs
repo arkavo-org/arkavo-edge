@@ -52,7 +52,7 @@ impl DataflowView {
 
             // Simple grid layout for now
             let cols = ((node_count as f32).sqrt().ceil()) as u16;
-            let _rows = ((node_count as f32) / cols as f32).ceil() as u16;
+            let _rows = ((node_count as f32) / f32::from(cols)).ceil() as u16;
 
             for (idx, node) in nodes.iter().enumerate() {
                 let col = (idx as u16) % cols;

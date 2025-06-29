@@ -101,7 +101,7 @@ impl HttpClientBuilder {
         // Add jitter
         let jitter_range = capped_delay * self.config.jitter_factor;
         let jitter = (rand::random::<f64>() * jitter_range).mul_add(2.0, -jitter_range);
-        let final_delay = (capped_delay + jitter).max(0.0) as u64;
+        let final_delay = (capped_delay + jitter).max(0.0).round() as u64;
 
         Duration::from_millis(final_delay)
     }

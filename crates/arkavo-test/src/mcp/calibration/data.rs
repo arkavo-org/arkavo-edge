@@ -111,7 +111,7 @@ impl CalibrationDataStore {
     pub fn is_calibration_valid(&self, device_id: &str, max_age_hours: u64) -> bool {
         if let Some(config) = self.get_calibration(device_id) {
             let age = chrono::Utc::now() - config.last_calibrated;
-            age.num_hours() < max_age_hours as i64
+            age.num_hours() < max_age_hours.try_into().unwrap_or(i64::MAX)
         } else {
             false
         }
@@ -191,7 +191,8 @@ impl CalibrationDataStore {
             return Ok(0);
         }
 
-        let cutoff = chrono::Utc::now() - chrono::Duration::days(days_to_keep as i64);
+        let cutoff = chrono::Utc::now()
+            - chrono::Duration::days(days_to_keep.try_into().unwrap_or(i64::MAX));
         let mut removed = 0;
 
         for entry in fs::read_dir(&backup_dir)? {

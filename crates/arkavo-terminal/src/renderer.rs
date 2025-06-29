@@ -33,7 +33,7 @@ impl RenderMetrics {
     }
 
     pub fn is_within_budget(&self, budget_ms: u64) -> bool {
-        self.frame_time.as_millis() <= budget_ms as u128
+        self.frame_time.as_millis() <= u128::from(budget_ms)
     }
 }
 

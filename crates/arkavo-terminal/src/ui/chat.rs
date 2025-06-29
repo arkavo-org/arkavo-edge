@@ -258,7 +258,7 @@ impl Renderable for ChatView {
             .collect();
 
         // Calculate total height and scrolling
-        let total_height: usize = items.iter().map(|item| item.height()).sum();
+        let total_height: usize = items.iter().map(ratatui::widgets::ListItem::height).sum();
         let visible_height = inner_area.height as usize;
 
         // Implement proper scrolling

@@ -26,7 +26,7 @@ async fn test_ollama_factory_validation() {
     // Test empty URL
     let config = ProviderConfig {
         provider_type: ProviderType::Ollama,
-        base_url: "".to_string(),
+        base_url: String::new(),
         auth_ref: None,
         default_model: None,
         timeout_secs: None,
@@ -162,7 +162,7 @@ async fn test_provider_creation() {
     let result = registry.create_provider(&config).await;
     assert!(result.is_err());
     let err = result.err().unwrap();
-    println!("Error message: {}", err);
+    println!("Error message: {err}");
     // Should fail because credentials can't be found
     // After sanitization, credential IDs are truncated in error messages
     assert!(

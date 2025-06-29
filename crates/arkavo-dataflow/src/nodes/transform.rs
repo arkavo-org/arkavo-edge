@@ -102,7 +102,7 @@ impl NodeProcessor for EnrichTransform {
         // Add metadata
         if params
             .get("add_metadata")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
         {
             if let Value::Object(ref mut data_obj) = data {
@@ -138,7 +138,7 @@ impl NodeProcessor for AggregateTransform {
         // Get aggregation config
         let window_size = params
             .get("window_size")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(10);
 
         let aggregation_type = params
