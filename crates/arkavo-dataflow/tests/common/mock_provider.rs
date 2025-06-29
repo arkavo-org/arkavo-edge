@@ -5,14 +5,14 @@ use tokio::sync::RwLock;
 use tokio_stream::Stream;
 
 /// Simple mock provider for testing
-pub struct MockProvider {
+pub(crate) struct MockProvider {
     responses: Arc<RwLock<Vec<String>>>,
     current_index: Arc<RwLock<usize>>,
     pub request_count: Arc<RwLock<usize>>,
 }
 
 impl MockProvider {
-    pub fn new(responses: Vec<String>) -> Self {
+    pub(crate) fn new(responses: Vec<String>) -> Self {
         Self {
             responses: Arc::new(RwLock::new(responses)),
             current_index: Arc::new(RwLock::new(0)),
@@ -21,7 +21,7 @@ impl MockProvider {
     }
 
     #[allow(dead_code)]
-    pub fn with_single_response(response: String) -> Self {
+    pub(crate) fn with_single_response(response: String) -> Self {
         Self::new(vec![response])
     }
 }

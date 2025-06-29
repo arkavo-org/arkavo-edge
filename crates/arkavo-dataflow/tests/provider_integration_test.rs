@@ -1,7 +1,6 @@
 mod common;
 
 use arkavo_dataflow::nodes::{
-    auth_manager::{AuthManager, AuthMethod},
     provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType},
 };
 use arkavo_llm::{Message, Role};
