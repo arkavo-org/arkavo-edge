@@ -2,6 +2,7 @@ pub mod app;
 pub mod benchmark;
 pub mod event;
 pub mod helix;
+pub mod mcp_integration;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;
@@ -57,6 +58,7 @@ pub async fn run() -> Result<()> {
 
     // Spawn LLM handler task with proper Ollama integration
     tokio::spawn(async move {
+        use crate::mcp_integration::McpConnection;
         use arkavo_llm::Message;
         use tokio_stream::StreamExt;
 
@@ -74,8 +76,121 @@ pub async fn run() -> Result<()> {
             client.provider_name()
         );
 
-        // Keep conversation context
-        let mut messages = Vec::new();
+        // Initialize MCP connection
+        let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
+            None
+        } else {
+            let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
+            let result = match mcp_url {
+                Some(url) => McpConnection::new_external(Some(url)),
+                None => McpConnection::new_in_process(),
+            };
+
+            match result {
+                Ok(client) => {
+                    match &client {
+                        McpConnection::InProcess(_) => {
+                            eprintln!("✓ LLM handler using in-process MCP server")
+                        }
+                        McpConnection::External(_) => {
+                            eprintln!("✓ LLM handler connected to external MCP server")
+                        }
+                    }
+                    Some(client)
+                }
+                Err(e) => {
+                    eprintln!("ℹ MCP server not available for LLM handler: {}", e);
+                    None
+                }
+            }
+        };
+
+        // Build MCP tools information for system prompt
+        let mcp_info = if let Some(ref client) = mcp_client {
+            match client.list_tools() {
+                Ok(tools) => {
+                    if tools.is_empty() {
+                        "\n\nMCP Integration: Enabled\nNo tools available yet.".to_string()
+                    } else {
+                        let mut tool_info =
+                            String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
+
+                        // Group tools by category
+                        let mut device_tools = Vec::new();
+                        let mut ui_tools = Vec::new();
+                        let mut git_tools = Vec::new();
+                        let mut memory_tools = Vec::new();
+                        let mut other_tools = Vec::new();
+
+                        for tool in &tools {
+                            let tool_desc = format!("- @{}: {}", tool.name, tool.description);
+
+                            if tool.name.contains("device") || tool.name.contains("simulator") {
+                                device_tools.push(tool_desc);
+                            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
+                                ui_tools.push(tool_desc);
+                            } else if tool.name.contains("git_") {
+                                git_tools.push(tool_desc);
+                            } else if tool.name.contains("memory")
+                                || tool.name == "store_memory"
+                                || tool.name == "search_memory"
+                            {
+                                memory_tools.push(tool_desc);
+                            } else {
+                                other_tools.push(tool_desc);
+                            }
+                        }
+
+                        if !device_tools.is_empty() {
+                            tool_info.push_str("\nDevice Management:\n");
+                            tool_info.push_str(&device_tools.join("\n"));
+                        }
+
+                        if !ui_tools.is_empty() {
+                            tool_info.push_str("\n\nUI Interaction:\n");
+                            tool_info.push_str(&ui_tools.join("\n"));
+                        }
+
+                        if !git_tools.is_empty() {
+                            tool_info.push_str("\n\nGit Tools:\n");
+                            tool_info.push_str(&git_tools.join("\n"));
+                        }
+
+                        if !memory_tools.is_empty() {
+                            tool_info.push_str("\n\nMemory Tools:\n");
+                            tool_info.push_str(&memory_tools.join("\n"));
+                        }
+
+                        if !other_tools.is_empty() {
+                            tool_info.push_str("\n\nOther Tools:\n");
+                            tool_info.push_str(&other_tools.join("\n"));
+                        }
+
+                        tool_info
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to list MCP tools: {}", e);
+                    "\n\nMCP Integration: Enabled (tool listing failed)".to_string()
+                }
+            }
+        } else {
+            "\n\nMCP Integration: Disabled".to_string()
+        };
+
+        // System prompt with MCP tools information
+        let system_prompt = format!(
+            "You are an AI assistant working in the Arkavo Terminal UI. \
+            You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+            When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
+            \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
+            \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
+            {}",
+            mcp_info
+        );
+
+        // Keep conversation context with system message
+        let mut messages = vec![Message::system(&system_prompt)];
 
         while let Some(request) = ui_rx.recv().await {
             let llm_tx = llm_tx.clone();
@@ -153,6 +268,10 @@ pub async fn run() -> Result<()> {
                     Some(actual_model.clone()),
                 )));
 
+            // Clone MCP client for this task
+            let task_mcp_client = mcp_client.clone();
+            let provider_name = client.provider_name().to_string();
+
             // Spawn a task for each request
             tokio::spawn(async move {
                 // Get streaming response from LLM with the user-selected model
@@ -170,10 +289,13 @@ pub async fn run() -> Result<()> {
                             })
                             .await;
 
+                        let mut full_response = String::new();
+
                         while let Some(chunk_result) = stream.next().await {
                             match chunk_result {
                                 Ok(chunk) => {
                                     if !chunk.content.is_empty() {
+                                        full_response.push_str(&chunk.content);
                                         // Send each chunk as it arrives
                                         let _ = llm_tx
                                             .send(LlmResponse {
@@ -200,6 +322,66 @@ pub async fn run() -> Result<()> {
                                         .await;
                                     break;
                                 }
+                            }
+                        }
+
+                        // Check for and execute any @tool calls in the response
+                        if let Some(ref mcp) = task_mcp_client {
+                            let tool_calls = extract_tool_calls(&full_response);
+                            for (tool_name, args_str) in tool_calls {
+                                // Parse arguments
+                                let args = if args_str.trim().starts_with('{') {
+                                    serde_json::from_str(&args_str)
+                                        .unwrap_or_else(|_| serde_json::json!({"prompt": args_str}))
+                                } else {
+                                    serde_json::json!({"prompt": args_str})
+                                };
+
+                                // Execute tool
+                                let tool_response =
+                                    match mcp.call_tool(&tool_name, args, &provider_name) {
+                                        Ok(result) => {
+                                            // Extract result text
+                                            let result_text = if let Some(result_obj) =
+                                                result.get("result")
+                                            {
+                                                if let Some(text) = result_obj.as_str() {
+                                                    text.to_string()
+                                                } else {
+                                                    serde_json::to_string_pretty(&result_obj)
+                                                        .unwrap_or_else(|_| result_obj.to_string())
+                                                }
+                                            } else {
+                                                serde_json::to_string_pretty(&result)
+                                                    .unwrap_or_else(|_| result.to_string())
+                                            };
+
+                                            LlmResponse {
+                                                task_id: request.task_id,
+                                                model_name: request.model_name.clone(),
+                                                content: format!(
+                                                    "\n\n[Tool Result - @{}]:\n{}",
+                                                    tool_name, result_text
+                                                ),
+                                                is_streaming: false,
+                                                is_complete: false,
+                                                error: None,
+                                            }
+                                        }
+                                        Err(e) => LlmResponse {
+                                            task_id: request.task_id,
+                                            model_name: request.model_name.clone(),
+                                            content: format!(
+                                                "\n\n[Tool Error - @{}]: {}",
+                                                tool_name, e
+                                            ),
+                                            is_streaming: false,
+                                            is_complete: false,
+                                            error: None,
+                                        },
+                                    };
+
+                                let _ = llm_tx.send(tool_response).await;
                             }
                         }
 
@@ -536,6 +718,77 @@ pub async fn run_with_string_channels(
 
     // Run with the adapted channels
     run_with_channels(new_ui_tx, new_llm_rx).await
+}
+
+fn extract_tool_calls(response: &str) -> Vec<(String, String)> {
+    let mut tool_calls = Vec::new();
+
+    // Remove markdown code blocks to find tools within them
+    let cleaned_response = response.replace("```", "").replace('`', "");
+
+    let mut remaining = &cleaned_response[..];
+
+    while let Some(at_pos) = remaining.find('@') {
+        // Check if this is a tool call (followed by word characters)
+        let after_at = &remaining[at_pos + 1..];
+
+        if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
+            let tool_name = &after_at[..space_or_brace];
+
+            // Only process if tool_name is alphanumeric and not "screenshot"
+            if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && tool_name != "screenshot"
+            {
+                let args_start = at_pos + 1 + space_or_brace;
+                let args_str = &remaining[args_start..].trim_start();
+
+                let (args, consumed_len) = if args_str.starts_with('{') {
+                    // Find matching closing brace
+                    let mut brace_count = 0;
+                    let mut end_pos = 0;
+                    for (i, ch) in args_str.chars().enumerate() {
+                        match ch {
+                            '{' => brace_count += 1,
+                            '}' => {
+                                brace_count -= 1;
+                                if brace_count == 0 {
+                                    end_pos = i + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if end_pos > 0 {
+                        (&args_str[..end_pos], end_pos)
+                    } else {
+                        // No closing brace found
+                        ("", 0)
+                    }
+                } else {
+                    // Take until newline or end of string
+                    let end_pos = args_str.find('\n').unwrap_or(args_str.len());
+                    (args_str[..end_pos].trim(), end_pos)
+                };
+
+                if !args.is_empty() {
+                    tool_calls.push((tool_name.to_string(), args.to_string()));
+                }
+
+                // Move to after this tool call
+                remaining = &remaining[args_start + consumed_len..];
+            } else {
+                // Not a valid tool call, move past the @
+                remaining = &remaining[at_pos + 1..];
+            }
+        } else {
+            // No space or brace after @, move past it
+            remaining = &remaining[at_pos + 1..];
+        }
+    }
+
+    tool_calls
 }
 
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
