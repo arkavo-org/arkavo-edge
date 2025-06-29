@@ -1,5 +1,9 @@
-use crate::nodes::llm_discovery::{discover_ollama_providers, get_llm_capability_info, suggest_llm_node_config};
-use crate::nodes::llm_config::{LlmConfiguration, LlmConfigBuilder, store_llm_config, load_llm_config};
+use crate::nodes::llm_config::{
+    LlmConfigBuilder, LlmConfiguration, load_llm_config, store_llm_config,
+};
+use crate::nodes::llm_discovery::{
+    discover_ollama_providers, get_llm_capability_info, suggest_llm_node_config,
+};
 use anyhow::Result;
 use serde_json::json;
 
@@ -12,7 +16,7 @@ impl LlmDataflowAgent {
     pub async fn discover_capabilities(&self) -> Result<serde_json::Value> {
         let info = get_llm_capability_info();
         let discovered_providers = discover_ollama_providers().await?;
-        
+
         Ok(json!({
             "available_providers": discovered_providers,
             "capability_info": info,
@@ -24,28 +28,29 @@ impl LlmDataflowAgent {
             }
         }))
     }
-    
+
     /// Configure LLM providers based on discovered or known endpoints
-    pub async fn configure_providers(&self, providers: Vec<(String, String)>) -> Result<String> {
+    pub fn configure_providers(&self, providers: Vec<(String, String)>) -> Result<String> {
         let mut config_builder = LlmConfigBuilder::new();
-        
+
         for (name, url) in providers {
-            if name != "local-ollama" { // local-ollama is added by default
+            if name != "local-ollama" {
+                // local-ollama is added by default
                 config_builder.add_remote_ollama(&url, Some(&name))?;
             }
         }
-        
+
         let config = config_builder.build();
-        
+
         // Store configuration
         let _stored = store_llm_config(&config)?;
-        
+
         Ok(format!(
             "Configured {} providers. Configuration stored in memory.",
             config.providers.len()
         ))
     }
-    
+
     /// Get current LLM configuration
     pub async fn get_current_config(&self) -> Result<serde_json::Value> {
         if let Some(config) = load_llm_config().await? {
@@ -63,12 +68,15 @@ impl LlmDataflowAgent {
             }))
         }
     }
-    
+
     /// Suggest a blueprint configuration for a given task
-    pub async fn suggest_blueprint_for_task(&self, task_description: &str) -> Result<serde_json::Value> {
+    pub async fn suggest_blueprint_for_task(
+        &self,
+        task_description: &str,
+    ) -> Result<serde_json::Value> {
         let providers = discover_ollama_providers().await?;
         let node_config = suggest_llm_node_config(task_description, &providers)?;
-        
+
         Ok(json!({
             "suggested_node": node_config,
             "complete_blueprint": {
@@ -105,21 +113,19 @@ impl LlmDataflowAgent {
             }
         }))
     }
-    
+
     /// Update model preferences for specific task types
     pub async fn set_task_model_preference(&self, task_type: &str, model: &str) -> Result<String> {
-        let mut config = if let Some(existing) = load_llm_config().await? {
-            existing
-        } else {
-            LlmConfiguration::new()
-        };
-        
+        let mut config: LlmConfiguration = load_llm_config().await?.unwrap_or_default();
+
         config.set_model_preference(task_type.to_string(), model.to_string());
         store_llm_config(&config)?;
-        
-        Ok(format!("Set model preference for task '{}' to '{}'", task_type, model))
+
+        Ok(format!(
+            "Set model preference for task '{task_type}' to '{model}'"
+        ))
     }
-    
+
     /// Get example usage patterns
     pub fn get_usage_examples(&self) -> serde_json::Value {
         json!({

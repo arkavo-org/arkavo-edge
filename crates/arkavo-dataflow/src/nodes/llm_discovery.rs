@@ -37,38 +37,41 @@ pub struct TaskTypeInfo {
 /// Discovers available LLM providers by checking connectivity
 pub async fn discover_ollama_providers() -> Result<Vec<(String, String)>> {
     let mut discovered = Vec::new();
-    
+
     // Check local Ollama
-    if check_ollama_endpoint("http://localhost:11434").await.is_ok() {
-        discovered.push(("local-ollama".to_string(), "http://localhost:11434".to_string()));
+    if check_ollama_endpoint("http://localhost:11434").is_ok() {
+        discovered.push((
+            "local-ollama".to_string(),
+            "http://localhost:11434".to_string(),
+        ));
     }
-    
+
     // Check common local network addresses
     let common_ports = vec!["11434", "8080", "8000"];
     let subnet_prefixes = vec!["192.168.1", "192.168.0", "10.0.0", "172.16.0"];
-    
+
     for prefix in &subnet_prefixes {
         for i in 1..255 {
             for port in &common_ports {
-                let url = format!("http://{}.{}:{}", prefix, i, port);
-                if check_ollama_endpoint(&url).await.is_ok() {
-                    discovered.push((format!("remote-{}-{}", prefix, i), url));
+                let url = format!("http://{prefix}.{i}:{port}");
+                if check_ollama_endpoint(&url).is_ok() {
+                    discovered.push((format!("remote-{prefix}-{i}"), url));
                 }
             }
         }
     }
-    
+
     // Check environment variable
     if let Ok(remote_url) = std::env::var("REMOTE_OLLAMA_URL") {
-        if check_ollama_endpoint(&remote_url).await.is_ok() {
+        if check_ollama_endpoint(&remote_url).is_ok() {
             discovered.push(("remote-env".to_string(), remote_url));
         }
     }
-    
+
     Ok(discovered)
 }
 
-async fn check_ollama_endpoint(url: &str) -> Result<()> {
+fn check_ollama_endpoint(url: &str) -> Result<()> {
     // This would make an HTTP request to check if Ollama is running
     // For now, we'll simulate the check
     if url.contains("localhost") {
@@ -170,26 +173,27 @@ pub fn suggest_llm_node_config(
 ) -> Result<serde_json::Value> {
     // Analyze task description to determine best configuration
     let task_lower = task_description.to_lowercase();
-    
-    let (task_type, model, temperature) = if task_lower.contains("code") || task_lower.contains("review") {
-        ("code_review", "devstral:latest", 0.2)
-    } else if task_lower.contains("summar") {
-        ("summarization", "llama3.2:latest", 0.5)
-    } else if task_lower.contains("translat") {
-        ("translation", "qwen3:latest", 0.3)
-    } else if task_lower.contains("classif") || task_lower.contains("route") {
-        ("classification", "qwen3:0.6b", 0.1)
-    } else {
-        ("general", "llama3.2:latest", 0.7)
-    };
-    
+
+    let (task_type, model, temperature) =
+        if task_lower.contains("code") || task_lower.contains("review") {
+            ("code_review", "devstral:latest", 0.2)
+        } else if task_lower.contains("summar") {
+            ("summarization", "llama3.2:latest", 0.5)
+        } else if task_lower.contains("translat") {
+            ("translation", "qwen3:latest", 0.3)
+        } else if task_lower.contains("classif") || task_lower.contains("route") {
+            ("classification", "qwen3:0.6b", 0.1)
+        } else {
+            ("general", "llama3.2:latest", 0.7)
+        };
+
     // Select provider based on model availability
     let provider = if available_providers.len() > 1 && model == "devstral:latest" {
         "remote-ollama" // Prefer remote for specialized models
     } else {
         "local-ollama"
     };
-    
+
     Ok(json!({
         "type": "llm_transform",
         "provider": provider,
@@ -215,10 +219,11 @@ mod tests {
 
     #[test]
     fn test_suggest_config() {
-        let providers = vec![
-            ("local-ollama".to_string(), "http://localhost:11434".to_string()),
-        ];
-        
+        let providers = vec![(
+            "local-ollama".to_string(),
+            "http://localhost:11434".to_string(),
+        )];
+
         let config = suggest_llm_node_config("Review this code for bugs", &providers).unwrap();
         assert_eq!(config["task_type"], "code_review");
         assert_eq!(config["model"], "devstral:latest");

@@ -219,7 +219,6 @@ dependencies = [
  "futures",
  "jsonschema 0.19.1",
  "lazy-regex",
- "once_cell",
  "semver",
  "serde",
  "serde_json",
