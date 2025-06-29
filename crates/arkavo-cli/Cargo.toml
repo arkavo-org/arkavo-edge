@@ -18,7 +18,6 @@ embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal" }
-arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm" }
@@ -33,7 +32,6 @@ tokio = { version = "1.41", features = ["rt", "macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-regex = "1.10"
 chrono = "0.4"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 clap = { version = "4.5", features = ["derive", "cargo"] }
