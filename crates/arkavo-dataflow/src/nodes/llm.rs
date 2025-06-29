@@ -174,6 +174,43 @@ impl LlmTransform {
             None
         }
     }
+    
+    async fn resolve_server_url(&self, server_prefix: &str) -> Option<String> {
+        use arkavo_memory::storage::MemoryStorage;
+        
+        if server_prefix == "localhost" {
+            return Some("http://localhost:11434".to_string());
+        }
+        
+        // Look up saved server configuration from memory storage
+        if let Ok(storage) = MemoryStorage::new().await {
+            if let Ok(all_configs) = storage.search("http", 20, Some("config")).await {
+                // Filter for Ollama server configs only
+                let ollama_configs: Vec<_> = all_configs.into_iter()
+                    .filter(|config| {
+                        config.memory.metadata
+                            .as_ref()
+                            .and_then(|m| m.get("type"))
+                            .and_then(|t| t.as_str())
+                            .map(|t| t == "arkavo_ollama_server_config")
+                            .unwrap_or(false)
+                    })
+                    .filter(|config| config.memory.content != "http://localhost:11434")
+                    .collect();
+                
+                // Extract server number from prefix (e.g., "server1" -> 1)
+                if let Some(num_str) = server_prefix.strip_prefix("server") {
+                    if let Ok(idx) = num_str.parse::<usize>() {
+                        if idx > 0 && idx <= ollama_configs.len() {
+                            return Some(ollama_configs[idx - 1].memory.content.clone());
+                        }
+                    }
+                }
+            }
+        }
+        
+        None
+    }
 }
 
 #[async_trait]
@@ -194,6 +231,20 @@ impl NodeProcessor for LlmTransform {
             .unwrap_or("local-ollama");
 
         let model = params.get("model").and_then(|v| v.as_str());
+        
+        // Check if model contains server prefix (e.g., "server1/llama3")
+        let (effective_provider, effective_model) = if let Some(model_str) = model {
+            if let Some((prefix, model_name)) = model_str.split_once('/') {
+                // Model has server prefix, override provider
+                (prefix, Some(model_name))
+            } else {
+                // No prefix, use specified provider
+                (provider_name, Some(model_str))
+            }
+        } else {
+            // No model specified
+            (provider_name, None)
+        };
 
         let prompt_template = params
             .get("prompt")
@@ -235,11 +286,19 @@ impl NodeProcessor for LlmTransform {
         // Get task type from params for model preference lookup
         let task_type = params.get("task_type").and_then(|v| v.as_str());
 
-        // Get provider configuration
-        let (base_url, default_model) = self.get_provider_config(provider_name).await?;
+        // Get provider configuration based on effective provider
+        let (base_url, default_model) = if effective_provider.starts_with("server") || effective_provider == "localhost" {
+            // This is a server prefix from terminal UI, resolve it from memory storage
+            let url = self.resolve_server_url(effective_provider).await
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            (url, None)
+        } else {
+            // Regular provider name
+            self.get_provider_config(effective_provider).await?
+        };
 
         // Determine which model to use
-        let model_to_use = if let Some(explicit_model) = model {
+        let model_to_use = if let Some(explicit_model) = effective_model {
             explicit_model.to_string()
         } else if let Some(task) = task_type {
             // Check if we have a model preference for this task type
@@ -260,7 +319,7 @@ impl NodeProcessor for LlmTransform {
 
         debug!(
             "Executing LLM transform with provider: {}, model: {}",
-            provider_name, model_to_use
+            effective_provider, model_to_use
         );
 
         let response = if stream {
