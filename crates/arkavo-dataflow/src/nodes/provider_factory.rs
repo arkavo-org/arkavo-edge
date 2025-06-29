@@ -296,7 +296,11 @@ impl ProviderFactory for AnthropicProviderFactory {
                 .metadata
                 .as_ref()
                 .and_then(|m| m.get("api_version"))
-                .and_then(|v| v.as_str()).map_or_else(|| "2023-06-01".to_string(), std::string::ToString::to_string),
+                .and_then(|v| v.as_str())
+                .map_or_else(
+                    || "2023-06-01".to_string(),
+                    std::string::ToString::to_string,
+                ),
         };
 
         let provider = AnthropicProvider::new(anthropic_config)?;
