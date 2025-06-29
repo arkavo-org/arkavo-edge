@@ -579,7 +579,7 @@ impl App {
         self.render_task_layout(frame);
     }
 
-    fn render_task_layout(&mut self, frame: &mut ratatui::Frame) {
+    fn render_task_layout(&self, frame: &mut ratatui::Frame) {
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 

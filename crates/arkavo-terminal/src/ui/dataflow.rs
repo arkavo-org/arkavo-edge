@@ -192,6 +192,12 @@ impl DataflowView {
     }
 }
 
+impl Default for DataflowView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Helper function to create a centered rect
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let layout = Layout::default()
