@@ -1,5 +1,7 @@
 use anyhow::Result;
+use arkavo_memory::storage::MemoryStorage;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,37 +63,46 @@ impl Default for LlmConfiguration {
 }
 
 /// Store LLM configuration in memory storage
-pub fn store_llm_config(config: &LlmConfiguration) -> Result<String> {
-    // This would integrate with arkavo-memory to persist the configuration
-    // For now, we'll serialize to JSON and would store it as a memory with category "llm_config"
+pub async fn store_llm_config(config: &LlmConfiguration) -> Result<String> {
     let content = serde_json::to_string_pretty(config)?;
 
-    // In a full implementation, this would use the memory storage API:
-    // let memory = Memory {
-    //     content,
-    //     category: Some("llm_config".to_string()),
-    //     metadata: Some(json!({
-    //         "type": "llm_configuration",
-    //         "version": "1.0"
-    //     })),
-    //     ...
-    // };
-    // storage.store(memory).await?;
+    // Create storage instance
+    let storage = MemoryStorage::new().await?;
+
+    // Create memory entry
+    let memory = arkavo_memory::models::Memory {
+        id: uuid::Uuid::new_v4(),
+        content: content.clone(),
+        embedding: vec![],
+        category: Some("llm_config".to_string()),
+        metadata: Some(json!({
+            "type": "llm_configuration",
+            "version": "1.0",
+            "provider_count": config.providers.len(),
+            "updated_at": config.updated_at
+        })),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    // Store in memory
+    storage.store(memory).await?;
 
     Ok(content)
 }
 
 /// Retrieve LLM configuration from memory storage
 pub async fn load_llm_config() -> Result<Option<LlmConfiguration>> {
-    // This would integrate with arkavo-memory to retrieve the configuration
-    // For now, we'll return None to indicate no stored config
+    // Create storage instance
+    let storage = MemoryStorage::new().await?;
 
-    // In a full implementation:
-    // let results = storage.search("category:llm_config", 1).await?;
-    // if let Some(memory) = results.first() {
-    //     let config: LlmConfiguration = serde_json::from_str(&memory.content)?;
-    //     return Ok(Some(config));
-    // }
+    // Search for latest configuration
+    let results = storage.search("", 1, Some("llm_config")).await?;
+
+    if let Some(result) = results.first() {
+        let config: LlmConfiguration = serde_json::from_str(&result.memory.content)?;
+        return Ok(Some(config));
+    }
 
     Ok(None)
 }

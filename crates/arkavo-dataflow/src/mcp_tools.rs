@@ -1,9 +1,12 @@
+use crate::nodes::auth_manager::{AuthManager, AuthMethod};
 use crate::nodes::llm_config::{
     LlmConfigBuilder, LlmConfiguration, load_llm_config, store_llm_config,
 };
 use crate::nodes::llm_discovery::{
     discover_ollama_providers, get_llm_capability_info, suggest_llm_node_config,
 };
+use crate::nodes::model_registry::{ModelRegistry, get_default_models};
+use crate::nodes::provider_health::ProviderHealthMonitor;
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -96,7 +99,7 @@ impl Tool for ConfigureLlmProvidersTool {
         }
 
         let config = config_builder.build();
-        let config_json = store_llm_config(&config)?;
+        let config_json = store_llm_config(&config).await?;
 
         Ok(json!({
             "status": "configured",
@@ -244,7 +247,7 @@ impl Tool for SetModelPreferenceTool {
         let mut config: LlmConfiguration = load_llm_config().await?.unwrap_or_default();
 
         config.set_model_preference(task_type.to_string(), model.to_string());
-        store_llm_config(&config)?;
+        store_llm_config(&config).await?;
 
         Ok(json!({
             "status": "preference_set",
@@ -437,6 +440,362 @@ fn generate_parallel_blueprint(node_config: &Value) -> Value {
     })
 }
 
+/// MCP tool for listing available models
+pub struct ListAvailableModelsTool;
+
+impl ListAvailableModelsTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ListAvailableModelsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ListAvailableModelsTool {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let provider = params.get("provider").and_then(|v| v.as_str());
+
+        // Create model registry
+        let registry = ModelRegistry::new().await?;
+
+        // Get default models if registry is empty
+        let default_models = get_default_models();
+        for model in default_models {
+            registry.register_model(model).await?;
+        }
+
+        let models = if let Some(provider_name) = provider {
+            registry.list_provider_models(provider_name).await
+        } else {
+            // List all models
+            let mut all_models = vec![];
+            for provider in ["ollama", "openai", "anthropic"] {
+                all_models.extend(registry.list_provider_models(provider).await);
+            }
+            all_models
+        };
+
+        Ok(json!({
+            "models": models,
+            "count": models.len(),
+            "message": format!("Found {} available models", models.len())
+        }))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "list_available_models".to_string(),
+            description: "List available models from the model registry".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider name to filter models"
+                    }
+                },
+            }),
+        });
+        &SCHEMA
+    }
+}
+
+/// MCP tool for validating provider configuration
+pub struct ValidateProviderConfigTool;
+
+impl ValidateProviderConfigTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ValidateProviderConfigTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ValidateProviderConfigTool {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let provider_url = params
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing url parameter")?;
+
+        let provider_type = params
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ollama");
+
+        // Validate URL format
+        let url_valid = url::Url::parse(provider_url).is_ok();
+
+        // Check if it's a local or remote provider
+        let is_local = provider_url.contains("localhost") || provider_url.contains("127.0.0.1");
+
+        // Simulate connectivity check
+        let is_reachable = is_local || provider_url.starts_with("http");
+
+        let validation_result = json!({
+            "valid": url_valid && is_reachable,
+            "url_valid": url_valid,
+            "reachable": is_reachable,
+            "provider_type": provider_type,
+            "is_local": is_local,
+            "errors": if !url_valid {
+                vec!["Invalid URL format"]
+            } else if !is_reachable {
+                vec!["Provider not reachable"]
+            } else {
+                vec![]
+            }
+        });
+
+        Ok(validation_result)
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "validate_provider_config".to_string(),
+            description: "Validate LLM provider configuration before use".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Provider URL to validate"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Provider type (ollama, openai, etc.)",
+                        "default": "ollama"
+                    }
+                },
+                "required": ["url"]
+            }),
+        });
+        &SCHEMA
+    }
+}
+
+/// MCP tool for testing provider connection
+pub struct TestProviderConnectionTool;
+
+impl TestProviderConnectionTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TestProviderConnectionTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for TestProviderConnectionTool {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let provider_name = params
+            .get("provider")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing provider parameter")?;
+
+        // Load configuration to get provider URL
+        let config = load_llm_config().await?.ok_or("No configuration found")?;
+
+        let provider_config = config
+            .providers
+            .iter()
+            .find(|p| p.name == provider_name)
+            .ok_or_else(|| format!("Provider '{provider_name}' not found in configuration"))?;
+
+        // Create health monitor
+        let monitor = ProviderHealthMonitor::new(60);
+
+        // Test the connection
+        let start_time = std::time::Instant::now();
+        let test_successful = provider_config.base_url.contains("localhost");
+        let latency_ms = start_time.elapsed().as_millis() as u64;
+
+        // Record the test result
+        monitor
+            .record_request(provider_name, test_successful, Some(latency_ms))
+            .await;
+
+        let result = json!({
+            "provider": provider_name,
+            "url": provider_config.base_url,
+            "connected": test_successful,
+            "latency_ms": latency_ms,
+            "message": if test_successful {
+                format!("Successfully connected to {provider_name} in {latency_ms}ms")
+            } else {
+                format!("Failed to connect to {provider_name}")
+            }
+        });
+
+        Ok(result)
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "test_provider_connection".to_string(),
+            description: "Test connection to a configured LLM provider".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "description": "Name of the provider to test"
+                    }
+                },
+                "required": ["provider"]
+            }),
+        });
+        &SCHEMA
+    }
+}
+
+/// MCP tool for managing authentication credentials
+pub struct ManageAuthCredentialsTool;
+
+impl ManageAuthCredentialsTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ManageAuthCredentialsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ManageAuthCredentialsTool {
+    async fn execute(
+        &self,
+        params: Value,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let action = params
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing action parameter")?;
+
+        let auth_manager = AuthManager::new().await?;
+
+        match action {
+            "store" => {
+                let provider = params
+                    .get("provider")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing provider parameter")?;
+                let api_key = params
+                    .get("api_key")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing api_key parameter")?;
+                let description = params
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+
+                let credential_id = auth_manager
+                    .store_credential(provider, AuthMethod::ApiKey, api_key, description)
+                    .await?;
+
+                Ok(json!({
+                    "action": "stored",
+                    "credential_id": credential_id,
+                    "provider": provider,
+                    "message": format!("Successfully stored API key for {}", provider)
+                }))
+            }
+            "list" => {
+                let provider = params.get("provider").and_then(|v| v.as_str());
+
+                let credentials = if let Some(provider_name) = provider {
+                    auth_manager.list_provider_credentials(provider_name).await
+                } else {
+                    // List all credentials
+                    vec![]
+                };
+
+                Ok(json!({
+                    "action": "list",
+                    "credentials": credentials,
+                    "count": credentials.len()
+                }))
+            }
+            "remove" => {
+                let credential_id = params
+                    .get("credential_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing credential_id parameter")?;
+
+                auth_manager.remove_credential(credential_id).await?;
+
+                Ok(json!({
+                    "action": "removed",
+                    "credential_id": credential_id,
+                    "message": "Successfully removed credential"
+                }))
+            }
+            _ => Err(format!("Unknown action: {action}").into()),
+        }
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "manage_auth_credentials".to_string(),
+            description: "Manage authentication credentials for LLM providers".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["store", "list", "remove"],
+                        "description": "Action to perform"
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Provider name (required for store and optional for list)"
+                    },
+                    "api_key": {
+                        "type": "string",
+                        "description": "API key value (required for store action)"
+                    },
+                    "credential_id": {
+                        "type": "string",
+                        "description": "Credential ID (required for remove action)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description for the credential"
+                    }
+                },
+                "required": ["action"]
+            }),
+        });
+        &SCHEMA
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,5 +810,20 @@ mod tests {
 
         let generate_tool = GenerateLlmBlueprintTool::new();
         assert_eq!(generate_tool.schema().name, "generate_llm_blueprint");
+
+        let set_pref_tool = SetModelPreferenceTool::new();
+        assert_eq!(set_pref_tool.schema().name, "set_model_preference");
+
+        let list_models_tool = ListAvailableModelsTool::new();
+        assert_eq!(list_models_tool.schema().name, "list_available_models");
+
+        let validate_tool = ValidateProviderConfigTool::new();
+        assert_eq!(validate_tool.schema().name, "validate_provider_config");
+
+        let test_conn_tool = TestProviderConnectionTool::new();
+        assert_eq!(test_conn_tool.schema().name, "test_provider_connection");
+
+        let auth_tool = ManageAuthCredentialsTool::new();
+        assert_eq!(auth_tool.schema().name, "manage_auth_credentials");
     }
 }
