@@ -135,7 +135,7 @@ impl AuthManager {
     /// Get a credential by ID
     ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the credential metadata is not found after the secure data is retrieved.
     pub async fn get_credential(&self, credential_id: &str) -> Result<DecryptedCredential> {
         // Check if credential exists
@@ -270,7 +270,9 @@ impl AuthManager {
         {
             let mut creds = self.credentials.write().await;
             for result in results {
-                if let Ok(credential) = serde_json::from_str::<AuthCredential>(&result.memory.content) {
+                if let Ok(credential) =
+                    serde_json::from_str::<AuthCredential>(&result.memory.content)
+                {
                     creds.insert(credential.id.clone(), credential);
                 }
             }
@@ -437,7 +439,7 @@ impl AuthManager {
                 return Err(anyhow::anyhow!("Invalid encrypted data"));
             }
 
-            let mut in_out = encrypted_data.clone();
+            let mut in_out = encrypted_data;
 
             // Decrypt
             let decrypted = opening_key

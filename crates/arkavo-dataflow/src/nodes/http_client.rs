@@ -91,7 +91,10 @@ impl HttpClientBuilder {
     /// Calculate retry delay with exponential backoff and jitter
     pub fn calculate_retry_delay(&self, attempt: u32) -> Duration {
         let base_delay = self.config.initial_retry_delay_ms as f64
-            * self.config.backoff_factor.powi(i32::try_from(attempt).unwrap_or(i32::MAX));
+            * self
+                .config
+                .backoff_factor
+                .powi(i32::try_from(attempt).unwrap_or(i32::MAX));
 
         let capped_delay = base_delay.min(self.config.max_retry_delay_ms as f64);
 

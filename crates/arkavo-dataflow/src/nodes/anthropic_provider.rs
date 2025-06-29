@@ -423,7 +423,6 @@ impl Provider for AnthropicProvider {
 
                         for line in &lines {
                             if let Some(data) = line.strip_prefix("data: ") {
-
                                 if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
                                     match event {
                                         StreamEvent::ContentBlockDelta { delta, .. } => {

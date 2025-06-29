@@ -73,6 +73,7 @@ struct Choice {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
+#[allow(clippy::struct_field_names)]
 struct Usage {
     prompt_tokens: u32,
     completion_tokens: u32,
@@ -326,7 +327,7 @@ impl Provider for OpenAIProvider {
         if is_azure {
             req = req.header("api-key", &api_key);
         } else {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
+            req = req.header("Authorization", format!("Bearer {api_key}"));
         }
 
         if let Some(ref org) = org_id {
@@ -361,7 +362,6 @@ impl Provider for OpenAIProvider {
 
                         for line in &lines {
                             if let Some(data) = line.strip_prefix("data: ") {
-
                                 if data == "[DONE]" {
                                     let _ = tx.send(Ok(StreamResponse {
                                         content: String::new(),
