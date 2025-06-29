@@ -106,17 +106,11 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![
-                "devstral:latest".to_string(),
-                "llava:7b".to_string(),
-                "deepseek-r1:14b".to_string(),
-                "qwen3:0.6b".to_string(),
-                "dolphin3:latest".to_string(),
-            ],
+            available_models: vec![],
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
-            active_model: Some("devstral:latest".to_string()),
+            active_model: None, // Will be set when models are fetched
             main_task_id: None,
         }
     }
@@ -154,17 +148,11 @@ impl App {
             helix_editor: HelixEditor::new().ok(),
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
-            available_models: vec![
-                "devstral:latest".to_string(),
-                "llava:7b".to_string(),
-                "deepseek-r1:14b".to_string(),
-                "qwen3:0.6b".to_string(),
-                "dolphin3:latest".to_string(),
-            ],
+            available_models: vec![],
             selected_model: 0,
             input_focused: true,
             last_quit_attempt: None,
-            active_model: Some("devstral:latest".to_string()),
+            active_model: None, // Will be set when models are fetched
             main_task_id: None,
         }
     }
@@ -208,10 +196,42 @@ impl App {
         Ok(())
     }
 
+    pub async fn fetch_available_models(&mut self) {
+        // Try to fetch models from Ollama server
+        use arkavo_llm::ollama::OllamaClient;
+        
+        let client = OllamaClient::from_env().unwrap_or_else(|_| {
+            OllamaClient::new(None, None)
+        });
+        
+        match client.list_models().await {
+            Ok(models) => {
+                if !models.is_empty() {
+                    self.available_models = models;
+                    // If we have models and none selected, select the first one
+                    if self.selected_model >= self.available_models.len() {
+                        self.selected_model = 0;
+                    }
+                    if self.active_model.is_none() && !self.available_models.is_empty() {
+                        self.active_model = Some(self.available_models[0].clone());
+                    }
+                }
+            }
+            Err(e) => {
+                // If we can't fetch models, keep the list empty
+                // The UI will show an empty model selector
+                eprintln!("Failed to fetch models from Ollama: {e}");
+            }
+        }
+    }
+
     async fn run_app<B: ratatui::backend::Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<()> {
+        // Fetch available models from Ollama server
+        self.fetch_available_models().await;
+        
         // Immediate first draw for fast startup
         terminal.draw(|f| self.render(f))?;
 
@@ -343,9 +363,11 @@ impl App {
                                 terminal.draw(|f| self.render(f))?;
                             }
                             KeyCode::Tab => {
-                                // Cycle through available models
-                                self.selected_model = (self.selected_model + 1) % self.available_models.len();
-                                self.active_model = Some(self.available_models[self.selected_model].clone());
+                                // Cycle through available models (only if we have models)
+                                if !self.available_models.is_empty() {
+                                    self.selected_model = (self.selected_model + 1) % self.available_models.len();
+                                    self.active_model = Some(self.available_models[self.selected_model].clone());
+                                }
                             }
                             KeyCode::BackTab => {
                                 if matches!(self.layout_mode, LayoutMode::Portrait) {
@@ -363,12 +385,13 @@ impl App {
                                     // Send message to the single conversation window
                                     if !self.input_buffer.is_empty() {
                                         // Use the actual model being used (from the LLM client)
-                                        let displayed_model =
-                                            if let Some(ref active) = self.active_model {
-                                                active.clone()
-                                            } else {
-                                                "devstral:latest".to_string()
-                                            };
+                                        let displayed_model = self.active_model.clone()
+                                            .unwrap_or_else(|| {
+                                                // If no model selected, try to use first available
+                                                self.available_models.first()
+                                                    .cloned()
+                                                    .unwrap_or_else(|| "unknown".to_string())
+                                            });
 
                                         // Check if we have a main task, if not create one
                                         let task_id = if let Some(id) = self.main_task_id {
@@ -664,7 +687,7 @@ impl App {
         let active_model_display = if let Some(ref active) = self.active_model {
             format!("Active Model: {active}")
         } else {
-            "Active Model: devstral:latest".to_string()
+            "Active Model: None".to_string()
         };
 
         // Create a block for the model selector area
@@ -676,29 +699,37 @@ impl App {
         let model_inner = model_selector_block.inner(chunks[1]);
         frame.render_widget(model_selector_block, chunks[1]);
 
-        // Render model selection list
-        use ratatui::widgets::{List, ListItem};
-        use ratatui::style::Modifier;
-        
-        let model_items: Vec<ListItem> = self.available_models
-            .iter()
-            .enumerate()
-            .map(|(i, model)| {
-                let style = if i == self.selected_model {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                ListItem::new(format!(" {} {}", if i == self.selected_model { "▸" } else { " " }, model))
-                    .style(style)
-            })
-            .collect();
-        
-        let model_list = List::new(model_items)
-            .style(Style::default().fg(Color::White))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        // Render model selection list or loading message
+        if self.available_models.is_empty() {
+            let loading_text = "No models available. Check Ollama connection.";
+            let loading_paragraph = Paragraph::new(loading_text)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(ratatui::layout::Alignment::Center);
+            frame.render_widget(loading_paragraph, model_inner);
+        } else {
+            use ratatui::widgets::{List, ListItem};
+            use ratatui::style::Modifier;
             
-        frame.render_widget(model_list, model_inner);
+            let model_items: Vec<ListItem> = self.available_models
+                .iter()
+                .enumerate()
+                .map(|(i, model)| {
+                    let style = if i == self.selected_model {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(format!(" {} {}", if i == self.selected_model { "▸" } else { " " }, model))
+                        .style(style)
+                })
+                .collect();
+            
+            let model_list = List::new(model_items)
+                .style(Style::default().fg(Color::White))
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+                
+            frame.render_widget(model_list, model_inner);
+        }
 
         // Render task windows
         if self.task_manager.tasks.is_empty() {
@@ -951,11 +982,8 @@ Scrolling (when in scroll mode):
         use ratatui::style::{Color, Style};
         use ratatui::widgets::{Block, Borders, Paragraph};
 
-        let active_model = if let Some(ref model) = self.active_model {
-            model.clone()
-        } else {
-            "devstral:latest".to_string()
-        };
+        let active_model = self.active_model.clone()
+            .unwrap_or_else(|| "No model selected".to_string());
 
         let mode_indicator = if self.input_focused {
             "INPUT MODE"
