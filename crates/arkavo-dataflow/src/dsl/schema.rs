@@ -50,7 +50,21 @@ pub const BLUEPRINT_SCHEMA: &str = r##"{
                 },
                 "params": {
                     "type": "object",
-                    "description": "Node-specific parameters"
+                    "description": "Node-specific parameters",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "description": "LLM provider name (e.g., 'local-ollama', 'openai')"
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Model identifier (e.g., 'gpt-4', 'claude-3-opus')"
+                        },
+                        "provider_type": {
+                            "enum": ["ollama", "openai", "anthropic", "gemini"],
+                            "description": "Type of LLM provider"
+                        }
+                    }
                 },
                 "auth_ref": {
                     "type": "string",

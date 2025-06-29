@@ -53,6 +53,10 @@ impl LlmTransform {
                     default_model: provider_config.default_model.clone(),
                     timeout_secs: Some(60),
                     max_retries: Some(3),
+                    initial_retry_delay_ms: None,
+                    backoff_factor: None,
+                    max_retry_delay_ms: None,
+                    jitter_factor: None,
                     metadata: None,
                 };
 
@@ -96,6 +100,10 @@ impl LlmTransform {
                 default_model: None,
                 timeout_secs: Some(60),
                 max_retries: Some(3),
+                initial_retry_delay_ms: None,
+                backoff_factor: None,
+                max_retry_delay_ms: None,
+                jitter_factor: None,
                 metadata: None,
             };
 
@@ -113,6 +121,10 @@ impl LlmTransform {
                     default_model: None,
                     timeout_secs: Some(60),
                     max_retries: Some(3),
+                    initial_retry_delay_ms: None,
+                    backoff_factor: None,
+                    max_retry_delay_ms: None,
+                    jitter_factor: None,
                     metadata: None,
                 };
 

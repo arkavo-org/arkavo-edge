@@ -118,6 +118,7 @@ impl ProviderHealthMonitor {
                             metrics.last_failure = Some(result.checked_at);
                             metrics.consecutive_failures += 1;
                         }
+                        drop(provider_metrics);
                     }
                 }
             }
@@ -143,6 +144,11 @@ impl ProviderHealthMonitor {
     }
 
     /// Record a request result
+    ///
+    /// # Panics
+    ///
+    /// Panics if unable to sort latency values for percentile calculation
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn record_request(
         &self,
         provider_name: &str,
@@ -224,6 +230,11 @@ impl ProviderHealthMonitor {
     }
 
     /// Get the healthiest provider from a list
+    ///
+    /// # Panics
+    ///
+    /// Panics if best_provider unwrap fails during comparison (which should not happen)
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_healthiest_provider(&self, providers: &[String]) -> Option<String> {
         let statuses = self.get_all_health_statuses().await;
         let metrics = self.metrics.read().await;
@@ -309,6 +320,7 @@ impl ProviderHealthMonitor {
     }
 
     /// Export health report
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn export_health_report(&self) -> serde_json::Value {
         let statuses = self.health_status.read().await;
         let metrics = self.metrics.read().await;
@@ -371,7 +383,9 @@ impl CircuitBreaker {
             }
         }
 
-        state.is_open
+        let is_open = state.is_open;
+        drop(states);
+        is_open
     }
 
     /// Record a success
@@ -400,6 +414,7 @@ impl CircuitBreaker {
         if state.consecutive_failures >= self.failure_threshold {
             state.is_open = true;
         }
+        drop(states);
     }
 }
 

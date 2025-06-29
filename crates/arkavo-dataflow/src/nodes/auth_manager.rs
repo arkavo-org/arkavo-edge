@@ -1,5 +1,8 @@
 use anyhow::Result;
 use arkavo_memory::storage::MemoryStorage;
+use ring::aead::{AES_256_GCM, Aad, BoundKey, Nonce, NonceSequence, SealingKey, UnboundKey};
+use ring::pbkdf2;
+use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -30,18 +33,44 @@ pub struct AuthCredential {
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
+/// Decrypted credential with metadata
+#[derive(Debug)]
+pub struct DecryptedCredential {
+    pub metadata: AuthCredential,
+    pub value: String,
+}
+
 /// Secure credential data (stored separately)
 #[derive(Debug, Serialize, Deserialize)]
 struct SecureCredentialData {
     credential_id: String,
-    encrypted_data: String,
-    salt: String,
+    encrypted_data: String, // Base64 encoded
+    nonce: String,          // Base64 encoded
+    salt: String,           // Base64 encoded
+}
+
+/// Simple nonce sequence for AES-GCM
+struct NonceSeq {
+    nonce: [u8; 12],
+}
+
+impl NonceSeq {
+    fn new(nonce: [u8; 12]) -> Self {
+        Self { nonce }
+    }
+}
+
+impl NonceSequence for NonceSeq {
+    fn advance(&mut self) -> Result<Nonce, ring::error::Unspecified> {
+        Nonce::try_assume_unique_for_key(&self.nonce)
+    }
 }
 
 /// Authentication manager for secure credential storage
 pub struct AuthManager {
     credentials: Arc<RwLock<HashMap<String, AuthCredential>>>,
     storage: Arc<MemoryStorage>,
+    rng: SystemRandom,
 }
 
 impl AuthManager {
@@ -51,10 +80,16 @@ impl AuthManager {
         let manager = Self {
             credentials: Arc::new(RwLock::new(HashMap::new())),
             storage,
+            rng: SystemRandom::new(),
         };
 
         // Load existing credentials from storage
         manager.load_credentials().await?;
+
+        // Log startup message
+        tracing::info!(
+            "Credential vault initialized with software-only AES-256-GCM encryption (demo)"
+        );
 
         Ok(manager)
     }
@@ -97,16 +132,30 @@ impl AuthManager {
     }
 
     /// Retrieve a credential value
-    pub async fn get_credential(&self, credential_id: &str) -> Result<Option<String>> {
+    /// Get a credential by ID
+    ///
+    /// # Panics
+    ///
+    /// Panics if the credential metadata is not found after the secure data is retrieved.
+    pub async fn get_credential(&self, credential_id: &str) -> Result<DecryptedCredential> {
         // Check if credential exists
         let creds = self.credentials.read().await;
         if !creds.contains_key(credential_id) {
-            return Ok(None);
+            return Err(anyhow::anyhow!("Credential not found: {}", credential_id));
         }
+        let metadata = creds.get(credential_id).cloned();
         drop(creds);
 
         // Retrieve secure data
-        self.retrieve_secure_data(credential_id).await
+        let value = self
+            .retrieve_secure_data(credential_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Credential data not found"))?;
+
+        Ok(DecryptedCredential {
+            metadata: metadata.unwrap(),
+            value,
+        })
     }
 
     /// Get credential metadata (without the actual credential value)
@@ -218,11 +267,14 @@ impl AuthManager {
             .search("", 100, Some("auth_credential"))
             .await?;
 
-        let mut creds = self.credentials.write().await;
-
-        for result in results {
-            if let Ok(credential) = serde_json::from_str::<AuthCredential>(&result.memory.content) {
-                creds.insert(credential.id.clone(), credential);
+        {
+            let mut creds = self.credentials.write().await;
+            for result in results {
+                if let Ok(credential) =
+                    serde_json::from_str::<AuthCredential>(&result.memory.content)
+                {
+                    creds.insert(credential.id.clone(), credential);
+                }
             }
         }
 
@@ -256,16 +308,50 @@ impl AuthManager {
 
     /// Store secure credential data (encrypted)
     async fn store_secure_data(&self, credential_id: &str, value: &str) -> Result<()> {
-        // In a production system, this would use proper encryption
-        // For now, we'll use a simple base64 encoding as a placeholder
         use base64::Engine;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(value);
-        let salt = uuid::Uuid::new_v4().to_string();
+
+        // Generate salt for key derivation
+        let mut salt = [0u8; 32];
+        self.rng
+            .fill(&mut salt)
+            .map_err(|_| anyhow::anyhow!("Failed to generate salt"))?;
+
+        // Derive key from a master key (in production, this would come from secure storage)
+        let master_key = self.get_or_create_master_key()?;
+        let mut derived_key = [0u8; 32];
+        pbkdf2::derive(
+            pbkdf2::PBKDF2_HMAC_SHA256,
+            std::num::NonZeroU32::new(100_000).unwrap(),
+            &salt,
+            master_key.as_bytes(),
+            &mut derived_key,
+        );
+
+        // Create encryption key
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &derived_key)
+            .map_err(|_| anyhow::anyhow!("Failed to create encryption key"))?;
+        let mut sealing_key = SealingKey::new(unbound_key, NonceSeq::new([0u8; 12]));
+
+        // Generate nonce
+        let mut nonce = [0u8; 12];
+        self.rng
+            .fill(&mut nonce)
+            .map_err(|_| anyhow::anyhow!("Failed to generate nonce"))?;
+
+        // Encrypt the credential
+        let mut in_out = value.as_bytes().to_vec();
+        let tag = sealing_key
+            .seal_in_place_separate_tag(Aad::empty(), &mut in_out)
+            .map_err(|_| anyhow::anyhow!("Encryption failed"))?;
+
+        // Append tag to encrypted data
+        in_out.extend_from_slice(tag.as_ref());
 
         let secure_data = SecureCredentialData {
             credential_id: credential_id.to_string(),
-            encrypted_data: encoded,
-            salt,
+            encrypted_data: base64::engine::general_purpose::STANDARD.encode(&in_out),
+            nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
+            salt: base64::engine::general_purpose::STANDARD.encode(salt),
         };
 
         let content = serde_json::to_string(&secure_data)?;
@@ -278,7 +364,8 @@ impl AuthManager {
             metadata: Some(json!({
                 "type": "secure_credential",
                 "credential_id": credential_id,
-                "version": "1.0"
+                "version": "2.0", // Updated version for encrypted format
+                "algorithm": "AES-256-GCM"
             })),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -300,17 +387,89 @@ impl AuthManager {
         if let Some(result) = results.first() {
             let secure_data: SecureCredentialData = serde_json::from_str(&result.memory.content)?;
 
-            // In production, this would decrypt the data
-            // For now, we'll decode from base64
-            use base64::Engine;
-            let decoded =
-                base64::engine::general_purpose::STANDARD.decode(&secure_data.encrypted_data)?;
-            let value = String::from_utf8(decoded)?;
+            // Check version for backward compatibility
+            if let Some(metadata) = &result.memory.metadata {
+                if let Some(version) = metadata.get("version").and_then(|v| v.as_str()) {
+                    if version == "1.0" {
+                        // Legacy base64-only encoding
+                        use base64::Engine;
+                        let decoded = base64::engine::general_purpose::STANDARD
+                            .decode(&secure_data.encrypted_data)?;
+                        let value = String::from_utf8(decoded)?;
+                        return Ok(Some(value));
+                    }
+                }
+            }
 
+            // Decrypt AES-256-GCM encrypted data
+            use base64::Engine;
+            use ring::aead::{Aad, OpeningKey};
+
+            let encrypted_data =
+                base64::engine::general_purpose::STANDARD.decode(&secure_data.encrypted_data)?;
+            let nonce_bytes =
+                base64::engine::general_purpose::STANDARD.decode(&secure_data.nonce)?;
+            let salt = base64::engine::general_purpose::STANDARD.decode(&secure_data.salt)?;
+
+            // Derive key from master key
+            let master_key = self.get_or_create_master_key()?;
+            let mut derived_key = [0u8; 32];
+            pbkdf2::derive(
+                pbkdf2::PBKDF2_HMAC_SHA256,
+                std::num::NonZeroU32::new(100_000).unwrap(),
+                &salt,
+                master_key.as_bytes(),
+                &mut derived_key,
+            );
+
+            // Create decryption key
+            let unbound_key = UnboundKey::new(&AES_256_GCM, &derived_key)
+                .map_err(|_| anyhow::anyhow!("Failed to create decryption key"))?;
+
+            // Create nonce
+            let mut nonce = [0u8; 12];
+            nonce.copy_from_slice(&nonce_bytes);
+            let nonce_seq = NonceSeq::new(nonce);
+
+            let mut opening_key = OpeningKey::new(unbound_key, nonce_seq);
+
+            // Split encrypted data and tag
+            let tag_size = AES_256_GCM.tag_len();
+            if encrypted_data.len() < tag_size {
+                return Err(anyhow::anyhow!("Invalid encrypted data"));
+            }
+
+            let mut in_out = encrypted_data;
+
+            // Decrypt
+            let decrypted = opening_key
+                .open_in_place(Aad::empty(), &mut in_out)
+                .map_err(|_| anyhow::anyhow!("Decryption failed"))?;
+
+            let value = String::from_utf8(decrypted.to_vec())?;
             return Ok(Some(value));
         }
 
         Ok(None)
+    }
+
+    /// Get or create master key from environment or OS keychain
+    fn get_or_create_master_key(&self) -> Result<String> {
+        // Try environment variable first
+        if let Ok(key) = std::env::var("ARKAVO_MASTER_KEY") {
+            if key.len() >= 32 {
+                return Ok(key);
+            }
+            return Err(anyhow::anyhow!(
+                "ARKAVO_MASTER_KEY must be at least 32 characters long"
+            ));
+        }
+
+        // TODO: Add OS keychain integration in follow-up PR
+        // For now, require explicit key setting
+        Err(anyhow::anyhow!(
+            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars)"
+        ))
     }
 }
 
@@ -321,25 +480,32 @@ pub async fn create_auth_headers(
 ) -> Result<HashMap<String, String>> {
     let mut headers = HashMap::new();
 
-    if let Some(metadata) = auth_manager.get_credential_metadata(credential_id).await {
-        if let Some(value) = auth_manager.get_credential(credential_id).await? {
-            match metadata.auth_method {
-                AuthMethod::ApiKey => {
-                    headers.insert("X-API-Key".to_string(), value);
-                }
-                AuthMethod::BearerToken => {
-                    headers.insert("Authorization".to_string(), format!("Bearer {value}"));
-                }
-                AuthMethod::BasicAuth => {
-                    headers.insert("Authorization".to_string(), format!("Basic {value}"));
-                }
-                AuthMethod::OAuth2 => {
-                    headers.insert("Authorization".to_string(), format!("Bearer {value}"));
-                }
-                AuthMethod::Custom(header_name) => {
-                    headers.insert(header_name, value);
-                }
-            }
+    let credential = auth_manager.get_credential(credential_id).await?;
+
+    match credential.metadata.auth_method {
+        AuthMethod::ApiKey => {
+            headers.insert("X-API-Key".to_string(), credential.value);
+        }
+        AuthMethod::BearerToken => {
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {}", credential.value),
+            );
+        }
+        AuthMethod::BasicAuth => {
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Basic {}", credential.value),
+            );
+        }
+        AuthMethod::OAuth2 => {
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {}", credential.value),
+            );
+        }
+        AuthMethod::Custom(header_name) => {
+            headers.insert(header_name, credential.value);
         }
     }
 
