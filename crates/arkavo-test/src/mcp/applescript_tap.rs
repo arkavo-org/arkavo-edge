@@ -44,7 +44,8 @@ impl AppleScriptTap {
                 click at {{{}, {}}}
             end tell
             "#,
-            screen_x as i32, screen_y as i32
+            screen_x.round() as i32,
+            screen_y.round() as i32
         );
 
         let output = Command::new("osascript")

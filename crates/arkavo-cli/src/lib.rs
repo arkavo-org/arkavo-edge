@@ -31,11 +31,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let cli = Cli::parse_from(
-                    std::iter::once("dataflow").chain(args[1..].iter().map(|s| s.as_str())),
+                    std::iter::once("dataflow")
+                        .chain(args[1..].iter().map(std::string::String::as_str)),
                 );
                 commands::dataflow::handle_dataflow_command(cli.command)
                     .await
-                    .map_err(|e| e.into())
+                    .map_err(std::convert::Into::into)
             })
         }
         "serve" | "mcp" => {

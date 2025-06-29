@@ -61,7 +61,7 @@ impl NodeProcessor for FileSink {
 
             let append = params
                 .get("append")
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true);
 
             let format = params
@@ -158,7 +158,10 @@ impl NodeProcessor for MetricsSink {
                 .unwrap_or("counter");
 
             // Extract value from data
-            let value = data.get("value").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let value = data
+                .get("value")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(1.0);
 
             // In a real implementation, this would send to a metrics system
             eprintln!("[Metric] {metric_name} ({metric_type}) = {value}");

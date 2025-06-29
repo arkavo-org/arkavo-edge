@@ -210,13 +210,13 @@ impl ProviderFactory for OpenAIProviderFactory {
                 .as_ref()
                 .and_then(|m| m.get("organization_id"))
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
             api_version: config
                 .metadata
                 .as_ref()
                 .and_then(|m| m.get("api_version"))
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
+                .map(std::string::ToString::to_string),
             is_azure,
         };
 
@@ -296,9 +296,7 @@ impl ProviderFactory for AnthropicProviderFactory {
                 .metadata
                 .as_ref()
                 .and_then(|m| m.get("api_version"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "2023-06-01".to_string()),
+                .and_then(|v| v.as_str()).map_or_else(|| "2023-06-01".to_string(), std::string::ToString::to_string),
         };
 
         let provider = AnthropicProvider::new(anthropic_config)?;
@@ -354,7 +352,7 @@ mod tests {
         // Test invalid URL
         let config = ProviderConfig {
             provider_type: ProviderType::Ollama,
-            base_url: "".to_string(),
+            base_url: String::new(),
             auth_ref: None,
             default_model: None,
             timeout_secs: None,

@@ -50,7 +50,7 @@ pub async fn handle_dataflow_command(command: DataflowCommand) -> Result<()> {
             output,
             compress,
         } => {
-            println!("Exporting pipeline {}...", id);
+            println!("Exporting pipeline {id}...");
 
             let data = if compress {
                 engine.export_blueprint_compressed(id)?
@@ -78,7 +78,7 @@ pub async fn handle_dataflow_command(command: DataflowCommand) -> Result<()> {
                 engine.import_blueprint(&json)?
             };
 
-            println!("✓ Imported pipeline {}", pipeline_id);
+            println!("✓ Imported pipeline {pipeline_id}");
 
             if start {
                 engine.start_pipeline(pipeline_id).await?;
@@ -95,7 +95,7 @@ pub async fn handle_dataflow_command(command: DataflowCommand) -> Result<()> {
                 println!("ID                                   | Name");
                 println!("-------------------------------------|------------------------------");
                 for (id, name) in pipelines {
-                    println!("{} | {}", id, name);
+                    println!("{id} | {name}");
                 }
             }
         }

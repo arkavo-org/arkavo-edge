@@ -84,7 +84,7 @@ Implement comprehensive Git functionality for Arkavo Edge to enable version cont
 
 ### Phase 3: Safety Layer (Week 3)
 1. **RepoGuard Transaction System**
-   ```rust
+```rust
    pub struct RepoGuard<'a> {
        repo: &'a Repository,
        backup: Option<Oid>,
@@ -94,7 +94,7 @@ Implement comprehensive Git functionality for Arkavo Edge to enable version cont
        pub fn transaction<F>(&mut self, f: F) -> Result<Oid>
        where F: FnOnce(&Repository) -> Result<Oid>
    }
-   ```
+```
 
 2. **Pre-commit Validation**
    - Run `cargo fmt --check`

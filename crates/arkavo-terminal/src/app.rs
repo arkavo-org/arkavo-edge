@@ -256,12 +256,9 @@ impl App {
                         task.set_status(crate::ui::task_window::TaskStatus::Streaming);
 
                         // Check if we need to start a new assistant message
-                        if task
-                            .messages
-                            .back()
-                            .map(|m| m.role != crate::ui::task_window::MessageRole::Assistant)
-                            .unwrap_or(true)
-                        {
+                        if task.messages.back().is_none_or(|m| {
+                            m.role != crate::ui::task_window::MessageRole::Assistant
+                        }) {
                             task.add_message(
                                 crate::ui::task_window::MessageRole::Assistant,
                                 response.content,
@@ -991,8 +988,7 @@ Scrolling (when in scroll mode):
             .chat_view
             .messages
             .back()
-            .map(|m| m.is_streaming)
-            .unwrap_or(false);
+            .is_some_and(|m| m.is_streaming);
 
         let streaming_indicator = if is_streaming { " ● Streaming" } else { "" };
 

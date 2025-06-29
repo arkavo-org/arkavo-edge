@@ -202,17 +202,17 @@ impl NodeProcessor for LlmTransform {
 
         let temperature = params
             .get("temperature")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.7);
 
         let max_tokens = params
             .get("max_tokens")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(1000);
 
         let stream = params
             .get("stream")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         // Build prompt from template and input data
@@ -229,7 +229,7 @@ impl NodeProcessor for LlmTransform {
         // Get timeout from params or use default (30 seconds)
         let timeout_secs = params
             .get("timeout_secs")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(30);
 
         // Get task type from params for model preference lookup

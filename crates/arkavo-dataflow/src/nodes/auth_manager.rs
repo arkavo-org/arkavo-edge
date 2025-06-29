@@ -246,7 +246,7 @@ impl AuthManager {
         let creds = self.credentials.read().await;
         let expired_ids: Vec<String> = creds
             .values()
-            .filter(|c| c.expires_at.map(|exp| exp < now).unwrap_or(false))
+            .filter(|c| c.expires_at.is_some_and(|exp| exp < now))
             .map(|c| c.id.clone())
             .collect();
         drop(creds);

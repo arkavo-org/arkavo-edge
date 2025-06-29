@@ -199,8 +199,10 @@ impl ProviderHealthMonitor {
                 let mut sorted_latencies = latencies.clone();
                 sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-                let p95_index = (latencies.len() as f64 * 0.95) as usize;
-                let p99_index = (latencies.len() as f64 * 0.99) as usize;
+                let p95_index = ((latencies.len() as f64 * 0.95).round() as usize)
+                    .min(latencies.len().saturating_sub(1));
+                let p99_index = ((latencies.len() as f64 * 0.99).round() as usize)
+                    .min(latencies.len().saturating_sub(1));
 
                 provider_metrics.p95_latency_ms =
                     sorted_latencies[p95_index.min(latencies.len() - 1)];
@@ -249,12 +251,8 @@ impl ProviderHealthMonitor {
                 ) {
                     // Calculate provider score based on uptime and latency
                     let provider_metrics = metrics.get(provider_name);
-                    let uptime = provider_metrics
-                        .map(|m| m.uptime_percentage)
-                        .unwrap_or(50.0);
-                    let avg_latency = provider_metrics
-                        .map(|m| m.average_latency_ms)
-                        .unwrap_or(1000.0);
+                    let uptime = provider_metrics.map_or(50.0, |m| m.uptime_percentage);
+                    let avg_latency = provider_metrics.map_or(1000.0, |m| m.average_latency_ms);
 
                     // Score: higher uptime is better, lower latency is better
                     let score = uptime / (1.0 + avg_latency / 100.0);
@@ -306,7 +304,7 @@ impl ProviderHealthMonitor {
             }
         };
 
-        let latency_ms = start_time.elapsed().as_millis() as u64;
+        let latency_ms = start_time.elapsed().as_millis().min(u64::MAX as u128) as u64;
 
         HealthCheckResult {
             provider_name: provider_name.to_string(),

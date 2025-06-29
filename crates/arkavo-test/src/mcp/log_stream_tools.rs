@@ -306,7 +306,7 @@ impl Tool for LogStreamKit {
                 let limit = params
                     .get("limit")
                     .and_then(serde_json::Value::as_u64)
-                    .map(|n| n as usize);
+                    .and_then(|n| n.try_into().ok());
 
                 self.read_recent_logs(stream_id, limit).await
             }

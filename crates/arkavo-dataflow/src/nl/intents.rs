@@ -132,8 +132,7 @@ impl IntentClassifier {
         Ok(intent_scores
             .into_iter()
             .next()
-            .map(|(intent, _)| intent)
-            .unwrap_or(Intent::Connect))
+            .map_or(Intent::Connect, |(intent, _)| intent))
     }
 
     fn has_filter_context(&self, input: &str) -> bool {

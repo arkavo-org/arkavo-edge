@@ -168,7 +168,7 @@ impl CalibrationAgentImpl {
             actual_coordinates: Some((x, y)),
             element_hit: None,
             state_change_detected: true,
-            response_time_ms: start.elapsed().as_millis() as u64,
+            response_time_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
         })
     }
 

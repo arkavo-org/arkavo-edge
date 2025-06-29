@@ -194,7 +194,7 @@ fn validate_rule(rule: &crate::dsl::Rule) -> Result<(), ValidationError> {
 
     match rule.rule_type {
         RuleType::Filter => {
-            if rule.conditions.as_ref().is_none_or(|c| c.is_empty()) {
+            if rule.conditions.as_ref().is_none_or(std::vec::Vec::is_empty) {
                 return Err(ValidationError::InvalidRule(
                     "Filter rule must have at least one condition".to_string(),
                 ));

@@ -64,11 +64,14 @@ impl NodeRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn NodeProcessor> {
-        self.processors.get(name).map(|p| p.as_ref())
+        self.processors.get(name).map(std::convert::AsRef::as_ref)
     }
 
     pub fn list(&self) -> Vec<&str> {
-        self.processors.keys().map(|s| s.as_str()).collect()
+        self.processors
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 }
 

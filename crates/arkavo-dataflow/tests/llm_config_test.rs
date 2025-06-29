@@ -21,7 +21,7 @@ fn test_add_provider() {
         description: Some("Remote Ollama instance".to_string()),
     };
 
-    config.add_provider(remote_provider.clone());
+    config.add_provider(remote_provider);
     assert_eq!(config.providers.len(), 2);
     assert_eq!(config.providers[1].name, "remote-ollama");
     assert_eq!(config.providers[1].base_url, "http://10.0.0.101:11434");
