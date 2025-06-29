@@ -1,0 +1,39 @@
+{
+  "version": "1.1",
+  "title": "Legacy Blueprint",
+  "description": "A test blueprint from v1.1",
+  "nodes": [
+    {
+      "id": "llm_node",
+      "type": "llm",
+      "params": {
+        "provider": "openai",
+        "model": "gpt-4",
+        "temperature": 0.7
+      },
+      "position": {"x": 100, "y": 100}
+    },
+    {
+      "id": "ollama_node",
+      "type": "llm",
+      "params": {
+        "provider": "local-ollama",
+        "model": "llama3.2:latest"
+      },
+      "position": {"x": 200, "y": 200}
+    },
+    {
+      "id": "anthropic_node",
+      "type": "llm",
+      "params": {
+        "provider": "anthropic",
+        "model": "claude-3-opus"
+      },
+      "position": {"x": 300, "y": 300}
+    }
+  ],
+  "connections": [],
+  "metadata": {
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+}

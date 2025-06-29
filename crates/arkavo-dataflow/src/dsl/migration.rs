@@ -115,6 +115,58 @@ impl BlueprintMigration for Migration_1_0_to_1_1 {
     }
 }
 
+// Migration from 1.1.0 to 1.2.0 - Add LLM provider configuration support
+#[allow(non_camel_case_types)]
+pub struct Migration_1_1_to_1_2;
+
+impl BlueprintMigration for Migration_1_1_to_1_2 {
+    fn source_version(&self) -> &Version {
+        static VERSION: std::sync::LazyLock<Version> =
+            std::sync::LazyLock::new(|| Version::new(1, 1, 0));
+        &VERSION
+    }
+
+    fn target_version(&self) -> &Version {
+        static VERSION: std::sync::LazyLock<Version> =
+            std::sync::LazyLock::new(|| Version::new(1, 2, 0));
+        &VERSION
+    }
+
+    fn migrate(&self, blueprint: &mut Blueprint) -> Result<()> {
+        use serde_json::json;
+
+        // Migrate LLM nodes to include provider_type if not present
+        for node in &mut blueprint.nodes {
+            if node.params.contains_key("model") || node.params.contains_key("prompt") {
+                // This looks like an LLM node
+
+                // If provider exists but provider_type doesn't, infer it
+                if let Some(provider) = node.params.get("provider").and_then(|v| v.as_str()) {
+                    if !node.params.contains_key("provider_type") {
+                        let provider_type = match provider {
+                            s if s.contains("ollama") => "ollama",
+                            s if s.contains("openai") => "openai",
+                            s if s.contains("anthropic") => "anthropic",
+                            s if s.contains("gemini") => "gemini",
+                            _ => "ollama", // Default to ollama
+                        };
+                        node.params
+                            .insert("provider_type".to_string(), json!(provider_type));
+                    }
+                } else {
+                    // No provider specified, add defaults
+                    node.params
+                        .insert("provider".to_string(), json!("local-ollama"));
+                    node.params
+                        .insert("provider_type".to_string(), json!("ollama"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 // Convenience macro for defining migrations
 #[macro_export]
 macro_rules! define_migration {
@@ -150,6 +202,7 @@ pub fn create_default_registry() -> MigrationRegistry {
 
     // Register built-in migrations
     registry.register(Migration_1_0_to_1_1);
+    registry.register(Migration_1_1_to_1_2);
 
     registry
 }
