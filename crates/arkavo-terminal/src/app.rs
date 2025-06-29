@@ -107,8 +107,8 @@ impl App {
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
             available_models: vec![
-                "llava:7b".to_string(),
                 "devstral:latest".to_string(),
+                "llava:7b".to_string(),
                 "deepseek-r1:14b".to_string(),
                 "qwen3:0.6b".to_string(),
                 "dolphin3:latest".to_string(),
@@ -155,8 +155,8 @@ impl App {
             task_manager: TaskManager::new(),
             input_buffer: String::new(),
             available_models: vec![
-                "llava:7b".to_string(),
                 "devstral:latest".to_string(),
+                "llava:7b".to_string(),
                 "deepseek-r1:14b".to_string(),
                 "qwen3:0.6b".to_string(),
                 "dolphin3:latest".to_string(),
@@ -343,8 +343,9 @@ impl App {
                                 terminal.draw(|f| self.render(f))?;
                             }
                             KeyCode::Tab => {
-                                // Tab key disabled - model switching not yet implemented
-                                // See issue #86 for multi-model support
+                                // Cycle through available models
+                                self.selected_model = (self.selected_model + 1) % self.available_models.len();
+                                self.active_model = Some(self.available_models[self.selected_model].clone());
                             }
                             KeyCode::BackTab => {
                                 if matches!(self.layout_mode, LayoutMode::Portrait) {
@@ -675,12 +676,29 @@ impl App {
         let model_inner = model_selector_block.inner(chunks[1]);
         frame.render_widget(model_selector_block, chunks[1]);
 
-        // Add info text about model selection
-        let info_text = "Model selection coming soon (see issue #86)";
-        let info_paragraph = Paragraph::new(info_text)
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(ratatui::layout::Alignment::Center);
-        frame.render_widget(info_paragraph, model_inner);
+        // Render model selection list
+        use ratatui::widgets::{List, ListItem};
+        use ratatui::style::Modifier;
+        
+        let model_items: Vec<ListItem> = self.available_models
+            .iter()
+            .enumerate()
+            .map(|(i, model)| {
+                let style = if i == self.selected_model {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(format!(" {} {}", if i == self.selected_model { "▸" } else { " " }, model))
+                    .style(style)
+            })
+            .collect();
+        
+        let model_list = List::new(model_items)
+            .style(Style::default().fg(Color::White))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+            
+        frame.render_widget(model_list, model_inner);
 
         // Render task windows
         if self.task_manager.tasks.is_empty() {
@@ -688,6 +706,7 @@ impl App {
 Welcome to Arkavo Terminal UI
 
 • Type your prompt and press Enter to start a conversation
+• Press Tab to cycle through available models
 • Press Ctrl+E to open Helix editor
 • Press Ctrl+I to toggle input/scroll mode
 • Press Ctrl+Q to quit
