@@ -1,8 +1,12 @@
+pub mod anthropic_provider;
 pub mod auth_manager;
+pub mod http_client;
 pub mod llm;
 pub mod llm_config;
 pub mod llm_discovery;
 pub mod model_registry;
+pub mod openai_provider;
+pub mod provider_error;
 pub mod provider_factory;
 pub mod provider_health;
 pub mod sink;

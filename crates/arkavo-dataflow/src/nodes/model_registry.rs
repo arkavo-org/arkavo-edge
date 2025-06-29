@@ -26,6 +26,7 @@ pub struct ModelInfo {
 
 /// Model capabilities and features
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ModelCapabilities {
     pub supports_streaming: bool,
     pub supports_function_calling: bool,
@@ -216,12 +217,14 @@ impl ModelRegistry {
         // Load all models
         let results = self.storage.search("", 100, Some("model_info")).await?;
 
-        let mut models = self.models.write().await;
+        {
+            let mut models = self.models.write().await;
 
-        for result in results {
-            if let Ok(model) = serde_json::from_str::<ModelInfo>(&result.memory.content) {
-                let model_key = format!("{}:{}", model.provider_name, model.model_id);
-                models.insert(model_key, model);
+            for result in results {
+                if let Ok(model) = serde_json::from_str::<ModelInfo>(&result.memory.content) {
+                    let model_key = format!("{}:{}", model.provider_name, model.model_id);
+                    models.insert(model_key, model);
+                }
             }
         }
 
@@ -256,13 +259,15 @@ impl ModelRegistry {
 
     /// Export registry to JSON
     pub async fn export_to_json(&self) -> Result<String> {
-        let models = self.models.read().await;
-        let export = json!({
-            "version": "1.0",
-            "exported_at": Utc::now().to_rfc3339(),
-            "model_count": models.len(),
-            "models": models.values().collect::<Vec<_>>()
-        });
+        let export = {
+            let models = self.models.read().await;
+            json!({
+                "version": "1.0",
+                "exported_at": Utc::now().to_rfc3339(),
+                "model_count": models.len(),
+                "models": models.values().collect::<Vec<_>>()
+            })
+        };
 
         Ok(serde_json::to_string_pretty(&export)?)
     }
