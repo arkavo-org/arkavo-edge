@@ -1,6 +1,7 @@
 use super::{
     NodeProcessor,
     llm_config::{LlmConfiguration, load_llm_config},
+    provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType},
 };
 use anyhow::Result;
 use arkavo_llm::ollama::OllamaClient;
@@ -34,38 +35,92 @@ impl LlmTransform {
     }
 
     pub async fn initialize_providers(&self) -> Result<()> {
+        let factory_registry = ProviderFactoryRegistry::new();
+
         // Try to load configuration from memory storage
         if let Ok(Some(stored_config)) = load_llm_config().await {
             info!("Loaded LLM configuration from memory storage");
             *self.config.write().await = Some(stored_config.clone());
 
-            // Initialize providers from stored configuration
+            // Initialize providers from stored configuration using factory
             for provider_config in &stored_config.providers {
-                let ollama_client = OllamaClient::new(
-                    Some(provider_config.base_url.clone()),
-                    provider_config.default_model.clone(),
-                );
-                self.add_provider(provider_config.name.clone(), Box::new(ollama_client))
-                    .await;
-                debug!(
-                    "Initialized provider: {} at {}",
-                    provider_config.name, provider_config.base_url
-                );
+                let provider_type = ProviderType::from_name(&provider_config.name);
+
+                let factory_config = ProviderConfig {
+                    provider_type: provider_type.clone(),
+                    base_url: provider_config.base_url.clone(),
+                    auth_ref: provider_config.auth_ref.clone(),
+                    default_model: provider_config.default_model.clone(),
+                    timeout_secs: Some(60),
+                    max_retries: Some(3),
+                    metadata: None,
+                };
+
+                match factory_registry.create_provider(&factory_config).await {
+                    Ok(provider) => {
+                        self.add_provider(provider_config.name.clone(), provider)
+                            .await;
+                        debug!(
+                            "Initialized provider: {} at {}",
+                            provider_config.name, provider_config.base_url
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to initialize provider {}: {}. Falling back to direct initialization.",
+                            provider_config.name, e
+                        );
+                        // Fallback to direct Ollama client for backward compatibility
+                        if provider_type == ProviderType::Ollama {
+                            let ollama_client = OllamaClient::new(
+                                Some(provider_config.base_url.clone()),
+                                provider_config.default_model.clone(),
+                            );
+                            self.add_provider(
+                                provider_config.name.clone(),
+                                Box::new(ollama_client),
+                            )
+                            .await;
+                        }
+                    }
+                }
             }
         } else {
             info!("No stored LLM configuration found, initializing defaults");
 
-            // Initialize with default local Ollama
-            let local_ollama = OllamaClient::new(Some("http://localhost:11434".to_string()), None);
-            self.add_provider("local-ollama".to_string(), Box::new(local_ollama))
-                .await;
+            // Initialize with default local Ollama using factory
+            let local_config = ProviderConfig {
+                provider_type: ProviderType::Ollama,
+                base_url: "http://localhost:11434".to_string(),
+                auth_ref: None,
+                default_model: None,
+                timeout_secs: Some(60),
+                max_retries: Some(3),
+                metadata: None,
+            };
+
+            if let Ok(provider) = factory_registry.create_provider(&local_config).await {
+                self.add_provider("local-ollama".to_string(), provider)
+                    .await;
+            }
 
             // Check for remote Ollama from env (for backward compatibility)
             if let Ok(remote_url) = std::env::var("REMOTE_OLLAMA_URL") {
-                let remote_ollama = OllamaClient::new(Some(remote_url.clone()), None);
-                self.add_provider("remote-ollama".to_string(), Box::new(remote_ollama))
-                    .await;
-                info!("Added remote Ollama from environment: {}", remote_url);
+                let remote_config = ProviderConfig {
+                    provider_type: ProviderType::Ollama,
+                    base_url: remote_url.clone(),
+                    auth_ref: None,
+                    default_model: None,
+                    timeout_secs: Some(60),
+                    max_retries: Some(3),
+                    metadata: None,
+                };
+
+                if let Ok(provider) = factory_registry.create_provider(&remote_config).await {
+                    self.add_provider("remote-ollama".to_string(), provider)
+                        .await;
+                    info!("Added remote Ollama from environment: {}", remote_url);
+                }
             }
         }
 
@@ -293,7 +348,7 @@ mod tests {
         params.insert("model".to_string(), json!("llama3:latest"));
         params.insert("temperature".to_string(), json!(0.5));
 
-        let input = json!({
+        let _input = json!({
             "text": "This is a test document that needs summarization."
         });
 
