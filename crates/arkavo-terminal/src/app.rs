@@ -197,30 +197,55 @@ impl App {
     }
 
     pub async fn fetch_available_models(&mut self) {
-        // Try to fetch models from Ollama server
+        // Try to fetch models from multiple Ollama servers
         use arkavo_llm::ollama::OllamaClient;
         
-        let client = OllamaClient::from_env().unwrap_or_else(|_| {
-            OllamaClient::new(None, None)
-        });
+        let mut all_models = Vec::new();
         
-        match client.list_models().await {
+        // Primary Ollama server
+        let primary_url = std::env::var("OLLAMA_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let primary_client = OllamaClient::new(Some(primary_url.clone()), None);
+        
+        match primary_client.list_models().await {
             Ok(models) => {
-                if !models.is_empty() {
-                    self.available_models = models;
-                    // If we have models and none selected, select the first one
-                    if self.selected_model >= self.available_models.len() {
-                        self.selected_model = 0;
-                    }
-                    if self.active_model.is_none() && !self.available_models.is_empty() {
-                        self.active_model = Some(self.available_models[0].clone());
-                    }
+                for model in models {
+                    // Add server prefix to distinguish models
+                    all_models.push(format!("primary/{}", model));
                 }
+                eprintln!("✓ Connected to primary Ollama server: {}", primary_url);
             }
             Err(e) => {
-                // If we can't fetch models, keep the list empty
-                // The UI will show an empty model selector
-                eprintln!("Failed to fetch models from Ollama: {e}");
+                eprintln!("Failed to fetch models from primary Ollama ({}): {}", primary_url, e);
+            }
+        }
+        
+        // Secondary Ollama server (if configured)
+        if let Ok(secondary_url) = std::env::var("OLLAMA_BASE_URL_2") {
+            let secondary_client = OllamaClient::new(Some(secondary_url.clone()), None);
+            
+            match secondary_client.list_models().await {
+                Ok(models) => {
+                    for model in models {
+                        // Add server prefix to distinguish models
+                        all_models.push(format!("secondary/{}", model));
+                    }
+                    eprintln!("✓ Connected to secondary Ollama server: {}", secondary_url);
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch models from secondary Ollama ({}): {}", secondary_url, e);
+                }
+            }
+        }
+        
+        if !all_models.is_empty() {
+            self.available_models = all_models;
+            // If we have models and none selected, select the first one
+            if self.selected_model >= self.available_models.len() {
+                self.selected_model = 0;
+            }
+            if self.active_model.is_none() && !self.available_models.is_empty() {
+                self.active_model = Some(self.available_models[0].clone());
             }
         }
     }

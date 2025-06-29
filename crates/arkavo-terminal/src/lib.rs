@@ -79,17 +79,42 @@ pub async fn run() -> Result<()> {
 
         while let Some(request) = ui_rx.recv().await {
             let llm_tx = llm_tx.clone();
-            let client = client.clone();
             let mut messages_clone = messages.clone();
 
             // Add user message to context
             let user_message = Message::user(&request.prompt);
             messages_clone.push(user_message.clone());
 
+            // Parse the model name to extract server and actual model
+            let (server_url, actual_model) = if request.model_name.starts_with("primary/") {
+                let model = request.model_name.strip_prefix("primary/").unwrap_or(&request.model_name);
+                let url = std::env::var("OLLAMA_BASE_URL")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                (url, model.to_string())
+            } else if request.model_name.starts_with("secondary/") {
+                let model = request.model_name.strip_prefix("secondary/").unwrap_or(&request.model_name);
+                let url = std::env::var("OLLAMA_BASE_URL_2")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                (url, model.to_string())
+            } else {
+                // Fallback to primary server for backward compatibility
+                let url = std::env::var("OLLAMA_BASE_URL")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                (url, request.model_name.clone())
+            };
+            
+            // Create a new Ollama client with the specific model and server
+            let model_specific_client = arkavo_llm::LlmClient::new(
+                Box::new(arkavo_llm::ollama::OllamaClient::new(
+                    Some(server_url),
+                    Some(actual_model)
+                ))
+            );
+
             // Spawn a task for each request
             tokio::spawn(async move {
-                // Get streaming response from LLM
-                match client.stream(messages_clone.clone()).await {
+                // Get streaming response from LLM with the user-selected model
+                match model_specific_client.stream(messages_clone.clone()).await {
                     Ok(mut stream) => {
                         // Send start streaming signal
                         let _ = llm_tx
