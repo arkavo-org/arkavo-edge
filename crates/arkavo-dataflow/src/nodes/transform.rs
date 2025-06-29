@@ -153,8 +153,8 @@ impl NodeProcessor for AggregateTransform {
             "window_size": window_size,
             "value": match aggregation_type {
                 "count" => json!(1),
-                "sum" => data.get("value").cloned().unwrap_or(json!(0)),
-                "avg" => data.get("value").cloned().unwrap_or(json!(0)),
+                "sum" => data.get("value").cloned().unwrap_or_else(|| json!(0)),
+                "avg" => data.get("value").cloned().unwrap_or_else(|| json!(0)),
                 _ => json!(null),
             },
             "timestamp": chrono::Utc::now().to_rfc3339(),

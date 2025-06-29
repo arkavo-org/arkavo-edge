@@ -137,13 +137,13 @@ impl NodeExecutor {
                         }
                         NodeKind::Transform => {
                             // Apply transformation logic
-                            Self::transform_message(payload, &node).await.map(|p| {
+                            Self::transform_message(payload, &node).map(|p| {
                                 Message::new_data(p, &node.id).with_trace_id(metadata.trace_id)
                             })
                         }
                         NodeKind::Sink => {
                             // Sinks consume data, potentially storing or outputting it
-                            Self::sink_message(payload, &node).await;
+                            Self::sink_message(payload, &node);
                             None
                         }
                         NodeKind::Router => {
@@ -157,19 +157,21 @@ impl NodeExecutor {
 
                     // Send to outputs based on rules
                     if let Some(msg) = processed_message {
-                        let outputs = outputs.read().await;
                         let mut sent_count = 0;
                         let mut filtered_count = 0;
 
-                        for (link, sender) in outputs.iter() {
-                            if Self::should_send(&msg, &link.rule).await {
-                                if sender.send(msg.clone()).await.is_ok() {
-                                    sent_count += 1;
+                        {
+                            let outputs = outputs.read().await;
+                            for (link, sender) in outputs.iter() {
+                                if Self::should_send(&msg, link.rule.as_ref()) {
+                                    if sender.send(msg.clone()).await.is_ok() {
+                                        sent_count += 1;
+                                    } else {
+                                        metrics.write().await.messages_errored += 1;
+                                    }
                                 } else {
-                                    metrics.write().await.messages_errored += 1;
+                                    filtered_count += 1;
                                 }
-                            } else {
-                                filtered_count += 1;
                             }
                         }
 
@@ -193,10 +195,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn transform_message(
-        payload: serde_json::Value,
-        node: &Node,
-    ) -> Option<serde_json::Value> {
+    fn transform_message(payload: serde_json::Value, node: &Node) -> Option<serde_json::Value> {
         // Basic transformation logic - can be extended
         match node.params.get("transform_type") {
             Some(serde_json::Value::String(t)) if t == "uppercase" => {
@@ -213,7 +212,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn sink_message(payload: serde_json::Value, node: &Node) {
+    fn sink_message(payload: serde_json::Value, node: &Node) {
         // Basic sink logic - can be extended
         if let Some(serde_json::Value::String(sink_type)) = node.params.get("type") {
             match sink_type.as_str() {
@@ -232,7 +231,7 @@ impl NodeExecutor {
         }
     }
 
-    async fn should_send(message: &Message, rule: &Option<Rule>) -> bool {
+    fn should_send(message: &Message, rule: Option<&Rule>) -> bool {
         let Some(rule) = rule else {
             return true; // No rule means always send
         };
@@ -241,7 +240,7 @@ impl NodeExecutor {
             RuleType::Passthrough => true,
             RuleType::Filter => {
                 if let Some(conditions) = &rule.conditions {
-                    Self::evaluate_conditions(message, conditions).await
+                    Self::evaluate_conditions(message, conditions)
                 } else {
                     true
                 }
@@ -250,14 +249,14 @@ impl NodeExecutor {
         }
     }
 
-    async fn evaluate_conditions(message: &Message, conditions: &[Condition]) -> bool {
+    fn evaluate_conditions(message: &Message, conditions: &[Condition]) -> bool {
         let Message::Data { payload, .. } = message else {
             return false;
         };
 
         // All conditions must match (AND logic)
         for condition in conditions {
-            if !Self::evaluate_condition(payload, condition).await {
+            if !Self::evaluate_condition(payload, condition) {
                 return false;
             }
         }
@@ -265,7 +264,7 @@ impl NodeExecutor {
         true
     }
 
-    async fn evaluate_condition(payload: &serde_json::Value, condition: &Condition) -> bool {
+    fn evaluate_condition(payload: &serde_json::Value, condition: &Condition) -> bool {
         // Extract field value using dot notation
         let field_value = Self::extract_field(payload, &condition.field);
 

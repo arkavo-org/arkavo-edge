@@ -77,6 +77,11 @@ impl EntityRecognizer {
         self.model_names.insert("devstral".to_string());
     }
 
+    /// Extracts entities from the input text.
+    ///
+    /// # Panics
+    ///
+    /// Panics if regex capture groups are not properly matched (should not happen with valid regex).
     pub fn extract(&self, input: &str) -> Result<Vec<Entity>> {
         let mut entities = Vec::new();
         let input_lower = input.to_lowercase();

@@ -91,7 +91,7 @@ impl DataflowEngine {
     }
 
     #[cfg(feature = "nl")]
-    pub async fn create_pipeline_from_nl(&self, natural_language: &str) -> Result<Uuid> {
+    pub fn create_pipeline_from_nl(&self, natural_language: &str) -> Result<Uuid> {
         let parser = nl::NLParser::new();
         let blueprint = parser.parse_to_blueprint(natural_language)?;
         self.create_pipeline_from_blueprint(blueprint)
@@ -132,12 +132,12 @@ impl DataflowEngine {
     }
 
     pub fn export_blueprint(&self, pipeline_id: Uuid) -> Result<String> {
-        let pipeline = self
+        let blueprint = self
             .pipelines
             .get(&pipeline_id)
-            .ok_or_else(|| anyhow::anyhow!("Pipeline not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("Pipeline not found"))?
+            .to_blueprint();
 
-        let blueprint = pipeline.to_blueprint();
         let json = serde_json::to_string_pretty(&blueprint)?;
         Ok(json)
     }

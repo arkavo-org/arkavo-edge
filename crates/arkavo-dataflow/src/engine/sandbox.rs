@@ -39,27 +39,27 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "linux")]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
         _code: &str,
         _input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // Linux implementation using seccomp
-        self.execute_linux_sandbox(_code, _input).await
+        self.execute_linux_sandbox(_code, _input)
     }
 
     #[cfg(target_os = "macos")]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
         code: &str,
         input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // macOS implementation using sandbox-exec
-        self.execute_macos_sandbox(code, input).await
+        self.execute_macos_sandbox(code, input)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    pub async fn execute_transform(
+    pub fn execute_transform(
         &self,
         _code: &str,
         _input: serde_json::Value,
@@ -68,7 +68,7 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "linux")]
-    async fn execute_linux_sandbox(
+    fn execute_linux_sandbox(
         &self,
         code: &str,
         input: serde_json::Value,
@@ -125,7 +125,7 @@ impl Sandbox {
     }
 
     #[cfg(target_os = "macos")]
-    async fn execute_macos_sandbox(
+    fn execute_macos_sandbox(
         &self,
         code: &str,
         input: serde_json::Value,
@@ -190,7 +190,7 @@ impl Sandbox {
 
         for path in &self.config.allowed_paths {
             use std::fmt::Write;
-            write!(profile, "(allow file-write* (regex #\"^{}.*\"))\n", path).unwrap();
+            writeln!(profile, "(allow file-write* (regex #\"^{path}.*\"))").unwrap();
         }
 
         profile
