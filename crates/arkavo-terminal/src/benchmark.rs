@@ -10,8 +10,8 @@ pub fn run_performance_benchmark() {
     println!("Running Terminal UI Performance Benchmark...\n");
 
     // Create test data
-    let mut chat_view = create_test_chat_view(100);
-    let mut diff_view = create_test_diff_view(1000);
+    let chat_view = create_test_chat_view(100);
+    let diff_view = create_test_diff_view(1000);
 
     // Create a test buffer
     let area = Rect::new(0, 0, 120, 40);
