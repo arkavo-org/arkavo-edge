@@ -306,7 +306,10 @@ impl App {
 
         // Search for saved Ollama server configurations
         // Search directly for the type marker like the chat command does
-        let saved_configs = match storage.search("arkavo_ollama_server_config", 20, Some("config")).await {
+        let saved_configs = match storage
+            .search("arkavo_ollama_server_config", 20, Some("config"))
+            .await
+        {
             Ok(configs) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Debug,
@@ -381,12 +384,12 @@ impl App {
         );
         for config in saved_configs.iter() {
             let server_url = &config.memory.content;
-            
+
             // Skip cleared configs and localhost (we already tried it)
             if server_url == "CLEARED" || server_url == "http://localhost:11434" {
                 continue;
             }
-            
+
             self.add_debug_log(
                 crate::ui::debug::LogLevel::Debug,
                 format!("[Storage] Found saved Ollama config: {}", server_url),
@@ -763,15 +766,19 @@ impl App {
 
                                         // Check for natural language Ollama commands
                                         let input_lower = self.input_buffer.to_lowercase();
-                                        if input_lower.contains("add ollama server") || input_lower.contains("connect to ollama") {
+                                        if input_lower.contains("add ollama server")
+                                            || input_lower.contains("connect to ollama")
+                                        {
                                             // Extract server address from the message
-                                            if let Some(server_url) = self.extract_server_url(&self.input_buffer) {
+                                            if let Some(server_url) =
+                                                self.extract_server_url(&self.input_buffer)
+                                            {
                                                 self.add_ollama_server(server_url).await;
                                                 self.input_buffer.clear();
                                                 continue;
                                             }
                                         }
-                                        
+
                                         // Add user message to the task
                                         if let Some(task) =
                                             self.task_manager.find_task_by_id_mut(task_id)
@@ -1583,7 +1590,7 @@ Scrolling (when in scroll mode):
     pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {
         self.debug_view.add_log(level, message);
     }
-    
+
     fn extract_server_url(&self, input: &str) -> Option<String> {
         // Look for patterns like IP:port, hostname:port, or URLs
         let patterns = [
@@ -1594,7 +1601,7 @@ Scrolling (when in scroll mode):
             // Full URL
             r"https?://[^\s]+",
         ];
-        
+
         for pattern in patterns {
             if let Ok(re) = regex::Regex::new(pattern) {
                 if let Some(mat) = re.find(input) {
@@ -1604,23 +1611,23 @@ Scrolling (when in scroll mode):
         }
         None
     }
-    
+
     async fn add_ollama_server(&mut self, server_url: String) {
         use arkavo_llm::ollama::OllamaClient;
         use arkavo_memory::storage::MemoryStorage;
         use std::sync::Arc;
-        
+
         // Normalize URL
         let mut url = server_url.trim().to_string();
         if !url.starts_with("http://") && !url.starts_with("https://") {
             url = format!("http://{}", url);
         }
-        
+
         self.add_debug_log(
             crate::ui::debug::LogLevel::Info,
             format!("[Config] Testing connection to {}", url),
         );
-        
+
         // Test connection
         let client = OllamaClient::new(Some(url.clone()), None);
         match client.list_models().await {
@@ -1629,7 +1636,7 @@ Scrolling (when in scroll mode):
                 if let Ok(storage) = MemoryStorage::new().await {
                     let storage = Arc::new(storage);
                     let embedding = vec![0.0; 384]; // Placeholder
-                    
+
                     let memory = arkavo_memory::models::Memory {
                         id: uuid::Uuid::new_v4(),
                         content: url.clone(),
@@ -1643,7 +1650,7 @@ Scrolling (when in scroll mode):
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
                     };
-                    
+
                     if let Err(e) = storage.store(memory).await {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Error,
@@ -1652,9 +1659,13 @@ Scrolling (when in scroll mode):
                     } else {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Info,
-                            format!("[Config] Added Ollama server {} with {} models", url, models.len()),
+                            format!(
+                                "[Config] Added Ollama server {} with {} models",
+                                url,
+                                models.len()
+                            ),
                         );
-                        
+
                         // Refresh model list
                         self.fetch_available_models().await;
                     }
@@ -1668,12 +1679,12 @@ Scrolling (when in scroll mode):
             }
         }
     }
-    
+
     async fn export_ui_state(&mut self) {
         use chrono::Local;
         use serde_json::json;
         use std::fs;
-        
+
         // Create a comprehensive UI state dump
         let ui_state = json!({
             "timestamp": Local::now().to_rfc3339(),
@@ -1706,11 +1717,17 @@ Scrolling (when in scroll mode):
                 })
             }).collect::<Vec<_>>(),
         });
-        
+
         // Generate filename with timestamp
-        let filename = format!("arkavo-ui-state-{}.json", Local::now().format("%Y%m%d-%H%M%S"));
-        
-        match fs::write(&filename, serde_json::to_string_pretty(&ui_state).unwrap_or_default()) {
+        let filename = format!(
+            "arkavo-ui-state-{}.json",
+            Local::now().format("%Y%m%d-%H%M%S")
+        );
+
+        match fs::write(
+            &filename,
+            serde_json::to_string_pretty(&ui_state).unwrap_or_default(),
+        ) {
             Ok(_) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,

@@ -131,7 +131,7 @@ impl DebugView {
         }
         Ok(())
     }
-    
+
     pub fn get_all_logs(&self) -> Vec<serde_json::Value> {
         self.logs
             .iter()

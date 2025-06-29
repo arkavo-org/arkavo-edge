@@ -1,9 +1,9 @@
 use anyhow::Result;
 use arkavo_mcp_core::{Tool, ToolSchema};
+use arkavo_memory::storage::MemoryStorage;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use arkavo_memory::storage::MemoryStorage;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -26,7 +26,7 @@ impl OllamaConfigTool {
 impl Tool for OllamaConfigTool {
     async fn execute(&self, params: Value) -> Result<Value> {
         let config_params: OllamaConfigParams = serde_json::from_value(params)?;
-        
+
         match config_params.action.as_str() {
             "add" => {
                 if let Some(server_url) = config_params.server_url {
@@ -35,7 +35,7 @@ impl Tool for OllamaConfigTool {
                     if !url.starts_with("http://") && !url.starts_with("https://") {
                         url = format!("http://{}", url);
                     }
-                    
+
                     // Test connection
                     let client = arkavo_llm::ollama::OllamaClient::new(Some(url.clone()), None);
                     match client.list_models().await {
@@ -43,7 +43,7 @@ impl Tool for OllamaConfigTool {
                             // Save configuration
                             let storage = Arc::new(MemoryStorage::new().await?);
                             let embedding = vec![0.0; 384]; // Placeholder embedding
-                            
+
                             let memory = arkavo_memory::models::Memory {
                                 id: uuid::Uuid::new_v4(),
                                 content: url.clone(),
@@ -57,21 +57,19 @@ impl Tool for OllamaConfigTool {
                                 created_at: chrono::Utc::now(),
                                 updated_at: chrono::Utc::now(),
                             };
-                            
+
                             storage.store(memory).await?;
-                            
+
                             Ok(json!({
                                 "success": true,
                                 "message": format!("Added Ollama server at {} with {} models", url, models.len()),
                                 "models": models,
                             }))
                         }
-                        Err(e) => {
-                            Ok(json!({
-                                "success": false,
-                                "error": format!("Failed to connect to {}: {}", url, e),
-                            }))
-                        }
+                        Err(e) => Ok(json!({
+                            "success": false,
+                            "error": format!("Failed to connect to {}: {}", url, e),
+                        })),
                     }
                 } else {
                     Ok(json!({
@@ -82,17 +80,21 @@ impl Tool for OllamaConfigTool {
             }
             "list" => {
                 let storage = Arc::new(MemoryStorage::new().await?);
-                let configs = storage.search("arkavo_ollama_server_config", 20, Some("config")).await?;
-                
+                let configs = storage
+                    .search("arkavo_ollama_server_config", 20, Some("config"))
+                    .await?;
+
                 let servers: Vec<_> = configs
                     .into_iter()
                     .filter(|c| c.memory.content != "CLEARED")
-                    .map(|c| json!({
-                        "url": c.memory.content,
-                        "added_at": c.memory.created_at.to_rfc3339(),
-                    }))
+                    .map(|c| {
+                        json!({
+                            "url": c.memory.content,
+                            "added_at": c.memory.created_at.to_rfc3339(),
+                        })
+                    })
                     .collect();
-                    
+
                 Ok(json!({
                     "success": true,
                     "servers": servers,
@@ -105,18 +107,16 @@ impl Tool for OllamaConfigTool {
                     "error": "Remove action not yet implemented",
                 }))
             }
-            _ => {
-                Ok(json!({
-                    "success": false,
-                    "error": format!("Unknown action: {}", config_params.action),
-                }))
-            }
+            _ => Ok(json!({
+                "success": false,
+                "error": format!("Unknown action: {}", config_params.action),
+            })),
         }
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
+        static SCHEMA: once_cell::sync::Lazy<ToolSchema> = once_cell::sync::Lazy::new(|| {
+            ToolSchema {
                 name: "ollama_config".to_string(),
                 description: "Manage Ollama server configurations. Add new servers, list existing ones, or remove them.".to_string(),
                 parameters: json!({
@@ -134,7 +134,8 @@ impl Tool for OllamaConfigTool {
                     },
                     "required": ["action"]
                 }),
-            });
+            }
+        });
         &SCHEMA
     }
 }

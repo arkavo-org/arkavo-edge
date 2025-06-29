@@ -29,6 +29,7 @@ impl McpServer {
         }
         info!("Registered tool: {}", name);
         tools.insert(name, tool);
+        drop(tools);
         Ok(())
     }
 
@@ -98,7 +99,7 @@ impl McpServer {
                         result: None,
                         error: Some(RpcError {
                             code: error_codes::INVALID_PARAMS,
-                            message: format!("Invalid tool request: {}", e),
+                            message: format!("Invalid tool request: {e}"),
                             data: None,
                         }),
                     },
