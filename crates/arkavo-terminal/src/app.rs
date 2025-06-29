@@ -223,7 +223,7 @@ impl App {
         let storage = match MemoryStorage::new().await {
             Ok(s) => Arc::new(s),
             Err(e) => {
-                eprintln!("Failed to initialize memory storage: {}", e);
+                eprintln!("Failed to initialize memory storage: {e}");
                 return;
             }
         };
@@ -233,7 +233,7 @@ impl App {
         let saved_configs = match storage.search("http", 20, Some("config")).await {
             Ok(configs) => configs,
             Err(e) => {
-                eprintln!("Failed to search for Ollama configs: {}", e);
+                eprintln!("Failed to search for Ollama configs: {e}");
                 vec![]
             }
         };
@@ -247,9 +247,8 @@ impl App {
                     "http://localhost:11434".to_string(),
                 );
                 for model in models {
-                    all_models.push(format!("localhost/{}", model));
+                    all_models.push(format!("localhost/{model}"));
                 }
-                eprintln!("✓ Connected to localhost Ollama server");
             }
             Err(_) => {
                 // Silently ignore localhost if not available
@@ -279,23 +278,17 @@ impl App {
 
                 match client.list_models().await {
                     Ok(models) => {
-                        let server_name = format!("server{}", server_idx);
+                        let server_name = format!("server{server_idx}");
                         self.server_urls
                             .insert(server_name.clone(), server_url.clone());
                         for model in models {
-                            all_models.push(format!("{}/{}", server_name, model));
+                            all_models.push(format!("{server_name}/{model}"));
                         }
-                        eprintln!(
-                            "✓ Connected to {} Ollama server: {}",
-                            server_name, server_url
-                        );
+                        eprintln!("✓ Connected to {server_name} Ollama server: {server_url}");
                         server_idx += 1;
                     }
                     Err(e) => {
-                        eprintln!(
-                            "Failed to fetch models from Ollama server {} ({}): {}",
-                            server_url, server_url, e
-                        );
+                        eprintln!("Failed to fetch models from Ollama server {server_url}: {e}");
                     }
                 }
             }
@@ -311,8 +304,13 @@ impl App {
                 self.active_model = Some(self.available_models[0].clone());
             }
         } else {
-            // If no servers found, prompt user to configure
-            eprintln!("No Ollama servers found. Use 'arkavo chat' to configure servers.");
+            // No models found, prompt for configuration
+            self.available_models = vec![
+                "Configure Ollama Server...".to_string(),
+                "Configure OpenAI API...".to_string(),
+                "Configure Anthropic API...".to_string(),
+            ];
+            self.selected_model = 0;
         }
     }
 
@@ -460,6 +458,22 @@ impl App {
                                         (self.selected_model + 1) % self.available_models.len();
                                     self.active_model =
                                         Some(self.available_models[self.selected_model].clone());
+
+                                    // If we selected a configuration option, show a hint
+                                    if self
+                                        .active_model
+                                        .as_ref()
+                                        .map(|m| m.ends_with("..."))
+                                        .unwrap_or(false)
+                                    {
+                                        self.add_debug_log(
+                                            crate::ui::debug::LogLevel::Info,
+                                            format!(
+                                                "[UI] Press Enter to {}",
+                                                self.active_model.as_ref().unwrap()
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                             KeyCode::BackTab => {
@@ -486,6 +500,34 @@ impl App {
                                                     .cloned()
                                                     .unwrap_or_else(|| "unknown".to_string())
                                             });
+
+                                        // Check if the selected model is actually a configuration option
+                                        if displayed_model.ends_with("...") {
+                                            // This is a configuration option, not a real model
+                                            // Temporarily leave terminal to prompt for configuration
+                                            let _ = terminal::disable_raw_mode();
+                                            let _ = crossterm::execute!(
+                                                std::io::stdout(),
+                                                terminal::LeaveAlternateScreen,
+                                                cursor::Show
+                                            );
+
+                                            // Configure the provider
+                                            let _ =
+                                                self.configure_llm_provider(&displayed_model).await;
+
+                                            // Return to terminal
+                                            let _ = terminal::enable_raw_mode();
+                                            let _ = crossterm::execute!(
+                                                std::io::stdout(),
+                                                terminal::EnterAlternateScreen,
+                                                cursor::Hide
+                                            );
+
+                                            // Force redraw
+                                            terminal.draw(|f| self.render(f))?;
+                                            continue;
+                                        }
 
                                         // Check if we have a main task, if not create one
                                         let task_id = if let Some(id) = self.main_task_id {
@@ -1222,6 +1264,112 @@ Scrolling (when in scroll mode):
 
     pub fn add_debug_log(&mut self, level: crate::ui::debug::LogLevel, message: String) {
         self.debug_view.add_log(level, message);
+    }
+
+    async fn configure_llm_provider(&mut self, provider_type: &str) -> Result<()> {
+        use arkavo_memory::storage::MemoryStorage;
+        use std::io::{self, Write};
+
+        match provider_type {
+            "Configure Ollama Server..." => {
+                // Prompt for Ollama server IP
+                eprintln!("\n⚠️  No Ollama servers found.");
+                eprintln!("Please enter the Ollama server address:");
+                eprintln!("Examples: 192.168.1.100:11434, myserver.local:11434");
+                print!("\nServer address: ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let input = input.trim();
+
+                if !input.is_empty() {
+                    let base_url = if input.starts_with("http://") || input.starts_with("https://")
+                    {
+                        input.to_string()
+                    } else {
+                        format!("http://{input}")
+                    };
+
+                    // Test the connection
+                    eprintln!("\nTesting connection to {base_url}...");
+                    let test_client =
+                        arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
+
+                    match test_client.list_models().await {
+                        Ok(models) => {
+                            eprintln!("✓ Connected! Found {} models", models.len());
+
+                            // Save the configuration
+                            let storage = MemoryStorage::new().await?;
+                            let embedding_service =
+                                arkavo_memory::embeddings::EmbeddingService::new();
+                            let embedding =
+                                match embedding_service.generate_embedding(&base_url).await {
+                                    Ok(e) => e,
+                                    Err(_) => vec![0.0; 384],
+                                };
+
+                            let memory = arkavo_memory::models::Memory {
+                                id: uuid::Uuid::new_v4(),
+                                content: base_url.clone(),
+                                metadata: Some(serde_json::json!({
+                                    "type": "arkavo_ollama_server_config",
+                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                })),
+                                category: Some("config".to_string()),
+                                embedding,
+                                created_at: chrono::Utc::now(),
+                                updated_at: chrono::Utc::now(),
+                            };
+
+                            storage.store(memory).await?;
+                            eprintln!("✓ Configuration saved!");
+
+                            // Refresh available models
+                            self.fetch_available_models().await;
+                        }
+                        Err(e) => {
+                            eprintln!("✗ Failed to connect: {e}");
+                            eprintln!("Please check the server address and try again.");
+                        }
+                    }
+                }
+            }
+            "Configure OpenAI API..." => {
+                eprintln!("\n🔧 OpenAI API configuration");
+                eprintln!("Please enter your OpenAI API key:");
+                print!("\nAPI Key: ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let api_key = input.trim();
+
+                if !api_key.is_empty() {
+                    // TODO: Store OpenAI API key securely and test connection
+                    eprintln!("⚠️  OpenAI provider not yet implemented in terminal UI");
+                }
+            }
+            "Configure Anthropic API..." => {
+                eprintln!("\n🔧 Anthropic API configuration");
+                eprintln!("Please enter your Anthropic API key:");
+                print!("\nAPI Key: ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let api_key = input.trim();
+
+                if !api_key.is_empty() {
+                    // TODO: Store Anthropic API key securely and test connection
+                    eprintln!("⚠️  Anthropic provider not yet implemented in terminal UI");
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
