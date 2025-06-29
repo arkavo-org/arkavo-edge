@@ -31,6 +31,7 @@ arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 tokio-stream = "0.1"
+regex = "1.11"
 
 # For multi-terminal support
 uuid = { version = "1.11", features = ["v4", "serde"] }

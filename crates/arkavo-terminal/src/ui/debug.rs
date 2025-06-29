@@ -131,6 +131,19 @@ impl DebugView {
         }
         Ok(())
     }
+    
+    pub fn get_all_logs(&self) -> Vec<serde_json::Value> {
+        self.logs
+            .iter()
+            .map(|log| {
+                serde_json::json!({
+                    "timestamp": log.timestamp.to_rfc3339(),
+                    "level": log.level.prefix(),
+                    "message": log.message,
+                })
+            })
+            .collect()
+    }
 }
 
 impl Default for DebugView {

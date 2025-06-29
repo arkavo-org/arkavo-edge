@@ -282,7 +282,9 @@ name = "arkavo-mcp-runtime"
 version = "0.19.3"
 dependencies = [
  "anyhow",
+ "arkavo-llm",
  "arkavo-mcp-core",
+ "arkavo-memory",
  "async-trait",
  "chrono",
  "once_cell",
@@ -334,6 +336,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "ratatui",
+ "regex",
  "semver",
  "serde",
  "serde_json",

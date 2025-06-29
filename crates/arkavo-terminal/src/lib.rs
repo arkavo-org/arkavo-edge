@@ -95,21 +95,11 @@ pub async fn run() -> Result<()> {
                 } else if server_prefix.starts_with("server") {
                     // Look up saved server configuration from memory storage
                     if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
-                        if let Ok(all_configs) = storage.search("http", 20, Some("config")).await {
-                            // Filter for Ollama server configs only
+                        if let Ok(all_configs) = storage.search("arkavo_ollama_server_config", 20, Some("config")).await {
+                            // No need to filter since we searched for the specific type
                             let ollama_configs: Vec<_> = all_configs
                                 .into_iter()
-                                .filter(|config| {
-                                    config
-                                        .memory
-                                        .metadata
-                                        .as_ref()
-                                        .and_then(|m| m.get("type"))
-                                        .and_then(|t| t.as_str())
-                                        .map(|t| t == "arkavo_ollama_server_config")
-                                        .unwrap_or(false)
-                                })
-                                .filter(|config| config.memory.content != "http://localhost:11434")
+                                .filter(|config| config.memory.content != "CLEARED" && config.memory.content != "http://localhost:11434")
                                 .collect();
 
                             // Extract server number from prefix (e.g., "server1" -> 1)
@@ -145,9 +135,12 @@ pub async fn run() -> Result<()> {
                 )
             };
 
+            // Debug log the resolved server and model
+            eprintln!("[LLM] Using server: {} with model: {}", server_url, actual_model);
+            
             // Create a new Ollama client with the specific model and server
             let model_specific_client = arkavo_llm::LlmClient::new(Box::new(
-                arkavo_llm::ollama::OllamaClient::new(Some(server_url), Some(actual_model)),
+                arkavo_llm::ollama::OllamaClient::new(Some(server_url.clone()), Some(actual_model.clone())),
             ));
 
             // Spawn a task for each request

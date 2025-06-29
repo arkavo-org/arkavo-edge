@@ -11,6 +11,8 @@ categories = ["network-programming", "asynchronous"]
 
 [dependencies]
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-llm = { path = "../arkavo-llm" }
+arkavo-memory = { path = "../arkavo-memory" }
 tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "sync", "time"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
