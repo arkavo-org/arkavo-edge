@@ -453,16 +453,23 @@ impl AuthManager {
         Ok(None)
     }
 
-    /// Get or create master key (in production, this would use secure key storage)
+    /// Get or create master key from environment or OS keychain
     fn get_or_create_master_key(&self) -> Result<String> {
-        // In production, this would:
-        // 1. Try to retrieve from secure enclave/HSM
-        // 2. Use OS keychain services
-        // 3. Derive from hardware security module
+        // Try environment variable first
+        if let Ok(key) = std::env::var("ARKAVO_MASTER_KEY") {
+            if key.len() >= 32 {
+                return Ok(key);
+            }
+            return Err(anyhow::anyhow!(
+                "ARKAVO_MASTER_KEY must be at least 32 characters long"
+            ));
+        }
 
-        // For now, we use a deterministic key based on a seed
-        // This is NOT secure for production use!
-        Ok("TEMPORARY_MASTER_KEY_DO_NOT_USE_IN_PRODUCTION".to_string())
+        // TODO: Add OS keychain integration in follow-up PR
+        // For now, require explicit key setting
+        Err(anyhow::anyhow!(
+            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars)"
+        ))
     }
 }
 

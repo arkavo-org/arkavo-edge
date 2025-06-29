@@ -41,6 +41,14 @@ pub struct ProviderConfig {
     pub default_model: Option<String>,
     pub timeout_secs: Option<u64>,
     pub max_retries: Option<u32>,
+    /// Initial retry delay in milliseconds (default: 1000)
+    pub initial_retry_delay_ms: Option<u64>,
+    /// Backoff factor for exponential retry (default: 2.0)
+    pub backoff_factor: Option<f64>,
+    /// Maximum retry delay in milliseconds (default: 30000)
+    pub max_retry_delay_ms: Option<u64>,
+    /// Jitter factor 0.0-1.0 (default: 0.1)
+    pub jitter_factor: Option<f64>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
@@ -162,13 +170,23 @@ impl ProviderFactory for OpenAIProviderFactory {
                         Ok(cred) => cred.value,
                         Err(_) => {
                             // Fall back to environment variable
-                            std::env::var(auth_ref)?
+                            std::env::var(auth_ref).map_err(|_| {
+                                anyhow::anyhow!(
+                                    "Credential '{}' not found in auth manager or environment",
+                                    auth_ref.chars().take(8).collect::<String>() + "..."
+                                )
+                            })?
                         }
                     }
                 }
                 Err(_) => {
                     // Fall back to environment variable if auth manager fails
-                    std::env::var(auth_ref)?
+                    std::env::var(auth_ref).map_err(|_| {
+                        anyhow::anyhow!(
+                            "Auth manager unavailable and credential '{}' not found in environment",
+                            auth_ref.chars().take(8).collect::<String>() + "..."
+                        )
+                    })?
                 }
             }
         } else {
@@ -242,13 +260,23 @@ impl ProviderFactory for AnthropicProviderFactory {
                         Ok(cred) => cred.value,
                         Err(_) => {
                             // Fall back to environment variable
-                            std::env::var(auth_ref)?
+                            std::env::var(auth_ref).map_err(|_| {
+                                anyhow::anyhow!(
+                                    "Credential '{}' not found in auth manager or environment",
+                                    auth_ref.chars().take(8).collect::<String>() + "..."
+                                )
+                            })?
                         }
                     }
                 }
                 Err(_) => {
                     // Fall back to environment variable if auth manager fails
-                    std::env::var(auth_ref)?
+                    std::env::var(auth_ref).map_err(|_| {
+                        anyhow::anyhow!(
+                            "Auth manager unavailable and credential '{}' not found in environment",
+                            auth_ref.chars().take(8).collect::<String>() + "..."
+                        )
+                    })?
                 }
             }
         } else {
@@ -331,6 +359,10 @@ mod tests {
             default_model: None,
             timeout_secs: None,
             max_retries: None,
+            initial_retry_delay_ms: None,
+            backoff_factor: None,
+            max_retry_delay_ms: None,
+            jitter_factor: None,
             metadata: None,
         };
 
@@ -344,6 +376,10 @@ mod tests {
             default_model: None,
             timeout_secs: None,
             max_retries: None,
+            initial_retry_delay_ms: None,
+            backoff_factor: None,
+            max_retry_delay_ms: None,
+            jitter_factor: None,
             metadata: None,
         };
 

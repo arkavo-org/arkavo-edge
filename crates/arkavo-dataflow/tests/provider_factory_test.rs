@@ -31,6 +31,10 @@ async fn test_ollama_factory_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
     assert!(factory.validate_config(&config).await.is_err());
@@ -43,6 +47,10 @@ async fn test_ollama_factory_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
     assert!(factory.validate_config(&config).await.is_err());
@@ -55,6 +63,10 @@ async fn test_ollama_factory_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
     assert!(factory.validate_config(&config).await.is_err());
@@ -67,6 +79,10 @@ async fn test_ollama_factory_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
     assert!(factory.validate_config(&config).await.is_ok());
@@ -79,6 +95,10 @@ async fn test_ollama_factory_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
     assert!(factory.validate_config(&config).await.is_ok());
@@ -112,6 +132,10 @@ async fn test_provider_creation() {
         default_model: Some("llama3.2:latest".to_string()),
         timeout_secs: Some(30),
         max_retries: Some(3),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -127,6 +151,10 @@ async fn test_provider_creation() {
         default_model: Some("gpt-4".to_string()),
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -147,6 +175,10 @@ async fn test_provider_creation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -167,6 +199,10 @@ fn test_provider_config_serialization() {
         default_model: Some("llama3.2:latest".to_string()),
         timeout_secs: Some(30),
         max_retries: Some(3),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 

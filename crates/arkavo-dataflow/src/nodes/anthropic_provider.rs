@@ -164,6 +164,10 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: AnthropicConfig) -> ProviderResult<Self> {
+        // Validate base URL
+        url::Url::parse(&config.base_url)
+            .map_err(|e| anyhow::anyhow!("Invalid base URL '{}': {}", config.base_url, e))?;
+
         let http_config = HttpClientConfig {
             base_url: config.base_url.clone(),
             auth_token: None, // Anthropic uses a custom header
@@ -407,7 +411,8 @@ impl Provider for AnthropicProvider {
         }
 
         // Convert response body to stream of parsed events
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Use bounded channel to prevent memory exhaustion under load
+        let (tx, rx) = tokio::sync::mpsc::channel(1024);
 
         // Spawn task to process the response stream
         tokio::spawn(async move {
@@ -427,22 +432,38 @@ impl Provider for AnthropicProvider {
                                     match event {
                                         StreamEvent::ContentBlockDelta { delta, .. } => {
                                             if let Some(text) = delta.text {
-                                                let _ = tx.send(Ok(StreamResponse {
-                                                    content: text,
-                                                    done: false,
-                                                }));
+                                                if tx
+                                                    .send(Ok(StreamResponse {
+                                                        content: text,
+                                                        done: false,
+                                                    }))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    break; // Receiver dropped
+                                                }
                                             }
                                         }
                                         StreamEvent::MessageStop => {
-                                            let _ = tx.send(Ok(StreamResponse {
-                                                content: String::new(),
-                                                done: true,
-                                            }));
+                                            if tx
+                                                .send(Ok(StreamResponse {
+                                                    content: String::new(),
+                                                    done: true,
+                                                }))
+                                                .await
+                                                .is_err()
+                                            {
+                                                break; // Receiver dropped
+                                            }
                                         }
                                         StreamEvent::Error { error } => {
-                                            let _ = tx.send(Err(arkavo_llm::Error::Provider(
-                                                format!("Stream error: {}", error.message),
-                                            )));
+                                            let _ = tx
+                                                .send(Err(arkavo_llm::Error::Provider(format!(
+                                                    "Stream error: {}",
+                                                    error.message
+                                                ))))
+                                                .await;
+                                            break;
                                         }
                                         _ => {} // Ignore other event types
                                     }
@@ -456,16 +477,16 @@ impl Provider for AnthropicProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(Err(arkavo_llm::Error::Provider(e.to_string())));
+                        let _ = tx
+                            .send(Err(arkavo_llm::Error::Provider(e.to_string())))
+                            .await;
                         break;
                     }
                 }
             }
         });
 
-        Ok(Box::new(
-            tokio_stream::wrappers::UnboundedReceiverStream::new(rx),
-        ))
+        Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
 
     fn name(&self) -> &'static str {

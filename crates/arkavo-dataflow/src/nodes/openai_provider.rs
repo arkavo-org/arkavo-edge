@@ -121,6 +121,10 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     pub fn new(config: OpenAIConfig) -> ProviderResult<Self> {
+        // Validate base URL
+        url::Url::parse(&config.base_url)
+            .map_err(|e| anyhow::anyhow!("Invalid base URL '{}': {}", config.base_url, e))?;
+
         let http_config = HttpClientConfig {
             base_url: config.base_url.clone(),
             auth_token: Some(config.api_key.clone()),
@@ -345,8 +349,8 @@ impl Provider for OpenAIProvider {
         }
 
         // Convert response body to stream of parsed events
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Use bounded channel to prevent memory exhaustion under load
+        let (tx, rx) = tokio::sync::mpsc::channel(1024);
 
         // Spawn task to process the response stream
         tokio::spawn(async move {
@@ -363,18 +367,30 @@ impl Provider for OpenAIProvider {
                         for line in &lines {
                             if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
-                                    let _ = tx.send(Ok(StreamResponse {
-                                        content: String::new(),
-                                        done: true,
-                                    }));
+                                    if tx
+                                        .send(Ok(StreamResponse {
+                                            content: String::new(),
+                                            done: true,
+                                        }))
+                                        .await
+                                        .is_err()
+                                    {
+                                        break; // Receiver dropped
+                                    }
                                 } else if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data)
                                 {
                                     if let Some(choice) = chunk.choices.first() {
                                         if let Some(content) = &choice.delta.content {
-                                            let _ = tx.send(Ok(StreamResponse {
-                                                content: content.clone(),
-                                                done: choice.finish_reason.is_some(),
-                                            }));
+                                            if tx
+                                                .send(Ok(StreamResponse {
+                                                    content: content.clone(),
+                                                    done: choice.finish_reason.is_some(),
+                                                }))
+                                                .await
+                                                .is_err()
+                                            {
+                                                break; // Receiver dropped
+                                            }
                                         }
                                     }
                                 }
@@ -387,16 +403,16 @@ impl Provider for OpenAIProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(Err(arkavo_llm::Error::Provider(e.to_string())));
+                        let _ = tx
+                            .send(Err(arkavo_llm::Error::Provider(e.to_string())))
+                            .await;
                         break;
                     }
                 }
             }
         });
 
-        Ok(Box::new(
-            tokio_stream::wrappers::UnboundedReceiverStream::new(rx),
-        ))
+        Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
 
     fn name(&self) -> &'static str {

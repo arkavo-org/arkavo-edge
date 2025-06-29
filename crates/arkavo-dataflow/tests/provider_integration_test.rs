@@ -28,6 +28,10 @@ async fn test_ollama_provider_creation() {
         default_model: Some("llama3.2:latest".to_string()),
         timeout_secs: Some(30),
         max_retries: Some(3),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -50,6 +54,10 @@ async fn test_openai_provider_validation() {
         default_model: Some("gpt-4".to_string()),
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -71,6 +79,10 @@ async fn test_anthropic_provider_validation() {
         default_model: None,
         timeout_secs: None,
         max_retries: None,
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 

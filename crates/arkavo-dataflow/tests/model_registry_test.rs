@@ -52,6 +52,10 @@ fn test_model_info_serialization() {
         version: Some("1.0".to_string()),
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -91,6 +95,10 @@ async fn test_model_search_by_capability() {
         version: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
@@ -115,6 +123,10 @@ async fn test_model_search_by_capability() {
         version: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
         metadata: None,
     };
 
