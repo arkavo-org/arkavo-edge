@@ -30,6 +30,7 @@ tempfile = "3.15"
 lazy-regex = "3.3"
 flate2 = "1.0"
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-mcp = { path = "../arkavo-mcp" }
 tokio-stream = "0.1"
 tracing = "0.1"
 
