@@ -43,8 +43,10 @@
 //! - `nl` (default): Enables natural language parsing capabilities
 //! - `sandbox` (default): Enables secure code execution sandbox
 
+pub mod agent_interface;
 pub mod dsl;
 pub mod engine;
+pub mod mcp_tools;
 #[cfg(feature = "nl")]
 pub mod nl;
 pub mod nodes;

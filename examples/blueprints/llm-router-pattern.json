@@ -1,0 +1,141 @@
+{
+  "version": "1.0.0",
+  "name": "llm-router-pattern",
+  "description": "Pipeline demonstrating LLM-based routing based on content classification",
+  "nodes": [
+    {
+      "id": "input_stream",
+      "kind": "source",
+      "params": {
+        "type": "webhook_source",
+        "port": 8082,
+        "path": "/classify"
+      }
+    },
+    {
+      "id": "classifier",
+      "kind": "transform",
+      "params": {
+        "type": "llm_transform",
+        "provider": "local-ollama",
+        "model": "qwen3:0.6b",
+        "prompt": "Classify the following text into one category: technical, business, or general. Respond with only the category name.\n\nText: {{input}}",
+        "temperature": 0.1,
+        "max_tokens": 10
+      }
+    },
+    {
+      "id": "router",
+      "kind": "router",
+      "params": {
+        "type": "conditional_router",
+        "field": "llm_response"
+      }
+    },
+    {
+      "id": "technical_processor",
+      "kind": "transform",
+      "params": {
+        "type": "llm_transform",
+        "provider": "local-ollama",
+        "model": "devstral:latest",
+        "prompt": "Provide a technical analysis of: {{input}}",
+        "temperature": 0.3
+      }
+    },
+    {
+      "id": "business_processor",
+      "kind": "transform",
+      "params": {
+        "type": "llm_transform",
+        "provider": "local-ollama",
+        "model": "llama3.2:latest",
+        "prompt": "Provide a business impact analysis of: {{input}}",
+        "temperature": 0.5
+      }
+    },
+    {
+      "id": "general_processor",
+      "kind": "transform",
+      "params": {
+        "type": "llm_transform",
+        "provider": "local-ollama",
+        "model": "qwen3:latest",
+        "prompt": "Summarize the following text: {{input}}",
+        "temperature": 0.7
+      }
+    },
+    {
+      "id": "output_sink",
+      "kind": "sink",
+      "params": {
+        "type": "console_sink",
+        "format": "pretty"
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "input_stream",
+      "to": "classifier"
+    },
+    {
+      "from": "classifier",
+      "to": "router"
+    },
+    {
+      "from": "router",
+      "to": "technical_processor",
+      "rule": {
+        "type": "filter",
+        "conditions": [
+          {
+            "field": "llm_response",
+            "operator": "contains",
+            "value": "technical"
+          }
+        ]
+      }
+    },
+    {
+      "from": "router",
+      "to": "business_processor",
+      "rule": {
+        "type": "filter",
+        "conditions": [
+          {
+            "field": "llm_response",
+            "operator": "contains",
+            "value": "business"
+          }
+        ]
+      }
+    },
+    {
+      "from": "router",
+      "to": "general_processor",
+      "rule": {
+        "type": "filter",
+        "conditions": [
+          {
+            "field": "llm_response",
+            "operator": "contains",
+            "value": "general"
+          }
+        ]
+      }
+    },
+    {
+      "from": "technical_processor",
+      "to": "output_sink"
+    },
+    {
+      "from": "business_processor",
+      "to": "output_sink"
+    },
+    {
+      "from": "general_processor",
+      "to": "output_sink"
+    }
+  ]
+}

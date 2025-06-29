@@ -25,10 +25,13 @@ async-trait = "0.1"
 dashmap = "6.1"
 futures = "0.3"
 thiserror = "2.0"
-once_cell = "1.20"
 tempfile = "3.15"
 lazy-regex = "3.3"
 flate2 = "1.0"
+arkavo-llm = { path = "../arkavo-llm" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+tokio-stream = "0.1"
+tracing = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

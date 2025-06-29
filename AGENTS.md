@@ -32,7 +32,7 @@ cargo test
 # Run specific test
 cargo test test_name
 
-# Code quality  
+# Code quality
 cargo clippy
 
 # Format code
@@ -46,14 +46,14 @@ cargo doc --open
 
 Arkavo Edge consists of several core components:
 
-1. **CLI Core**: Command parser and multistep agent loop
-2. **Terminal UI**: GPU-accelerated terminal integration
-3. **Repository Mapper**: Builds a semantic map of repositories and tracks changed files
-4. **Git Integration**: Handles auto-commit, branch management, and unified-diff previews
-5. **Protocol Adapters**: MCP & A2A client implementations
-6. **Encryption**: OpenTDF wrapping with local KMS support
-7. **Edge Vault CE**: Web UI, CRUD APIs, and SQLite driver
-8. **Test Harness**: Local test runner adapter for various languages
+1.  **CLI Core**: Command parser and multistep agent loop
+2.  **Terminal UI**: GPU-accelerated terminal integration
+3.  **Repository Mapper**: Builds a semantic map of repositories and tracks changed files
+4.  **Git Integration**: Handles auto-commit, branch management, and unified-diff previews
+5.  **Protocol Adapters**: MCP & A2A client implementations
+6.  **Encryption**: OpenTDF wrapping with local KMS support
+7.  **Edge Vault CE**: Web UI, CRUD APIs, and SQLite driver
+8.  **Test Harness**: Local test runner adapter for various languages
 
 ## Code Organization
 
@@ -65,7 +65,7 @@ Arkavo Edge consists of several core components:
 - **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
 - **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
 - **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
-- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability.  Do not use generic names as a catch-all.
+- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability. Do not use generic names as a catch-all.
 
 ## Documentation and Test Organization
 
@@ -75,7 +75,7 @@ Arkavo Edge consists of several core components:
   - `REQUIREMENTS.md` - Project requirements
   - `THIRD-PARTY-LICENSES.md` - License information
   - Crate-specific `README.md` files remain in their respective crate directories
-- **Test files**: 
+- **Test files**:
   - Integration tests should be placed in the `tests/` directory at the crate level
   - Unit tests should remain as inline `#[cfg(test)]` modules in source files (standard Rust convention)
   - Temporary test scripts or debugging utilities should be removed rather than kept in the repository
@@ -108,16 +108,18 @@ The project follows these quality standards:
 
 When working with this repository:
 
-1. Initialize repo if absent
-2. Create feature branches as `feature/<feature-name>`
+1.  Initialize repo if absent
+2.  Create feature branches as `feature/<feature-name>`
 
 ## Portability
 
 The project targets:
+
 - macOS (arm64)
 - Linux (x64/aarch64)
 
 All implementations must work across:
+
 - ✅ On simulators
 - ✅ On real devices (with proper signing)
 - ✅ Across different user home directories
@@ -126,30 +128,34 @@ All implementations must work across:
 
 Avoid hardcoded paths, platform-specific assumptions, or environment-dependent configurations. Use relative paths, dynamic discovery, and embedded resources where possible.
 
-## AI Collaboration Guidance
+## AI-Driven Configuration
 
-- This tool is for a superintelligent AI - all work should be done directly with the tool with supervision from the superintelligent AI, a human will do very high level guidance
+The configuration of Arkavo Edge is a dynamic process handled by the AI agent at runtime, rather than through static files, command-line parameters, or environment variables set by a human user. The agent configures its operations through a combination of inquiry and observation:
+
+- **Interactive Dialogue with the User:** When the agent requires input or needs to make a decision with multiple valid options, it will directly ask the human supervisor for guidance. For example, instead of requiring a pre-set configuration for a new feature branch, the agent would ask, "What should I name the feature branch for this task?" This conversational approach makes configuration contextual and task-specific.
+
+- **Environmental and Capability Awareness:** The agent autonomously assesses its environment to gather necessary configuration details. It can detect the operating system, understand the current state of the Git repository, and map the codebase. Furthermore, the agent is aware of its own compiled capabilities (e.g., whether it was built with `embeddings` support) and will adjust its available actions and strategies accordingly, without needing to be explicitly told which version is running.
 
 ## Development Principles
 
-- Keep required third-party tools to a minimum.  Zero configuration is required for humans.
+- Keep required third-party tools to a minimum. Zero configuration is required for humans.
 
 ## Memories
 
 - Faking success is worse than an honest failure
 - do not use conventional commits
 - A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
-    •    You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
-    •    This includes trying to invoke Homebrew or similar to install dependencies at runtime.
-    •    Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
+  - You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
+  - This includes trying to invoke Homebrew or similar to install dependencies at runtime.
+  - Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
 - **IMPORTANT: simctl does NOT support tap/touch/swipe commands**. The following commands are INVALID and do not exist:
-    • `xcrun simctl io <device> tap <x> <y>` - DOES NOT EXIST
-    • `xcrun simctl io <device> touch <x>,<y>` - DOES NOT EXIST  
-    • `xcrun simctl io <device> swipe` - DOES NOT EXIST
-    • `xcrun simctl io <device> sendkey` - DOES NOT EXIST
-    • Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
-    • For UI automation use: IDB, XCTest, or AppleScript - NOT simctl
+  - `xcrun simctl io <device> tap <x> <y>` - DOES NOT EXIST
+  - `xcrun simctl io <device> touch <x>,<y>` - DOES NOT EXIST
+  - `xcrun simctl io <device> swipe` - DOES NOT EXIST
+  - `xcrun simctl io <device> sendkey` - DOES NOT EXIST
+  - Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
+  - For UI automation use: IDB, XCTest, or AppleScript - NOT simctl
 - run clippy and cargo fmt before each git push
 - ProTip! Add .patch or .diff to the end of URLs for Git's plaintext views.
-- keep PR titles short and not "feat:".  the reason is this is shown prominently in Github next to files and folders
-- each feature branch needs to bump the appropriate semver version.  No release branches
+- keep PR titles short and not "feat:". the reason is this is shown prominently in Github next to files and folders
+- each feature branch needs to bump the appropriate semver version. No release branches
