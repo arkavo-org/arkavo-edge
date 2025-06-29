@@ -30,6 +30,7 @@ arkavo-llm = { path = "../arkavo-llm" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-test = { path = "../arkavo-test" }
 tokio-stream = "0.1"
 regex = "1.11"
 
