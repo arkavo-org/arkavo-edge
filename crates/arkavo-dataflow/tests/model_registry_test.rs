@@ -1,6 +1,4 @@
-use arkavo_dataflow::nodes::model_registry::{
-    ModelCapabilities, ModelInfo, get_default_models,
-};
+use arkavo_dataflow::nodes::model_registry::{ModelCapabilities, ModelInfo, get_default_models};
 use chrono::Utc;
 
 #[tokio::test]

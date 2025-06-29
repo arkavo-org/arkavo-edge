@@ -1,7 +1,7 @@
 mod common;
 
-use arkavo_dataflow::nodes::{
-    provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType},
+use arkavo_dataflow::nodes::provider_factory::{
+    ProviderConfig, ProviderFactoryRegistry, ProviderType,
 };
 use arkavo_llm::{Message, Role};
 

@@ -8,7 +8,7 @@ The shared HTTP client infrastructure provides automatic retry logic with expone
 
 | Parameter | Default Value | Description |
 |-----------|--------------|-------------|
-| Initial Delay | 100ms | First retry delay |
+| Initial Delay | 1000ms | First retry delay |
 | Max Retries | 3 | Maximum number of retry attempts |
 | Backoff Factor | 2.0 | Exponential growth factor |
 | Max Delay | 30s | Maximum delay between retries |
@@ -23,10 +23,10 @@ jittered_delay = delay ± (delay * jitter_factor)
 ```
 
 Example retry sequence:
-- Attempt 1: ~100ms (90-110ms with jitter)
-- Attempt 2: ~200ms (180-220ms with jitter)  
-- Attempt 3: ~400ms (360-440ms with jitter)
-- Attempt 4: ~800ms (720-880ms with jitter)
+- Attempt 1: ~1000ms (900-1100ms with jitter)
+- Attempt 2: ~2000ms (1800-2200ms with jitter)  
+- Attempt 3: ~4000ms (3600-4400ms with jitter)
+- Attempt 4: ~8000ms (7200-8800ms with jitter)
 
 ### Provider-Specific Settings
 
@@ -59,7 +59,11 @@ Retry settings can be customized per provider in the Blueprint node configuratio
     "provider": "openai",
     "model": "gpt-4",
     "timeout_secs": 120,
-    "max_retries": 5
+    "max_retries": 5,
+    "initial_retry_delay_ms": 500,
+    "backoff_factor": 1.5,
+    "max_retry_delay_ms": 15000,
+    "jitter_factor": 0.2
   }
 }
 ```
