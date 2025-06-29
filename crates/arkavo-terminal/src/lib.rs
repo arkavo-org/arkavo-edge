@@ -79,17 +79,84 @@ pub async fn run() -> Result<()> {
 
         while let Some(request) = ui_rx.recv().await {
             let llm_tx = llm_tx.clone();
-            let client = client.clone();
             let mut messages_clone = messages.clone();
 
             // Add user message to context
             let user_message = Message::user(&request.prompt);
             messages_clone.push(user_message.clone());
 
+            // Parse the model name to extract server and actual model
+            let (server_url, actual_model) =
+                if let Some((server_prefix, model)) = request.model_name.split_once('/') {
+                    // Model has server prefix - need to resolve the URL
+                    let url = if server_prefix == "localhost" {
+                        "http://localhost:11434".to_string()
+                    } else if server_prefix.starts_with("server") {
+                        // Look up saved server configuration from memory storage
+                        if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
+                            if let Ok(all_configs) = storage
+                                .search("arkavo_ollama_server_config", 20, Some("config"))
+                                .await
+                            {
+                                // No need to filter since we searched for the specific type
+                                let ollama_configs: Vec<_> = all_configs
+                                    .into_iter()
+                                    .filter(|config| {
+                                        config.memory.content != "CLEARED"
+                                            && config.memory.content != "http://localhost:11434"
+                                    })
+                                    .collect();
+
+                                // Extract server number from prefix (e.g., "server1" -> 1)
+                                if let Some(num_str) = server_prefix.strip_prefix("server") {
+                                    if let Ok(idx) = num_str.parse::<usize>() {
+                                        if idx > 0 && idx <= ollama_configs.len() {
+                                            ollama_configs[idx - 1].memory.content.clone()
+                                        } else {
+                                            "http://localhost:11434".to_string()
+                                        }
+                                    } else {
+                                        "http://localhost:11434".to_string()
+                                    }
+                                } else {
+                                    "http://localhost:11434".to_string()
+                                }
+                            } else {
+                                "http://localhost:11434".to_string()
+                            }
+                        } else {
+                            "http://localhost:11434".to_string()
+                        }
+                    } else {
+                        // Unknown prefix, use localhost as fallback
+                        "http://localhost:11434".to_string()
+                    };
+                    (url, model.to_string())
+                } else {
+                    // No server prefix, use default
+                    (
+                        "http://localhost:11434".to_string(),
+                        request.model_name.clone(),
+                    )
+                };
+
+            // Debug log the resolved server and model
+            eprintln!(
+                "[LLM] Using server: {} with model: {}",
+                server_url, actual_model
+            );
+
+            // Create a new Ollama client with the specific model and server
+            let model_specific_client =
+                arkavo_llm::LlmClient::new(Box::new(arkavo_llm::ollama::OllamaClient::new(
+                    Some(server_url.clone()),
+                    Some(actual_model.clone()),
+                )));
+
             // Spawn a task for each request
             tokio::spawn(async move {
-                // Get streaming response from LLM
-                match client.stream(messages_clone.clone()).await {
+                // Get streaming response from LLM with the user-selected model
+                match model_specific_client.stream(messages_clone.clone()).await {
                     Ok(mut stream) => {
                         // Send start streaming signal
                         let _ = llm_tx

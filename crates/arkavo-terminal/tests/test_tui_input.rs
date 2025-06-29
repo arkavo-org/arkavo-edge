@@ -97,9 +97,17 @@ mod tui_input_tests {
     fn test_model_selection() {
         let mut app = App::new();
 
-        // Test initial model selection
+        // Test initial state (models are fetched dynamically now)
         assert_eq!(app.selected_model, 0);
-        assert!(!app.available_models.is_empty());
+        assert!(app.available_models.is_empty());
+        assert!(app.active_model.is_none());
+
+        // Simulate models being fetched
+        app.available_models = vec![
+            "localhost/llama3".to_string(),
+            "server1/devstral".to_string(),
+            "server2/deepseek".to_string(),
+        ];
 
         // Test cycling through models
         let model_count = app.available_models.len();
@@ -110,6 +118,10 @@ mod tui_input_tests {
         app.selected_model = model_count - 1;
         app.selected_model = (app.selected_model + 1) % model_count;
         assert_eq!(app.selected_model, 0);
+
+        // Test active model selection
+        app.active_model = Some(app.available_models[app.selected_model].clone());
+        assert_eq!(app.active_model, Some("localhost/llama3".to_string()));
     }
 
     #[test]
