@@ -176,7 +176,7 @@ impl VimInputField {
         }
     }
 
-    fn execute_command(&mut self, command: &str) {
+    fn execute_command(&self, command: &str) {
         match command {
             "q" | "quit" => {}
             "w" | "write" => {}

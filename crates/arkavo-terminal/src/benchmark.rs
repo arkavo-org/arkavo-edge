@@ -118,7 +118,7 @@ fn create_test_diff_view(line_count: usize) -> DiffView {
     diff
 }
 
-fn render_chat_to_buffer(chat: &mut ChatView, _buffer: &mut Buffer, _area: Rect) {
+fn render_chat_to_buffer(chat: &ChatView, _buffer: &mut Buffer, _area: Rect) {
     // Simulate render without actual frame
     use crate::renderer::Renderable;
     // This would normally call chat.render(frame, area)
@@ -126,7 +126,7 @@ fn render_chat_to_buffer(chat: &mut ChatView, _buffer: &mut Buffer, _area: Rect)
     let _ = chat.needs_redraw();
 }
 
-fn render_diff_to_buffer(diff: &mut DiffView, _buffer: &mut Buffer, _area: Rect) {
+fn render_diff_to_buffer(diff: &DiffView, _buffer: &mut Buffer, _area: Rect) {
     // Simulate render without actual frame
     use crate::renderer::Renderable;
     // This would normally call diff.render(frame, area)

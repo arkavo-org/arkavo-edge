@@ -317,7 +317,7 @@ impl Renderable for ChatView {
 
 // Helper for text wrapping
 pub(crate) mod textwrap {
-    pub fn wrap(text: &str, width: usize) -> Vec<String> {
+    pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
         let mut result = Vec::new();
         let mut current_line = String::new();
 
