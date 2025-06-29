@@ -5,7 +5,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ProviderError {
     /// Rate limit exceeded with optional retry-after duration
-    #[error("Rate limit exceeded{}", .retry_after.map(|d| format!(" (retry after {:?})", d)).unwrap_or_default())]
+    #[error("Rate limit exceeded{}", .retry_after.map(|d| format!(" (retry after {d:?})")).unwrap_or_default())]
     RateLimited {
         retry_after: Option<Duration>,
         message: Option<String>,
