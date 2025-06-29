@@ -125,7 +125,8 @@ impl EntityRecognizer {
 
         // Third pass: Look for quoted entities
         // But skip quoted strings that are likely condition values
-        let quoted_regex = regex::Regex::new(r#"["']([^"']+)["']"#)?;
+        use lazy_regex::regex;
+        let quoted_regex = regex!(r#"["']([^"']+)["']"#);
         let condition_keywords = ["contains", "equals", "matches", "starts with", "ends with"];
 
         for cap in quoted_regex.captures_iter(input) {
@@ -164,8 +165,8 @@ impl EntityRecognizer {
         for (i, word) in words_lower.iter().enumerate() {
             if word == "all" && i + 1 < words_lower.len() {
                 let next_word = &words_lower[i + 1];
-                let entity_name = format!("all_{}", next_word);
-                let position = input_lower.find(&format!("all {}", next_word)).unwrap_or(0);
+                let entity_name = format!("all_{next_word}");
+                let position = input_lower.find(&format!("all {next_word}")).unwrap_or(0);
 
                 // Don't duplicate if already found
                 if !entities.iter().any(|e| e.name == entity_name) {
@@ -216,9 +217,6 @@ impl Default for EntityRecognizer {
         Self::new()
     }
 }
-
-// Re-export regex for entity extraction
-pub use regex;
 
 #[cfg(test)]
 mod tests {

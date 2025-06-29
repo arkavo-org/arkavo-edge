@@ -169,6 +169,11 @@ pub const BLUEPRINT_SCHEMA: &str = r##"{
     }
 }"##;
 
+/// Validates a JSON value against the blueprint schema.
+///
+/// # Panics
+///
+/// Panics if the embedded BLUEPRINT_SCHEMA is not valid JSON.
 pub fn validate_json_schema(json: &Value) -> Result<(), Vec<String>> {
     let schema =
         serde_json::from_str(BLUEPRINT_SCHEMA).expect("Blueprint schema should be valid JSON");
@@ -186,6 +191,11 @@ pub fn validate_json_schema(json: &Value) -> Result<(), Vec<String>> {
     }
 }
 
+/// Returns the blueprint schema as a JSON value.
+///
+/// # Panics
+///
+/// Panics if the embedded BLUEPRINT_SCHEMA is not valid JSON.
 pub fn get_schema_json() -> Value {
     serde_json::from_str(BLUEPRINT_SCHEMA).expect("Blueprint schema should be valid JSON")
 }

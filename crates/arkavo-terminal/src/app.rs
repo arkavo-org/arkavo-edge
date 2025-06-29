@@ -17,7 +17,7 @@ use crate::event::{AppEvent, EventHandler};
 use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{TaskManager, chat::ChatView, code::CodeView, debug::DebugView, diff::DiffView};
+use crate::ui::{TaskManager, chat::ChatView, code::CodeView, dataflow::DataflowView, debug::DebugView, diff::DiffView};
 use crate::vim::VimState;
 use crate::{LlmRequest, LlmResponse};
 
@@ -26,6 +26,7 @@ pub enum ViewMode {
     Code,
     Diff,
     Debug,
+    Dataflow,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -49,6 +50,7 @@ pub struct App {
     pub code_view: CodeView,
     pub diff_view: DiffView,
     pub debug_view: DebugView,
+    pub dataflow_view: DataflowView,
     pub thinking_view: ChatView, // Reuse ChatView for chain-of-thought display
     pub event_handler: EventHandler,
     pub ui_tx: Option<mpsc::Sender<LlmRequest>>,
@@ -87,6 +89,7 @@ impl App {
             code_view: CodeView::new(),
             diff_view: DiffView::new(),
             debug_view: DebugView::new(),
+            dataflow_view: DataflowView::new(),
             thinking_view,
             event_handler: EventHandler::new(),
             ui_tx: None,
@@ -134,6 +137,7 @@ impl App {
             code_view: CodeView::new(),
             diff_view: DiffView::new(),
             debug_view: DebugView::new(),
+            dataflow_view: DataflowView::new(),
             thinking_view,
             event_handler: EventHandler::new(),
             ui_tx: Some(ui_tx),
@@ -798,6 +802,7 @@ Scrolling (when in scroll mode):
             ViewMode::Code => self.code_view.render(frame, chunks[1]),
             ViewMode::Diff => self.diff_view.render(frame, chunks[1]),
             ViewMode::Debug => self.debug_view.render(frame, chunks[1]),
+            ViewMode::Dataflow => self.dataflow_view.render(frame, chunks[1]),
         }
 
         // Render performance metrics
@@ -879,7 +884,8 @@ Scrolling (when in scroll mode):
             ViewMode::Chat => ViewMode::Code,
             ViewMode::Code => ViewMode::Diff,
             ViewMode::Diff => ViewMode::Debug,
-            ViewMode::Debug => ViewMode::Chat,
+            ViewMode::Debug => ViewMode::Dataflow,
+            ViewMode::Dataflow => ViewMode::Chat,
         };
     }
 
@@ -890,6 +896,7 @@ Scrolling (when in scroll mode):
                 ViewMode::Code => self.code_view.handle_event(event),
                 ViewMode::Diff => self.diff_view.handle_event(event),
                 ViewMode::Debug => self.debug_view.handle_event(event),
+                ViewMode::Dataflow => Ok(()), // Dataflow view doesn't handle events yet
             },
             LayoutMode::Portrait => match self.focused_pane {
                 FocusedPane::Chat => self.chat_view.handle_event(event),

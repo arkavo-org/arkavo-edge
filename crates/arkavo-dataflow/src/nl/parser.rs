@@ -98,7 +98,7 @@ impl NLParser {
                         link = link.with_rule(Rule::filter(parsed.conditions.clone()));
                     }
                     Intent::Transform => {
-                        if let Some(transform_type) = parsed.transform_type.clone() {
+                        if let Some(transform_type) = parsed.transform_type {
                             let transform = Transform {
                                 transform_type,
                                 params: parsed.parameters.clone(),
@@ -111,7 +111,7 @@ impl NLParser {
                     }
                     Intent::Split => {
                         // Would create a router node
-                        let router_id = format!("{}_router", source);
+                        let router_id = format!("{source}_router");
                         blueprint.add_node(Node::router(&router_id));
                         blueprint.add_link(Link::new(source, &router_id));
 
@@ -122,7 +122,7 @@ impl NLParser {
                     }
                     Intent::Merge => {
                         // Would create a merger node
-                        let merger_id = format!("{}_merger", target);
+                        let merger_id = format!("{target}_merger");
                         blueprint
                             .add_node(Node::transform(&merger_id).with_param("type", "merger"));
 

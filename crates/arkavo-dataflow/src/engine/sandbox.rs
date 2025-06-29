@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SandboxConfig {
     pub enable_network: bool,
     pub memory_limit_mb: Option<u64>,
@@ -51,11 +51,11 @@ impl Sandbox {
     #[cfg(target_os = "macos")]
     pub async fn execute_transform(
         &self,
-        _code: &str,
-        _input: serde_json::Value,
+        code: &str,
+        input: serde_json::Value,
     ) -> Result<serde_json::Value> {
         // macOS implementation using sandbox-exec
-        self.execute_macos_sandbox(_code, _input).await
+        self.execute_macos_sandbox(code, input).await
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -189,7 +189,8 @@ impl Sandbox {
         }
 
         for path in &self.config.allowed_paths {
-            profile.push_str(&format!("(allow file-write* (regex #\"^{}.*\"))\n", path));
+            use std::fmt::Write;
+            write!(profile, "(allow file-write* (regex #\"^{}.*\"))\n", path).unwrap();
         }
 
         profile

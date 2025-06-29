@@ -215,7 +215,7 @@ impl ConditionParser {
                     // Get field (word before operator)
                     let field = if op_pos > 1 {
                         words[op_pos - 1].to_string()
-                    } else if op_pos == 1 && words.len() > 0 {
+                    } else if op_pos == 1 && !words.is_empty() {
                         words[0].to_string()
                     } else {
                         "message".to_string() // Default field
@@ -280,15 +280,14 @@ impl ConditionParser {
 
     fn extract_quoted_value(&self, text: &str) -> Option<String> {
         // Look for single or double quoted strings
-        let single_quote = regex::Regex::new(r"'([^']+)'").ok()?;
-        let double_quote = regex::Regex::new(r#""([^"]+)""#).ok()?;
+        use lazy_regex::regex_captures;
 
-        if let Some(cap) = single_quote.captures(text) {
-            return cap.get(1).map(|m| m.as_str().to_string());
+        if let Some((_, content)) = regex_captures!(r"'([^']+)'", text) {
+            return Some(content.to_string());
         }
 
-        if let Some(cap) = double_quote.captures(text) {
-            return cap.get(1).map(|m| m.as_str().to_string());
+        if let Some((_, content)) = regex_captures!(r#""([^"]+)""#, text) {
+            return Some(content.to_string());
         }
 
         None

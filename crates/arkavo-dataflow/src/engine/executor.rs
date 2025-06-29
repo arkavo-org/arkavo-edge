@@ -7,10 +7,12 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 
+type OutputChannels = Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>;
+
 pub struct NodeExecutor {
     node: Node,
     receiver: Arc<RwLock<mpsc::Receiver<Message>>>,
-    outputs: Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>,
+    outputs: OutputChannels,
     config: Arc<crate::DataflowConfig>,
     task_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     metrics: Arc<RwLock<NodeMetrics>>,
@@ -21,7 +23,7 @@ impl Debug for NodeExecutor {
         f.debug_struct("NodeExecutor")
             .field("node", &self.node)
             .field("metrics", &self.metrics)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -70,14 +72,17 @@ impl NodeExecutor {
             Self::run_node(node, receiver, outputs, config, metrics).await;
         });
 
-        let mut task_handle = self.task_handle.write().await;
-        *task_handle = Some(handle);
+        {
+            let mut task_handle = self.task_handle.write().await;
+            *task_handle = Some(handle);
+        }
 
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
-        if let Some(handle) = self.task_handle.write().await.take() {
+        let handle = self.task_handle.write().await.take();
+        if let Some(handle) = handle {
             handle.abort();
         }
         Ok(())
@@ -90,7 +95,7 @@ impl NodeExecutor {
     async fn run_node(
         node: Node,
         receiver: Arc<RwLock<mpsc::Receiver<Message>>>,
-        outputs: Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>,
+        outputs: OutputChannels,
         _config: Arc<crate::DataflowConfig>,
         metrics: Arc<RwLock<NodeMetrics>>,
     ) {
@@ -109,11 +114,9 @@ impl NodeExecutor {
                 }
                 Some(Message::Control(ControlMessage::Flush)) => {
                     // Process any remaining messages
-                    continue;
                 }
                 Some(Message::Control(ControlMessage::Metrics)) => {
                     // Metrics are collected passively
-                    continue;
                 }
                 Some(Message::Data {
                     payload, metadata, ..
@@ -278,7 +281,7 @@ impl NodeExecutor {
                     false
                 }
             }
-            ConditionOperator::Equals => field_value.map_or(false, |v| v == &condition.value),
+            ConditionOperator::Equals => field_value == Some(&condition.value),
             ConditionOperator::Exists => field_value.is_some(),
             ConditionOperator::NotExists => field_value.is_none(),
             ConditionOperator::Gt => {

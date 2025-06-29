@@ -1,5 +1,52 @@
+#![deny(clippy::all)]
+
+//! # Arkavo Dataflow
+//!
+//! A comprehensive dataflow orchestration system that enables natural language-driven
+//! data pipeline creation with zero configuration.
+//!
+//! ## Overview
+//!
+//! This crate provides a complete dataflow engine with:
+//! - Structured DSL with JSON Schema validation
+//! - Natural language parser (with `nl` feature)
+//! - Security sandbox for safe execution (with `sandbox` feature)
+//! - Real-time metrics and performance monitoring
+//! - Blueprint version migration system
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use arkavo_dataflow::{DataflowEngine, DataflowConfig};
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     // Create engine with default config
+//!     let engine = DataflowEngine::new(DataflowConfig::default());
+//!     
+//!     // Create pipeline from natural language (requires `nl` feature)
+//!     #[cfg(feature = "nl")]
+//!     {
+//!         let pipeline_id = engine
+//!             .create_pipeline_from_nl("Connect input to output when message contains 'error'")
+//!             .await?;
+//!         
+//!         // Start the pipeline
+//!         engine.start_pipeline(pipeline_id).await?;
+//!     }
+//!     
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Features
+//!
+//! - `nl` (default): Enables natural language parsing capabilities
+//! - `sandbox` (default): Enables secure code execution sandbox
+
 pub mod dsl;
 pub mod engine;
+#[cfg(feature = "nl")]
 pub mod nl;
 pub mod nodes;
 
@@ -13,6 +60,8 @@ pub struct DataflowConfig {
     pub max_queue_size: usize,
     pub enable_metrics: bool,
     pub sandbox_enabled: bool,
+    #[cfg(feature = "sandbox")]
+    pub sandbox_config: Option<engine::sandbox::SandboxConfig>,
 }
 
 impl Default for DataflowConfig {
@@ -21,6 +70,8 @@ impl Default for DataflowConfig {
             max_queue_size: 1000,
             enable_metrics: true,
             sandbox_enabled: true,
+            #[cfg(feature = "sandbox")]
+            sandbox_config: None, // Uses SandboxConfig::default() when None
         }
     }
 }
@@ -39,13 +90,14 @@ impl DataflowEngine {
         }
     }
 
+    #[cfg(feature = "nl")]
     pub async fn create_pipeline_from_nl(&self, natural_language: &str) -> Result<Uuid> {
         let parser = nl::NLParser::new();
         let blueprint = parser.parse_to_blueprint(natural_language)?;
-        self.create_pipeline_from_blueprint(blueprint).await
+        self.create_pipeline_from_blueprint(blueprint)
     }
 
-    pub async fn create_pipeline_from_blueprint(&self, blueprint: dsl::Blueprint) -> Result<Uuid> {
+    pub fn create_pipeline_from_blueprint(&self, blueprint: dsl::Blueprint) -> Result<Uuid> {
         let pipeline = engine::Pipeline::from_blueprint(blueprint, self.config.clone())?;
         let id = pipeline.id();
         self.pipelines.insert(id, pipeline);
@@ -77,6 +129,45 @@ impl DataflowEngine {
             .iter()
             .map(|entry| (*entry.key(), entry.value().name()))
             .collect()
+    }
+
+    pub fn export_blueprint(&self, pipeline_id: Uuid) -> Result<String> {
+        let pipeline = self
+            .pipelines
+            .get(&pipeline_id)
+            .ok_or_else(|| anyhow::anyhow!("Pipeline not found"))?;
+
+        let blueprint = pipeline.to_blueprint();
+        let json = serde_json::to_string_pretty(&blueprint)?;
+        Ok(json)
+    }
+
+    pub fn export_blueprint_compressed(&self, pipeline_id: Uuid) -> Result<Vec<u8>> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let json = self.export_blueprint(pipeline_id)?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(json.as_bytes())?;
+        encoder.finish().map_err(Into::into)
+    }
+
+    pub fn import_blueprint(&self, json: &str) -> Result<Uuid> {
+        let blueprint: dsl::Blueprint = serde_json::from_str(json)?;
+        dsl::BlueprintValidator::validate(&blueprint)
+            .map_err(|errors| anyhow::anyhow!("Blueprint validation failed: {:?}", errors))?;
+        self.create_pipeline_from_blueprint(blueprint)
+    }
+
+    pub fn import_blueprint_compressed(&self, data: &[u8]) -> Result<Uuid> {
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+
+        let mut decoder = GzDecoder::new(data);
+        let mut json = String::new();
+        decoder.read_to_string(&mut json)?;
+        self.import_blueprint(&json)
     }
 }
 
