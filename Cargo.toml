@@ -11,7 +11,10 @@ members = [
     "crates/arkavo-test",
     "crates/arkavo-llm",
     "crates/arkavo-memory",
-    "crates/arkavo-mcp", "crates/arkavo-dataflow",
+    "crates/arkavo-mcp",
+    "crates/arkavo-mcp-core",
+    "crates/arkavo-mcp-runtime",
+    "crates/arkavo-dataflow",
 ]
 resolver = "2"
 

@@ -28,6 +28,8 @@ semver = { version = "1.0", features = ["serde"] }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
+arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
+arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 tokio-stream = "0.1"
 
 # For multi-terminal support
