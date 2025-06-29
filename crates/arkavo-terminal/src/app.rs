@@ -17,7 +17,10 @@ use crate::event::{AppEvent, EventHandler};
 use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
-use crate::ui::{TaskManager, chat::ChatView, code::CodeView, dataflow::DataflowView, debug::DebugView, diff::DiffView};
+use crate::ui::{
+    TaskManager, chat::ChatView, code::CodeView, dataflow::DataflowView, debug::DebugView,
+    diff::DiffView,
+};
 use crate::vim::VimState;
 use crate::{LlmRequest, LlmResponse};
 

@@ -19,9 +19,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "vault" => commands::vault::execute(&args[1..]),
         "dataflow" | "flow" => {
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { 
+            runtime.block_on(async {
                 use clap::Parser;
-                
+
                 #[derive(Parser)]
                 #[command(name = "dataflow")]
                 #[command(about = "Manage dataflow pipelines")]
@@ -29,9 +29,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     #[command(subcommand)]
                     command: commands::dataflow::DataflowCommand,
                 }
-                
-                let cli = Cli::parse_from(std::iter::once("dataflow").chain(args[1..].iter().map(|s| s.as_str())));
-                commands::dataflow::handle_dataflow_command(cli.command).await
+
+                let cli = Cli::parse_from(
+                    std::iter::once("dataflow").chain(args[1..].iter().map(|s| s.as_str())),
+                );
+                commands::dataflow::handle_dataflow_command(cli.command)
+                    .await
                     .map_err(|e| e.into())
             })
         }

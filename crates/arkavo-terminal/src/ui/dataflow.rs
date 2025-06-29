@@ -1,10 +1,10 @@
 use arkavo_dataflow::dsl::{Blueprint, NodeKind};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 use std::collections::HashMap;
 
@@ -41,27 +41,27 @@ impl DataflowView {
     /// Calculate node positions for rendering
     fn calculate_layout(&mut self) {
         self.node_positions.clear();
-        
+
         if let Some(blueprint) = &self.blueprint {
             let nodes = &blueprint.nodes;
             let node_count = nodes.len();
-            
+
             if node_count == 0 {
                 return;
             }
-            
+
             // Simple grid layout for now
             let cols = ((node_count as f32).sqrt().ceil()) as u16;
             let _rows = ((node_count as f32) / cols as f32).ceil() as u16;
-            
+
             for (idx, node) in nodes.iter().enumerate() {
                 let col = (idx as u16) % cols;
                 let row = (idx as u16) / cols;
-                
+
                 // Space nodes with padding
                 let x = col * 20 + 5;
                 let y = row * 6 + 2;
-                
+
                 self.node_positions.insert(node.id.clone(), (x, y));
             }
         }
@@ -72,10 +72,10 @@ impl DataflowView {
             .title(" Dataflow Pipeline ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White));
-        
+
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        
+
         if let Some(blueprint) = &self.blueprint {
             // Render nodes
             for node in &blueprint.nodes {
@@ -89,7 +89,7 @@ impl DataflowView {
                     self.render_node(frame, inner, node.id.as_str(), node_type, x, y);
                 }
             }
-            
+
             // Render links (connections)
             for link in &blueprint.links {
                 self.render_connection(frame, inner, &link.from, &link.to);
@@ -99,66 +99,73 @@ impl DataflowView {
             let message = Paragraph::new("No dataflow pipeline loaded")
                 .style(Style::default().fg(Color::DarkGray))
                 .alignment(Alignment::Center);
-            
+
             let centered_area = centered_rect(50, 20, inner);
             frame.render_widget(message, centered_area);
         }
     }
 
-    fn render_node(&self, frame: &mut Frame, area: Rect, id: &str, node_type: &str, x: u16, y: u16) {
+    fn render_node(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        id: &str,
+        node_type: &str,
+        x: u16,
+        y: u16,
+    ) {
         // Node dimensions
         let width = 15;
         let height = 3;
-        
+
         // Check bounds
         if x + width > area.width || y + height > area.height {
             return;
         }
-        
+
         let node_area = Rect {
             x: area.x + x,
             y: area.y + y,
             width,
             height,
         };
-        
+
         let is_selected = self.selected_node.as_ref() == Some(&id.to_string());
-        
+
         let style = if is_selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Cyan)
         };
-        
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .style(style);
-        
+
+        let block = Block::default().borders(Borders::ALL).style(style);
+
         let inner = block.inner(node_area);
         frame.render_widget(block, node_area);
-        
+
         // Render node content
         let content = vec![
             Line::from(Span::raw(node_type)),
             Line::from(Span::styled(id, Style::default().fg(Color::DarkGray))),
         ];
-        
-        let paragraph = Paragraph::new(content)
-            .alignment(Alignment::Center);
-        
+
+        let paragraph = Paragraph::new(content).alignment(Alignment::Center);
+
         frame.render_widget(paragraph, inner);
     }
 
     fn render_connection(&self, frame: &mut Frame, area: Rect, from: &str, to: &str) {
         let from_pos = self.node_positions.get(from);
         let to_pos = self.node_positions.get(to);
-        
+
         if let (Some(&(x1, y1)), Some(&(x2, y2))) = (from_pos, to_pos) {
             // Simple ASCII arrow for now
             // In a full implementation, this would draw proper lines
             let arrow_x = area.x + x1 + 15;
             let arrow_y = area.y + y1 + 1;
-            
+
             if arrow_x < area.right() && arrow_y < area.bottom() {
                 let arrow = if x2 > x1 {
                     "→"
@@ -169,7 +176,7 @@ impl DataflowView {
                 } else {
                     "↑"
                 };
-                
+
                 let span = Span::styled(arrow, Style::default().fg(Color::Green));
                 frame.render_widget(
                     Paragraph::new(Line::from(span)),
@@ -209,7 +216,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_dataflow::dsl::{Node, Link};
+    use arkavo_dataflow::dsl::{Link, Node};
 
     #[test]
     fn test_dataflow_view_creation() {
@@ -222,7 +229,7 @@ mod tests {
     #[test]
     fn test_set_blueprint() {
         let mut view = DataflowView::new();
-        
+
         let blueprint = Blueprint {
             version: semver::Version::new(1, 0, 0),
             name: Some("Test Pipeline".to_string()),
@@ -241,16 +248,14 @@ mod tests {
                     auth_ref: None,
                 },
             ],
-            links: vec![
-                Link {
-                    from: "node1".to_string(),
-                    to: "node2".to_string(),
-                    rule: None,
-                },
-            ],
+            links: vec![Link {
+                from: "node1".to_string(),
+                to: "node2".to_string(),
+                rule: None,
+            }],
             metadata: None,
         };
-        
+
         view.set_blueprint(blueprint);
         assert!(view.blueprint.is_some());
         assert_eq!(view.node_positions.len(), 2);
