@@ -13,6 +13,12 @@ impl HealthTool {
     }
 }
 
+impl Default for HealthTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Tool for HealthTool {
     async fn execute(&self, _params: Value) -> Result<Value> {
@@ -24,15 +30,14 @@ impl Tool for HealthTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
-                name: "health".to_string(),
-                description: "Check the health status of the MCP server".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {},
-                }),
-            });
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "health".to_string(),
+            description: "Check the health status of the MCP server".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+            }),
+        });
         &SCHEMA
     }
 }
