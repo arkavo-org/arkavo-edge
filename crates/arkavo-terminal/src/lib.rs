@@ -2,7 +2,6 @@ pub mod app;
 pub mod benchmark;
 pub mod event;
 pub mod helix;
-pub mod mcp_integration;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;
@@ -58,8 +57,8 @@ pub async fn run() -> Result<()> {
 
     // Spawn LLM handler task with proper Ollama integration
     tokio::spawn(async move {
-        use crate::mcp_integration::McpConnection;
         use arkavo_llm::Message;
+        use arkavo_test::mcp::mcp_connection::McpConnection;
         use tokio_stream::StreamExt;
 
         // Initialize LLM client using the same logic as chat command
@@ -82,22 +81,11 @@ pub async fn run() -> Result<()> {
         let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
             None
         } else {
-            let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-            let result = match mcp_url {
-                Some(url) => McpConnection::new_external(Some(url)),
-                None => McpConnection::new_in_process(),
-            };
+            let result = McpConnection::new_in_process();
 
             match result {
                 Ok(client) => {
-                    match &client {
-                        McpConnection::InProcess(_) => {
-                            eprintln!("✓ LLM handler using in-process MCP server")
-                        }
-                        McpConnection::External(_) => {
-                            eprintln!("✓ LLM handler connected to external MCP server")
-                        }
-                    }
+                    eprintln!("✓ LLM handler using in-process MCP server");
                     Some(client)
                 }
                 Err(e) => {
@@ -109,72 +97,65 @@ pub async fn run() -> Result<()> {
 
         // Build MCP tools information for system prompt
         let mcp_info = if let Some(ref client) = mcp_client {
-            match client.list_tools() {
-                Ok(tools) => {
-                    if tools.is_empty() {
-                        "\n\nMCP Integration: Enabled\nNo tools available yet.".to_string()
+            let tool_names = client.list_tools();
+            if tool_names.is_empty() {
+                "\n\nMCP Integration: Enabled\nNo tools available yet.".to_string()
+            } else {
+                let mut tool_info =
+                    String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
+
+                // Group tools by category
+                let mut device_tools = Vec::new();
+                let mut ui_tools = Vec::new();
+                let mut git_tools = Vec::new();
+                let mut memory_tools = Vec::new();
+                let mut other_tools = Vec::new();
+
+                for tool_name in &tool_names {
+                    let tool_desc = format!("- @{}", tool_name);
+
+                    if tool_name.contains("device") || tool_name.contains("simulator") {
+                        device_tools.push(tool_desc);
+                    } else if tool_name.contains("ui_") || tool_name.contains("screen") {
+                        ui_tools.push(tool_desc);
+                    } else if tool_name.contains("git_") {
+                        git_tools.push(tool_desc);
+                    } else if tool_name.contains("memory")
+                        || tool_name == "store_memory"
+                        || tool_name == "search_memory"
+                    {
+                        memory_tools.push(tool_desc);
                     } else {
-                        let mut tool_info =
-                            String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
-
-                        // Group tools by category
-                        let mut device_tools = Vec::new();
-                        let mut ui_tools = Vec::new();
-                        let mut git_tools = Vec::new();
-                        let mut memory_tools = Vec::new();
-                        let mut other_tools = Vec::new();
-
-                        for tool in &tools {
-                            let tool_desc = format!("- @{}: {}", tool.name, tool.description);
-
-                            if tool.name.contains("device") || tool.name.contains("simulator") {
-                                device_tools.push(tool_desc);
-                            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
-                                ui_tools.push(tool_desc);
-                            } else if tool.name.contains("git_") {
-                                git_tools.push(tool_desc);
-                            } else if tool.name.contains("memory")
-                                || tool.name == "store_memory"
-                                || tool.name == "search_memory"
-                            {
-                                memory_tools.push(tool_desc);
-                            } else {
-                                other_tools.push(tool_desc);
-                            }
-                        }
-
-                        if !device_tools.is_empty() {
-                            tool_info.push_str("\nDevice Management:\n");
-                            tool_info.push_str(&device_tools.join("\n"));
-                        }
-
-                        if !ui_tools.is_empty() {
-                            tool_info.push_str("\n\nUI Interaction:\n");
-                            tool_info.push_str(&ui_tools.join("\n"));
-                        }
-
-                        if !git_tools.is_empty() {
-                            tool_info.push_str("\n\nGit Tools:\n");
-                            tool_info.push_str(&git_tools.join("\n"));
-                        }
-
-                        if !memory_tools.is_empty() {
-                            tool_info.push_str("\n\nMemory Tools:\n");
-                            tool_info.push_str(&memory_tools.join("\n"));
-                        }
-
-                        if !other_tools.is_empty() {
-                            tool_info.push_str("\n\nOther Tools:\n");
-                            tool_info.push_str(&other_tools.join("\n"));
-                        }
-
-                        tool_info
+                        other_tools.push(tool_desc);
                     }
                 }
-                Err(e) => {
-                    eprintln!("Warning: Failed to list MCP tools: {}", e);
-                    "\n\nMCP Integration: Enabled (tool listing failed)".to_string()
+
+                if !device_tools.is_empty() {
+                    tool_info.push_str("\nDevice Management:\n");
+                    tool_info.push_str(&device_tools.join("\n"));
                 }
+
+                if !ui_tools.is_empty() {
+                    tool_info.push_str("\n\nUI Interaction:\n");
+                    tool_info.push_str(&ui_tools.join("\n"));
+                }
+
+                if !git_tools.is_empty() {
+                    tool_info.push_str("\n\nGit Tools:\n");
+                    tool_info.push_str(&git_tools.join("\n"));
+                }
+
+                if !memory_tools.is_empty() {
+                    tool_info.push_str("\n\nMemory Tools:\n");
+                    tool_info.push_str(&memory_tools.join("\n"));
+                }
+
+                if !other_tools.is_empty() {
+                    tool_info.push_str("\n\nOther Tools:\n");
+                    tool_info.push_str(&other_tools.join("\n"));
+                }
+
+                tool_info
             }
         } else {
             "\n\nMCP Integration: Disabled".to_string()

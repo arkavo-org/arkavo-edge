@@ -1,5 +1,5 @@
-use crate::mcp_integration::{McpConnection, Tool};
 use anyhow::Result;
+use arkavo_test::mcp::mcp_connection::McpConnection;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -112,7 +112,7 @@ pub struct App {
     pub configuration_mode: ConfigurationMode, // Configuration dialog state
     pub providers: Vec<ProviderInfo>, // All available providers and their status
     pub mcp_client: Option<McpConnection>, // MCP client for tools
-    pub mcp_tools: Vec<Tool>,         // Available MCP tools
+    pub mcp_tools: Vec<String>,       // Available MCP tool names
 }
 
 impl App {
@@ -300,39 +300,26 @@ impl App {
             return;
         }
 
-        let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-        let result = match mcp_url {
-            Some(url) => McpConnection::new_external(Some(url)),
-            None => McpConnection::new_in_process(),
-        };
+        let result = McpConnection::new_in_process();
 
         match result {
             Ok(client) => {
                 // List available tools
-                match client.list_tools() {
-                    Ok(tools) => {
-                        self.mcp_tools = tools.clone();
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Info,
-                            format!("[MCP] Connected with {} tools available", tools.len()),
-                        );
+                let tools = client.list_tools();
+                self.mcp_tools = tools.clone();
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Info,
+                    format!("[MCP] Connected with {} tools available", tools.len()),
+                );
 
-                        // Add MCP provider info
-                        self.providers.push(ProviderInfo {
-                            name: "MCP Tools".to_string(),
-                            provider_type: ProviderType::Claude, // Using Claude as placeholder
-                            url: None,
-                            status: ProviderStatus::Connected,
-                            models: tools.iter().map(|t| t.name.clone()).collect(),
-                        });
-                    }
-                    Err(e) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Error,
-                            format!("[MCP] Failed to list tools: {}", e),
-                        );
-                    }
-                }
+                // Add MCP provider info
+                self.providers.push(ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude, // Using Claude as placeholder
+                    url: None,
+                    status: ProviderStatus::Connected,
+                    models: tools.clone(),
+                });
                 self.mcp_client = Some(client);
             }
             Err(e) => {
@@ -1324,7 +1311,7 @@ impl App {
                 for tool in tools_to_show {
                     lines.push(Line::from(vec![
                         Span::raw("    • "),
-                        Span::styled(&tool.name, Style::default().fg(Color::Blue)),
+                        Span::styled(tool, Style::default().fg(Color::Blue)),
                     ]));
                 }
                 if self.mcp_tools.len() > 3 {
@@ -2172,18 +2159,18 @@ Scrolling (when in scroll mode):
         let mut memory_tools = Vec::new();
         let mut other_tools = Vec::new();
 
-        for tool in &self.mcp_tools {
-            let tool_info = format!("@{}: {}", tool.name, tool.description);
+        for tool_name in &self.mcp_tools {
+            let tool_info = format!("@{}", tool_name);
 
-            if tool.name.contains("device") || tool.name.contains("simulator") {
+            if tool_name.contains("device") || tool_name.contains("simulator") {
                 device_tools.push(tool_info);
-            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
+            } else if tool_name.contains("ui_") || tool_name.contains("screen") {
                 ui_tools.push(tool_info);
-            } else if tool.name.contains("git_") {
+            } else if tool_name.contains("git_") {
                 git_tools.push(tool_info);
-            } else if tool.name.contains("memory")
-                || tool.name == "store_memory"
-                || tool.name == "search_memory"
+            } else if tool_name.contains("memory")
+                || tool_name == "store_memory"
+                || tool_name == "search_memory"
             {
                 memory_tools.push(tool_info);
             } else {
