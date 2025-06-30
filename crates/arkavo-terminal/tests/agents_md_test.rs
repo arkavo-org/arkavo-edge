@@ -22,7 +22,7 @@ fn test_agents_md_loading() {
     // Test 3: CLAUDE.md as fallback
     // Remove AGENTS.md if it exists
     let _ = fs::remove_file(&agents_path);
-    
+
     let claude_content = "# CLAUDE.md\n\nThis is a fallback prompt.";
     let claude_path = temp_dir.path().join("CLAUDE.md");
     fs::write(&claude_path, claude_content).unwrap();
@@ -34,7 +34,7 @@ fn test_agents_md_loading() {
     // Test 4: AGENTS.md takes precedence over CLAUDE.md
     let agents_path = temp_dir.path().join("AGENTS.md");
     fs::write(&agents_path, agents_content).unwrap();
-    
+
     // Both files exist, but AGENTS.md should be preferred
     assert!(agents_path.exists());
     assert!(claude_path.exists());
