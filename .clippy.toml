@@ -1,0 +1,15 @@
+# Clippy configuration for arkavo-edge
+
+# Warn about common async/runtime issues
+warn = [
+    "clippy::await_holding_lock",
+    "clippy::await_holding_refcell_ref",
+    "clippy::large_futures",
+]
+
+# Disallow certain patterns that can cause runtime panics
+disallowed-methods = [
+    # Prevent using block_on from within async contexts
+    { path = "tokio::runtime::Handle::current::block_on", reason = "Can cause 'Cannot start a runtime from within a runtime' panic. Use spawn_blocking or make the function async instead." },
+    { path = "tokio::runtime::Runtime::block_on", reason = "Be careful not to call from async context. Consider using spawn_blocking." },
+]

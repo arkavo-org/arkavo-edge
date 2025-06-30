@@ -10,7 +10,7 @@ use super::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 
 #[derive(Debug, Clone)]
 pub enum McpConnection {
@@ -40,17 +40,9 @@ impl McpConnection {
     pub fn new_in_process_with_additional_tools(
         additional_tools: HashMap<String, Box<dyn McpTool>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Check if we're already inside a tokio runtime
-        let runtime = match Handle::try_current() {
-            Ok(_) => {
-                // We're already in a runtime, don't create a new one
-                None
-            }
-            Err(_) => {
-                // Not in a runtime, safe to create one directly
-                Some(Arc::new(Runtime::new()?))
-            }
-        };
+        // Always create a dedicated runtime for MCP operations
+        // This avoids the "Cannot start a runtime from within a runtime" panic
+        let runtime = Some(Arc::new(Runtime::new()?));
 
         // Create tools with shared device manager
         let device_manager = Arc::new(DeviceManager::new());
@@ -132,26 +124,35 @@ impl McpConnection {
     pub fn call_tool(&self, name: &str, args: Value, _provider: &str) -> Result<Value, String> {
         match self {
             McpConnection::InProcess(mcp) => {
-                let tool = mcp
+                // Verify tool exists
+                let _tool = mcp
                     .tools
                     .get(name)
                     .ok_or_else(|| format!("Tool not found: {}", name))?;
-
-                // Use the runtime if available, otherwise use current handle
-                if let Some(ref rt) = mcp.runtime {
-                    rt.block_on(async {
-                        tool.execute(args)
+                
+                // Create a new thread to avoid runtime conflicts
+                let args_clone = args.clone();
+                let tools = mcp.tools.clone();
+                let tool_name = name.to_string();
+                
+                std::thread::spawn(move || {
+                    // Get the tool again in the new thread
+                    let tool = tools
+                        .get(&tool_name)
+                        .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
+                    
+                    // Create a new runtime for this thread
+                    let thread_rt = Runtime::new()
+                        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+                    
+                    thread_rt.block_on(async move {
+                        tool.execute(args_clone)
                             .await
                             .map_err(|e| format!("Tool execution failed: {}", e))
                     })
-                } else {
-                    // We're already in an async context
-                    Handle::current().block_on(async {
-                        tool.execute(args)
-                            .await
-                            .map_err(|e| format!("Tool execution failed: {}", e))
-                    })
-                }
+                })
+                .join()
+                .map_err(|_| "Tool execution thread panicked".to_string())?
             }
         }
     }
