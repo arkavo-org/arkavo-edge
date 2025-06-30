@@ -759,6 +759,15 @@ impl App {
                                     self.active_model =
                                         Some(self.available_models[self.selected_model].clone());
 
+                                    // Log the model change for debugging
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Info,
+                                        format!(
+                                            "[UI] Switched to model: {}",
+                                            self.active_model.as_ref().unwrap()
+                                        ),
+                                    );
+
                                     // If we selected a configuration option, show a hint
                                     if self
                                         .active_model
@@ -774,6 +783,11 @@ impl App {
                                             ),
                                         );
                                     }
+                                } else {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Warning,
+                                        "[UI] No models available for Tab cycling".to_string(),
+                                    );
                                 }
                             }
                             KeyCode::BackTab => {
@@ -1074,7 +1088,11 @@ impl App {
 
         // Render input area at the top
         let input_title = if self.input_focused {
-            " Input (Press Ctrl+E for Helix) "
+            if self.helix_editor.is_some() {
+                " Input (Press Ctrl+E for Helix) "
+            } else {
+                " Input "
+            }
         } else {
             " Input (Press 'i' to focus) "
         };
@@ -1092,43 +1110,34 @@ impl App {
 
         // Calculate visible portion of input buffer for scrolling
         let visible_width = input_inner.width.saturating_sub(1) as usize;
-        let buffer_len = self.input_buffer.len();
 
-        let (input_text, is_placeholder) = if self.input_buffer.is_empty() {
-            (
-                "Type your prompt here or press Ctrl+E to open Helix editor...".to_string(),
-                true,
-            )
-        } else {
-            // Show only the visible portion of the input buffer with horizontal scrolling
-            let scroll_offset = buffer_len.saturating_sub(visible_width);
-            (
-                self.input_buffer
-                    .chars()
-                    .skip(scroll_offset)
-                    .collect::<String>(),
-                false,
-            )
-        };
+        // Show prompt with input buffer
+        let prompt = "> ";
+        let full_text = format!("{}{}", prompt, self.input_buffer);
+        
+        // Calculate visible portion with horizontal scrolling
+        let scroll_offset = full_text.len().saturating_sub(visible_width);
+        let input_text = full_text
+            .chars()
+            .skip(scroll_offset)
+            .collect::<String>();
 
-        let input_paragraph = Paragraph::new(input_text).style(if is_placeholder {
-            Style::default().fg(Color::DarkGray)
-        } else {
-            Style::default()
-        });
+        let input_paragraph = Paragraph::new(input_text).style(Style::default());
         frame.render_widget(input_paragraph, input_inner);
 
         // Handle cursor visibility and position
         if self.input_focused {
-            // Calculate visible portion of input buffer
+            // Calculate visible portion of input buffer (including "> " prompt)
+            let prompt_len = 2; // "> " is 2 characters
             let visible_width = input_inner.width.saturating_sub(1) as usize;
-            let buffer_len = self.input_buffer.len();
+            let full_len = prompt_len + self.input_buffer.len();
 
             // Calculate scroll offset to keep cursor visible
-            let scroll_offset = buffer_len.saturating_sub(visible_width);
+            let scroll_offset = full_len.saturating_sub(visible_width);
 
             // Calculate cursor position within visible area
-            let cursor_offset = buffer_len.saturating_sub(scroll_offset);
+            let cursor_pos = prompt_len + self.input_buffer.len();
+            let cursor_offset = cursor_pos.saturating_sub(scroll_offset);
             let cursor_x = (input_inner.x + cursor_offset as u16)
                 .min(input_inner.x + input_inner.width.saturating_sub(1));
             let cursor_y = input_inner.y;
@@ -1381,9 +1390,8 @@ impl App {
             let help_text = r#"
 Welcome to Arkavo Terminal UI
 
-• Type your prompt and press Enter to start a conversation
+• Type your prompt after > and press Enter to start a conversation
 • Press Tab to cycle through available models
-• Press Ctrl+E to open Helix editor
 • Press Ctrl+I to toggle input/scroll mode
 • Press Ctrl+R to refresh model list
 • Press Ctrl+Q to quit
