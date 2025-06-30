@@ -33,7 +33,7 @@ impl Tool for OllamaConfigTool {
                     // Validate and normalize URL
                     let mut url = server_url.trim().to_string();
                     if !url.starts_with("http://") && !url.starts_with("https://") {
-                        url = format!("http://{}", url);
+                        url = format!("http://{url}");
                     }
 
                     // Test connection
@@ -115,7 +115,7 @@ impl Tool for OllamaConfigTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> = once_cell::sync::Lazy::new(|| {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| {
             ToolSchema {
                 name: "ollama_config".to_string(),
                 description: "Manage Ollama server configurations. Add new servers, list existing ones, or remove them.".to_string(),

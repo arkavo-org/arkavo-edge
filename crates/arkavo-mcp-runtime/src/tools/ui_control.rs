@@ -54,8 +54,8 @@ impl Tool for UiControlTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> =
+            std::sync::LazyLock::new(|| ToolSchema {
                 name: "ui_control".to_string(),
                 description: "Control the terminal UI view modes and focus".to_string(),
                 parameters: json!({

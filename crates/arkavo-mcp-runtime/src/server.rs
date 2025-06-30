@@ -145,7 +145,7 @@ impl McpServer {
                             result: None,
                             error: Some(RpcError {
                                 code: error_codes::INVALID_PARAMS,
-                                message: format!("Tool '{}' not found", tool_name),
+                                message: format!("Tool '{tool_name}' not found"),
                                 data: None,
                             }),
                         },

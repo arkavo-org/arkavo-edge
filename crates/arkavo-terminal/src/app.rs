@@ -680,9 +680,9 @@ impl App {
             } else {
                 Duration::from_millis(100) // 10fps when idle
             };
-            
+
             let mut needs_redraw = has_llm_updates;
-            
+
             if event::poll(poll_timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
@@ -1352,11 +1352,11 @@ impl App {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )]));
-            
+
             for (idx, model) in self.available_models.iter().enumerate() {
                 let is_selected = idx == self.selected_model;
                 let prefix = if is_selected { "→ " } else { "  " };
-                
+
                 let style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
@@ -1364,7 +1364,7 @@ impl App {
                 } else {
                     Style::default()
                 };
-                
+
                 lines.push(Line::from(vec![
                     Span::raw(prefix),
                     Span::styled(model, style),

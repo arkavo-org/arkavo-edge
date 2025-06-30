@@ -13,6 +13,12 @@ impl EchoTool {
     }
 }
 
+impl Default for EchoTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Tool for EchoTool {
     async fn execute(&self, params: Value) -> Result<Value> {
@@ -23,8 +29,8 @@ impl Tool for EchoTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
-            once_cell::sync::Lazy::new(|| ToolSchema {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> =
+            std::sync::LazyLock::new(|| ToolSchema {
                 name: "echo".to_string(),
                 description: "Echo back the input parameters".to_string(),
                 parameters: json!({
