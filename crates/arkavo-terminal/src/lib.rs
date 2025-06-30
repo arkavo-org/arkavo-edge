@@ -180,16 +180,39 @@ pub async fn run() -> Result<()> {
             "\n\nMCP Integration: Disabled".to_string()
         };
 
+        // Try to read AGENTS.md for system prompt
+        let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
+            Ok(content) => Some(content),
+            Err(_) => {
+                // Try CLAUDE.md as fallback
+                match std::fs::read_to_string("CLAUDE.md") {
+                    Ok(content) => Some(content),
+                    Err(_) => None,
+                }
+            }
+        };
+
         // System prompt with MCP tools information
-        let system_prompt = format!(
-            "You are an AI assistant working in the Arkavo Terminal UI. \
-            You have access to MCP tools for various operations including Git, device management, and UI interaction. \
-            When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
-            \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
-            \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
-            {}",
-            mcp_info
-        );
+        let system_prompt = if let Some(agents_content) = agents_md_content {
+            format!(
+                "{}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+                When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
+                \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
+                \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
+                {}",
+                agents_content, mcp_info
+            )
+        } else {
+            format!(
+                "You are an AI assistant working in the Arkavo Terminal UI. \
+                You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+                When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
+                \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
+                \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
+                {}",
+                mcp_info
+            )
+        };
 
         // Keep conversation context with system message
         let mut messages = vec![Message::system(&system_prompt)];
@@ -201,6 +224,9 @@ pub async fn run() -> Result<()> {
             // Add user message to context
             let user_message = Message::user(&request.prompt);
             messages_clone.push(user_message.clone());
+
+            // Create a channel to receive the assistant's response
+            let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<String>(1);
 
             // Parse the model name to extract server and actual model
             let (server_url, actual_model) =
@@ -399,6 +425,9 @@ pub async fn run() -> Result<()> {
                                 error: None,
                             })
                             .await;
+
+                        // Send the full response back to be added to conversation history
+                        let _ = response_tx.send(full_response).await;
                     }
                     Err(e) => {
                         let _ = llm_tx
@@ -415,8 +444,13 @@ pub async fn run() -> Result<()> {
                 }
             });
 
-            // Update context
+            // Update context with user message
             messages.push(user_message);
+
+            // Wait for assistant response and add to context
+            if let Some(assistant_response) = response_rx.recv().await {
+                messages.push(Message::assistant(&assistant_response));
+            }
         }
     });
 

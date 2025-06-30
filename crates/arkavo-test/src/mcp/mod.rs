@@ -20,6 +20,7 @@ pub mod embedded_ios26_fix;
 pub mod enrollment_dialog_handler;
 pub mod enrollment_flow_handler;
 pub mod face_id_control;
+pub mod filesystem_tools;
 #[cfg(target_os = "macos")]
 pub mod frameworks_data;
 pub mod git_tools;
