@@ -23,7 +23,8 @@ fn test_agents_md_loading() {
     assert!(read_content.len() > 10);
 
     // Test 3: CLAUDE.md as fallback
-    fs::remove_file("AGENTS.md").unwrap();
+    // Use unwrap_or to handle the case where AGENTS.md might not exist
+    let _ = fs::remove_file("AGENTS.md");
     let claude_content = "# CLAUDE.md\n\nThis is a fallback prompt.";
     fs::write("CLAUDE.md", claude_content).unwrap();
 
