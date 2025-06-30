@@ -11,7 +11,7 @@ pub struct SimulatorInteraction {
 impl SimulatorInteraction {
     pub fn new() -> Self {
         Self {
-            xcode_version: XcodeVersion::detect().ok(),
+            xcode_version: XcodeVersion::detect(),
         }
     }
 

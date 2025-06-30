@@ -68,6 +68,7 @@ pub mod ui_element_handler;
 pub mod url_dialog_handler;
 pub mod usage_guide;
 pub mod xcode_info_tool;
+pub mod xcode_unavailable_tool;
 pub mod xcode_version;
 pub mod xctest_app_runner;
 pub mod xctest_compiler;

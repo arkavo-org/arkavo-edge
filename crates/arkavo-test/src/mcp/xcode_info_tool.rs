@@ -38,7 +38,7 @@ impl Tool for XcodeInfoTool {
             .unwrap_or(true);
 
         match XcodeVersion::detect() {
-            Ok(version) => {
+            Some(version) => {
                 let mut result = json!({
                     "xcode_version": {
                         "major": version.major,
@@ -120,11 +120,11 @@ impl Tool for XcodeInfoTool {
 
                 Ok(result)
             }
-            Err(e) => Ok(json!({
+            None => Ok(json!({
                 "error": {
-                    "code": "XCODE_DETECTION_FAILED",
-                    "message": e.to_string(),
-                    "suggestion": "Ensure Xcode is installed and xcode-select is configured correctly"
+                    "code": "XCODE_NOT_AVAILABLE",
+                    "message": "Xcode is not installed or not available",
+                    "suggestion": XcodeVersion::require_xcode_message()
                 }
             })),
         }

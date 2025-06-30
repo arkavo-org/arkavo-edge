@@ -51,20 +51,29 @@ Then ask the AI to:
 - "Test what happens when the network fails during checkout"
 - "Explore edge cases in the authentication flow"
 
-## iOS Testing Requirements (macOS only)
+## iOS Testing (Optional, macOS only)
 
-For iOS simulator testing capabilities, you'll need:
+iOS simulator testing capabilities are available on macOS but require Xcode Command Line Tools.
 
-### idb_companion
-The iOS Debug Bridge companion tool from Meta is required for reliable simulator UI automation:
+### Requirements
 
+**Xcode Command Line Tools** - Required for iOS simulator control and testing:
 ```bash
-# Install via Homebrew
-brew tap facebook/fb
-brew install idb-companion
+# Install Xcode Command Line Tools
+xcode-select --install
 ```
 
-**Note:** The macOS build can optionally embed idb_companion for distribution. See THIRD-PARTY-LICENSES.md for license information.
+### What happens without Xcode?
+
+If Xcode is not installed:
+- Arkavo Edge will still run normally
+- iOS testing tools will be automatically disabled
+- No system prompts will appear
+- You'll see a message indicating iOS features are unavailable
+
+### Embedded Tools
+
+The macOS build includes an embedded idb_companion (iOS Debug Bridge) from Meta for reliable simulator UI automation. This tool is automatically extracted and managed by Arkavo Edge when iOS testing features are used. See THIRD-PARTY-LICENSES.md for license information.
 
 ## Commands
 
