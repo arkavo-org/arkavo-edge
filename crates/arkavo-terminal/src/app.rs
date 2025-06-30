@@ -711,6 +711,7 @@ impl App {
                             }
                             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 self.view_mode = ViewMode::Debug;
+                                needs_redraw = true;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+S: Save/export UI state to file
@@ -727,9 +728,11 @@ impl App {
                             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+T: Show all MCP tools
                                 self.show_mcp_tools_dialog();
+                                needs_redraw = true;
                             }
                             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                                 self.vim_enabled = !self.vim_enabled;
+                                needs_redraw = true;
                                 self.add_debug_log(
                                     crate::ui::debug::LogLevel::Info,
                                     format!(
@@ -783,6 +786,8 @@ impl App {
                                             ),
                                         );
                                     }
+                                    // Force UI redraw after model change
+                                    needs_redraw = true;
                                 } else {
                                     self.add_debug_log(
                                         crate::ui::debug::LogLevel::Warning,
