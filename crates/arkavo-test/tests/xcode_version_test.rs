@@ -6,7 +6,7 @@ mod tests {
     fn test_xcode_version_detection() {
         // This test will only work if Xcode is installed
         match XcodeVersion::detect() {
-            Ok(version) => {
+            Some(version) => {
                 println!(
                     "Detected Xcode version: {}.{}.{}",
                     version.major, version.minor, version.patch
@@ -40,8 +40,8 @@ mod tests {
                 // Test version comparisons
                 assert!(version >= XcodeVersion::new(10, 0, 0));
             }
-            Err(e) => {
-                println!("Could not detect Xcode version: {e}");
+            None => {
+                println!("Xcode is not installed or not available");
                 // This is not a failure if Xcode is not installed
             }
         }

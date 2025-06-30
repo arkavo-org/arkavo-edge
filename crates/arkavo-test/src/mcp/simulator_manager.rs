@@ -29,7 +29,7 @@ pub struct SimulatorManager {
 
 impl SimulatorManager {
     pub fn new() -> Self {
-        let xcode_version = XcodeVersion::detect().ok();
+        let xcode_version = XcodeVersion::detect();
         let mut manager = Self {
             devices: HashMap::new(),
             xcode_version,

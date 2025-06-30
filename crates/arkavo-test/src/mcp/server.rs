@@ -78,27 +78,17 @@ impl McpTestServer {
     pub fn new() -> Result<Self> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
-        // Initialize IDB companion early to ensure it's available for all tools
+        // Defer IDB initialization until iOS tools are actually used
         #[cfg(target_os = "macos")]
         {
-            eprintln!("[McpTestServer] Initializing IDB companion...");
-            if let Err(e) = crate::mcp::idb_wrapper::IdbWrapper::initialize() {
-                eprintln!("[McpTestServer] Warning: Failed to initialize IDB companion: {e}");
-                eprintln!("[McpTestServer] Some features requiring IDB may not work properly");
-            } else {
-                eprintln!("[McpTestServer] IDB companion initialized successfully");
-                eprintln!(
-                    "[McpTestServer] Arkavo files are stored in .arkavo/ directory relative to your working directory:"
-                );
-                eprintln!("  - IDB companion: .arkavo/idb_companion");
-                eprintln!("  - AXP harnesses: .arkavo/axp-harnesses/");
-                eprintln!("  - Unix sockets: .arkavo/sockets/");
-            }
+            eprintln!(
+                "[McpTestServer] iOS testing tools available - initialization deferred until first use"
+            );
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            eprintln!("[McpTestServer] IDB companion not available on this platform");
+            eprintln!("[McpTestServer] iOS testing tools not available on this platform");
         }
 
         // Initialize analysis engine for intelligent tools
@@ -183,147 +173,190 @@ impl McpTestServer {
             Arc::new(CoordinateConverterKit::new()),
         );
 
-        // Add deep link and app launcher tools
-        tools.insert(
-            "deep_link".to_string(),
-            Arc::new(DeepLinkKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "app_launcher".to_string(),
-            Arc::new(AppLauncherKit::new(device_manager.clone())),
-        );
+        // Check Xcode availability for iOS-specific tools
+        let xcode_available = super::xcode_version::XcodeVersion::is_available();
 
-        // Add iOS-specific tools
-        tools.insert(
-            "ui_interaction".to_string(),
-            Arc::new(UiInteractionKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "screen_capture".to_string(),
-            Arc::new(ScreenCaptureKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "ui_query".to_string(),
-            Arc::new(UiQueryKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "ui_element_handler".to_string(),
-            Arc::new(UiElementHandler::new(device_manager.clone())),
-        );
-        tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
-        tools.insert(
-            "ios_automation_guide".to_string(),
-            Arc::new(IosAutomationGuide::new()),
-        );
+        if xcode_available {
+            eprintln!("[McpTestServer] Xcode detected - registering iOS testing tools");
+
+            // Add deep link and app launcher tools
+            tools.insert(
+                "deep_link".to_string(),
+                Arc::new(DeepLinkKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "app_launcher".to_string(),
+                Arc::new(AppLauncherKit::new(device_manager.clone())),
+            );
+
+            // Add iOS-specific tools
+            tools.insert(
+                "ui_interaction".to_string(),
+                Arc::new(UiInteractionKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "screen_capture".to_string(),
+                Arc::new(ScreenCaptureKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "ui_query".to_string(),
+                Arc::new(UiQueryKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "ui_element_handler".to_string(),
+                Arc::new(UiElementHandler::new(device_manager.clone())),
+            );
+            tools.insert("usage_guide".to_string(), Arc::new(UsageGuideKit::new()));
+            tools.insert(
+                "ios_automation_guide".to_string(),
+                Arc::new(IosAutomationGuide::new()),
+            );
+        } else {
+            eprintln!("[McpTestServer] Xcode not detected - registering placeholder iOS tools");
+
+            // Register placeholder tools that return helpful error messages
+            use super::xcode_unavailable_tool::XcodeUnavailableTool;
+
+            tools.insert(
+                "ui_interaction".to_string(),
+                Arc::new(XcodeUnavailableTool::new(
+                    "ui_interaction".to_string(),
+                    "Interact with iOS UI elements using coordinates".to_string(),
+                    serde_json::json!({"type": "object"}),
+                )),
+            );
+            tools.insert(
+                "screen_capture".to_string(),
+                Arc::new(XcodeUnavailableTool::new(
+                    "screen_capture".to_string(),
+                    "Capture screenshots from iOS simulators".to_string(),
+                    serde_json::json!({"type": "object"}),
+                )),
+            );
+            tools.insert(
+                "simulator_control".to_string(),
+                Arc::new(XcodeUnavailableTool::new(
+                    "simulator_control".to_string(),
+                    "Control iOS simulators - boot, shutdown, list devices".to_string(),
+                    serde_json::json!({"type": "object"}),
+                )),
+            );
+        }
+
+        // Always include xcode_info tool to check status
         tools.insert("xcode_info".to_string(), Arc::new(XcodeInfoTool::new()));
 
         #[cfg(target_os = "macos")]
-        tools.insert(
-            "idb_management".to_string(),
-            Arc::new(super::idb_management_tool::IdbManagementTool::new()),
-        );
+        if xcode_available {
+            tools.insert(
+                "idb_management".to_string(),
+                Arc::new(super::idb_management_tool::IdbManagementTool::new()),
+            );
 
-        tools.insert(
-            "app_diagnostic".to_string(),
-            Arc::new(AppDiagnosticTool::new()),
-        );
-        tools.insert(
-            "setup_xcuitest".to_string(),
-            Arc::new(XCTestSetupKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "xctest_status".to_string(),
-            Arc::new(XCTestStatusKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "build_test_harness".to_string(),
-            Arc::new(AxpHarnessBuilder::new(device_manager.clone())),
-        );
+            tools.insert(
+                "app_diagnostic".to_string(),
+                Arc::new(AppDiagnosticTool::new()),
+            );
+            tools.insert(
+                "setup_xcuitest".to_string(),
+                Arc::new(XCTestSetupKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "xctest_status".to_string(),
+                Arc::new(XCTestStatusKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "build_test_harness".to_string(),
+                Arc::new(AxpHarnessBuilder::new(device_manager.clone())),
+            );
+        }
         tools.insert(
             "template_diagnostics".to_string(),
             Arc::new(TemplateDiagnosticsKit::new()),
         );
-        tools.insert(
-            "ios26_beta_guidance".to_string(),
-            Arc::new(super::ios26_beta_guidance::Ios26BetaGuidance::new()),
-        );
-        tools.insert(
-            "biometric_auth".to_string(),
-            Arc::new(BiometricKit::new(device_manager.clone())),
-        );
-        tools.insert(
-            "system_dialog".to_string(),
-            Arc::new(SystemDialogKit::new(device_manager.clone())),
-        );
+        if xcode_available {
+            tools.insert(
+                "ios26_beta_guidance".to_string(),
+                Arc::new(super::ios26_beta_guidance::Ios26BetaGuidance::new()),
+            );
+            tools.insert(
+                "biometric_auth".to_string(),
+                Arc::new(BiometricKit::new(device_manager.clone())),
+            );
+            tools.insert(
+                "system_dialog".to_string(),
+                Arc::new(SystemDialogKit::new(device_manager.clone())),
+            );
 
-        // Add simulator management tools (IDB functionality in Rust)
-        tools.insert(
-            "simulator_control".to_string(),
-            Arc::new(SimulatorControl::new()),
-        );
-        tools.insert("app_management".to_string(), Arc::new(AppManagement::new()));
-        tools.insert(
-            "file_operations".to_string(),
-            Arc::new(FileOperations::new()),
-        );
-        tools.insert(
-            "simulator_advanced".to_string(),
-            Arc::new(SimulatorAdvancedKit::new(device_manager.clone())),
-        );
+            // Add simulator management tools (IDB functionality in Rust)
+            tools.insert(
+                "simulator_control".to_string(),
+                Arc::new(SimulatorControl::new()),
+            );
+            tools.insert("app_management".to_string(), Arc::new(AppManagement::new()));
+            tools.insert(
+                "file_operations".to_string(),
+                Arc::new(FileOperations::new()),
+            );
+            tools.insert(
+                "simulator_advanced".to_string(),
+                Arc::new(SimulatorAdvancedKit::new(device_manager.clone())),
+            );
 
-        // Add biometric dialog handlers (no external dependencies)
-        tools.insert(
-            "biometric_dialog_handler".to_string(),
-            Arc::new(BiometricDialogHandler::new(device_manager.clone())),
-        );
-        tools.insert(
-            "accessibility_dialog_handler".to_string(),
-            Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
-        );
+            // Add biometric dialog handlers (no external dependencies)
+            tools.insert(
+                "biometric_dialog_handler".to_string(),
+                Arc::new(BiometricDialogHandler::new(device_manager.clone())),
+            );
+            tools.insert(
+                "accessibility_dialog_handler".to_string(),
+                Arc::new(AccessibilityDialogHandler::new(device_manager.clone())),
+            );
 
-        // Add passkey dialog handler for biometric enrollment dialogs
-        tools.insert(
-            "passkey_dialog".to_string(),
-            Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
-        );
+            // Add passkey dialog handler for biometric enrollment dialogs
+            tools.insert(
+                "passkey_dialog".to_string(),
+                Arc::new(PasskeyDialogHandler::new(device_manager.clone())),
+            );
 
-        // Add enrollment dialog handler for precise Cancel button coordinates
-        tools.insert(
-            "enrollment_dialog".to_string(),
-            Arc::new(EnrollmentDialogHandler::new(device_manager.clone())),
-        );
+            // Add enrollment dialog handler for precise Cancel button coordinates
+            tools.insert(
+                "enrollment_dialog".to_string(),
+                Arc::new(EnrollmentDialogHandler::new(device_manager.clone())),
+            );
 
-        // Add screenshot analyzer tool
-        tools.insert(
-            "analyze_screenshot".to_string(),
-            Arc::new(ScreenshotAnalyzer::new()),
-        );
+            // Add screenshot analyzer tool
+            tools.insert(
+                "analyze_screenshot".to_string(),
+                Arc::new(ScreenshotAnalyzer::new()),
+            );
 
-        // Add enrollment flow handler for complete enrollment workflow
-        tools.insert(
-            "enrollment_flow".to_string(),
-            Arc::new(EnrollmentFlowHandler::new(device_manager.clone())),
-        );
+            // Add enrollment flow handler for complete enrollment workflow
+            tools.insert(
+                "enrollment_flow".to_string(),
+                Arc::new(EnrollmentFlowHandler::new(device_manager.clone())),
+            );
 
-        // Add Face ID control tools
-        tools.insert(
-            "face_id_control".to_string(),
-            Arc::new(FaceIdController::new(device_manager.clone())),
-        );
-        tools.insert(
-            "face_id_status".to_string(),
-            Arc::new(FaceIdStatusChecker::new(device_manager.clone())),
-        );
+            // Add Face ID control tools
+            tools.insert(
+                "face_id_control".to_string(),
+                Arc::new(FaceIdController::new(device_manager.clone())),
+            );
+            tools.insert(
+                "face_id_status".to_string(),
+                Arc::new(FaceIdStatusChecker::new(device_manager.clone())),
+            );
 
-        // Add biometric test scenario tools
-        tools.insert(
-            "biometric_test_scenario".to_string(),
-            Arc::new(BiometricTestScenario::new(device_manager.clone())),
-        );
-        tools.insert(
-            "smart_biometric_handler".to_string(),
-            Arc::new(SmartBiometricHandler::new(device_manager.clone())),
-        );
+            // Add biometric test scenario tools
+            tools.insert(
+                "biometric_test_scenario".to_string(),
+                Arc::new(BiometricTestScenario::new(device_manager.clone())),
+            );
+            tools.insert(
+                "smart_biometric_handler".to_string(),
+                Arc::new(SmartBiometricHandler::new(device_manager.clone())),
+            );
+        }
 
         // Add code analysis tools
         tools.insert("find_bugs".to_string(), Arc::new(FindBugsKit::new()));
