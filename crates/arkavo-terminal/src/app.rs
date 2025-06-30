@@ -578,15 +578,19 @@ impl App {
         loop {
             // Check for LLM responses - drain all available messages
             let mut responses_to_process = Vec::new();
+            let mut has_llm_updates = false;
             if let Some(ref mut llm_rx) = self.llm_rx {
                 // Collect all available responses first
                 while let Ok(response) = llm_rx.try_recv() {
                     responses_to_process.push(response);
+                    has_llm_updates = true;
                 }
             }
 
             // Process collected responses
             for response in responses_to_process {
+                // Only log in debug builds
+                #[cfg(debug_assertions)]
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Debug,
                     format!(
@@ -604,6 +608,8 @@ impl App {
                             crate::ui::task_window::MessageRole::System,
                             format!("Error: {error}"),
                         );
+                        // Only log errors in debug builds
+                        #[cfg(debug_assertions)]
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Error,
                             format!("[UI] LLM error for task {}: {}", response.task_id, error),
@@ -642,6 +648,8 @@ impl App {
                             self.telemetry.track_message_received();
                         }
 
+                        // Only log in debug builds
+                        #[cfg(debug_assertions)]
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Info,
                             format!("[UI] Completed response for task {}", response.task_id),
@@ -666,9 +674,16 @@ impl App {
                 }
             }
 
-            // Always check for events but don't block
-            if event::poll(Duration::from_millis(16))? {
-                // ~60fps for smooth updates
+            // Poll for events with longer timeout when idle to reduce CPU usage
+            let poll_timeout = if has_llm_updates || self.input_focused {
+                Duration::from_millis(16) // 60fps when active
+            } else {
+                Duration::from_millis(100) // 10fps when idle
+            };
+            
+            let mut needs_redraw = has_llm_updates;
+            
+            if event::poll(poll_timeout)? {
                 match event::read()? {
                     Event::Key(key) => {
                         self.telemetry.track_key_event();
@@ -993,11 +1008,13 @@ impl App {
                                 // Prevent buffer overflow by limiting input length
                                 if self.input_buffer.len() < 500 {
                                     self.input_buffer.push(c);
+                                    needs_redraw = true;
                                 }
                             }
                             KeyCode::Backspace if self.input_focused => {
                                 // Remove last character from input buffer
                                 self.input_buffer.pop();
+                                needs_redraw = true;
                             }
                             _ => {
                                 let event = AppEvent::from_crossterm_event(Event::Key(key));
@@ -1006,7 +1023,7 @@ impl App {
                         }
                     }
                     Event::Resize(_, _) => {
-                        // Terminal will be redrawn in the main loop
+                        needs_redraw = true;
                     }
                     _ => {}
                 }
@@ -1016,16 +1033,17 @@ impl App {
                 break;
             }
 
-            // Always render to ensure UI stays consistent
-            // Force full redraw when input is focused to prevent artifacts
-            if self.input_focused {
-                terminal.draw(|f| {
-                    // Clear the entire frame first when input is active
-                    f.render_widget(ratatui::widgets::Clear, f.area());
-                    self.render(f);
-                })?;
-            } else {
-                terminal.draw(|f| self.render(f))?;
+            // Only render when there are updates or user input
+            if needs_redraw || has_llm_updates {
+                if self.input_focused {
+                    terminal.draw(|f| {
+                        // Clear the entire frame first when input is active
+                        f.render_widget(ratatui::widgets::Clear, f.area());
+                        self.render(f);
+                    })?;
+                } else {
+                    terminal.draw(|f| self.render(f))?;
+                }
             }
 
             // Track frame timing
