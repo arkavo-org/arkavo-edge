@@ -17,6 +17,7 @@ impl Drop for CompanionGuard {
 }
 
 #[tokio::test]
+#[ignore = "Requires macOS with simulators and exclusive port access"]
 async fn test_idb_tap_simple() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing IDB Tap Functionality ===\n");
 

@@ -232,7 +232,28 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
-    let system_prompt = format!(
+    // Try to read AGENTS.md for system prompt
+    let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
+        Ok(content) => Some(content),
+        Err(_) => {
+            // Try CLAUDE.md as fallback
+            match std::fs::read_to_string("CLAUDE.md") {
+                Ok(content) => Some(content),
+                Err(_) => None,
+            }
+        }
+    };
+
+    let system_prompt = if let Some(agents_content) = agents_md_content {
+        format!(
+            "{}\n\nRepository context:\n{}\n\nRepository details:\n{}\n\n{}",
+            agents_content,
+            repo_context_str,
+            serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
+            mcp_info
+        )
+    } else {
+        format!(
         "You are an expert UI testing assistant working with the Arkavo Edge project. \
          You have access to MCP tools for clicking elements, entering text, and other UI interactions. \
          When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI. \
@@ -283,7 +304,8 @@ Repository details:
         repo_context_str,
         serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
         mcp_info
-    );
+    )
+    };
 
     // Get conversation context with system message
     let system_message = Message::system(&system_prompt);
