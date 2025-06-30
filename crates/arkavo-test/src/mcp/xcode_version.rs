@@ -1,5 +1,7 @@
-use crate::{Result, TestError};
 use std::process::Command;
+use std::sync::OnceLock;
+
+static XCODE_VERSION_CACHE: OnceLock<Option<XcodeVersion>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct XcodeVersion {
@@ -17,17 +19,24 @@ impl XcodeVersion {
         }
     }
 
-    pub fn detect() -> Result<Self> {
-        let output = Command::new("xcodebuild")
-            .arg("-version")
-            .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to run xcodebuild: {e}")))?;
+    pub fn detect() -> Option<Self> {
+        XCODE_VERSION_CACHE
+            .get_or_init(|| Self::detect_uncached())
+            .clone()
+    }
+
+    fn detect_uncached() -> Option<Self> {
+        // Try to run xcodebuild without triggering system prompts
+        let output = match Command::new("xcodebuild").arg("-version").output() {
+            Ok(output) => output,
+            Err(_) => {
+                // xcodebuild not found or not executable - return None without error
+                return None;
+            }
+        };
 
         if !output.status.success() {
-            return Err(TestError::Mcp(format!(
-                "Failed to get Xcode version: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
+            return None;
         }
 
         let version_str = String::from_utf8_lossy(&output.stdout);
@@ -50,11 +59,24 @@ impl XcodeVersion {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
 
-                return Ok(Self::new(major, minor, patch));
+                return Some(Self::new(major, minor, patch));
             }
         }
 
-        Err(TestError::Mcp("Failed to parse Xcode version".to_string()))
+        None
+    }
+
+    pub fn is_available() -> bool {
+        Self::detect().is_some()
+    }
+
+    pub fn require_xcode_message() -> &'static str {
+        "This feature requires Xcode Command Line Tools. To install:\n\
+         1. Open Terminal\n\
+         2. Run: xcode-select --install\n\
+         3. Follow the installation prompts\n\
+         \n\
+         Alternatively, install the full Xcode IDE from the Mac App Store."
     }
 
     pub const fn supports_bootstatus(&self) -> bool {
