@@ -71,6 +71,8 @@ pub async fn run() -> Result<()> {
             }
         };
 
+        // Only log in debug builds
+        #[cfg(debug_assertions)]
         eprintln!(
             "Terminal UI connected to LLM provider: {}",
             client.provider_name()
@@ -255,7 +257,8 @@ pub async fn run() -> Result<()> {
                     )
                 };
 
-            // Debug log the resolved server and model
+            // Only log in debug builds
+            #[cfg(debug_assertions)]
             eprintln!(
                 "[LLM] Using server: {} with model: {}",
                 server_url, actual_model

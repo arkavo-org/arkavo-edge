@@ -29,7 +29,7 @@ impl Tool for UiInspectTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: once_cell::sync::Lazy<ToolSchema> = once_cell::sync::Lazy::new(|| {
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| {
             ToolSchema {
                 name: "ui_inspect".to_string(),
                 description: "Get the current state of the terminal UI including providers, models, and debug logs".to_string(),
