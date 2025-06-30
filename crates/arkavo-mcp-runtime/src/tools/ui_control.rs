@@ -54,30 +54,29 @@ impl Tool for UiControlTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: std::sync::LazyLock<ToolSchema> =
-            std::sync::LazyLock::new(|| ToolSchema {
-                name: "ui_control".to_string(),
-                description: "Control the terminal UI view modes and focus".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": [
-                                "show_debug",
-                                "show_chat",
-                                "show_code",
-                                "show_diff",
-                                "show_dataflow",
-                                "focus_input",
-                                "focus_scroll"
-                            ],
-                            "description": "The UI action to perform"
-                        }
-                    },
-                    "required": ["action"]
-                }),
-            });
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "ui_control".to_string(),
+            description: "Control the terminal UI view modes and focus".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "show_debug",
+                            "show_chat",
+                            "show_code",
+                            "show_diff",
+                            "show_dataflow",
+                            "focus_input",
+                            "focus_scroll"
+                        ],
+                        "description": "The UI action to perform"
+                    }
+                },
+                "required": ["action"]
+            }),
+        });
         &SCHEMA
     }
 }

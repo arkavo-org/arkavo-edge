@@ -30,15 +30,14 @@ impl Tool for HealthTool {
     }
 
     fn schema(&self) -> &ToolSchema {
-        static SCHEMA: std::sync::LazyLock<ToolSchema> =
-            std::sync::LazyLock::new(|| ToolSchema {
-                name: "health".to_string(),
-                description: "Check the health status of the MCP server".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {},
-                }),
-            });
+        static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            name: "health".to_string(),
+            description: "Check the health status of the MCP server".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+            }),
+        });
         &SCHEMA
     }
 }
