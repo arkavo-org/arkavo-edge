@@ -1,11 +1,6 @@
 # Clippy configuration for arkavo-edge
-
-# Warn about common async/runtime issues
-warn = [
-    "clippy::await_holding_lock",
-    "clippy::await_holding_refcell_ref",
-    "clippy::large_futures",
-]
+# Note: Most Clippy lints are configured in Cargo.toml under [workspace.lints.clippy]
+# This file contains configurations that cannot be expressed in Cargo.toml
 
 # Disallow certain patterns that can cause runtime panics
 disallowed-methods = [
