@@ -169,6 +169,13 @@ impl App {
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
                 },
+                ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude,
+                    url: None,
+                    status: ProviderStatus::Disconnected,
+                    models: vec![],
+                },
             ],
             mcp_client: None,
             mcp_tools: vec![],
@@ -229,6 +236,13 @@ impl App {
                     provider_type: ProviderType::Anthropic,
                     url: Some("https://api.anthropic.com".to_string()),
                     status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+                ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude,
+                    url: None,
+                    status: ProviderStatus::Disconnected,
                     models: vec![],
                 },
             ],
@@ -312,14 +326,11 @@ impl App {
                     format!("[MCP] Connected with {} tools available", tools.len()),
                 );
 
-                // Add MCP provider info
-                self.providers.push(ProviderInfo {
-                    name: "MCP Tools".to_string(),
-                    provider_type: ProviderType::Claude, // Using Claude as placeholder
-                    url: None,
-                    status: ProviderStatus::Connected,
-                    models: tools,
-                });
+                // Update MCP provider info
+                if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
+                    provider.status = ProviderStatus::Connected;
+                    provider.models = tools.iter().map(|t| t.clone()).collect();
+                }
                 self.mcp_client = Some(client);
             }
             Err(e) => {
@@ -328,14 +339,11 @@ impl App {
                     format!("[MCP] Failed to connect: {e}"),
                 );
 
-                // Add disconnected MCP provider
-                self.providers.push(ProviderInfo {
-                    name: "MCP Tools".to_string(),
-                    provider_type: ProviderType::Claude,
-                    url: None,
-                    status: ProviderStatus::Disconnected,
-                    models: vec![],
-                });
+                // Update MCP provider status
+                if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
+                    provider.status = ProviderStatus::Error(format!("Failed to connect: {e}"));
+                    provider.models = vec![];
+                }
             }
         }
     }
@@ -573,6 +581,39 @@ impl App {
 
             // Process collected responses
             for response in responses_to_process {
+                // Handle MCP status updates
+                if let Some(mcp_status) = response.mcp_status {
+                    if mcp_status.available {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!(
+                                "[MCP] Connected with {} tools available",
+                                mcp_status.tool_count
+                            ),
+                        );
+                        // Update MCP provider status
+                        if let Some(provider) =
+                            self.providers.iter_mut().find(|p| p.name == "MCP Tools")
+                        {
+                            provider.status = ProviderStatus::Connected;
+                            provider.models = vec![format!("{} tools", mcp_status.tool_count)];
+                        }
+                    } else if let Some(error_msg) = mcp_status.error_message {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Warning,
+                            format!("[MCP] {}", error_msg),
+                        );
+                        // Update MCP provider status
+                        if let Some(provider) =
+                            self.providers.iter_mut().find(|p| p.name == "MCP Tools")
+                        {
+                            provider.status = ProviderStatus::Error(error_msg);
+                        }
+                    }
+                    // Skip further processing for MCP status updates
+                    continue;
+                }
+
                 // Only log in debug builds
                 #[cfg(debug_assertions)]
                 self.add_debug_log(
@@ -777,6 +818,43 @@ impl App {
                                                 self.active_model.as_ref().unwrap()
                                             ),
                                         );
+                                    } else {
+                                        // Create or update task window for non-configuration models
+                                        let model_name =
+                                            self.active_model.as_ref().unwrap().clone();
+
+                                        // Check if we already have a task for this model
+                                        let existing_task = self
+                                            .task_manager
+                                            .tasks
+                                            .iter()
+                                            .position(|t| t.model_name == model_name);
+
+                                        if let Some(task_idx) = existing_task {
+                                            // Switch to existing task
+                                            self.task_manager.active_task = Some(task_idx);
+                                            self.main_task_id =
+                                                Some(self.task_manager.tasks[task_idx].id);
+                                        } else {
+                                            // Create new task for this model
+                                            let id = uuid::Uuid::new_v4();
+                                            let task = self.task_manager.create_task(
+                                                "LLM Conversation".to_string(),
+                                                model_name.clone(),
+                                            );
+                                            task.id = id;
+                                            self.main_task_id = Some(id);
+                                            let new_idx = self.task_manager.tasks.len() - 1;
+                                            self.task_manager.active_task = Some(new_idx);
+
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Info,
+                                                format!(
+                                                    "[UI] Created task window for model: {}",
+                                                    model_name
+                                                ),
+                                            );
+                                        }
                                     }
                                     // Force UI redraw after model change
                                     needs_redraw = true;
@@ -839,10 +917,59 @@ impl App {
                                             continue;
                                         }
 
-                                        // Check if we have a main task, if not create one
+                                        // Find or create task for current model
                                         let task_id = if let Some(id) = self.main_task_id {
-                                            id
+                                            // Verify the task exists and matches the current model
+                                            if let Some(task) =
+                                                self.task_manager.find_task_by_id(id)
+                                            {
+                                                if task.model_name == displayed_model {
+                                                    id
+                                                } else {
+                                                    // Model changed, find or create task for new model
+                                                    let existing_task =
+                                                        self.task_manager.tasks.iter().position(
+                                                            |t| t.model_name == displayed_model,
+                                                        );
+
+                                                    if let Some(task_idx) = existing_task {
+                                                        let task_id =
+                                                            self.task_manager.tasks[task_idx].id;
+                                                        self.task_manager.active_task =
+                                                            Some(task_idx);
+                                                        self.main_task_id = Some(task_id);
+                                                        task_id
+                                                    } else {
+                                                        // Create new task
+                                                        let id = uuid::Uuid::new_v4();
+                                                        let task = self.task_manager.create_task(
+                                                            "LLM Conversation".to_string(),
+                                                            displayed_model.clone(),
+                                                        );
+                                                        task.id = id;
+                                                        self.main_task_id = Some(id);
+                                                        let new_idx =
+                                                            self.task_manager.tasks.len() - 1;
+                                                        self.task_manager.active_task =
+                                                            Some(new_idx);
+                                                        id
+                                                    }
+                                                }
+                                            } else {
+                                                // Task doesn't exist, create new one
+                                                let id = uuid::Uuid::new_v4();
+                                                let task = self.task_manager.create_task(
+                                                    "LLM Conversation".to_string(),
+                                                    displayed_model.clone(),
+                                                );
+                                                task.id = id;
+                                                self.main_task_id = Some(id);
+                                                let new_idx = self.task_manager.tasks.len() - 1;
+                                                self.task_manager.active_task = Some(new_idx);
+                                                id
+                                            }
                                         } else {
+                                            // No main task, create new one
                                             let id = uuid::Uuid::new_v4();
                                             let task = self.task_manager.create_task(
                                                 "LLM Conversation".to_string(),
@@ -850,7 +977,8 @@ impl App {
                                             );
                                             task.id = id;
                                             self.main_task_id = Some(id);
-                                            self.task_manager.active_task = Some(0); // Make it the active task
+                                            let new_idx = self.task_manager.tasks.len() - 1;
+                                            self.task_manager.active_task = Some(new_idx);
                                             id
                                         };
 
