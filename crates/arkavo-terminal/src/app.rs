@@ -259,7 +259,7 @@ impl App {
         self.setup_terminal()?;
 
         // Initialize MCP connection
-        self.initialize_mcp_connection().await;
+        self.initialize_mcp_connection();
 
         // Ollama configuration is handled by arkavo chat command
 
@@ -273,22 +273,22 @@ impl App {
     }
 
     fn setup_terminal(&self) -> Result<()> {
-        crossterm::terminal::enable_raw_mode()?;
+        terminal::enable_raw_mode()?;
         crossterm::execute!(
             io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture
+            terminal::EnterAlternateScreen,
+            event::EnableMouseCapture
         )?;
         Ok(())
     }
 
     fn restore_terminal(&self) -> Result<()> {
         // Ignore errors during cleanup to ensure we try all steps
-        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = terminal::disable_raw_mode();
         let _ = crossterm::execute!(
             io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
+            terminal::LeaveAlternateScreen,
+            event::DisableMouseCapture
         );
         Ok(())
     }
@@ -304,7 +304,7 @@ impl App {
         }
     }
 
-    pub async fn initialize_mcp_connection(&mut self) {
+    pub fn initialize_mcp_connection(&mut self) {
         // Initialize MCP client - attempt by default unless explicitly disabled
         if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
             self.add_debug_log(
@@ -320,7 +320,7 @@ impl App {
             Ok(client) => {
                 // List available tools
                 let tools = client.list_tools();
-                self.mcp_tools = tools.clone();
+                self.mcp_tools.clone_from(&tools);
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
                     format!("[MCP] Connected with {} tools available", tools.len()),
@@ -329,7 +329,7 @@ impl App {
                 // Update MCP provider info
                 if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
                     provider.status = ProviderStatus::Connected;
-                    provider.models = tools.iter().map(|t| t.clone()).collect();
+                    provider.models.clone_from(&tools);
                 }
                 self.mcp_client = Some(client);
             }
@@ -528,7 +528,7 @@ impl App {
         }
 
         if !all_models.is_empty() {
-            self.available_models = all_models.clone();
+            self.available_models.clone_from(&all_models);
             // If we have models and none selected, select the first one
             if self.selected_model >= self.available_models.len() {
                 self.selected_model = 0;
@@ -606,7 +606,7 @@ impl App {
                     } else if let Some(error_msg) = mcp_status.error_message {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Warning,
-                            format!("[MCP] {}", error_msg),
+                            format!("[MCP] {error_msg}"),
                         );
                         // Update MCP provider status
                         if let Some(provider) =
@@ -758,7 +758,7 @@ impl App {
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+S: Save/export UI state to file
-                                self.export_ui_state().await;
+                                self.export_ui_state();
                             }
                             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+R: Refresh model list
@@ -848,8 +848,7 @@ impl App {
                                             self.add_debug_log(
                                                 crate::ui::debug::LogLevel::Warning,
                                                 format!(
-                                                    "[UI] Model {} not available on its server",
-                                                    model_name
+                                                    "[UI] Model {model_name} not available on its server"
                                                 ),
                                             );
                                         }
@@ -881,8 +880,7 @@ impl App {
                                             self.add_debug_log(
                                                 crate::ui::debug::LogLevel::Info,
                                                 format!(
-                                                    "[UI] Created task window for model: {}",
-                                                    model_name
+                                                    "[UI] Created task window for model: {model_name}"
                                                 ),
                                             );
                                         }
@@ -1863,11 +1861,7 @@ Scrolling (when in scroll mode):
 
             // Suspend the terminal temporarily
             let _ = terminal::disable_raw_mode();
-            let _ = crossterm::execute!(
-                std::io::stdout(),
-                terminal::LeaveAlternateScreen,
-                cursor::Show
-            );
+            let _ = crossterm::execute!(io::stdout(), terminal::LeaveAlternateScreen, cursor::Show);
 
             // Get current input buffer content
             let initial_content = self.input_buffer.clone();
@@ -1896,7 +1890,7 @@ Scrolling (when in scroll mode):
             // Restore terminal with proper cleanup
             let _ = terminal::enable_raw_mode();
             let _ = crossterm::execute!(
-                std::io::stdout(),
+                io::stdout(),
                 terminal::EnterAlternateScreen,
                 terminal::Clear(terminal::ClearType::All),
                 cursor::Hide,
@@ -1904,7 +1898,7 @@ Scrolling (when in scroll mode):
             );
 
             // Add a small delay for terminal to stabilize
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
             // No need to manually clear - the next render cycle will handle it
         } else {
@@ -2008,7 +2002,7 @@ Scrolling (when in scroll mode):
         }
     }
 
-    async fn export_ui_state(&mut self) {
+    fn export_ui_state(&mut self) {
         use chrono::Local;
         use serde_json::json;
         use std::fs;
@@ -2275,99 +2269,6 @@ Scrolling (when in scroll mode):
             }
             ConfigurationMode::None => {}
         }
-    }
-
-    fn show_mcp_tools_dialog(&mut self) {
-        if self.mcp_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Warning,
-                "[MCP] No tools available".to_string(),
-            );
-            return;
-        }
-
-        // Log all available tools to debug view
-        self.add_debug_log(
-            crate::ui::debug::LogLevel::Info,
-            format!("[MCP] Available tools ({}):", self.mcp_tools.len()),
-        );
-
-        // Group tools by category
-        let mut device_tools = Vec::new();
-        let mut ui_tools = Vec::new();
-        let mut git_tools = Vec::new();
-        let mut memory_tools = Vec::new();
-        let mut other_tools = Vec::new();
-
-        for tool_name in &self.mcp_tools {
-            let tool_info = format!("@{tool_name}");
-
-            if tool_name.contains("device") || tool_name.contains("simulator") {
-                device_tools.push(tool_info);
-            } else if tool_name.contains("ui_") || tool_name.contains("screen") {
-                ui_tools.push(tool_info);
-            } else if tool_name.contains("git_") {
-                git_tools.push(tool_info);
-            } else if tool_name.contains("memory")
-                || tool_name == "store_memory"
-                || tool_name == "search_memory"
-            {
-                memory_tools.push(tool_info);
-            } else {
-                other_tools.push(tool_info);
-            }
-        }
-
-        // Log tools by category
-        if !device_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Device Management Tools]".to_string(),
-            );
-            for tool in device_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
-            }
-        }
-
-        if !ui_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[UI Interaction Tools]".to_string(),
-            );
-            for tool in ui_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
-            }
-        }
-
-        if !git_tools.is_empty() {
-            self.add_debug_log(crate::ui::debug::LogLevel::Info, "[Git Tools]".to_string());
-            for tool in git_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
-            }
-        }
-
-        if !memory_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Memory Tools]".to_string(),
-            );
-            for tool in memory_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
-            }
-        }
-
-        if !other_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Other Tools]".to_string(),
-            );
-            for tool in other_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
-            }
-        }
-
-        // Switch to debug view to show the tools
-        self.view_mode = ViewMode::Debug;
     }
 }
 

@@ -288,8 +288,7 @@ pub async fn run() -> Result<()> {
                                             ollama_configs[idx - 1].memory.content.clone();
                                         #[cfg(debug_assertions)]
                                         eprintln!(
-                                            "[LLM] Resolved {} to URL: {}",
-                                            server_prefix, server_url
+                                            "[LLM] Resolved {server_prefix} to URL: {server_url}"
                                         );
                                         server_url
                                     } else {
@@ -479,11 +478,10 @@ pub async fn run() -> Result<()> {
                             || e.to_string().contains("not found")
                         {
                             format!(
-                                "Model '{}' not found on server {}. Please check available models for this server.",
-                                actual_model, server_url
+                                "Model '{actual_model}' not found on server {server_url}. Please check available models for this server."
                             )
                         } else {
-                            format!("Failed to get LLM response from {}: {}", server_url, e)
+                            format!("Failed to get LLM response from {server_url}: {e}")
                         };
 
                         let _ = llm_tx
