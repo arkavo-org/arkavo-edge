@@ -106,10 +106,16 @@ impl McpConnection {
         tools.insert(tui_keyboard.schema().name.clone(), Box::new(tui_keyboard));
 
         let tui_screenshot = TuiScreenshotKit::new();
-        tools.insert(tui_screenshot.schema().name.clone(), Box::new(tui_screenshot));
+        tools.insert(
+            tui_screenshot.schema().name.clone(),
+            Box::new(tui_screenshot),
+        );
 
         let tui_interaction = TuiInteractionKit::new();
-        tools.insert(tui_interaction.schema().name.clone(), Box::new(tui_interaction));
+        tools.insert(
+            tui_interaction.schema().name.clone(),
+            Box::new(tui_interaction),
+        );
 
         let tui_harness = TuiTestHarness::new();
         tools.insert(tui_harness.schema().name.clone(), Box::new(tui_harness));

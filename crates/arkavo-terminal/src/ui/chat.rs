@@ -170,7 +170,7 @@ impl ChatView {
                     .add_modifier(Modifier::SLOW_BLINK),
             )));
         }
-        
+
         // Add spacing between messages
         lines.push(Line::from(""));
 
