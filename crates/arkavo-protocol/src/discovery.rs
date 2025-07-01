@@ -274,12 +274,14 @@ impl DiscoveryService {
             loop {
                 // Sync mDNS discoveries to main cache
                 let mdns_endpoints = mdns_manager.get_discovered_services().await;
-                {
-                    let mut cache = discovered_endpoints.write().unwrap();
-                    for endpoint in mdns_endpoints {
-                        cache.insert(endpoint.agent_id.clone(), endpoint);
-                    }
-                } // cache lock is dropped here
+
+                // Only lock while inserting, not during iteration
+                for endpoint in mdns_endpoints {
+                    discovered_endpoints
+                        .write()
+                        .unwrap()
+                        .insert(endpoint.agent_id.clone(), endpoint);
+                }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }

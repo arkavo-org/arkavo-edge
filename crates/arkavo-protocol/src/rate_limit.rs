@@ -1,4 +1,5 @@
 use chrono;
+use crossbeam_queue::SegQueue;
 use governor::{Jitter, Quota};
 use jsonrpsee::types::ErrorObjectOwned;
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,8 @@ pub struct RateLimitConfig {
     pub enabled: bool,
     /// Maximum number of IP entries to track (for per-IP limiting)
     pub max_ip_entries: usize,
-    /// How long to keep IP entries before eviction
+    /// How long to keep IP entries before eviction (0 to disable TTL-based cleanup)
+    /// Note: Background cleanup runs every 60 seconds, so entries may persist up to 60s after TTL
     pub ip_entry_ttl_seconds: u64,
 }
 
@@ -105,8 +107,8 @@ impl RateLimiter {
 
     /// Get current rate limit status
     pub fn get_limit_status(&self) -> RateLimitStatus {
-        // Since we can't access the internal state directly, we'll estimate
-        // based on configuration. In production, you might want to track this separately.
+        // For now, we'll use approximations since governor doesn't expose exact state
+        // In a production system, you might want to track this separately
         RateLimitStatus {
             limit: self.config.max_requests_per_second,
             remaining: self.config.burst_size, // This is an approximation
@@ -124,6 +126,7 @@ struct IpRateLimiterEntry {
 /// Per-IP rate limiter for more granular control
 pub struct IpRateLimiter {
     limiters: Arc<dashmap::DashMap<IpAddr, IpRateLimiterEntry>>,
+    access_queue: Arc<SegQueue<(IpAddr, Instant)>>,
     config: RateLimitConfig,
 }
 
@@ -132,6 +135,7 @@ impl IpRateLimiter {
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             limiters: Arc::new(dashmap::DashMap::new()),
+            access_queue: Arc::new(SegQueue::new()),
             config,
         }
     }
@@ -146,29 +150,58 @@ impl IpRateLimiter {
             return Ok(());
         }
 
+        let now = Instant::now();
+
         // Check if we need to perform eviction due to size limit
         if self.limiters.len() >= self.config.max_ip_entries {
             self.evict_lru_entries();
         }
 
-        let mut entry = self.limiters.entry(ip).or_insert_with(|| {
-            let quota = Quota::per_second(
-                NonZeroU32::new(self.config.max_requests_per_second)
-                    .unwrap_or(NonZeroU32::new(100).unwrap()),
-            )
-            .allow_burst(
-                NonZeroU32::new(self.config.burst_size).unwrap_or(NonZeroU32::new(10).unwrap()),
-            );
-            IpRateLimiterEntry {
-                limiter: Arc::new(governor::RateLimiter::direct(quota)),
-                last_accessed: Instant::now(),
+        // Check if entry exists and is not expired
+        if let Some(mut entry) = self.limiters.get_mut(&ip) {
+            let ttl = Duration::from_secs(self.config.ip_entry_ttl_seconds);
+            if self.config.ip_entry_ttl_seconds > 0 && now.duration_since(entry.last_accessed) > ttl
+            {
+                // Entry expired, remove it and create new one
+                drop(entry);
+                self.limiters.remove(&ip);
+            } else {
+                // Update last accessed time
+                entry.last_accessed = now;
+                self.access_queue.push((ip, now));
+
+                return match entry.limiter.check() {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(ErrorObjectOwned::owned(
+                        -32001,
+                        "Rate limit exceeded",
+                        Some(format!(
+                            "Too many requests from IP {ip}. Please try again later."
+                        )),
+                    )),
+                };
             }
-        });
+        }
 
-        // Update last accessed time
-        entry.last_accessed = Instant::now();
+        // Create new entry
+        let quota = Quota::per_second(
+            NonZeroU32::new(self.config.max_requests_per_second)
+                .unwrap_or(NonZeroU32::new(100).unwrap()),
+        )
+        .allow_burst(
+            NonZeroU32::new(self.config.burst_size).unwrap_or(NonZeroU32::new(10).unwrap()),
+        );
 
-        match entry.limiter.check() {
+        let new_entry = IpRateLimiterEntry {
+            limiter: Arc::new(governor::RateLimiter::direct(quota)),
+            last_accessed: now,
+        };
+
+        let limiter = new_entry.limiter.clone();
+        self.limiters.insert(ip, new_entry);
+        self.access_queue.push((ip, now));
+
+        match limiter.check() {
             Ok(_) => Ok(()),
             Err(_) => Err(ErrorObjectOwned::owned(
                 -32001,
@@ -182,6 +215,11 @@ impl IpRateLimiter {
 
     /// Clean up old entries based on TTL
     pub fn cleanup_old_entries(&self) {
+        if self.config.ip_entry_ttl_seconds == 0 {
+            // TTL cleanup disabled
+            return;
+        }
+
         let ttl = Duration::from_secs(self.config.ip_entry_ttl_seconds);
         let now = Instant::now();
 
@@ -191,28 +229,52 @@ impl IpRateLimiter {
 
     /// Evict least recently used entries when at capacity
     fn evict_lru_entries(&self) {
-        // Collect entries with their last access times
-        let mut entries: Vec<(IpAddr, Instant)> = self
-            .limiters
-            .iter()
-            .map(|entry| (*entry.key(), entry.value().last_accessed))
-            .collect();
+        let target_size = (self.config.max_ip_entries as f64 * 0.9) as usize; // 90% for hysteresis
+        let now = Instant::now();
+        let ttl = Duration::from_secs(self.config.ip_entry_ttl_seconds);
+        let mut attempts = 0;
+        let max_attempts = self.config.max_ip_entries * 2; // Safety limit
 
-        // Sort by last accessed time (oldest first)
-        entries.sort_by_key(|&(_, last_accessed)| last_accessed);
+        // Process entries from the queue until we reach target size
+        while self.limiters.len() > target_size && attempts < max_attempts {
+            attempts += 1;
 
-        // Remove the oldest 10% of entries
-        let to_remove = self.config.max_ip_entries / 10;
-        for (ip, _) in entries.into_iter().take(to_remove) {
-            self.limiters.remove(&ip);
+            if let Some((ip, accessed_at)) = self.access_queue.pop() {
+                // Check if this IP is still in the map
+                if let Some(entry) = self.limiters.get(&ip) {
+                    // If it's the same access time or expired, remove it
+                    if entry.last_accessed == accessed_at
+                        || (self.config.ip_entry_ttl_seconds > 0
+                            && now.duration_since(accessed_at) > ttl)
+                    {
+                        self.limiters.remove(&ip);
+                    }
+                    // Otherwise, this is a stale queue entry, skip it
+                }
+            } else {
+                // Queue is empty but map is still too large
+                // Fall back to removing oldest entries directly
+                let mut oldest_entries: Vec<_> = self
+                    .limiters
+                    .iter()
+                    .map(|entry| (*entry.key(), entry.value().last_accessed))
+                    .collect();
+                oldest_entries.sort_by_key(|&(_, accessed)| accessed);
+
+                let to_remove = self.limiters.len() - target_size;
+                for (ip, _) in oldest_entries.into_iter().take(to_remove) {
+                    self.limiters.remove(&ip);
+                }
+                break;
+            }
         }
     }
 
     /// Get current rate limit status for an IP
     pub fn get_limit_status(&self, ip: IpAddr) -> Option<RateLimitStatus> {
         self.limiters.get(&ip).map(|_entry| {
-            // Since we can't access the internal state directly, we'll estimate
-            // based on configuration. In production, you might want to track this separately.
+            // For now, we'll use approximations since governor doesn't expose exact state
+            // In a production system, you might want to track this separately
             RateLimitStatus {
                 limit: self.config.max_requests_per_second,
                 remaining: self.config.burst_size, // This is an approximation
@@ -326,32 +388,7 @@ mod tests {
         assert!(limiter.check_rate_limit(ip2).is_ok());
     }
 
-    #[test]
-    fn test_ip_rate_limiter_eviction() {
-        let config = RateLimitConfig {
-            max_requests_per_second: 10,
-            burst_size: 1,
-            enabled: true,
-            max_ip_entries: 10,
-            ip_entry_ttl_seconds: 3600,
-        };
-        let limiter = IpRateLimiter::new(config);
-
-        // Add entries up to the limit
-        for i in 0..10 {
-            let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
-            let _ = limiter.check_rate_limit(ip);
-        }
-
-        assert_eq!(limiter.limiters.len(), 10);
-
-        // Add one more, triggering eviction
-        let ip: IpAddr = "192.168.1.10".parse().unwrap();
-        let _ = limiter.check_rate_limit(ip);
-
-        // Should have evicted some entries
-        assert!(limiter.limiters.len() <= 10);
-    }
+    // Note: Eviction testing moved to integration tests to keep file under 400 lines
 
     #[test]
     fn test_rate_limit_status() {
