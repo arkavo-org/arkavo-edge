@@ -129,22 +129,22 @@ impl McpConnection {
                     .tools
                     .get(name)
                     .ok_or_else(|| format!("Tool not found: {}", name))?;
-                
+
                 // Create a new thread to avoid runtime conflicts
                 let args_clone = args.clone();
                 let tools = mcp.tools.clone();
                 let tool_name = name.to_string();
-                
+
                 std::thread::spawn(move || {
                     // Get the tool again in the new thread
                     let tool = tools
                         .get(&tool_name)
                         .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
-                    
+
                     // Create a new runtime for this thread
-                    let thread_rt = Runtime::new()
-                        .map_err(|e| format!("Failed to create runtime: {}", e))?;
-                    
+                    let thread_rt =
+                        Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+
                     thread_rt.block_on(async move {
                         tool.execute(args_clone)
                             .await

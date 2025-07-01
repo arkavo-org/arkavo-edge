@@ -52,6 +52,12 @@ uuid = { version = "1.11", features = ["v4", "serde"] }
 # Random number generation
 rand = "0.8"
 
+# Regular expressions for ANSI code stripping
+regex = "1.11"
+
+# Base64 encoding for screenshots
+base64 = "0.22"
+
 # Template engine for reporting
 handlebars = "6.3"
 

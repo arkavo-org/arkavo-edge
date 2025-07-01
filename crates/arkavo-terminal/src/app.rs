@@ -1119,13 +1119,10 @@ impl App {
         // Show prompt with input buffer
         let prompt = "> ";
         let full_text = format!("{}{}", prompt, self.input_buffer);
-        
+
         // Calculate visible portion with horizontal scrolling
         let scroll_offset = full_text.len().saturating_sub(visible_width);
-        let input_text = full_text
-            .chars()
-            .skip(scroll_offset)
-            .collect::<String>();
+        let input_text = full_text.chars().skip(scroll_offset).collect::<String>();
 
         let input_paragraph = Paragraph::new(input_text).style(Style::default());
         frame.render_widget(input_paragraph, input_inner);

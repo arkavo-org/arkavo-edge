@@ -448,6 +448,24 @@ impl McpTestServer {
             Arc::new(super::git_tools::GitRemoteKit::new()),
         );
 
+        // Add TUI testing tools
+        tools.insert(
+            "tui_keyboard".to_string(),
+            Arc::new(super::tui_keyboard_tools::TuiKeyboardKit::new()),
+        );
+        tools.insert(
+            "tui_screenshot".to_string(),
+            Arc::new(super::tui_screenshot_tool::TuiScreenshotKit::new()),
+        );
+        tools.insert(
+            "tui_interaction".to_string(),
+            Arc::new(super::tui_interaction_kit::TuiInteractionKit::new()),
+        );
+        tools.insert(
+            "tui_harness".to_string(),
+            Arc::new(super::tui_test_harness::TuiTestHarness::new()),
+        );
+
         let state_store = Arc::new(StateStore::new());
 
         // Memory tools initialization will be done after creating the server instance
@@ -670,6 +688,10 @@ impl McpTestServer {
                 | "git_branch"
                 | "git_log"
                 | "git_remote"
+                | "tui_keyboard"
+                | "tui_screenshot"
+                | "tui_interaction"
+                | "tui_harness"
         )
     }
 
