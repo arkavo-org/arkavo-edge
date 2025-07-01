@@ -16,8 +16,8 @@ async fn test_rate_limit_eviction_with_background_task() {
 
     let limiter = Arc::new(IpRateLimiter::new(config));
 
-    // Spawn cleanup task
-    let cleanup_handle = spawn_cleanup_task(limiter.clone());
+    // Spawn cleanup task (no metrics for test)
+    let cleanup_handle = spawn_cleanup_task(limiter.clone(), None);
 
     // Add some IPs
     for i in 0..50 {

@@ -1,5 +1,6 @@
 use crate::config::ServerConfig;
 use crate::error::{A2aError, Result};
+use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
@@ -45,6 +46,7 @@ pub trait A2aRpc {
 
 pub struct A2aRpcImpl {
     rate_limiter: Arc<RateLimiter>,
+    metrics: Arc<MetricsCollector>,
 }
 
 #[async_trait]
@@ -55,20 +57,29 @@ impl A2aRpcServer for A2aRpcImpl {
         _promise_type: String,
         _payload: Option<serde_json::Value>,
     ) -> RpcResult<PromiseResponse> {
+        let timer = RpcTimer::new("promise_request".to_string(), self.metrics.clone());
+
         // Check rate limit
-        self.rate_limiter.check_rate_limit()?;
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
 
         #[cfg(feature = "stub_handlers")]
         {
-            Ok(PromiseResponse {
+            let response = PromiseResponse {
                 promise_id: uuid::Uuid::new_v4(),
                 status: PromiseStatus::Pending,
                 data: _payload,
-            })
+            };
+            timer.success();
+            Ok(response)
         }
 
         #[cfg(not(feature = "stub_handlers"))]
         {
+            timer.error();
             Err(ErrorObjectOwned::owned(
                 -32601,
                 "Method not yet implemented",
@@ -82,19 +93,28 @@ impl A2aRpcServer for A2aRpcImpl {
         _agent_id: String,
         _promises: Vec<PromiseCapability>,
     ) -> RpcResult<PromiseDeclareResponse> {
+        let timer = RpcTimer::new("promise_declare".to_string(), self.metrics.clone());
+
         // Check rate limit
-        self.rate_limiter.check_rate_limit()?;
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
 
         #[cfg(feature = "stub_handlers")]
         {
-            Ok(PromiseDeclareResponse {
+            let response = PromiseDeclareResponse {
                 acknowledged: true,
                 timestamp: chrono::Utc::now(),
-            })
+            };
+            timer.success();
+            Ok(response)
         }
 
         #[cfg(not(feature = "stub_handlers"))]
         {
+            timer.error();
             Err(ErrorObjectOwned::owned(
                 -32601,
                 "Method not yet implemented",
@@ -107,16 +127,24 @@ impl A2aRpcServer for A2aRpcImpl {
         &self,
         _filter: Option<AgentDiscoverFilter>,
     ) -> RpcResult<Vec<DiscoveredAgent>> {
+        let timer = RpcTimer::new("agent_discover".to_string(), self.metrics.clone());
+
         // Check rate limit
-        self.rate_limiter.check_rate_limit()?;
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
 
         #[cfg(feature = "stub_handlers")]
         {
+            timer.success();
             Ok(vec![])
         }
 
         #[cfg(not(feature = "stub_handlers"))]
         {
+            timer.error();
             Err(ErrorObjectOwned::owned(
                 -32601,
                 "Method not yet implemented",
@@ -126,14 +154,23 @@ impl A2aRpcServer for A2aRpcImpl {
     }
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {
+        let timer = RpcTimer::new("rpc.discover".to_string(), self.metrics.clone());
         let schema = openrpc::generate_openrpc_schema();
-        serde_json::to_value(schema).map_err(|e| {
-            ErrorObjectOwned::owned(
-                -32603,
-                "Failed to serialize OpenRPC schema",
-                Some(e.to_string()),
-            )
-        })
+
+        match serde_json::to_value(schema) {
+            Ok(value) => {
+                timer.success();
+                Ok(value)
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "Failed to serialize OpenRPC schema",
+                    Some(e.to_string()),
+                ))
+            }
+        }
     }
 }
 
@@ -160,7 +197,11 @@ impl A2aServer {
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
-        let rpc_impl = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(true)); // TODO: Make configurable
+        let rpc_impl = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
         let handle = server.start(rpc_impl.into_rpc());
 
         info!("A2A server started successfully on {}", addr);
@@ -186,7 +227,11 @@ mod tests {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
-        let impl_instance = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(false));
+        let impl_instance = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
         let result = impl_instance
             .promise_request(
                 "test-agent".to_string(),
@@ -216,7 +261,11 @@ mod tests {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
-        let impl_instance = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(false));
+        let impl_instance = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
         let result = impl_instance
             .promise_declare(
                 "test-agent".to_string(),
@@ -249,7 +298,11 @@ mod tests {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
-        let impl_instance = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(false));
+        let impl_instance = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
         let result = impl_instance.rpc_discover().await.unwrap();
 
         assert_eq!(result.get("openrpc").unwrap(), "1.2.6");
@@ -274,7 +327,11 @@ mod tests {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
-        let impl_instance = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(false));
+        let impl_instance = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
                 promise_types: Some(vec!["test".to_string()]),
@@ -303,7 +360,11 @@ mod tests {
         config.max_requests_per_second = 1;
         config.burst_size = 1;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
-        let impl_instance = A2aRpcImpl { rate_limiter };
+        let metrics = Arc::new(MetricsCollector::new(false));
+        let impl_instance = A2aRpcImpl {
+            rate_limiter,
+            metrics,
+        };
 
         // First request should succeed
         let result1 = impl_instance.agent_discover(None).await;

@@ -52,10 +52,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 # mDNS dependencies
 mdns-sd = { version = "0.13", optional = true }
 
+# Metrics dependencies
+metrics = { version = "0.23", optional = true }
+metrics-exporter-prometheus = { version = "0.15", optional = true }
+
 [features]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
 mdns = ["mdns-sd"]
+metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 
 [dev-dependencies]
 # For integration tests

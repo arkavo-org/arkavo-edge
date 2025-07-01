@@ -149,6 +149,9 @@ impl MdnsManager {
                                             .await
                                             .insert(agent_id.to_string(), endpoint);
                                         info!("Added mDNS discovered agent: {}", agent_id);
+
+                                        // TODO: Add metrics reporting when metrics collector is available
+                                        // metrics.record_mdns_discovery();
                                     }
                                 }
                             }

@@ -6,6 +6,7 @@ pub mod http;
 pub mod mcp;
 #[cfg(feature = "mdns")]
 pub mod mdns;
+pub mod metrics;
 pub mod openrpc;
 pub mod rate_limit;
 pub mod security;
@@ -18,6 +19,7 @@ pub use config::{A2aConfig, A2aConfigBuilder, ConfigManager};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
+pub use metrics::{MetricsCollector, RpcTimer};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
     IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,

@@ -301,7 +301,10 @@ pub struct RateLimitStatus {
 }
 
 /// Spawn a background task to periodically clean up old IP rate limiter entries
-pub fn spawn_cleanup_task(limiter: Arc<IpRateLimiter>) -> tokio::task::JoinHandle<()> {
+pub fn spawn_cleanup_task(
+    limiter: Arc<IpRateLimiter>,
+    metrics: Option<Arc<crate::metrics::MetricsCollector>>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut cleanup_interval = interval(Duration::from_secs(60)); // Run every minute
         cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -310,7 +313,12 @@ pub fn spawn_cleanup_task(limiter: Arc<IpRateLimiter>) -> tokio::task::JoinHandl
             cleanup_interval.tick().await;
             debug!("Running rate limiter cleanup");
             limiter.cleanup_old_entries();
-            debug!("Rate limiter has {} entries", limiter.entry_count());
+            let entry_count = limiter.entry_count();
+            debug!("Rate limiter has {} entries", entry_count);
+
+            if let Some(ref metrics) = metrics {
+                metrics.update_rate_limit_entries(entry_count);
+            }
         }
     })
 }
