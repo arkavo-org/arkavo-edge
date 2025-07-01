@@ -2,7 +2,6 @@ pub mod app;
 pub mod benchmark;
 pub mod event;
 pub mod helix;
-pub mod mcp_integration;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;
@@ -44,6 +43,14 @@ pub struct LlmResponse {
     pub is_streaming: bool,
     pub is_complete: bool,
     pub error: Option<String>,
+    pub mcp_status: Option<McpStatusUpdate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpStatusUpdate {
+    pub available: bool,
+    pub error_message: Option<String>,
+    pub tool_count: usize,
 }
 
 pub struct TerminalContext {
@@ -58,8 +65,8 @@ pub async fn run() -> Result<()> {
 
     // Spawn LLM handler task with proper Ollama integration
     tokio::spawn(async move {
-        use crate::mcp_integration::McpConnection;
         use arkavo_llm::Message;
+        use arkavo_test::mcp::mcp_connection::McpConnection;
         use tokio_stream::StreamExt;
 
         // Initialize LLM client using the same logic as chat command
@@ -78,103 +85,115 @@ pub async fn run() -> Result<()> {
             client.provider_name()
         );
 
-        // Initialize MCP connection
-        let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
-            None
-        } else {
-            let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-            let result = match mcp_url {
-                Some(url) => McpConnection::new_external(Some(url)),
-                None => McpConnection::new_in_process(),
+        // Initialize MCP connection and report status
+        let (mcp_client, mcp_status) =
+            if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
+                (
+                    None,
+                    McpStatusUpdate {
+                        available: false,
+                        error_message: Some("MCP disabled by environment variable".to_string()),
+                        tool_count: 0,
+                    },
+                )
+            } else {
+                let result = McpConnection::new_in_process();
+
+                match result {
+                    Ok(client) => {
+                        let tool_count = client.list_tools().len();
+                        let status = McpStatusUpdate {
+                            available: true,
+                            error_message: None,
+                            tool_count,
+                        };
+                        (Some(client), status)
+                    }
+                    Err(e) => {
+                        let status = McpStatusUpdate {
+                            available: false,
+                            error_message: Some(format!("MCP server not available: {e}")),
+                            tool_count: 0,
+                        };
+                        (None, status)
+                    }
+                }
             };
 
-            match result {
-                Ok(client) => {
-                    match &client {
-                        McpConnection::InProcess(_) => {
-                            eprintln!("✓ LLM handler using in-process MCP server")
-                        }
-                        McpConnection::External(_) => {
-                            eprintln!("✓ LLM handler connected to external MCP server")
-                        }
-                    }
-                    Some(client)
-                }
-                Err(e) => {
-                    eprintln!("ℹ MCP server not available for LLM handler: {}", e);
-                    None
-                }
-            }
-        };
+        // Send MCP status update through LLM channel
+        let _ = llm_tx
+            .send(LlmResponse {
+                task_id: uuid::Uuid::new_v4(),
+                model_name: "system".to_string(),
+                content: String::new(),
+                is_streaming: false,
+                is_complete: true,
+                error: None,
+                mcp_status: Some(mcp_status),
+            })
+            .await;
 
         // Build MCP tools information for system prompt
         let mcp_info = if let Some(ref client) = mcp_client {
-            match client.list_tools() {
-                Ok(tools) => {
-                    if tools.is_empty() {
-                        "\n\nMCP Integration: Enabled\nNo tools available yet.".to_string()
+            let tool_names = client.list_tools();
+            if tool_names.is_empty() {
+                "\n\nMCP Integration: Enabled\nNo tools available yet.".to_string()
+            } else {
+                let mut tool_info =
+                    String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
+
+                // Group tools by category
+                let mut device_tools = Vec::new();
+                let mut ui_tools = Vec::new();
+                let mut git_tools = Vec::new();
+                let mut memory_tools = Vec::new();
+                let mut other_tools = Vec::new();
+
+                for tool_name in &tool_names {
+                    let tool_desc = format!("- @{tool_name}");
+
+                    if tool_name.contains("device") || tool_name.contains("simulator") {
+                        device_tools.push(tool_desc);
+                    } else if tool_name.contains("ui_") || tool_name.contains("screen") {
+                        ui_tools.push(tool_desc);
+                    } else if tool_name.contains("git_") {
+                        git_tools.push(tool_desc);
+                    } else if tool_name.contains("memory")
+                        || tool_name == "store_memory"
+                        || tool_name == "search_memory"
+                    {
+                        memory_tools.push(tool_desc);
                     } else {
-                        let mut tool_info =
-                            String::from("\n\nMCP Integration: Enabled\n\nAvailable MCP tools:\n");
-
-                        // Group tools by category
-                        let mut device_tools = Vec::new();
-                        let mut ui_tools = Vec::new();
-                        let mut git_tools = Vec::new();
-                        let mut memory_tools = Vec::new();
-                        let mut other_tools = Vec::new();
-
-                        for tool in &tools {
-                            let tool_desc = format!("- @{}: {}", tool.name, tool.description);
-
-                            if tool.name.contains("device") || tool.name.contains("simulator") {
-                                device_tools.push(tool_desc);
-                            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
-                                ui_tools.push(tool_desc);
-                            } else if tool.name.contains("git_") {
-                                git_tools.push(tool_desc);
-                            } else if tool.name.contains("memory")
-                                || tool.name == "store_memory"
-                                || tool.name == "search_memory"
-                            {
-                                memory_tools.push(tool_desc);
-                            } else {
-                                other_tools.push(tool_desc);
-                            }
-                        }
-
-                        if !device_tools.is_empty() {
-                            tool_info.push_str("\nDevice Management:\n");
-                            tool_info.push_str(&device_tools.join("\n"));
-                        }
-
-                        if !ui_tools.is_empty() {
-                            tool_info.push_str("\n\nUI Interaction:\n");
-                            tool_info.push_str(&ui_tools.join("\n"));
-                        }
-
-                        if !git_tools.is_empty() {
-                            tool_info.push_str("\n\nGit Tools:\n");
-                            tool_info.push_str(&git_tools.join("\n"));
-                        }
-
-                        if !memory_tools.is_empty() {
-                            tool_info.push_str("\n\nMemory Tools:\n");
-                            tool_info.push_str(&memory_tools.join("\n"));
-                        }
-
-                        if !other_tools.is_empty() {
-                            tool_info.push_str("\n\nOther Tools:\n");
-                            tool_info.push_str(&other_tools.join("\n"));
-                        }
-
-                        tool_info
+                        other_tools.push(tool_desc);
                     }
                 }
-                Err(e) => {
-                    eprintln!("Warning: Failed to list MCP tools: {}", e);
-                    "\n\nMCP Integration: Enabled (tool listing failed)".to_string()
+
+                if !device_tools.is_empty() {
+                    tool_info.push_str("\nDevice Management:\n");
+                    tool_info.push_str(&device_tools.join("\n"));
                 }
+
+                if !ui_tools.is_empty() {
+                    tool_info.push_str("\n\nUI Interaction:\n");
+                    tool_info.push_str(&ui_tools.join("\n"));
+                }
+
+                if !git_tools.is_empty() {
+                    tool_info.push_str("\n\nGit Tools:\n");
+                    tool_info.push_str(&git_tools.join("\n"));
+                }
+
+                if !memory_tools.is_empty() {
+                    tool_info.push_str("\n\nMemory Tools:\n");
+                    tool_info.push_str(&memory_tools.join("\n"));
+                }
+
+                if !other_tools.is_empty() {
+                    tool_info.push_str("\n\nOther Tools:\n");
+                    tool_info.push_str(&other_tools.join("\n"));
+                }
+
+                tool_info
             }
         } else {
             "\n\nMCP Integration: Disabled".to_string()
@@ -185,22 +204,18 @@ pub async fn run() -> Result<()> {
             Ok(content) => Some(content),
             Err(_) => {
                 // Try CLAUDE.md as fallback
-                match std::fs::read_to_string("CLAUDE.md") {
-                    Ok(content) => Some(content),
-                    Err(_) => None,
-                }
+                std::fs::read_to_string("CLAUDE.md").ok()
             }
         };
 
         // System prompt with MCP tools information
         let system_prompt = if let Some(agents_content) = agents_md_content {
             format!(
-                "{}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+                "{agents_content}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
                 When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
                 \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
                 \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
-                {}",
-                agents_content, mcp_info
+                {mcp_info}"
             )
         } else {
             format!(
@@ -209,8 +224,7 @@ pub async fn run() -> Result<()> {
                 When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
                 \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
                 \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
-                {}",
-                mcp_info
+                {mcp_info}"
             )
         };
 
@@ -229,36 +243,61 @@ pub async fn run() -> Result<()> {
             let (response_tx, mut response_rx) = tokio::sync::mpsc::channel::<String>(1);
 
             // Parse the model name to extract server and actual model
-            let (server_url, actual_model) =
-                if let Some((server_prefix, model)) = request.model_name.split_once('/') {
-                    // Model has server prefix - need to resolve the URL
-                    let url = if server_prefix == "localhost" {
-                        "http://localhost:11434".to_string()
-                    } else if server_prefix.starts_with("server") {
-                        // Look up saved server configuration from memory storage
-                        if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
-                            if let Ok(all_configs) = storage
-                                .search("arkavo_ollama_server_config", 20, Some("config"))
-                                .await
-                            {
-                                // No need to filter since we searched for the specific type
-                                let ollama_configs: Vec<_> = all_configs
-                                    .into_iter()
-                                    .filter(|config| {
-                                        config.memory.content != "CLEARED"
-                                            && config.memory.content != "http://localhost:11434"
-                                    })
-                                    .collect();
+            let (server_url, actual_model) = if let Some((server_prefix, model)) =
+                request.model_name.split_once('/')
+            {
+                // Model has server prefix - need to resolve the URL
+                let url = if server_prefix == "localhost" {
+                    "http://localhost:11434".to_string()
+                } else if server_prefix.starts_with("server") {
+                    // Look up saved server configuration from memory storage
+                    if let Ok(storage) = arkavo_memory::storage::MemoryStorage::new().await {
+                        if let Ok(all_configs) = storage
+                            .search("arkavo_ollama_server_config", 20, Some("config"))
+                            .await
+                        {
+                            // No need to filter since we searched for the specific type
+                            let ollama_configs: Vec<_> = all_configs
+                                .into_iter()
+                                .filter(|config| {
+                                    config.memory.content != "CLEARED"
+                                        && config.memory.content != "http://localhost:11434"
+                                })
+                                .collect();
 
-                                // Extract server number from prefix (e.g., "server1" -> 1)
-                                if let Some(num_str) = server_prefix.strip_prefix("server") {
-                                    if let Ok(idx) = num_str.parse::<usize>() {
-                                        if idx > 0 && idx <= ollama_configs.len() {
-                                            ollama_configs[idx - 1].memory.content.clone()
-                                        } else {
-                                            "http://localhost:11434".to_string()
-                                        }
+                            #[cfg(debug_assertions)]
+                            {
+                                eprintln!(
+                                    "[LLM] Found {} Ollama server configs:",
+                                    ollama_configs.len()
+                                );
+                                for (i, config) in ollama_configs.iter().enumerate() {
+                                    eprintln!(
+                                        "[LLM]   server{} -> {}",
+                                        i + 1,
+                                        config.memory.content
+                                    );
+                                }
+                            }
+
+                            // Extract server number from prefix (e.g., "server1" -> 1)
+                            if let Some(num_str) = server_prefix.strip_prefix("server") {
+                                if let Ok(idx) = num_str.parse::<usize>() {
+                                    if idx > 0 && idx <= ollama_configs.len() {
+                                        let server_url =
+                                            ollama_configs[idx - 1].memory.content.clone();
+                                        #[cfg(debug_assertions)]
+                                        eprintln!(
+                                            "[LLM] Resolved {server_prefix} to URL: {server_url}"
+                                        );
+                                        server_url
                                     } else {
+                                        #[cfg(debug_assertions)]
+                                        eprintln!(
+                                            "[LLM] Server index {} out of range (have {} servers)",
+                                            idx,
+                                            ollama_configs.len()
+                                        );
                                         "http://localhost:11434".to_string()
                                     }
                                 } else {
@@ -271,24 +310,24 @@ pub async fn run() -> Result<()> {
                             "http://localhost:11434".to_string()
                         }
                     } else {
-                        // Unknown prefix, use localhost as fallback
                         "http://localhost:11434".to_string()
-                    };
-                    (url, model.to_string())
+                    }
                 } else {
-                    // No server prefix, use default
-                    (
-                        "http://localhost:11434".to_string(),
-                        request.model_name.clone(),
-                    )
+                    // Unknown prefix, use localhost as fallback
+                    "http://localhost:11434".to_string()
                 };
+                (url, model.to_string())
+            } else {
+                // No server prefix, use default
+                (
+                    "http://localhost:11434".to_string(),
+                    request.model_name.clone(),
+                )
+            };
 
             // Only log in debug builds
             #[cfg(debug_assertions)]
-            eprintln!(
-                "[LLM] Using server: {} with model: {}",
-                server_url, actual_model
-            );
+            eprintln!("[LLM] Using server: {server_url} with model: {actual_model}");
 
             // Create a new Ollama client with the specific model and server
             let model_specific_client =
@@ -315,6 +354,7 @@ pub async fn run() -> Result<()> {
                                 is_streaming: true,
                                 is_complete: false,
                                 error: None,
+                                mcp_status: None,
                             })
                             .await;
 
@@ -334,6 +374,7 @@ pub async fn run() -> Result<()> {
                                                 is_streaming: true,
                                                 is_complete: false,
                                                 error: None,
+                                                mcp_status: None,
                                             })
                                             .await;
                                     }
@@ -347,6 +388,7 @@ pub async fn run() -> Result<()> {
                                             is_streaming: false,
                                             is_complete: true,
                                             error: Some(format!("Stream error: {e}")),
+                                            mcp_status: None,
                                         })
                                         .await;
                                     break;
@@ -367,13 +409,15 @@ pub async fn run() -> Result<()> {
                                 };
 
                                 // Execute tool
-                                let tool_response =
-                                    match mcp.call_tool(&tool_name, args, &provider_name) {
-                                        Ok(result) => {
-                                            // Extract result text
-                                            let result_text = if let Some(result_obj) =
-                                                result.get("result")
-                                            {
+                                let tool_response = match mcp.call_tool(
+                                    &tool_name,
+                                    args,
+                                    &provider_name,
+                                ) {
+                                    Ok(result) => {
+                                        // Extract result text
+                                        let result_text =
+                                            if let Some(result_obj) = result.get("result") {
                                                 if let Some(text) = result_obj.as_str() {
                                                     text.to_string()
                                                 } else {
@@ -385,30 +429,28 @@ pub async fn run() -> Result<()> {
                                                     .unwrap_or_else(|_| result.to_string())
                                             };
 
-                                            LlmResponse {
-                                                task_id: request.task_id,
-                                                model_name: request.model_name.clone(),
-                                                content: format!(
-                                                    "\n\n[Tool Result - @{}]:\n{}",
-                                                    tool_name, result_text
-                                                ),
-                                                is_streaming: false,
-                                                is_complete: false,
-                                                error: None,
-                                            }
-                                        }
-                                        Err(e) => LlmResponse {
+                                        LlmResponse {
                                             task_id: request.task_id,
                                             model_name: request.model_name.clone(),
                                             content: format!(
-                                                "\n\n[Tool Error - @{}]: {}",
-                                                tool_name, e
+                                                "\n\n[Tool Result - @{tool_name}]:\n{result_text}"
                                             ),
                                             is_streaming: false,
                                             is_complete: false,
                                             error: None,
-                                        },
-                                    };
+                                            mcp_status: None,
+                                        }
+                                    }
+                                    Err(e) => LlmResponse {
+                                        task_id: request.task_id,
+                                        model_name: request.model_name.clone(),
+                                        content: format!("\n\n[Tool Error - @{tool_name}]: {e}"),
+                                        is_streaming: false,
+                                        is_complete: false,
+                                        error: None,
+                                        mcp_status: None,
+                                    },
+                                };
 
                                 let _ = llm_tx.send(tool_response).await;
                             }
@@ -423,6 +465,7 @@ pub async fn run() -> Result<()> {
                                 is_streaming: true,
                                 is_complete: true,
                                 error: None,
+                                mcp_status: None,
                             })
                             .await;
 
@@ -430,6 +473,17 @@ pub async fn run() -> Result<()> {
                         let _ = response_tx.send(full_response).await;
                     }
                     Err(e) => {
+                        // Provide more informative error messages
+                        let error_msg = if e.to_string().contains("404")
+                            || e.to_string().contains("not found")
+                        {
+                            format!(
+                                "Model '{actual_model}' not found on server {server_url}. Please check available models for this server."
+                            )
+                        } else {
+                            format!("Failed to get LLM response from {server_url}: {e}")
+                        };
+
                         let _ = llm_tx
                             .send(LlmResponse {
                                 task_id: request.task_id,
@@ -437,7 +491,8 @@ pub async fn run() -> Result<()> {
                                 content: String::new(),
                                 is_streaming: false,
                                 is_complete: true,
-                                error: Some(format!("Failed to get LLM response: {e}")),
+                                error: Some(error_msg),
+                                mcp_status: None,
                             })
                             .await;
                     }
@@ -486,7 +541,6 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
         if let Ok(client) = LlmClient::from_env() {
             let test_message = vec![Message::user("ping")];
             if client.complete(test_message).await.is_ok() {
-                eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 return Ok(client);
             }
         }
@@ -658,6 +712,7 @@ pub async fn run_with_string_channels(
                                     is_streaming: false,
                                     is_complete: true,
                                     error: Some(format!("Request timeout after 30s. Model '{model_name}' may not be available.")),
+                                    mcp_status: None,
                                 };
                                 let _ = tx_clone.send(timeout_response).await;
                             });
@@ -671,6 +726,7 @@ pub async fn run_with_string_channels(
                                 is_streaming: false,
                                 is_complete: true,
                                 error: Some(format!("Channel error: {e}")),
+                                mcp_status: None,
                             };
                             let _ = new_llm_tx.send(error_response).await;
                         }
@@ -697,6 +753,7 @@ pub async fn run_with_string_channels(
                             is_streaming: true,
                             is_complete: false,
                             error: None,
+                            mcp_status: None,
                         }
                     } else if let Some(chunk) = response.strip_prefix("<<STREAM_CHUNK>>") {
                         LlmResponse {
@@ -706,6 +763,7 @@ pub async fn run_with_string_channels(
                             is_streaming: true,
                             is_complete: false,
                             error: None,
+                            mcp_status: None,
                         }
                     } else if response == "<<STREAM_END>>" {
                         // Remove from queue and pending when complete
@@ -718,6 +776,7 @@ pub async fn run_with_string_channels(
                             is_streaming: true,
                             is_complete: true,
                             error: None,
+                            mcp_status: None,
                         }
                     } else if let Some(error_msg) = response.strip_prefix("<<STREAM_ERROR>>") {
                         // Remove from queue and pending on error
@@ -730,6 +789,7 @@ pub async fn run_with_string_channels(
                             is_streaming: false,
                             is_complete: true,
                             error: Some(error_msg.to_string()),
+                            mcp_status: None,
                         }
                     } else {
                         // Regular complete response
@@ -742,6 +802,7 @@ pub async fn run_with_string_channels(
                             is_streaming: false,
                             is_complete: true,
                             error: None,
+                            mcp_status: None,
                         }
                     };
 

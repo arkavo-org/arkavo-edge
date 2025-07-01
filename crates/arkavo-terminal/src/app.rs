@@ -1,5 +1,5 @@
-use crate::mcp_integration::{McpConnection, Tool};
 use anyhow::Result;
+use arkavo_test::mcp::mcp_connection::McpConnection;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -112,7 +112,7 @@ pub struct App {
     pub configuration_mode: ConfigurationMode, // Configuration dialog state
     pub providers: Vec<ProviderInfo>, // All available providers and their status
     pub mcp_client: Option<McpConnection>, // MCP client for tools
-    pub mcp_tools: Vec<Tool>,         // Available MCP tools
+    pub mcp_tools: Vec<String>,       // Available MCP tool names
 }
 
 impl App {
@@ -167,6 +167,13 @@ impl App {
                     provider_type: ProviderType::Anthropic,
                     url: Some("https://api.anthropic.com".to_string()),
                     status: ProviderStatus::NotConfigured,
+                    models: vec![],
+                },
+                ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude,
+                    url: None,
+                    status: ProviderStatus::Disconnected,
                     models: vec![],
                 },
             ],
@@ -231,6 +238,13 @@ impl App {
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
                 },
+                ProviderInfo {
+                    name: "MCP Tools".to_string(),
+                    provider_type: ProviderType::Claude,
+                    url: None,
+                    status: ProviderStatus::Disconnected,
+                    models: vec![],
+                },
             ],
             mcp_client: None,
             mcp_tools: vec![],
@@ -245,7 +259,7 @@ impl App {
         self.setup_terminal()?;
 
         // Initialize MCP connection
-        self.initialize_mcp_connection().await;
+        self.initialize_mcp_connection();
 
         // Ollama configuration is handled by arkavo chat command
 
@@ -259,22 +273,22 @@ impl App {
     }
 
     fn setup_terminal(&self) -> Result<()> {
-        crossterm::terminal::enable_raw_mode()?;
+        terminal::enable_raw_mode()?;
         crossterm::execute!(
             io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::event::EnableMouseCapture
+            terminal::EnterAlternateScreen,
+            event::EnableMouseCapture
         )?;
         Ok(())
     }
 
     fn restore_terminal(&self) -> Result<()> {
         // Ignore errors during cleanup to ensure we try all steps
-        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = terminal::disable_raw_mode();
         let _ = crossterm::execute!(
             io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
+            terminal::LeaveAlternateScreen,
+            event::DisableMouseCapture
         );
         Ok(())
     }
@@ -290,7 +304,7 @@ impl App {
         }
     }
 
-    pub async fn initialize_mcp_connection(&mut self) {
+    pub fn initialize_mcp_connection(&mut self) {
         // Initialize MCP client - attempt by default unless explicitly disabled
         if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
             self.add_debug_log(
@@ -300,55 +314,36 @@ impl App {
             return;
         }
 
-        let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-        let result = match mcp_url {
-            Some(url) => McpConnection::new_external(Some(url)),
-            None => McpConnection::new_in_process(),
-        };
+        let result = McpConnection::new_in_process();
 
         match result {
             Ok(client) => {
                 // List available tools
-                match client.list_tools() {
-                    Ok(tools) => {
-                        self.mcp_tools = tools.clone();
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Info,
-                            format!("[MCP] Connected with {} tools available", tools.len()),
-                        );
+                let tools = client.list_tools();
+                self.mcp_tools.clone_from(&tools);
+                self.add_debug_log(
+                    crate::ui::debug::LogLevel::Info,
+                    format!("[MCP] Connected with {} tools available", tools.len()),
+                );
 
-                        // Add MCP provider info
-                        self.providers.push(ProviderInfo {
-                            name: "MCP Tools".to_string(),
-                            provider_type: ProviderType::Claude, // Using Claude as placeholder
-                            url: None,
-                            status: ProviderStatus::Connected,
-                            models: tools.iter().map(|t| t.name.clone()).collect(),
-                        });
-                    }
-                    Err(e) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Error,
-                            format!("[MCP] Failed to list tools: {}", e),
-                        );
-                    }
+                // Update MCP provider info
+                if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
+                    provider.status = ProviderStatus::Connected;
+                    provider.models.clone_from(&tools);
                 }
                 self.mcp_client = Some(client);
             }
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Warning,
-                    format!("[MCP] Failed to connect: {}", e),
+                    format!("[MCP] Failed to connect: {e}"),
                 );
 
-                // Add disconnected MCP provider
-                self.providers.push(ProviderInfo {
-                    name: "MCP Tools".to_string(),
-                    provider_type: ProviderType::Claude,
-                    url: None,
-                    status: ProviderStatus::Disconnected,
-                    models: vec![],
-                });
+                // Update MCP provider status
+                if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
+                    provider.status = ProviderStatus::Error(format!("Failed to connect: {e}"));
+                    provider.models = vec![];
+                }
             }
         }
     }
@@ -426,10 +421,7 @@ impl App {
 
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
-                    format!(
-                        "[Ollama] Connected to localhost, found {} models",
-                        model_count
-                    ),
+                    format!("[Ollama] Connected to localhost, found {model_count} models"),
                 );
             }
             Err(e) => {
@@ -450,22 +442,27 @@ impl App {
         }
 
         // Try saved configurations - filter for Ollama server configs
+        // Sort configs by URL to ensure consistent server numbering
+        let mut sorted_configs: Vec<_> = saved_configs
+            .iter()
+            .filter(|c| {
+                let url = &c.memory.content;
+                url != "CLEARED" && url != "http://localhost:11434" && url.starts_with("http")
+            })
+            .collect();
+        sorted_configs.sort_by(|a, b| a.memory.content.cmp(&b.memory.content));
+
         let mut server_idx = 1;
         self.add_debug_log(
             crate::ui::debug::LogLevel::Debug,
-            format!("[Models] Checking {} saved configs", saved_configs.len()),
+            format!("[Models] Checking {} saved configs", sorted_configs.len()),
         );
-        for config in saved_configs.iter() {
+        for config in sorted_configs.iter() {
             let server_url = &config.memory.content;
-
-            // Skip cleared configs and localhost (we already tried it)
-            if server_url == "CLEARED" || server_url == "http://localhost:11434" {
-                continue;
-            }
 
             self.add_debug_log(
                 crate::ui::debug::LogLevel::Debug,
-                format!("[Storage] Found saved Ollama config: {}", server_url),
+                format!("[Storage] Found saved Ollama config: {server_url}"),
             );
 
             if server_url.starts_with("http") {
@@ -492,7 +489,7 @@ impl App {
                             .or_else(|| server_url.strip_prefix("https://"))
                             .unwrap_or(&server_url);
                         self.providers.push(ProviderInfo {
-                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            name: format!("Ollama ({server_name} - {display_url})"),
                             provider_type: ProviderType::Ollama,
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Connected,
@@ -501,7 +498,7 @@ impl App {
 
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Info,
-                            format!("[Ollama] Connected to {server_name}: {server_url}, found {} models", model_count),
+                            format!("[Ollama] Connected to {server_name}: {server_url}, found {model_count} models"),
                         );
                         server_idx += 1;
                     }
@@ -513,7 +510,7 @@ impl App {
                             .or_else(|| server_url.strip_prefix("https://"))
                             .unwrap_or(&server_url);
                         self.providers.push(ProviderInfo {
-                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            name: format!("Ollama ({server_name} - {display_url})"),
                             provider_type: ProviderType::Ollama,
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Error(e.to_string()),
@@ -531,7 +528,7 @@ impl App {
         }
 
         if !all_models.is_empty() {
-            self.available_models = all_models.clone();
+            self.available_models.clone_from(&all_models);
             // If we have models and none selected, select the first one
             if self.selected_model >= self.available_models.len() {
                 self.selected_model = 0;
@@ -589,6 +586,39 @@ impl App {
 
             // Process collected responses
             for response in responses_to_process {
+                // Handle MCP status updates
+                if let Some(mcp_status) = response.mcp_status {
+                    if mcp_status.available {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Info,
+                            format!(
+                                "[MCP] Connected with {} tools available",
+                                mcp_status.tool_count
+                            ),
+                        );
+                        // Update MCP provider status
+                        if let Some(provider) =
+                            self.providers.iter_mut().find(|p| p.name == "MCP Tools")
+                        {
+                            provider.status = ProviderStatus::Connected;
+                            provider.models = vec![format!("{} tools", mcp_status.tool_count)];
+                        }
+                    } else if let Some(error_msg) = mcp_status.error_message {
+                        self.add_debug_log(
+                            crate::ui::debug::LogLevel::Warning,
+                            format!("[MCP] {error_msg}"),
+                        );
+                        // Update MCP provider status
+                        if let Some(provider) =
+                            self.providers.iter_mut().find(|p| p.name == "MCP Tools")
+                        {
+                            provider.status = ProviderStatus::Error(error_msg);
+                        }
+                    }
+                    // Skip further processing for MCP status updates
+                    continue;
+                }
+
                 // Only log in debug builds
                 #[cfg(debug_assertions)]
                 self.add_debug_log(
@@ -724,10 +754,11 @@ impl App {
                             }
                             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 self.view_mode = ViewMode::Debug;
+                                needs_redraw = true;
                             }
                             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+S: Save/export UI state to file
-                                self.export_ui_state().await;
+                                self.export_ui_state();
                             }
                             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Ctrl+R: Refresh model list
@@ -737,12 +768,9 @@ impl App {
                                 );
                                 self.fetch_available_models().await;
                             }
-                            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                // Ctrl+T: Show all MCP tools
-                                self.show_mcp_tools_dialog();
-                            }
                             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                                 self.vim_enabled = !self.vim_enabled;
+                                needs_redraw = true;
                                 self.add_debug_log(
                                     crate::ui::debug::LogLevel::Info,
                                     format!(
@@ -772,6 +800,15 @@ impl App {
                                     self.active_model =
                                         Some(self.available_models[self.selected_model].clone());
 
+                                    // Log the model change for debugging
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Info,
+                                        format!(
+                                            "[UI] Switched to model: {}",
+                                            self.active_model.as_ref().unwrap()
+                                        ),
+                                    );
+
                                     // If we selected a configuration option, show a hint
                                     if self
                                         .active_model
@@ -786,7 +823,75 @@ impl App {
                                                 self.active_model.as_ref().unwrap()
                                             ),
                                         );
+                                    } else {
+                                        // Create or update task window for non-configuration models
+                                        let model_name =
+                                            self.active_model.as_ref().unwrap().clone();
+
+                                        // Validate the model exists on its server
+                                        let model_valid = if let Some((server_prefix, _)) =
+                                            model_name.split_once('/')
+                                        {
+                                            // Find the provider for this server
+                                            self.providers.iter().any(|p| {
+                                                p.name.contains(server_prefix)
+                                                    && p.status == ProviderStatus::Connected
+                                                    && p.models
+                                                        .iter()
+                                                        .any(|m| model_name.ends_with(m))
+                                            })
+                                        } else {
+                                            true // Assume valid if no server prefix
+                                        };
+
+                                        if !model_valid {
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Warning,
+                                                format!(
+                                                    "[UI] Model {model_name} not available on its server"
+                                                ),
+                                            );
+                                        }
+
+                                        // Check if we already have a task for this model
+                                        let existing_task = self
+                                            .task_manager
+                                            .tasks
+                                            .iter()
+                                            .position(|t| t.model_name == model_name);
+
+                                        if let Some(task_idx) = existing_task {
+                                            // Switch to existing task
+                                            self.task_manager.active_task = Some(task_idx);
+                                            self.main_task_id =
+                                                Some(self.task_manager.tasks[task_idx].id);
+                                        } else {
+                                            // Create new task for this model
+                                            let id = uuid::Uuid::new_v4();
+                                            let task = self.task_manager.create_task(
+                                                "LLM Conversation".to_string(),
+                                                model_name.clone(),
+                                            );
+                                            task.id = id;
+                                            self.main_task_id = Some(id);
+                                            let new_idx = self.task_manager.tasks.len() - 1;
+                                            self.task_manager.active_task = Some(new_idx);
+
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Info,
+                                                format!(
+                                                    "[UI] Created task window for model: {model_name}"
+                                                ),
+                                            );
+                                        }
                                     }
+                                    // Force UI redraw after model change
+                                    needs_redraw = true;
+                                } else {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Warning,
+                                        "[UI] No models available for Tab cycling".to_string(),
+                                    );
                                 }
                             }
                             KeyCode::BackTab => {
@@ -841,10 +946,59 @@ impl App {
                                             continue;
                                         }
 
-                                        // Check if we have a main task, if not create one
+                                        // Find or create task for current model
                                         let task_id = if let Some(id) = self.main_task_id {
-                                            id
+                                            // Verify the task exists and matches the current model
+                                            if let Some(task) =
+                                                self.task_manager.find_task_by_id(id)
+                                            {
+                                                if task.model_name == displayed_model {
+                                                    id
+                                                } else {
+                                                    // Model changed, find or create task for new model
+                                                    let existing_task =
+                                                        self.task_manager.tasks.iter().position(
+                                                            |t| t.model_name == displayed_model,
+                                                        );
+
+                                                    if let Some(task_idx) = existing_task {
+                                                        let task_id =
+                                                            self.task_manager.tasks[task_idx].id;
+                                                        self.task_manager.active_task =
+                                                            Some(task_idx);
+                                                        self.main_task_id = Some(task_id);
+                                                        task_id
+                                                    } else {
+                                                        // Create new task
+                                                        let id = uuid::Uuid::new_v4();
+                                                        let task = self.task_manager.create_task(
+                                                            "LLM Conversation".to_string(),
+                                                            displayed_model.clone(),
+                                                        );
+                                                        task.id = id;
+                                                        self.main_task_id = Some(id);
+                                                        let new_idx =
+                                                            self.task_manager.tasks.len() - 1;
+                                                        self.task_manager.active_task =
+                                                            Some(new_idx);
+                                                        id
+                                                    }
+                                                }
+                                            } else {
+                                                // Task doesn't exist, create new one
+                                                let id = uuid::Uuid::new_v4();
+                                                let task = self.task_manager.create_task(
+                                                    "LLM Conversation".to_string(),
+                                                    displayed_model.clone(),
+                                                );
+                                                task.id = id;
+                                                self.main_task_id = Some(id);
+                                                let new_idx = self.task_manager.tasks.len() - 1;
+                                                self.task_manager.active_task = Some(new_idx);
+                                                id
+                                            }
                                         } else {
+                                            // No main task, create new one
                                             let id = uuid::Uuid::new_v4();
                                             let task = self.task_manager.create_task(
                                                 "LLM Conversation".to_string(),
@@ -852,7 +1006,8 @@ impl App {
                                             );
                                             task.id = id;
                                             self.main_task_id = Some(id);
-                                            self.task_manager.active_task = Some(0); // Make it the active task
+                                            let new_idx = self.task_manager.tasks.len() - 1;
+                                            self.task_manager.active_task = Some(new_idx);
                                             id
                                         };
 
@@ -990,10 +1145,6 @@ impl App {
                                     task.scroll_offset = u16::MAX;
                                 }
                             }
-                            // Press Ctrl+I to toggle input/scroll mode
-                            KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.input_focused = !self.input_focused;
-                            }
                             // Number keys for quick jump (1-9)
                             KeyCode::Char(c) if !self.input_focused && c.is_ascii_digit() => {
                                 if let Some(digit) = c.to_digit(10) {
@@ -1035,15 +1186,11 @@ impl App {
 
             // Only render when there are updates or user input
             if needs_redraw || has_llm_updates {
-                if self.input_focused {
-                    terminal.draw(|f| {
-                        // Clear the entire frame first when input is active
-                        f.render_widget(ratatui::widgets::Clear, f.area());
-                        self.render(f);
-                    })?;
-                } else {
-                    terminal.draw(|f| self.render(f))?;
-                }
+                terminal.draw(|f| {
+                    // Always clear the entire frame to prevent artifacts
+                    f.render_widget(ratatui::widgets::Clear, f.area());
+                    self.render(f);
+                })?;
             }
 
             // Track frame timing
@@ -1085,15 +1232,7 @@ impl App {
             ])
             .split(frame.area());
 
-        // Render input area at the top
-        let input_title = if self.input_focused {
-            " Input (Press Ctrl+E for Helix) "
-        } else {
-            " Input (Press 'i' to focus) "
-        };
-
         let input_block = Block::default()
-            .title(input_title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if self.input_focused {
                 Color::Cyan
@@ -1105,43 +1244,31 @@ impl App {
 
         // Calculate visible portion of input buffer for scrolling
         let visible_width = input_inner.width.saturating_sub(1) as usize;
-        let buffer_len = self.input_buffer.len();
 
-        let (input_text, is_placeholder) = if self.input_buffer.is_empty() {
-            (
-                "Type your prompt here or press Ctrl+E to open Helix editor...".to_string(),
-                true,
-            )
-        } else {
-            // Show only the visible portion of the input buffer with horizontal scrolling
-            let scroll_offset = buffer_len.saturating_sub(visible_width);
-            (
-                self.input_buffer
-                    .chars()
-                    .skip(scroll_offset)
-                    .collect::<String>(),
-                false,
-            )
-        };
+        // Show prompt with input buffer
+        let prompt = " > ";
+        let full_text = format!("{}{}", prompt, self.input_buffer);
 
-        let input_paragraph = Paragraph::new(input_text).style(if is_placeholder {
-            Style::default().fg(Color::DarkGray)
-        } else {
-            Style::default()
-        });
+        // Calculate visible portion with horizontal scrolling
+        let scroll_offset = full_text.len().saturating_sub(visible_width);
+        let input_text = full_text.chars().skip(scroll_offset).collect::<String>();
+
+        let input_paragraph = Paragraph::new(input_text).style(Style::default());
         frame.render_widget(input_paragraph, input_inner);
 
         // Handle cursor visibility and position
         if self.input_focused {
-            // Calculate visible portion of input buffer
+            // Calculate visible portion of input buffer (including "> " prompt)
+            let prompt_len = 2; // "> " is 2 characters
             let visible_width = input_inner.width.saturating_sub(1) as usize;
-            let buffer_len = self.input_buffer.len();
+            let full_len = prompt_len + self.input_buffer.len();
 
             // Calculate scroll offset to keep cursor visible
-            let scroll_offset = buffer_len.saturating_sub(visible_width);
+            let scroll_offset = full_len.saturating_sub(visible_width);
 
             // Calculate cursor position within visible area
-            let cursor_offset = buffer_len.saturating_sub(scroll_offset);
+            let cursor_pos = prompt_len + self.input_buffer.len();
+            let cursor_offset = cursor_pos.saturating_sub(scroll_offset);
             let cursor_x = (input_inner.x + cursor_offset as u16)
                 .min(input_inner.x + input_inner.width.saturating_sub(1));
             let cursor_y = input_inner.y;
@@ -1164,7 +1291,7 @@ impl App {
         // Create a block for the provider/model area
         let model_selector_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Providers & Models | {} ", active_model_display))
+            .title(format!(" Providers & Models | {active_model_display} "))
             .border_style(Style::default().fg(Color::Yellow));
 
         let model_inner = model_selector_block.inner(chunks[1]);
@@ -1187,7 +1314,7 @@ impl App {
                 match provider.provider_type {
                     ProviderType::Ollama => ollama_providers.push(provider),
                     ProviderType::OpenAI | ProviderType::Anthropic | ProviderType::Claude => {
-                        frontier_providers.push(provider)
+                        frontier_providers.push(provider);
                     }
                 }
             }
@@ -1324,7 +1451,7 @@ impl App {
                 for tool in tools_to_show {
                     lines.push(Line::from(vec![
                         Span::raw("    • "),
-                        Span::styled(&tool.name, Style::default().fg(Color::Blue)),
+                        Span::styled(tool, Style::default().fg(Color::Blue)),
                     ]));
                 }
                 if self.mcp_tools.len() > 3 {
@@ -1394,10 +1521,8 @@ impl App {
             let help_text = r#"
 Welcome to Arkavo Terminal UI
 
-• Type your prompt and press Enter to start a conversation
+• Type your prompt after > and press Enter to start a conversation
 • Press Tab to cycle through available models
-• Press Ctrl+E to open Helix editor
-• Press Ctrl+I to toggle input/scroll mode
 • Press Ctrl+R to refresh model list
 • Press Ctrl+Q to quit
 
@@ -1663,7 +1788,7 @@ Scrolling (when in scroll mode):
         };
 
         let status = format!(
-            " {mode_indicator} | Model: {active_model}{mcp_status} | Ctrl+T: Tools | Ctrl+R: Refresh | Ctrl+Q: Quit "
+            " {mode_indicator} | Model: {active_model}{mcp_status} | Ctrl+R: Refresh | Ctrl+Q: Quit "
         );
 
         let paragraph = Paragraph::new(status)
@@ -1736,11 +1861,7 @@ Scrolling (when in scroll mode):
 
             // Suspend the terminal temporarily
             let _ = terminal::disable_raw_mode();
-            let _ = crossterm::execute!(
-                std::io::stdout(),
-                terminal::LeaveAlternateScreen,
-                cursor::Show
-            );
+            let _ = crossterm::execute!(io::stdout(), terminal::LeaveAlternateScreen, cursor::Show);
 
             // Get current input buffer content
             let initial_content = self.input_buffer.clone();
@@ -1769,7 +1890,7 @@ Scrolling (when in scroll mode):
             // Restore terminal with proper cleanup
             let _ = terminal::enable_raw_mode();
             let _ = crossterm::execute!(
-                std::io::stdout(),
+                io::stdout(),
                 terminal::EnterAlternateScreen,
                 terminal::Clear(terminal::ClearType::All),
                 cursor::Hide,
@@ -1777,7 +1898,7 @@ Scrolling (when in scroll mode):
             );
 
             // Add a small delay for terminal to stabilize
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
             // No need to manually clear - the next render cycle will handle it
         } else {
@@ -1821,12 +1942,12 @@ Scrolling (when in scroll mode):
         // Normalize URL
         let mut url = server_url.trim().to_string();
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            url = format!("http://{}", url);
+            url = format!("http://{url}");
         }
 
         self.add_debug_log(
             crate::ui::debug::LogLevel::Info,
-            format!("[Config] Testing connection to {}", url),
+            format!("[Config] Testing connection to {url}"),
         );
 
         // Test connection
@@ -1855,7 +1976,7 @@ Scrolling (when in scroll mode):
                     if let Err(e) = storage.store(memory).await {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Error,
-                            format!("[Config] Failed to save: {}", e),
+                            format!("[Config] Failed to save: {e}"),
                         );
                     } else {
                         self.add_debug_log(
@@ -1875,13 +1996,13 @@ Scrolling (when in scroll mode):
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Error,
-                    format!("[Config] Failed to connect to {}: {}", url, e),
+                    format!("[Config] Failed to connect to {url}: {e}"),
                 );
             }
         }
     }
 
-    async fn export_ui_state(&mut self) {
+    fn export_ui_state(&mut self) {
         use chrono::Local;
         use serde_json::json;
         use std::fs;
@@ -1932,13 +2053,13 @@ Scrolling (when in scroll mode):
             Ok(_) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
-                    format!("[Export] UI state saved to {}", filename),
+                    format!("[Export] UI state saved to {filename}"),
                 );
             }
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Error,
-                    format!("[Export] Failed to save UI state: {}", e),
+                    format!("[Export] Failed to save UI state: {e}"),
                 );
             }
         }
@@ -2148,99 +2269,6 @@ Scrolling (when in scroll mode):
             }
             ConfigurationMode::None => {}
         }
-    }
-
-    fn show_mcp_tools_dialog(&mut self) {
-        if self.mcp_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Warning,
-                "[MCP] No tools available".to_string(),
-            );
-            return;
-        }
-
-        // Log all available tools to debug view
-        self.add_debug_log(
-            crate::ui::debug::LogLevel::Info,
-            format!("[MCP] Available tools ({}):", self.mcp_tools.len()),
-        );
-
-        // Group tools by category
-        let mut device_tools = Vec::new();
-        let mut ui_tools = Vec::new();
-        let mut git_tools = Vec::new();
-        let mut memory_tools = Vec::new();
-        let mut other_tools = Vec::new();
-
-        for tool in &self.mcp_tools {
-            let tool_info = format!("@{}: {}", tool.name, tool.description);
-
-            if tool.name.contains("device") || tool.name.contains("simulator") {
-                device_tools.push(tool_info);
-            } else if tool.name.contains("ui_") || tool.name.contains("screen") {
-                ui_tools.push(tool_info);
-            } else if tool.name.contains("git_") {
-                git_tools.push(tool_info);
-            } else if tool.name.contains("memory")
-                || tool.name == "store_memory"
-                || tool.name == "search_memory"
-            {
-                memory_tools.push(tool_info);
-            } else {
-                other_tools.push(tool_info);
-            }
-        }
-
-        // Log tools by category
-        if !device_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Device Management Tools]".to_string(),
-            );
-            for tool in device_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
-            }
-        }
-
-        if !ui_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[UI Interaction Tools]".to_string(),
-            );
-            for tool in ui_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
-            }
-        }
-
-        if !git_tools.is_empty() {
-            self.add_debug_log(crate::ui::debug::LogLevel::Info, "[Git Tools]".to_string());
-            for tool in git_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
-            }
-        }
-
-        if !memory_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Memory Tools]".to_string(),
-            );
-            for tool in memory_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
-            }
-        }
-
-        if !other_tools.is_empty() {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[Other Tools]".to_string(),
-            );
-            for tool in other_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
-            }
-        }
-
-        // Switch to debug view to show the tools
-        self.view_mode = ViewMode::Debug;
     }
 }
 

@@ -82,12 +82,6 @@ impl MemoryStorage {
     }
 
     pub async fn with_path(db_path: PathBuf, config: HnswConfig) -> Result<Self> {
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Memory storage: Creating database at {db_path:?}");
-            eprintln!("Current directory: {:?}", std::env::current_dir());
-        }
-
         // Create parent directory if it doesn't exist
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {

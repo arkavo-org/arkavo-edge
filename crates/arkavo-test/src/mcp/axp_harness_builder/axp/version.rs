@@ -1,6 +1,6 @@
 /// iOS version parsing and detection utilities
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IosVersion {
+pub(crate) struct IosVersion {
     pub major: u32,
     pub minor: u32,
     pub patch: Option<u32>,

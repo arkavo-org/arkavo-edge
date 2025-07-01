@@ -2,7 +2,6 @@ use arkavo_test::mcp::filesystem_tools::FileSystemKit;
 use arkavo_test::mcp::server::Tool;
 use serde_json::json;
 use tempfile::TempDir;
-use tokio;
 
 #[tokio::test]
 async fn test_filesystem_kit_read_agents_md() {

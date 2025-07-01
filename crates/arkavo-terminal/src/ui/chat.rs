@@ -171,6 +171,9 @@ impl ChatView {
             )));
         }
 
+        // Add spacing between messages
+        lines.push(Line::from(""));
+
         ListItem::new(Text::from(lines))
     }
 
