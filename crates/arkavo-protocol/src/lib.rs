@@ -4,6 +4,8 @@ pub mod discovery;
 pub mod error;
 pub mod http;
 pub mod mcp;
+#[cfg(feature = "mdns")]
+pub mod mdns;
 pub mod openrpc;
 pub mod rate_limit;
 pub mod security;

@@ -1,5 +1,7 @@
 use crate::error::{A2aError, Result};
 use crate::transport::A2aEndpoint;
+#[cfg(feature = "mdns")]
+use crate::mdns::{MdnsManager, MdnsServiceInfo};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
@@ -33,6 +35,8 @@ pub struct DiscoveryService {
     config: DiscoveryConfig,
     static_endpoints: Arc<RwLock<HashMap<String, A2aEndpoint>>>,
     discovered_endpoints: Arc<RwLock<HashMap<String, A2aEndpoint>>>,
+    #[cfg(feature = "mdns")]
+    mdns_manager: Arc<MdnsManager>,
 }
 
 impl DiscoveryService {
@@ -41,6 +45,8 @@ impl DiscoveryService {
             config,
             static_endpoints: Arc::new(RwLock::new(HashMap::new())),
             discovered_endpoints: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(feature = "mdns")]
+            mdns_manager: Arc::new(MdnsManager::new()),
         }
     }
 
@@ -179,15 +185,49 @@ impl DiscoveryService {
     }
 
     fn discover_via_mdns(&self, agent_id: &str) -> Result<A2aEndpoint> {
-        warn!("mDNS discovery not yet implemented for agent: {}", agent_id);
-        Err(A2aError::ServiceDiscovery(
-            "mDNS discovery not implemented".to_string(),
-        ))
+        #[cfg(feature = "mdns")]
+        {
+            // Note: This is a synchronous check of already discovered agents
+            // Actual discovery happens asynchronously in the background
+            let endpoint_opt = {
+                let endpoints = self.discovered_endpoints.read().unwrap();
+                endpoints.get(agent_id).cloned()
+            };
+            
+            if let Some(endpoint) = endpoint_opt {
+                info!("Found agent {} via mDNS at {}", agent_id, endpoint.url);
+                return Ok(endpoint);
+            }
+            
+            warn!("Agent {} not found via mDNS", agent_id);
+            Err(A2aError::AgentNotFound(format!(
+                "Agent {agent_id} not found via mDNS discovery"
+            )))
+        }
+        
+        #[cfg(not(feature = "mdns"))]
+        {
+            warn!("mDNS discovery not available (compile with 'mdns' feature)");
+            Err(A2aError::ServiceDiscovery(
+                "mDNS discovery not available".to_string(),
+            ))
+        }
     }
 
     fn discover_all_via_mdns(&self) -> Result<Vec<A2aEndpoint>> {
-        warn!("mDNS discovery not yet implemented");
-        Ok(Vec::new())
+        #[cfg(feature = "mdns")]
+        {
+            // Return all mDNS discovered endpoints from cache
+            let endpoints: Vec<A2aEndpoint> = self.discovered_endpoints.read().unwrap().values().cloned().collect();
+            info!("Found {} agents via mDNS", endpoints.len());
+            Ok(endpoints)
+        }
+        
+        #[cfg(not(feature = "mdns"))]
+        {
+            warn!("mDNS discovery not available (compile with 'mdns' feature)");
+            Ok(Vec::new())
+        }
     }
 
     fn discover_via_dns(&self, agent_id: &str) -> Result<A2aEndpoint> {
@@ -208,6 +248,54 @@ impl DiscoveryService {
     pub fn clear_cache(&self) {
         self.discovered_endpoints.write().unwrap().clear();
         info!("Cleared discovery cache");
+    }
+
+    /// Start mDNS discovery
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the RwLock is poisoned
+    #[cfg(feature = "mdns")]
+    pub async fn start_mdns_discovery(&self) -> Result<()> {
+        self.mdns_manager.start_discovery().await?;
+        
+        // Also share discovered endpoints with the main discovery cache
+        let mdns_manager = self.mdns_manager.clone();
+        let discovered_endpoints = self.discovered_endpoints.clone();
+        
+        tokio::spawn(async move {
+            loop {
+                // Sync mDNS discoveries to main cache
+                let mdns_endpoints = mdns_manager.get_discovered_services().await;
+                {
+                    let mut cache = discovered_endpoints.write().unwrap();
+                    for endpoint in mdns_endpoints {
+                        cache.insert(endpoint.agent_id.clone(), endpoint);
+                    }
+                }  // cache lock is dropped here
+                
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        });
+        
+        info!("Started mDNS discovery");
+        Ok(())
+    }
+
+    /// Register this agent with mDNS
+    #[cfg(feature = "mdns")]
+    pub async fn register_mdns_service(&self, info: MdnsServiceInfo) -> Result<()> {
+        self.mdns_manager.register_service(info).await?;
+        info!("Registered mDNS service");
+        Ok(())
+    }
+
+    /// Shutdown mDNS operations
+    #[cfg(feature = "mdns")]
+    pub async fn shutdown_mdns(&self) -> Result<()> {
+        self.mdns_manager.shutdown().await?;
+        info!("Shutdown mDNS operations");
+        Ok(())
     }
 }
 
