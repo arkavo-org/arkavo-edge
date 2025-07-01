@@ -274,7 +274,7 @@ impl TuiTestHarness {
     }
 
     async fn stop_session(&self, session_id: &str) -> Result<()> {
-        let mut session = {
+        let session = {
             let mut sessions = self
                 .sessions
                 .lock()
