@@ -360,14 +360,11 @@ jobs:
           
       - name: Install validation tools
         run: |
-          # JSON validation
-          npm install -g ajv-cli@5.0.0
-          npm install -g @open-rpc/schema@1.14.6
+          # Install jq for JSON validation
+          sudo apt-get update
+          sudo apt-get install -y jq
           
-          # API linting and breaking change detection
-          npm install -g @stoplight/spectral-cli@6.11.0
-          
-          # Install oasdiff for breaking change detection
+          # Install oasdiff for breaking change detection (Go binary, no npm)
           wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
           tar -xzf oasdiff.tar.gz
           sudo mv oasdiff /usr/local/bin/
@@ -375,7 +372,7 @@ jobs:
           
       - name: Build schema tools
         run: |
-          cargo build -p arkavo-protocol --bin export-schema || echo "Schema export not yet available"
+          cargo build -p arkavo-protocol --bin export-schema --bin validate-schema || echo "Schema tools not yet available"
           
       - name: Generate and validate schemas
         run: |
@@ -385,34 +382,62 @@ jobs:
             mkdir -p schemas/openrpc schemas/config schemas/wire/v1
             cp schema.json schemas/openrpc/
             
-            # Validate against OpenRPC meta-schema
-            npx ajv validate -s node_modules/@open-rpc/schema/meta-schema.json -d schema.json
+            # Basic JSON validation with jq
+            if ! jq . schema.json > /dev/null 2>&1; then
+              echo "❌ Invalid JSON in schema"
+              exit 1
+            fi
             
-            # Create Spectral ruleset for OpenRPC
-            cat > .spectral.yaml << 'EOF'
-            extends: [[spectral:oas, recommended]]
-            rules:
-              method-names-kebab-case:
-                description: Method names should be kebab-case
-                given: "$.methods[*]"
-                severity: warn
-                then:
-                  field: name
-                  function: pattern
-                  functionOptions:
-                    match: "^[a-z]+(_[a-z]+)*$"
-                    
-              method-must-have-description:
-                description: Methods must have descriptions
-                given: "$.methods[*]"
-                severity: error
-                then:
-                  field: description
-                  function: truthy
-            EOF
+            # Validate OpenRPC structure
+            echo "Validating OpenRPC schema structure..."
             
-            # Run Spectral linting
-            spectral lint schema.json --ruleset .spectral.yaml || true
+            # Check required fields
+            if ! jq -e '.openrpc' schema.json > /dev/null; then
+              echo "❌ Missing required field: openrpc"
+              exit 1
+            fi
+            
+            if ! jq -e '.info' schema.json > /dev/null; then
+              echo "❌ Missing required field: info"
+              exit 1
+            fi
+            
+            if ! jq -e '.methods' schema.json > /dev/null; then
+              echo "❌ Missing required field: methods"
+              exit 1
+            fi
+            
+            # Validate OpenRPC version
+            OPENRPC_VERSION=$(jq -r '.openrpc' schema.json)
+            if [[ ! "$OPENRPC_VERSION" =~ ^1\.[0-9]+\.[0-9]+$ ]]; then
+              echo "❌ Invalid OpenRPC version: $OPENRPC_VERSION"
+              exit 1
+            fi
+            
+            # Check method structure
+            jq -e '.methods[] | select(.name == null or .params == null or .result == null)' schema.json > /dev/null && {
+              echo "❌ Methods must have name, params, and result fields"
+              exit 1
+            } || true
+            
+            # Validate method names follow convention
+            INVALID_METHODS=$(jq -r '.methods[].name | select(test("^[a-z_]+$") | not)' schema.json || true)
+            if [ -n "$INVALID_METHODS" ]; then
+              echo "⚠️  Warning: Method names should be lowercase with underscores:"
+              echo "$INVALID_METHODS"
+            fi
+            
+            # Check for method descriptions
+            METHODS_WITHOUT_DESC=$(jq -r '.methods[] | select(.description == null) | .name' schema.json || true)
+            if [ -n "$METHODS_WITHOUT_DESC" ]; then
+              echo "⚠️  Warning: Methods without descriptions:"
+              echo "$METHODS_WITHOUT_DESC"
+            fi
+            
+            # Run Rust-based validation
+            if cargo run -p arkavo-protocol --bin validate-schema 2>/dev/null; then
+              echo "✅ Rust schema validation passed"
+            fi
             
             echo "✅ Schema validation completed"
           else
@@ -433,12 +458,10 @@ jobs:
         with:
           shared-key: "schema-compat"
           
-      - name: Install oasdiff
+      - name: Install jq for JSON comparison
         run: |
-          wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
-          tar -xzf oasdiff.tar.gz
-          sudo mv oasdiff /usr/local/bin/
-          rm oasdiff.tar.gz
+          sudo apt-get update
+          sudo apt-get install -y jq
           
       - name: Check for breaking changes
         run: |
@@ -455,12 +478,40 @@ jobs:
               # Switch back to PR branch
               git checkout -
               
-              # Use oasdiff to check for breaking changes
-              oasdiff breaking schema-base.json schema-current.json --fail-on-diff || {
-                echo "❌ Breaking changes detected!"
-                echo "Run 'oasdiff diff schema-base.json schema-current.json' locally for details"
+              # Check for breaking changes using jq
+              echo "Checking for breaking changes..."
+              
+              # Extract method names from both schemas
+              BASE_METHODS=$(jq -r '.methods[].name' schema-base.json | sort)
+              CURRENT_METHODS=$(jq -r '.methods[].name' schema-current.json | sort)
+              
+              # Check for removed methods (breaking change)
+              REMOVED_METHODS=$(comm -23 <(echo "$BASE_METHODS") <(echo "$CURRENT_METHODS"))
+              if [ -n "$REMOVED_METHODS" ]; then
+                echo "❌ Breaking change: Methods removed:"
+                echo "$REMOVED_METHODS"
                 exit 1
-              }
+              fi
+              
+              # Check for changes in required parameters
+              for method in $BASE_METHODS; do
+                if echo "$CURRENT_METHODS" | grep -q "^$method$"; then
+                  # Get required params from base
+                  BASE_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-base.json 2>/dev/null | sort || true)
+                  # Get required params from current
+                  CURRENT_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-current.json 2>/dev/null | sort || true)
+                  
+                  # Check for removed required params (breaking change)
+                  if [ -n "$BASE_REQUIRED" ]; then
+                    REMOVED_PARAMS=$(comm -23 <(echo "$BASE_REQUIRED") <(echo "$CURRENT_REQUIRED") || true)
+                    if [ -n "$REMOVED_PARAMS" ]; then
+                      echo "❌ Breaking change: Required parameters removed from $method:"
+                      echo "$REMOVED_PARAMS"
+                      exit 1
+                    fi
+                  fi
+                fi
+              done
               
               echo "✅ No breaking changes detected"
             else

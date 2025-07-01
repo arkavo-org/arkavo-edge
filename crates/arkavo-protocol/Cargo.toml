@@ -74,5 +74,9 @@ required-features = ["mdns", "demo"]
 name = "export-schema"
 path = "src/bin/export-schema.rs"
 
+[[bin]]
+name = "validate-schema"
+path = "src/bin/validate-schema.rs"
+
 [lints]
 workspace = true
