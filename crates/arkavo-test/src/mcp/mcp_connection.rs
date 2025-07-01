@@ -6,6 +6,10 @@ use super::{
     git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit},
     ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit},
     simulator_tools::SimulatorControl,
+    tui_interaction_kit::TuiInteractionKit,
+    tui_keyboard_tools::TuiKeyboardKit,
+    tui_screenshot_tool::TuiScreenshotKit,
+    tui_test_harness::TuiTestHarness,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -96,6 +100,19 @@ impl McpConnection {
         // Add file system tools
         let filesystem = FileSystemKit::new();
         tools.insert(filesystem.schema().name.clone(), Box::new(filesystem));
+
+        // Add TUI testing tools
+        let tui_keyboard = TuiKeyboardKit::new();
+        tools.insert(tui_keyboard.schema().name.clone(), Box::new(tui_keyboard));
+
+        let tui_screenshot = TuiScreenshotKit::new();
+        tools.insert(tui_screenshot.schema().name.clone(), Box::new(tui_screenshot));
+
+        let tui_interaction = TuiInteractionKit::new();
+        tools.insert(tui_interaction.schema().name.clone(), Box::new(tui_interaction));
+
+        let tui_harness = TuiTestHarness::new();
+        tools.insert(tui_harness.schema().name.clone(), Box::new(tui_harness));
 
         // Add any additional tools provided
         tools.extend(additional_tools);
