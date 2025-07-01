@@ -221,6 +221,13 @@ impl TuiTestHarness {
             cmd.env(key, value);
         }
 
+        // Create a new process group to isolate the child (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+
         // Spawn the process
         let mut process = cmd
             .spawn()
@@ -288,13 +295,48 @@ impl TuiTestHarness {
                 // Send Ctrl+C
                 let _ = stdin.write_all(&[3]);
                 let _ = stdin.flush();
+
+                // Also try sending 'q' key in case the app uses that for quit
+                let _ = stdin.write_all(b"q");
+                let _ = stdin.flush();
             }
 
-            // Give it a moment to exit gracefully
-            sleep(Duration::from_millis(500)).await;
+            // Give it more time to exit gracefully
+            sleep(Duration::from_millis(1000)).await;
 
-            // Force kill if still running
-            let _ = session.process.kill();
+            // Check if process is still running before force killing
+            match session.process.try_wait() {
+                Ok(Some(_)) => {
+                    // Process already exited
+                    eprintln!("[TuiTestHarness] Session {} stopped gracefully", session_id);
+                }
+                Ok(None) => {
+                    // Process still running, force kill
+                    eprintln!("[TuiTestHarness] Force killing session {}", session_id);
+
+                    #[cfg(unix)]
+                    {
+                        // Kill the entire process group
+                        let pid = session.process.id();
+                        unsafe {
+                            // Kill process group (negative PID)
+                            libc::kill(-(pid as i32), libc::SIGTERM);
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            libc::kill(-(pid as i32), libc::SIGKILL);
+                        }
+                    }
+
+                    #[cfg(not(unix))]
+                    {
+                        let _ = session.process.kill();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[TuiTestHarness] Error checking process status: {}", e);
+                    // Try to kill anyway
+                    let _ = session.process.kill();
+                }
+            }
 
             Ok(())
         } else {
@@ -504,9 +546,14 @@ impl Tool for TuiTestHarness {
 impl Drop for TuiTestHarness {
     fn drop(&mut self) {
         // Clean up any remaining sessions
-        if let Ok(mut sessions) = self.sessions.lock() {
-            for (_, mut session) in sessions.drain() {
-                let _ = session.process.kill();
+        if let Ok(sessions) = self.sessions.lock() {
+            if !sessions.is_empty() {
+                eprintln!(
+                    "[TuiTestHarness] Warning: {} sessions still active during drop",
+                    sessions.len()
+                );
+                // Note: We don't force kill here as it might affect the parent terminal
+                // The processes should be cleaned up by the OS when they lose their parent
             }
         }
     }

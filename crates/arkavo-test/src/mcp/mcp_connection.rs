@@ -14,7 +14,7 @@ use super::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 #[derive(Debug, Clone)]
 pub enum McpConnection {
@@ -24,14 +24,16 @@ pub enum McpConnection {
 #[derive(Clone)]
 pub struct InProcessMcp {
     pub tools: Arc<HashMap<String, Box<dyn McpTool>>>,
-    pub runtime: Option<Arc<Runtime>>,
+    pub runtime_handle: Handle,
+    // Keep the owned runtime only if we created it
+    owned_runtime: Option<Arc<Runtime>>,
 }
 
 impl std::fmt::Debug for InProcessMcp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InProcessMcp")
             .field("tools", &self.tools.keys().collect::<Vec<_>>())
-            .field("runtime", &self.runtime.is_some())
+            .field("has_owned_runtime", &self.owned_runtime.is_some())
             .finish()
     }
 }
@@ -44,9 +46,22 @@ impl McpConnection {
     pub fn new_in_process_with_additional_tools(
         additional_tools: HashMap<String, Box<dyn McpTool>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Always create a dedicated runtime for MCP operations
-        // This avoids the "Cannot start a runtime from within a runtime" panic
-        let runtime = Some(Arc::new(Runtime::new()?));
+        // Check if we're already in a Tokio runtime
+        let (runtime_handle, owned_runtime) = match Handle::try_current() {
+            Ok(handle) => {
+                // We're already in a runtime, reuse it
+
+                eprintln!("[McpConnection] Reusing existing Tokio runtime");
+                (handle, None)
+            }
+            Err(_) => {
+                // Not in a runtime, create a new one
+                eprintln!("[McpConnection] Creating new Tokio runtime");
+                let runtime = Arc::new(Runtime::new()?);
+                let handle = runtime.handle().clone();
+                (handle, Some(runtime))
+            }
+        };
 
         // Create tools with shared device manager
         let device_manager = Arc::new(DeviceManager::new());
@@ -125,7 +140,8 @@ impl McpConnection {
 
         Ok(Self::InProcess(InProcessMcp {
             tools: Arc::new(tools),
-            runtime,
+            runtime_handle,
+            owned_runtime,
         }))
     }
 
@@ -153,30 +169,56 @@ impl McpConnection {
                     .get(name)
                     .ok_or_else(|| format!("Tool not found: {}", name))?;
 
-                // Create a new thread to avoid runtime conflicts
-                let args_clone = args.clone();
+                // Clone the tools map and tool name to use in the thread
                 let tools = mcp.tools.clone();
                 let tool_name = name.to_string();
+                let handle = mcp.runtime_handle.clone();
 
-                std::thread::spawn(move || {
-                    // Get the tool again in the new thread
-                    let tool = tools
-                        .get(&tool_name)
-                        .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
+                // If we're already in a runtime context, spawn in a separate thread
+                if Handle::try_current().is_ok() {
+                    // We're in an async context, spawn a separate thread to avoid runtime conflicts
+                    std::thread::spawn(move || {
+                        let tool = tools
+                            .get(&tool_name)
+                            .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
 
-                    // Create a new runtime for this thread
-                    let thread_rt =
-                        Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+                        handle.block_on(async move {
+                            tool.execute(args)
+                                .await
+                                .map_err(|e| format!("Tool execution failed: {}", e))
+                        })
+                    })
+                    .join()
+                    .map_err(|_| "Tool execution thread panicked".to_string())?
+                } else {
+                    // We're not in an async context, can block directly
+                    handle.block_on(async move {
+                        let tool = tools
+                            .get(&tool_name)
+                            .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
 
-                    thread_rt.block_on(async move {
-                        tool.execute(args_clone)
+                        tool.execute(args)
                             .await
                             .map_err(|e| format!("Tool execution failed: {}", e))
                     })
-                })
-                .join()
-                .map_err(|_| "Tool execution thread panicked".to_string())?
+                }
             }
+        }
+    }
+}
+
+impl Drop for InProcessMcp {
+    fn drop(&mut self) {
+        // Only shutdown the runtime if we own it
+        if let Some(runtime) = self.owned_runtime.take() {
+            eprintln!("[McpConnection] Shutting down owned runtime");
+            // If we're in an async context, use shutdown_background to avoid blocking
+            if Handle::try_current().is_ok() {
+                if let Ok(rt) = Arc::try_unwrap(runtime) {
+                    rt.shutdown_background();
+                }
+            }
+            // If not in async context, the runtime will shut down normally on drop
         }
     }
 }

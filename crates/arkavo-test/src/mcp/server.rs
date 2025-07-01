@@ -101,22 +101,44 @@ impl McpTestServer {
         #[cfg(feature = "embeddings")]
         {
             eprintln!("[McpTestServer] Initializing memory tools...");
-            let runtime = tokio::runtime::Runtime::new()?;
-            let memory_storage = runtime.block_on(async {
-                match arkavo_memory::storage::MemoryStorage::new().await {
-                    Ok(storage) => {
-                        eprintln!("[McpTestServer] Memory storage initialized successfully");
-                        Some(Arc::new(storage))
+
+            // Check if we're already in a runtime
+            let memory_storage = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // Already in a runtime, use it
+                handle.block_on(async {
+                    match arkavo_memory::storage::MemoryStorage::new().await {
+                        Ok(storage) => {
+                            eprintln!("[McpTestServer] Memory storage initialized successfully");
+                            Some(Arc::new(storage))
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
+                            );
+                            eprintln!("[McpTestServer] Memory tools will not be available");
+                            None
+                        }
                     }
-                    Err(e) => {
-                        eprintln!(
-                            "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
-                        );
-                        eprintln!("[McpTestServer] Memory tools will not be available");
-                        None
+                })
+            } else {
+                // Not in a runtime, create a temporary one
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(async {
+                    match arkavo_memory::storage::MemoryStorage::new().await {
+                        Ok(storage) => {
+                            eprintln!("[McpTestServer] Memory storage initialized successfully");
+                            Some(Arc::new(storage))
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
+                            );
+                            eprintln!("[McpTestServer] Memory tools will not be available");
+                            None
+                        }
                     }
-                }
-            });
+                })
+            };
 
             // Add memory tools if storage is available
             if let Some(storage) = memory_storage {

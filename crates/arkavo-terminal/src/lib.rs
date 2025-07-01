@@ -85,6 +85,8 @@ pub async fn run() -> Result<()> {
 
             match result {
                 Ok(client) => {
+                    // Only log in debug builds
+                    #[cfg(debug_assertions)]
                     eprintln!("✓ LLM handler using in-process MCP server");
                     Some(client)
                 }
@@ -467,7 +469,6 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
         if let Ok(client) = LlmClient::from_env() {
             let test_message = vec![Message::user("ping")];
             if client.complete(test_message).await.is_ok() {
-                eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 return Ok(client);
             }
         }

@@ -364,6 +364,7 @@ dependencies = [
  "glob",
  "handlebars",
  "jsonschema 0.26.2",
+ "libc",
  "rand 0.8.5",
  "regex",
  "reqwest",

@@ -123,16 +123,18 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
     println!("Session stopped: {:?}", stop_result);
 }
 
-#[tokio::test]
-#[ignore = "Test causes runtime panic when creating MCP connection in async context"]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_tui_state_verification() {
     // Initialize MCP connection
+    println!("Creating MCP connection...");
     let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    println!("MCP connection created successfully");
 
     // This test verifies we can capture and analyze terminal state
     let session_id = "state_test_session";
 
     // Start a simple command that outputs predictable text
+    println!("Starting test session...");
     let start_result = mcp
         .call_tool(
             "tui_harness",

@@ -996,10 +996,6 @@ impl App {
                                     task.scroll_offset = u16::MAX;
                                 }
                             }
-                            // Press Ctrl+I to toggle input/scroll mode
-                            KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.input_focused = !self.input_focused;
-                            }
                             // Number keys for quick jump (1-9)
                             KeyCode::Char(c) if !self.input_focused && c.is_ascii_digit() => {
                                 if let Some(digit) = c.to_digit(10) {
@@ -1087,19 +1083,7 @@ impl App {
             ])
             .split(frame.area());
 
-        // Render input area at the top
-        let input_title = if self.input_focused {
-            if self.helix_editor.is_some() {
-                " Input (Press Ctrl+E for Helix) "
-            } else {
-                " Input "
-            }
-        } else {
-            " Input (Press 'i' to focus) "
-        };
-
         let input_block = Block::default()
-            .title(input_title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(if self.input_focused {
                 Color::Cyan
@@ -1113,7 +1097,7 @@ impl App {
         let visible_width = input_inner.width.saturating_sub(1) as usize;
 
         // Show prompt with input buffer
-        let prompt = "> ";
+        let prompt = " > ";
         let full_text = format!("{}{}", prompt, self.input_buffer);
 
         // Calculate visible portion with horizontal scrolling
@@ -1390,7 +1374,6 @@ Welcome to Arkavo Terminal UI
 
 • Type your prompt after > and press Enter to start a conversation
 • Press Tab to cycle through available models
-• Press Ctrl+I to toggle input/scroll mode
 • Press Ctrl+R to refresh model list
 • Press Ctrl+Q to quit
 
