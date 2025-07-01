@@ -15,8 +15,9 @@ members = [
     "crates/arkavo-mcp-core",
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-dataflow",
-    "xtask",
+    "tools/xtask",
 ]
+exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]

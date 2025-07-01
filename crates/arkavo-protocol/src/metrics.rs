@@ -78,6 +78,7 @@ impl MetricsCollector {
     }
 
     /// Record mDNS agent discovery
+    #[allow(clippy::needless_return)]
     pub fn record_mdns_discovery(&self) {
         if !self.enabled {
             return;

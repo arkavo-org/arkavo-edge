@@ -70,5 +70,9 @@ jsonrpsee = { version = "0.24", features = ["server", "macros"] }
 name = "mdns_browser"
 required-features = ["mdns", "demo"]
 
+[[bin]]
+name = "export-schema"
+path = "src/bin/export-schema.rs"
+
 [lints]
 workspace = true

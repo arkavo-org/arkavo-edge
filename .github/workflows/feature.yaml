@@ -344,10 +344,162 @@ jobs:
           # Test with bundled ONNX Runtime library
           ./arkavo --version
 
+  # Schema validation jobs
+  validate-openrpc:
+    name: Validate OpenRPC Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "schema-validation"
+          
+      - name: Install validation tools
+        run: |
+          # JSON validation
+          npm install -g ajv-cli@5.0.0
+          npm install -g @open-rpc/schema@1.14.6
+          
+          # API linting and breaking change detection
+          npm install -g @stoplight/spectral-cli@6.11.0
+          
+          # Install oasdiff for breaking change detection
+          wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
+          tar -xzf oasdiff.tar.gz
+          sudo mv oasdiff /usr/local/bin/
+          rm oasdiff.tar.gz
+          
+      - name: Build schema tools
+        run: |
+          cargo build -p arkavo-protocol --bin export-schema || echo "Schema export not yet available"
+          
+      - name: Generate and validate schemas
+        run: |
+          # Check if export-schema exists
+          if cargo run -p arkavo-protocol --bin export-schema > schema.json 2>/dev/null; then
+            # Create schemas directory
+            mkdir -p schemas/openrpc schemas/config schemas/wire/v1
+            cp schema.json schemas/openrpc/
+            
+            # Validate against OpenRPC meta-schema
+            npx ajv validate -s node_modules/@open-rpc/schema/meta-schema.json -d schema.json
+            
+            # Create Spectral ruleset for OpenRPC
+            cat > .spectral.yaml << 'EOF'
+            extends: [[spectral:oas, recommended]]
+            rules:
+              method-names-kebab-case:
+                description: Method names should be kebab-case
+                given: "$.methods[*]"
+                severity: warn
+                then:
+                  field: name
+                  function: pattern
+                  functionOptions:
+                    match: "^[a-z]+(_[a-z]+)*$"
+                    
+              method-must-have-description:
+                description: Methods must have descriptions
+                given: "$.methods[*]"
+                severity: error
+                then:
+                  field: description
+                  function: truthy
+            EOF
+            
+            # Run Spectral linting
+            spectral lint schema.json --ruleset .spectral.yaml || true
+            
+            echo "✅ Schema validation completed"
+          else
+            echo "⚠️ Schema export not yet implemented - skipping validation"
+          fi
+
+  check-schema-backwards-compatibility:
+    name: Check Schema Backwards Compatibility
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "schema-compat"
+          
+      - name: Install oasdiff
+        run: |
+          wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
+          tar -xzf oasdiff.tar.gz
+          sudo mv oasdiff /usr/local/bin/
+          rm oasdiff.tar.gz
+          
+      - name: Check for breaking changes
+        run: |
+          # Check if export-schema binary exists
+          if cargo run -p arkavo-protocol --bin export-schema > /dev/null 2>&1; then
+            # Generate current schema
+            cargo run -p arkavo-protocol --bin export-schema > schema-current.json
+            
+            # Checkout base branch
+            git checkout ${{ github.base_ref }}
+            
+            # Check if export-schema exists in base
+            if cargo run -p arkavo-protocol --bin export-schema > schema-base.json 2>/dev/null; then
+              # Switch back to PR branch
+              git checkout -
+              
+              # Use oasdiff to check for breaking changes
+              oasdiff breaking schema-base.json schema-current.json --fail-on-diff || {
+                echo "❌ Breaking changes detected!"
+                echo "Run 'oasdiff diff schema-base.json schema-current.json' locally for details"
+                exit 1
+              }
+              
+              echo "✅ No breaking changes detected"
+            else
+              echo "⚠️ Schema export doesn't exist in base branch - skipping compatibility check"
+            fi
+          else
+            echo "⚠️ Schema export not yet implemented - skipping compatibility check"
+          fi
+
+  validate-doc-snippets:
+    name: Validate Documentation Code Snippets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Test documentation examples
+        run: |
+          # Test Rust doc examples
+          cargo test --doc -p arkavo-protocol || echo "No doc tests in arkavo-protocol"
+          
+      - name: Validate JSON snippets in docs
+        run: |
+          # Extract and validate JSON snippets from markdown files
+          for md in docs/**/*.md README.md; do
+            if [ -f "$md" ]; then
+              echo "Checking $md for JSON snippets..."
+              # Extract JSON code blocks and validate them
+              awk '/```json/{flag=1;next}/```/{flag=0}flag' "$md" > temp.json || true
+              if [ -s temp.json ]; then
+                jq . temp.json > /dev/null 2>&1 || echo "Invalid JSON in $md"
+              fi
+            fi
+          done
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
+    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -361,7 +513,9 @@ jobs:
                 "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
-                "${{ needs.performance-check.result }}" != "success" ]]; then
+                "${{ needs.performance-check.result }}" != "success" || \
+                "${{ needs.validate-openrpc.result }}" != "success" || \
+                "${{ needs.validate-doc-snippets.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

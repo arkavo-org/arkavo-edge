@@ -14,7 +14,7 @@ pub async fn run_a2a_demo(agent1_port: u16, agent2_port: u16, use_websocket: boo
     // First, ensure the library is built
     info!("Building arkavo-protocol library...");
     let output = Command::new("cargo")
-        .args(&["build", "-p", "arkavo-protocol", "--lib"])
+        .args(["build", "-p", "arkavo-protocol", "--lib"])
         .output()?;
 
     if !output.status.success() {

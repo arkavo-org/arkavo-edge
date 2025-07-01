@@ -1,4 +1,5 @@
 mod demo;
+mod schema;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -22,6 +23,15 @@ enum Commands {
         #[arg(long)]
         use_websocket: bool,
     },
+    #[command(about = "Generate and validate protocol schemas")]
+    SchemaGen {
+        #[arg(long, help = "Check if schemas are up to date without modifying files")]
+        check: bool,
+        #[arg(long, help = "Generate config schemas")]
+        config: bool,
+        #[arg(long, help = "Generate wire protocol schemas")]
+        wire: bool,
+    },
 }
 
 #[tokio::main]
@@ -37,6 +47,13 @@ async fn main() -> Result<()> {
             use_websocket,
         } => {
             demo::run_a2a_demo(agent1_port, agent2_port, use_websocket).await?;
+        }
+        Commands::SchemaGen {
+            check,
+            config,
+            wire,
+        } => {
+            schema::generate_schemas(check, config, wire)?;
         }
     }
 
