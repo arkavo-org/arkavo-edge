@@ -124,15 +124,13 @@ jobs:
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
         run: |
-          # Run tests for all workspace members except those that need embeddings and dev tools
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude xtask --no-default-features
+          # Run tests for all workspace members except those that need embeddings
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --no-default-features --lib
           cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
           # Run arkavo-test without embeddings
           cargo test -p arkavo-test --no-default-features
-          # Explicitly test arkavo-protocol (A2A transport layer)
-          cargo test -p arkavo-protocol
 
   test-coverage:
     name: Test with Coverage
@@ -149,7 +147,7 @@ jobs:
           curl -L https://github.com/xd009642/tarpaulin/releases/download/0.31.2/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xzf - -C $HOME/.cargo/bin
           
       - name: Generate test coverage
-        run: cargo tarpaulin --ignore-tests --workspace --exclude arkavo-memory --exclude arkavo-test --exclude xtask --no-default-features --out Xml
+        run: cargo tarpaulin --ignore-tests --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features --out Xml
           
       - name: Check test coverage
         run: |
