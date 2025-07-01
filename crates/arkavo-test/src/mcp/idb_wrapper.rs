@@ -985,12 +985,11 @@ impl IdbWrapper {
                             "device_id": device_id,
                             "confidence": "high"
                         }));
-                    } else {
-                        let retry_stderr = String::from_utf8_lossy(&retry_output.stderr);
-                        return Err(TestError::Mcp(format!(
-                            "System idb_companion tap also failed: {retry_stderr}"
-                        )));
                     }
+                    let retry_stderr = String::from_utf8_lossy(&retry_output.stderr);
+                    return Err(TestError::Mcp(format!(
+                        "System idb_companion tap also failed: {retry_stderr}"
+                    )));
                 }
                 return Err(TestError::Mcp(
                     "Framework conflict detected: IDB frameworks conflicting with system frameworks. \

@@ -34,6 +34,7 @@ mod llm_integration_tests {
             is_streaming: true,
             is_complete: false,
             error: None,
+            mcp_status: None,
         };
         llm_tx.send(response1).await.unwrap();
 
@@ -44,6 +45,7 @@ mod llm_integration_tests {
             is_streaming: true,
             is_complete: false,
             error: None,
+            mcp_status: None,
         };
         llm_tx.send(response2).await.unwrap();
 
@@ -54,6 +56,7 @@ mod llm_integration_tests {
             is_streaming: true,
             is_complete: true,
             error: None,
+            mcp_status: None,
         };
         llm_tx.send(response3).await.unwrap();
 

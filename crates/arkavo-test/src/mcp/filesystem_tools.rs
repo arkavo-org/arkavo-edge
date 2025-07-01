@@ -45,7 +45,7 @@ impl FileSystemKit {
         // Convert to absolute path if relative
         let abs_path = if path.is_relative() {
             std::env::current_dir()
-                .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {}", e)))?
+                .map_err(|e| TestError::Mcp(format!("Failed to get current directory: {e}")))?
                 .join(path)
         } else {
             path.to_path_buf()
@@ -53,7 +53,7 @@ impl FileSystemKit {
 
         // Basic security check - ensure path doesn't contain suspicious patterns
         let path_str = abs_path.to_string_lossy();
-        if path_str.contains("..") || path_str.contains("~") {
+        if path_str.contains("..") || path_str.contains('~') {
             return Err(TestError::Mcp("Path traversal not allowed".to_string()));
         }
 
@@ -100,7 +100,7 @@ impl Tool for FileSystemKit {
 
                 // Read file with size limit (10MB)
                 let metadata = fs::metadata(&abs_path)
-                    .map_err(|e| TestError::Mcp(format!("Failed to get file metadata: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to get file metadata: {e}")))?;
 
                 if metadata.len() > 10_485_760 {
                     return Ok(json!({
@@ -110,7 +110,7 @@ impl Tool for FileSystemKit {
                 }
 
                 let content = fs::read_to_string(&abs_path)
-                    .map_err(|e| TestError::Mcp(format!("Failed to read file: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to read file: {e}")))?;
 
                 Ok(json!({
                     "success": true,
@@ -144,13 +144,13 @@ impl Tool for FileSystemKit {
 
                 let mut entries = Vec::new();
                 let read_dir = fs::read_dir(&abs_path)
-                    .map_err(|e| TestError::Mcp(format!("Failed to read directory: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to read directory: {e}")))?;
 
                 for entry in read_dir {
                     if let Ok(entry) = entry {
-                        let file_type = entry.file_type().map_err(|e| {
-                            TestError::Mcp(format!("Failed to get file type: {}", e))
-                        })?;
+                        let file_type = entry
+                            .file_type()
+                            .map_err(|e| TestError::Mcp(format!("Failed to get file type: {e}")))?;
 
                         entries.push(json!({
                             "name": entry.file_name().to_string_lossy(),
@@ -182,7 +182,7 @@ impl Tool for FileSystemKit {
                 }
 
                 let metadata = fs::metadata(&abs_path)
-                    .map_err(|e| TestError::Mcp(format!("Failed to get metadata: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to get metadata: {e}")))?;
 
                 Ok(json!({
                     "success": true,
@@ -195,7 +195,7 @@ impl Tool for FileSystemKit {
                 }))
             }
 
-            _ => Err(TestError::Mcp(format!("Unknown action: {}", action))),
+            _ => Err(TestError::Mcp(format!("Unknown action: {action}"))),
         }
     }
 

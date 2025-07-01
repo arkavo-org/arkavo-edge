@@ -1,0 +1,10 @@
+# Clippy configuration for arkavo-edge
+# Note: Most Clippy lints are configured in Cargo.toml under [workspace.lints.clippy]
+# This file contains configurations that cannot be expressed in Cargo.toml
+
+# Disallow certain patterns that can cause runtime panics
+disallowed-methods = [
+    # Prevent using block_on from within async contexts
+    { path = "tokio::runtime::Handle::block_on", reason = "Can cause 'Cannot start a runtime from within a runtime' panic. Use spawn_blocking or make the function async instead." },
+    { path = "tokio::runtime::Runtime::block_on", reason = "Be careful not to call from async context. Consider using spawn_blocking." },
+]

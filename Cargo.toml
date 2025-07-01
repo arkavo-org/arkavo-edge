@@ -19,7 +19,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.19.7"
+version = "0.19.8"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -70,6 +70,11 @@ cargo = { level = "warn", priority = -1 }
 default_trait_access = "warn"
 enum_glob_use = "warn"
 implicit_return = "allow"
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+large_futures = "warn"
+# Note: Additional Clippy configurations for disallowed-methods are in .clippy.toml
+# These configurations use syntax not supported in Cargo.toml
 # Things to consider later
 # missing_docs_in_private_items = "warn"
 # missing_errors_doc = "warn"

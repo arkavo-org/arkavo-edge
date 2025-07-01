@@ -225,6 +225,10 @@ impl TaskManager {
     pub fn find_task_by_id_mut(&mut self, id: Uuid) -> Option<&mut TaskWindow> {
         self.tasks.iter_mut().find(|task| task.id == id)
     }
+
+    pub fn find_task_by_id(&self, id: Uuid) -> Option<&TaskWindow> {
+        self.tasks.iter().find(|task| task.id == id)
+    }
 }
 
 impl Default for TaskManager {

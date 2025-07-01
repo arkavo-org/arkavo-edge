@@ -69,7 +69,7 @@ You are a specialized AI agent for code analysis.
 
     // Test that the content can be appended with MCP info
     let mcp_info = "\n\nMCP Tools Available:\n- git_status\n- filesystem_tools";
-    let combined = format!("{}{}", content, mcp_info);
+    let combined = format!("{content}{mcp_info}");
 
     assert!(combined.len() > content.len());
     assert!(combined.contains(&content)); // Original content is preserved

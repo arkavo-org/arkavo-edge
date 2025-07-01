@@ -1,125 +1,71 @@
+use crate::mcp_client::McpClient;
 use crate::memory_integration::MemoryIntegration;
-use arkavo_test::mcp::server::Tool as McpTool;
-use arkavo_test::mcp::{
-    device_manager::DeviceManager,
-    device_tools::DeviceManagementKit,
-    filesystem_tools::FileSystemKit,
-    git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit},
-    ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit},
-    simulator_tools::SimulatorControl,
-};
+use arkavo_test::mcp::mcp_connection as base;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::runtime::Runtime;
-
-#[derive(Debug, Clone)]
-pub enum McpConnection {
-    InProcess(InProcessMcp),
-    External(crate::mcp_client::McpClient),
-}
-
-#[derive(Clone)]
-pub struct InProcessMcp {
-    tools: Arc<HashMap<String, Box<dyn McpTool>>>,
-    runtime: Arc<Runtime>,
-}
+use tokio::runtime::Handle;
 
 // Re-export Tool from mcp_client for compatibility
 pub use crate::mcp_client::Tool;
 
+#[derive(Debug, Clone)]
+pub enum McpConnection {
+    InProcess(base::McpConnection),
+    External(McpClient),
+}
+
 impl McpConnection {
     pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
-        // Create tokio runtime for async operations
-        let runtime = Arc::new(Runtime::new()?);
-
-        // Create tools with shared device manager
-        let device_manager = Arc::new(DeviceManager::new());
-
-        let mut tools: HashMap<String, Box<dyn McpTool>> = HashMap::new();
-
-        // Register all tools
-        let simulator_control = SimulatorControl::new();
-        tools.insert(
-            simulator_control.schema().name.clone(),
-            Box::new(simulator_control),
-        );
-
-        let device_mgmt = DeviceManagementKit::new(device_manager.clone());
-        tools.insert(device_mgmt.schema().name.clone(), Box::new(device_mgmt));
-
-        let screen_capture = ScreenCaptureKit::new(device_manager.clone());
-        tools.insert(
-            screen_capture.schema().name.clone(),
-            Box::new(screen_capture),
-        );
-
-        let ui_interaction = UiInteractionKit::new(device_manager.clone());
-        tools.insert(
-            ui_interaction.schema().name.clone(),
-            Box::new(ui_interaction),
-        );
-
-        let ui_query = UiQueryKit::new(device_manager);
-        tools.insert(ui_query.schema().name.clone(), Box::new(ui_query));
-
-        // Add Git tools
-        let git_status = GitStatusKit::new();
-        tools.insert(git_status.schema().name.clone(), Box::new(git_status));
-
-        let git_diff = GitDiffKit::new();
-        tools.insert(git_diff.schema().name.clone(), Box::new(git_diff));
-
-        let git_commit = GitCommitKit::new();
-        tools.insert(git_commit.schema().name.clone(), Box::new(git_commit));
-
-        let git_branch = GitBranchKit::new();
-        tools.insert(git_branch.schema().name.clone(), Box::new(git_branch));
-
-        let git_log = GitLogKit::new();
-        tools.insert(git_log.schema().name.clone(), Box::new(git_log));
-
-        let git_remote = GitRemoteKit::new();
-        tools.insert(git_remote.schema().name.clone(), Box::new(git_remote));
-
-        // Add file system tools
-        let filesystem = FileSystemKit::new();
-        tools.insert(filesystem.schema().name.clone(), Box::new(filesystem));
-
-        // Initialize memory tools
+        // Initialize memory tools first
         eprintln!("Initializing memory tools...");
-        let memory_runtime = runtime.clone();
-        let memory_integration =
-            memory_runtime.block_on(async { MemoryIntegration::new().await })?;
 
-        // Add memory tools
-        for (name, tool) in memory_integration.get_tools() {
-            tools.insert(name, tool);
-        }
+        // Check if we're in a runtime to determine how to initialize memory
+        let memory_integration = match Handle::try_current() {
+            Ok(handle) => {
+                // We're in an async context, use the current handle
+                handle.block_on(async { MemoryIntegration::new().await })?
+            }
+            Err(_) => {
+                // Not in a runtime, create one temporarily
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(async { MemoryIntegration::new().await })?
+            }
+        };
 
-        Ok(Self::InProcess(InProcessMcp {
-            tools: Arc::new(tools),
-            runtime,
-        }))
+        // Get memory tools
+        let additional_tools = memory_integration.get_tools();
+
+        // Create the base MCP connection with additional tools
+        let base_connection =
+            base::McpConnection::new_in_process_with_additional_tools(additional_tools)?;
+
+        Ok(Self::InProcess(base_connection))
     }
 
     pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self::External(crate::mcp_client::McpClient::new(mcp_url)?))
+        if let Some(url) = mcp_url {
+            let client = McpClient::new(Some(url))?;
+            Ok(Self::External(client))
+        } else {
+            Err("MCP URL not provided for external connection".into())
+        }
     }
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         match self {
-            Self::InProcess(mcp) => {
-                let tools: Vec<Tool> = mcp
-                    .tools
-                    .values()
-                    .map(|tool| {
-                        let schema = tool.schema();
-                        Tool {
-                            name: schema.name.clone(),
-                            description: schema.description.clone(),
-                            input_schema: schema.parameters.clone(),
-                        }
+            Self::InProcess(base_conn) => {
+                let tool_names = base_conn.list_tools();
+                let tools = tool_names
+                    .into_iter()
+                    .filter_map(|name| {
+                        base_conn.get_tool_schema(&name).map(|schema| Tool {
+                            name: name.clone(),
+                            description: schema
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            input_schema: schema,
+                        })
                     })
                     .collect();
                 Ok(tools)
@@ -132,51 +78,13 @@ impl McpConnection {
         &self,
         tool_name: &str,
         args: Value,
-        _llm_origin: &str,
+        llm_origin: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
-            Self::InProcess(mcp) => {
-                // Create a oneshot channel to get the result
-                let (tx, rx) = std::sync::mpsc::channel::<Result<Value, String>>();
-
-                // Clone what we need
-                let tools = mcp.tools.clone();
-                let tool_name = tool_name.to_string();
-                let runtime = mcp.runtime.clone();
-
-                // Spawn a thread to run the async operation
-                std::thread::spawn(move || {
-                    let result = runtime.block_on(async move {
-                        if let Some(tool) = tools.get(&tool_name) {
-                            tool.execute(args)
-                                .await
-                                .map_err(|e| format!("Tool execution error: {e}"))
-                        } else {
-                            Err(format!("Tool '{tool_name}' not found"))
-                        }
-                    });
-                    tx.send(result).ok();
-                });
-
-                // Wait for the result
-                rx.recv()
-                    .map_err(|_| "Failed to receive tool result")?
-                    .map_err(|e: String| e.into())
-            }
-            Self::External(client) => client.call_tool(tool_name, args, _llm_origin),
+            Self::InProcess(base_conn) => base_conn
+                .call_tool(tool_name, args, llm_origin)
+                .map_err(|e| e.into()),
+            Self::External(client) => client.call_tool(tool_name, args, llm_origin),
         }
-    }
-}
-
-// Re-export McpClient for backward compatibility
-pub use crate::mcp_client::McpClient;
-
-// Implement Debug manually for InProcessMcp
-impl std::fmt::Debug for InProcessMcp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcessMcp")
-            .field("tools", &self.tools.keys().collect::<Vec<_>>())
-            .field("runtime", &"Runtime")
-            .finish()
     }
 }
