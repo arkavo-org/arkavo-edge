@@ -10,7 +10,7 @@ fn test_tui_keyboard_functionality() {
         println!("Skipping keyboard tests in CI environment");
         return;
     }
-    
+
     println!("=== Testing TUI Keyboard Tool ===");
 
     let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
@@ -96,7 +96,7 @@ fn test_tui_screenshot_functionality() {
         println!("Skipping screenshot tests in CI environment");
         return;
     }
-    
+
     println!("=== Testing TUI Screenshot Tool ===");
 
     let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
@@ -188,7 +188,7 @@ fn test_keyboard_modifiers() {
         println!("Skipping keyboard modifier tests in CI environment");
         return;
     }
-    
+
     println!("=== Testing Keyboard Modifiers ===");
 
     let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
