@@ -132,6 +132,21 @@ async fn demonstrate_api_usage(
     info!("   - Use discovery to find agents");
     info!("   - Exchange messages between agents");
     info!("");
+    info!("=== OpenRPC Schema ===");
+    info!("");
+    info!("The A2A protocol provides OpenRPC schema discovery:");
+    info!("");
+    info!("To get the OpenRPC schema via JSON-RPC:");
+    info!("   curl -X POST http://localhost:{}/rpc \\", agent1_port);
+    info!("     -H 'Content-Type: application/json' \\");
+    info!("     -d '{{\"jsonrpc\":\"2.0\",\"method\":\"rpc.discover\",\"params\":[],\"id\":1}}'");
+    info!("");
+    info!("This returns a complete OpenRPC 1.2.6 specification with:");
+    info!("   - All available methods and their parameters");
+    info!("   - Request/response schemas");
+    info!("   - Error codes and descriptions");
+    info!("   - Example usage for each method");
+    info!("");
     info!("Demo completed!");
 
     Ok(())

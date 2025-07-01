@@ -1,4 +1,5 @@
 use crate::discovery::{DiscoveryConfig, DiscoveryMethod};
+use crate::rate_limit::RateLimitConfig;
 use crate::security::SecurityConfig;
 use crate::transport::TransportConfig;
 use anyhow::Result;
@@ -32,6 +33,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub max_connections: usize,
     pub idle_timeout_seconds: u64,
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for ServerConfig {
@@ -42,6 +44,7 @@ impl Default for ServerConfig {
             port: 8765,
             max_connections: 100,
             idle_timeout_seconds: 300,
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
