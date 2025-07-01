@@ -318,14 +318,14 @@ impl App {
                     provider_type: ProviderType::Claude, // Using Claude as placeholder
                     url: None,
                     status: ProviderStatus::Connected,
-                    models: tools.clone(),
+                    models: tools,
                 });
                 self.mcp_client = Some(client);
             }
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Warning,
-                    format!("[MCP] Failed to connect: {}", e),
+                    format!("[MCP] Failed to connect: {e}"),
                 );
 
                 // Add disconnected MCP provider
@@ -413,10 +413,7 @@ impl App {
 
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
-                    format!(
-                        "[Ollama] Connected to localhost, found {} models",
-                        model_count
-                    ),
+                    format!("[Ollama] Connected to localhost, found {model_count} models"),
                 );
             }
             Err(e) => {
@@ -452,7 +449,7 @@ impl App {
 
             self.add_debug_log(
                 crate::ui::debug::LogLevel::Debug,
-                format!("[Storage] Found saved Ollama config: {}", server_url),
+                format!("[Storage] Found saved Ollama config: {server_url}"),
             );
 
             if server_url.starts_with("http") {
@@ -479,7 +476,7 @@ impl App {
                             .or_else(|| server_url.strip_prefix("https://"))
                             .unwrap_or(&server_url);
                         self.providers.push(ProviderInfo {
-                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            name: format!("Ollama ({server_name} - {display_url})"),
                             provider_type: ProviderType::Ollama,
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Connected,
@@ -488,7 +485,7 @@ impl App {
 
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Info,
-                            format!("[Ollama] Connected to {server_name}: {server_url}, found {} models", model_count),
+                            format!("[Ollama] Connected to {server_name}: {server_url}, found {model_count} models"),
                         );
                         server_idx += 1;
                     }
@@ -500,7 +497,7 @@ impl App {
                             .or_else(|| server_url.strip_prefix("https://"))
                             .unwrap_or(&server_url);
                         self.providers.push(ProviderInfo {
-                            name: format!("Ollama ({} - {})", server_name, display_url),
+                            name: format!("Ollama ({server_name} - {display_url})"),
                             provider_type: ProviderType::Ollama,
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Error(e.to_string()),
@@ -724,11 +721,6 @@ impl App {
                                     "[UI] Refreshing model list...".to_string(),
                                 );
                                 self.fetch_available_models().await;
-                            }
-                            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                // Ctrl+T: Show all MCP tools
-                                self.show_mcp_tools_dialog();
-                                needs_redraw = true;
                             }
                             KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
                                 self.vim_enabled = !self.vim_enabled;
@@ -1142,7 +1134,7 @@ impl App {
         // Create a block for the provider/model area
         let model_selector_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Providers & Models | {} ", active_model_display))
+            .title(format!(" Providers & Models | {active_model_display} "))
             .border_style(Style::default().fg(Color::Yellow));
 
         let model_inner = model_selector_block.inner(chunks[1]);
@@ -1165,7 +1157,7 @@ impl App {
                 match provider.provider_type {
                     ProviderType::Ollama => ollama_providers.push(provider),
                     ProviderType::OpenAI | ProviderType::Anthropic | ProviderType::Claude => {
-                        frontier_providers.push(provider)
+                        frontier_providers.push(provider);
                     }
                 }
             }
@@ -1639,7 +1631,7 @@ Scrolling (when in scroll mode):
         };
 
         let status = format!(
-            " {mode_indicator} | Model: {active_model}{mcp_status} | Ctrl+T: Tools | Ctrl+R: Refresh | Ctrl+Q: Quit "
+            " {mode_indicator} | Model: {active_model}{mcp_status} | Ctrl+R: Refresh | Ctrl+Q: Quit "
         );
 
         let paragraph = Paragraph::new(status)
@@ -1797,12 +1789,12 @@ Scrolling (when in scroll mode):
         // Normalize URL
         let mut url = server_url.trim().to_string();
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            url = format!("http://{}", url);
+            url = format!("http://{url}");
         }
 
         self.add_debug_log(
             crate::ui::debug::LogLevel::Info,
-            format!("[Config] Testing connection to {}", url),
+            format!("[Config] Testing connection to {url}"),
         );
 
         // Test connection
@@ -1831,7 +1823,7 @@ Scrolling (when in scroll mode):
                     if let Err(e) = storage.store(memory).await {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Error,
-                            format!("[Config] Failed to save: {}", e),
+                            format!("[Config] Failed to save: {e}"),
                         );
                     } else {
                         self.add_debug_log(
@@ -1851,7 +1843,7 @@ Scrolling (when in scroll mode):
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Error,
-                    format!("[Config] Failed to connect to {}: {}", url, e),
+                    format!("[Config] Failed to connect to {url}: {e}"),
                 );
             }
         }
@@ -1908,13 +1900,13 @@ Scrolling (when in scroll mode):
             Ok(_) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
-                    format!("[Export] UI state saved to {}", filename),
+                    format!("[Export] UI state saved to {filename}"),
                 );
             }
             Err(e) => {
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Error,
-                    format!("[Export] Failed to save UI state: {}", e),
+                    format!("[Export] Failed to save UI state: {e}"),
                 );
             }
         }
@@ -2149,7 +2141,7 @@ Scrolling (when in scroll mode):
         let mut other_tools = Vec::new();
 
         for tool_name in &self.mcp_tools {
-            let tool_info = format!("@{}", tool_name);
+            let tool_info = format!("@{tool_name}");
 
             if tool_name.contains("device") || tool_name.contains("simulator") {
                 device_tools.push(tool_info);
@@ -2174,7 +2166,7 @@ Scrolling (when in scroll mode):
                 "[Device Management Tools]".to_string(),
             );
             for tool in device_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
             }
         }
 
@@ -2184,14 +2176,14 @@ Scrolling (when in scroll mode):
                 "[UI Interaction Tools]".to_string(),
             );
             for tool in ui_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
             }
         }
 
         if !git_tools.is_empty() {
             self.add_debug_log(crate::ui::debug::LogLevel::Info, "[Git Tools]".to_string());
             for tool in git_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
             }
         }
 
@@ -2201,7 +2193,7 @@ Scrolling (when in scroll mode):
                 "[Memory Tools]".to_string(),
             );
             for tool in memory_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
             }
         }
 
@@ -2211,7 +2203,7 @@ Scrolling (when in scroll mode):
                 "[Other Tools]".to_string(),
             );
             for tool in other_tools {
-                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {}", tool));
+                self.add_debug_log(crate::ui::debug::LogLevel::Info, format!("  {tool}"));
             }
         }
 

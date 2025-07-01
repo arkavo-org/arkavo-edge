@@ -34,7 +34,7 @@ fn test_tui_keyboard_functionality() {
             assert!(res["success"].as_bool().unwrap_or(false));
         }
         Err(e) => {
-            println!("Key press failed (expected if no terminal focused): {}", e);
+            println!("Key press failed (expected if no terminal focused): {e}");
         }
     }
 
@@ -57,10 +57,7 @@ fn test_tui_keyboard_functionality() {
             assert!(res["success"].as_bool().unwrap_or(false));
         }
         Err(e) => {
-            println!(
-                "Text typing failed (expected if no terminal focused): {}",
-                e
-            );
+            println!("Text typing failed (expected if no terminal focused): {e}");
         }
     }
 
@@ -84,7 +81,7 @@ fn test_tui_keyboard_functionality() {
             assert!(res["success"].as_bool().unwrap_or(false));
         }
         Err(e) => {
-            println!("Shortcut failed (expected if no terminal focused): {}", e);
+            println!("Shortcut failed (expected if no terminal focused): {e}");
         }
     }
 }
@@ -121,10 +118,7 @@ fn test_tui_screenshot_functionality() {
             assert!(res.get("content").is_some());
         }
         Err(e) => {
-            println!(
-                "Screenshot failed (expected if no terminal available): {}",
-                e
-            );
+            println!("Screenshot failed (expected if no terminal available): {e}");
         }
     }
 }
@@ -166,18 +160,18 @@ fn test_all_tui_tools_schemas() {
     ];
 
     for tool_name in tui_tools {
-        println!("\nChecking schema for: {}", tool_name);
+        println!("\nChecking schema for: {tool_name}");
 
         let schema = mcp
             .get_tool_schema(tool_name)
-            .expect(&format!("Failed to get {} schema", tool_name));
+            .unwrap_or_else(|| panic!("Failed to get {tool_name} schema"));
 
         // Verify basic schema structure
         assert_eq!(schema["name"], tool_name);
         assert!(schema.get("description").is_some());
         assert!(schema.get("parameters").is_some());
 
-        println!("  ✓ Schema valid for {}", tool_name);
+        println!("  ✓ Schema valid for {tool_name}");
     }
 }
 
@@ -202,7 +196,7 @@ fn test_keyboard_modifiers() {
     ];
 
     for (modifiers, key) in modifier_combos {
-        println!("\nTesting {:?} + {}", modifiers, key);
+        println!("\nTesting {modifiers:?} + {key}");
 
         let result = mcp.call_tool(
             "tui_keyboard",
@@ -223,7 +217,7 @@ fn test_keyboard_modifiers() {
                 assert!(res["success"].as_bool().unwrap_or(false));
             }
             Err(e) => {
-                println!("  Failed (expected without focused terminal): {}", e);
+                println!("  Failed (expected without focused terminal): {e}");
             }
         }
     }

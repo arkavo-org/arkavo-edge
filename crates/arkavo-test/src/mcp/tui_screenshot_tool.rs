@@ -36,6 +36,12 @@ fn default_include_colors() -> bool {
     true
 }
 
+impl Default for TuiScreenshotKit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TuiScreenshotKit {
     pub fn new() -> Self {
         Self {
@@ -104,7 +110,7 @@ impl TuiScreenshotKit {
                 tell application "Terminal"
                     set targetWindow to null
                     repeat with w in windows
-                        if name of w contains "{}" then
+                        if name of w contains "{title}" then
                             set targetWindow to w
                             exit repeat
                         end if
@@ -117,8 +123,7 @@ impl TuiScreenshotKit {
                         error "Window not found"
                     end if
                 end tell
-                "#,
-                title
+                "#
             )
         } else {
             r#"
@@ -137,7 +142,7 @@ impl TuiScreenshotKit {
             .arg("-e")
             .arg(&script)
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp(format!(
@@ -234,11 +239,11 @@ impl TuiScreenshotKit {
 
         // Use screencapture to capture window
         let mut cmd = Command::new("screencapture");
-        cmd.args(&["-x", "-o"]); // No sound, no shadow
+        cmd.args(["-x", "-o"]); // No sound, no shadow
 
         if let Some(_title) = &params.window_title {
             // Try to find window by title
-            cmd.args(&["-l", &self.find_window_id_by_title(_title)?]);
+            cmd.args(["-l", &self.find_window_id_by_title(_title)?]);
         } else {
             // Interactive window selection
             cmd.arg("-W");
@@ -248,7 +253,7 @@ impl TuiScreenshotKit {
 
         let output = cmd
             .output()
-            .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {e}")))?;
 
         if !output.status.success() {
             return Err(TestError::Mcp("Failed to capture screenshot".to_string()));
@@ -256,7 +261,7 @@ impl TuiScreenshotKit {
 
         // Read and encode the image
         let image_data = fs::read(&temp_file)
-            .map_err(|e| TestError::Mcp(format!("Failed to read screenshot: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to read screenshot: {e}")))?;
 
         // Clean up
         let _ = fs::remove_file(&temp_file);
@@ -341,7 +346,7 @@ impl Tool for TuiScreenshotKit {
             }
         } else {
             serde_json::from_value(args)
-                .map_err(|e| TestError::Mcp(format!("Invalid parameters: {}", e)))?
+                .map_err(|e| TestError::Mcp(format!("Invalid parameters: {e}")))?
         };
 
         let content = self.capture_terminal_output(&params).await?;

@@ -21,7 +21,7 @@ impl XcodeVersion {
 
     pub fn detect() -> Option<Self> {
         XCODE_VERSION_CACHE
-            .get_or_init(|| Self::detect_uncached())
+            .get_or_init(Self::detect_uncached)
             .clone()
     }
 

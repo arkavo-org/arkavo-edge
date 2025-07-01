@@ -25,7 +25,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
         )
         .expect("Failed to start arkavo terminal");
 
-    println!("Started arkavo terminal: {:?}", start_result);
+    println!("Started arkavo terminal: {start_result:?}");
 
     // Wait for terminal to initialize
     sleep(Duration::from_secs(2)).await;
@@ -46,7 +46,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
         .expect("Failed to send Tab key");
 
     assert!(tab_result["success"].as_bool().unwrap_or(false));
-    println!("Tab key result: {:?}", tab_result);
+    println!("Tab key result: {tab_result:?}");
 
     // Test Ctrl+D for debug view
     println!("Testing Ctrl+D for debug view...");
@@ -64,7 +64,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
         .expect("Failed to send Ctrl+D");
 
     assert!(ctrl_d_result["success"].as_bool().unwrap_or(false));
-    println!("Ctrl+D result: {:?}", ctrl_d_result);
+    println!("Ctrl+D result: {ctrl_d_result:?}");
 
     // Test Ctrl+T for MCP tools dialog
     println!("Testing Ctrl+T for MCP tools dialog...");
@@ -82,7 +82,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
         .expect("Failed to send Ctrl+T");
 
     assert!(ctrl_t_result["success"].as_bool().unwrap_or(false));
-    println!("Ctrl+T result: {:?}", ctrl_t_result);
+    println!("Ctrl+T result: {ctrl_t_result:?}");
 
     // Test typing and verification
     println!("Testing text input...");
@@ -105,7 +105,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
             .as_bool()
             .unwrap_or(false)
     );
-    println!("Type and verify result: {:?}", type_result);
+    println!("Type and verify result: {type_result:?}");
 
     // Clean up - stop the session
     let stop_result = mcp
@@ -120,7 +120,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
         .expect("Failed to stop session");
 
     assert!(stop_result["success"].as_bool().unwrap_or(false));
-    println!("Session stopped: {:?}", stop_result);
+    println!("Session stopped: {stop_result:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -187,7 +187,7 @@ async fn test_tui_state_verification() {
     let output_lines = output_result["output"].as_array().unwrap();
     assert!(!output_lines.is_empty());
 
-    println!("Captured output: {:?}", output_lines);
+    println!("Captured output: {output_lines:?}");
 
     // Stop the session
     let _ = mcp.call_tool(

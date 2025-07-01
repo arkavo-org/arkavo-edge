@@ -51,9 +51,7 @@ Arkavo Terminal is a GPU-accelerated terminal UI that provides:
 
 ### Global Navigation
 - `Tab` / `Shift+Tab` - Cycle between view modes
-- `Ctrl+t` - Toggle between Tabbed and Portrait layouts
-- `Ctrl+f` - Toggle focus between panes (Portrait mode)
-- `q` / `Ctrl+c` - Quit application
+- `Ctrl+q` - Quit application
 
 ### Vim Mode
 - `i` - Enter Insert mode

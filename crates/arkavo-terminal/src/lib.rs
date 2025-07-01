@@ -91,7 +91,7 @@ pub async fn run() -> Result<()> {
                     Some(client)
                 }
                 Err(e) => {
-                    eprintln!("ℹ MCP server not available for LLM handler: {}", e);
+                    eprintln!("ℹ MCP server not available for LLM handler: {e}");
                     None
                 }
             }
@@ -114,7 +114,7 @@ pub async fn run() -> Result<()> {
                 let mut other_tools = Vec::new();
 
                 for tool_name in &tool_names {
-                    let tool_desc = format!("- @{}", tool_name);
+                    let tool_desc = format!("- @{tool_name}");
 
                     if tool_name.contains("device") || tool_name.contains("simulator") {
                         device_tools.push(tool_desc);
@@ -168,22 +168,18 @@ pub async fn run() -> Result<()> {
             Ok(content) => Some(content),
             Err(_) => {
                 // Try CLAUDE.md as fallback
-                match std::fs::read_to_string("CLAUDE.md") {
-                    Ok(content) => Some(content),
-                    Err(_) => None,
-                }
+                std::fs::read_to_string("CLAUDE.md").ok()
             }
         };
 
         // System prompt with MCP tools information
         let system_prompt = if let Some(agents_content) = agents_md_content {
             format!(
-                "{}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
+                "{agents_content}\n\nMCP Integration: You have access to MCP tools for various operations including Git, device management, and UI interaction. \
                 When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
                 \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
                 \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
-                {}",
-                agents_content, mcp_info
+                {mcp_info}"
             )
         } else {
             format!(
@@ -192,8 +188,7 @@ pub async fn run() -> Result<()> {
                 When the user asks you to perform actions, you can use these tools by including @toolname commands in your response.\n\
                 \nTo invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
                 \nFor example: @git_status {{}} or @device_management {{\"action\": \"list\"}}\
-                {}",
-                mcp_info
+                {mcp_info}"
             )
         };
 
@@ -268,10 +263,7 @@ pub async fn run() -> Result<()> {
 
             // Only log in debug builds
             #[cfg(debug_assertions)]
-            eprintln!(
-                "[LLM] Using server: {} with model: {}",
-                server_url, actual_model
-            );
+            eprintln!("[LLM] Using server: {server_url} with model: {actual_model}");
 
             // Create a new Ollama client with the specific model and server
             let model_specific_client =
@@ -350,13 +342,15 @@ pub async fn run() -> Result<()> {
                                 };
 
                                 // Execute tool
-                                let tool_response =
-                                    match mcp.call_tool(&tool_name, args, &provider_name) {
-                                        Ok(result) => {
-                                            // Extract result text
-                                            let result_text = if let Some(result_obj) =
-                                                result.get("result")
-                                            {
+                                let tool_response = match mcp.call_tool(
+                                    &tool_name,
+                                    args,
+                                    &provider_name,
+                                ) {
+                                    Ok(result) => {
+                                        // Extract result text
+                                        let result_text =
+                                            if let Some(result_obj) = result.get("result") {
                                                 if let Some(text) = result_obj.as_str() {
                                                     text.to_string()
                                                 } else {
@@ -368,30 +362,26 @@ pub async fn run() -> Result<()> {
                                                     .unwrap_or_else(|_| result.to_string())
                                             };
 
-                                            LlmResponse {
-                                                task_id: request.task_id,
-                                                model_name: request.model_name.clone(),
-                                                content: format!(
-                                                    "\n\n[Tool Result - @{}]:\n{}",
-                                                    tool_name, result_text
-                                                ),
-                                                is_streaming: false,
-                                                is_complete: false,
-                                                error: None,
-                                            }
-                                        }
-                                        Err(e) => LlmResponse {
+                                        LlmResponse {
                                             task_id: request.task_id,
                                             model_name: request.model_name.clone(),
                                             content: format!(
-                                                "\n\n[Tool Error - @{}]: {}",
-                                                tool_name, e
+                                                "\n\n[Tool Result - @{tool_name}]:\n{result_text}"
                                             ),
                                             is_streaming: false,
                                             is_complete: false,
                                             error: None,
-                                        },
-                                    };
+                                        }
+                                    }
+                                    Err(e) => LlmResponse {
+                                        task_id: request.task_id,
+                                        model_name: request.model_name.clone(),
+                                        content: format!("\n\n[Tool Error - @{tool_name}]: {e}"),
+                                        is_streaming: false,
+                                        is_complete: false,
+                                        error: None,
+                                    },
+                                };
 
                                 let _ = llm_tx.send(tool_response).await;
                             }

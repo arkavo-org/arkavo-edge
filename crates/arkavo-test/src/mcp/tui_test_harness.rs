@@ -70,6 +70,12 @@ fn default_timeout() -> u64 {
     5000
 }
 
+impl Default for TuiTestHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TuiTestHarness {
     pub fn new() -> Self {
         Self {
@@ -231,7 +237,7 @@ impl TuiTestHarness {
         // Spawn the process
         let mut process = cmd
             .spawn()
-            .map_err(|e| TestError::Mcp(format!("Failed to start process: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to start process: {e}")))?;
 
         // Set up output capture
         let stdout = process
@@ -273,7 +279,7 @@ impl TuiTestHarness {
             let mut sessions = self
                 .sessions
                 .lock()
-                .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
             sessions.insert(session_id, session);
         }
 
@@ -285,7 +291,7 @@ impl TuiTestHarness {
             let mut sessions = self
                 .sessions
                 .lock()
-                .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
             sessions.remove(session_id)
         };
 
@@ -308,11 +314,11 @@ impl TuiTestHarness {
             match session.process.try_wait() {
                 Ok(Some(_)) => {
                     // Process already exited
-                    eprintln!("[TuiTestHarness] Session {} stopped gracefully", session_id);
+                    eprintln!("[TuiTestHarness] Session {session_id} stopped gracefully");
                 }
                 Ok(None) => {
                     // Process still running, force kill
-                    eprintln!("[TuiTestHarness] Force killing session {}", session_id);
+                    eprintln!("[TuiTestHarness] Force killing session {session_id}");
 
                     #[cfg(unix)]
                     {
@@ -332,7 +338,7 @@ impl TuiTestHarness {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[TuiTestHarness] Error checking process status: {}", e);
+                    eprintln!("[TuiTestHarness] Error checking process status: {e}");
                     // Try to kill anyway
                     let _ = session.process.kill();
                 }
@@ -340,10 +346,7 @@ impl TuiTestHarness {
 
             Ok(())
         } else {
-            Err(TestError::Mcp(format!(
-                "Session '{}' not found",
-                session_id
-            )))
+            Err(TestError::Mcp(format!("Session '{session_id}' not found")))
         }
     }
 
@@ -351,25 +354,22 @@ impl TuiTestHarness {
         let sessions = self
             .sessions
             .lock()
-            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
 
         if let Some(session) = sessions.get(session_id) {
             if let Some(mut stdin) = session.process.stdin.as_ref() {
                 stdin
                     .write_all(input.as_bytes())
-                    .map_err(|e| TestError::Mcp(format!("Failed to send input: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to send input: {e}")))?;
                 stdin
                     .flush()
-                    .map_err(|e| TestError::Mcp(format!("Failed to flush input: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to flush input: {e}")))?;
                 Ok(())
             } else {
                 Err(TestError::Mcp("Process stdin not available".to_string()))
             }
         } else {
-            Err(TestError::Mcp(format!(
-                "Session '{}' not found",
-                session_id
-            )))
+            Err(TestError::Mcp(format!("Session '{session_id}' not found")))
         }
     }
 
@@ -377,13 +377,13 @@ impl TuiTestHarness {
         let sessions = self
             .sessions
             .lock()
-            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
 
         if let Some(session) = sessions.get(session_id) {
             let buffer = session
                 .output_buffer
                 .lock()
-                .map_err(|e| TestError::Mcp(format!("Failed to lock output buffer: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to lock output buffer: {e}")))?;
 
             let start = if buffer.len() > last_n_lines {
                 buffer.len() - last_n_lines
@@ -393,10 +393,7 @@ impl TuiTestHarness {
 
             Ok(buffer[start..].to_vec())
         } else {
-            Err(TestError::Mcp(format!(
-                "Session '{}' not found",
-                session_id
-            )))
+            Err(TestError::Mcp(format!("Session '{session_id}' not found")))
         }
     }
 
@@ -414,20 +411,17 @@ impl TuiTestHarness {
                 let sessions = self
                     .sessions
                     .lock()
-                    .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
 
                 if let Some(session) = sessions.get(session_id) {
                     let buffer = session.output_buffer.lock().map_err(|e| {
-                        TestError::Mcp(format!("Failed to lock output buffer: {}", e))
+                        TestError::Mcp(format!("Failed to lock output buffer: {e}"))
                     })?;
 
                     // Check if any line contains the expected text
                     buffer.iter().any(|line| line.contains(expected_text))
                 } else {
-                    return Err(TestError::Mcp(format!(
-                        "Session '{}' not found",
-                        session_id
-                    )));
+                    return Err(TestError::Mcp(format!("Session '{session_id}' not found")));
                 }
             }; // Release all locks
 
@@ -445,7 +439,7 @@ impl TuiTestHarness {
         let sessions = self
             .sessions
             .lock()
-            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Failed to lock sessions: {e}")))?;
 
         let session_info: Vec<HashMap<String, String>> = sessions
             .values()
@@ -470,7 +464,7 @@ impl Tool for TuiTestHarness {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let action: HarnessAction = serde_json::from_value(args)
-            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {e}")))?;
 
         match action {
             HarnessAction::Start {

@@ -50,8 +50,6 @@ impl McpConnection {
         let (runtime_handle, owned_runtime) = match Handle::try_current() {
             Ok(handle) => {
                 // We're already in a runtime, reuse it
-
-                eprintln!("[McpConnection] Reusing existing Tokio runtime");
                 (handle, None)
             }
             Err(_) => {
@@ -167,7 +165,7 @@ impl McpConnection {
                 let _tool = mcp
                     .tools
                     .get(name)
-                    .ok_or_else(|| format!("Tool not found: {}", name))?;
+                    .ok_or_else(|| format!("Tool not found: {name}"))?;
 
                 // Clone the tools map and tool name to use in the thread
                 let tools = mcp.tools.clone();
@@ -180,12 +178,12 @@ impl McpConnection {
                     std::thread::spawn(move || {
                         let tool = tools
                             .get(&tool_name)
-                            .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
+                            .ok_or_else(|| format!("Tool not found: {tool_name}"))?;
 
                         handle.block_on(async move {
                             tool.execute(args)
                                 .await
-                                .map_err(|e| format!("Tool execution failed: {}", e))
+                                .map_err(|e| format!("Tool execution failed: {e}"))
                         })
                     })
                     .join()
@@ -195,11 +193,11 @@ impl McpConnection {
                     handle.block_on(async move {
                         let tool = tools
                             .get(&tool_name)
-                            .ok_or_else(|| format!("Tool not found: {}", tool_name))?;
+                            .ok_or_else(|| format!("Tool not found: {tool_name}"))?;
 
                         tool.execute(args)
                             .await
-                            .map_err(|e| format!("Tool execution failed: {}", e))
+                            .map_err(|e| format!("Tool execution failed: {e}"))
                     })
                 }
             }

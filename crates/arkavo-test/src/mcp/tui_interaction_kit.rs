@@ -79,6 +79,12 @@ fn default_select_all() -> bool {
     true
 }
 
+impl Default for TuiInteractionKit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TuiInteractionKit {
     pub fn new() -> Self {
         Self {
@@ -214,8 +220,7 @@ impl TuiInteractionKit {
             "pagedown" | "page_down" => "pagedown",
             _ => {
                 return Err(TestError::Mcp(format!(
-                    "Unknown navigation direction: {}",
-                    direction
+                    "Unknown navigation direction: {direction}"
                 )));
             }
         };
@@ -415,7 +420,7 @@ impl Tool for TuiInteractionKit {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let action: InteractionAction = serde_json::from_value(args)
-            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {e}")))?;
 
         match action {
             InteractionAction::Navigate { direction, count } => {
@@ -445,7 +450,7 @@ impl Tool for TuiInteractionKit {
                 retry_count,
                 retry_delay_ms,
             } => {
-                let texts_slice = contains_text.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+                let texts_slice = contains_text.as_deref().unwrap_or(&[]);
                 Ok(self
                     .verify_state(
                         expected_content.as_deref(),

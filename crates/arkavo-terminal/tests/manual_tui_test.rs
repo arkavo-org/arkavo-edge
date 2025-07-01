@@ -11,7 +11,7 @@ mod manual_tests {
         let tools = mcp.list_tools();
         println!("Available MCP tools:");
         for tool in &tools {
-            println!("  - {}", tool);
+            println!("  - {tool}");
         }
 
         // Check that TUI tools are present
@@ -75,7 +75,7 @@ mod manual_tests {
                 assert!(res["success"].as_bool().unwrap_or(false));
             }
             Err(e) => {
-                println!("Error calling tui_keyboard: {}", e);
+                println!("Error calling tui_keyboard: {e}");
                 // This might fail if there's no focused terminal
             }
         }

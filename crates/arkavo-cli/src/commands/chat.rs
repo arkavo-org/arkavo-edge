@@ -237,10 +237,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         Ok(content) => Some(content),
         Err(_) => {
             // Try CLAUDE.md as fallback
-            match std::fs::read_to_string("CLAUDE.md") {
-                Ok(content) => Some(content),
-                Err(_) => None,
-            }
+            std::fs::read_to_string("CLAUDE.md").ok()
         }
     };
 

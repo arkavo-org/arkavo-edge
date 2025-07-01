@@ -33,6 +33,12 @@ enum KeyboardAction {
     },
 }
 
+impl Default for TuiKeyboardKit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TuiKeyboardKit {
     pub fn new() -> Self {
         Self {
@@ -124,7 +130,7 @@ impl TuiKeyboardKit {
                     .arg("-e")
                     .arg(&script)
                     .output()
-                    .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {}", e)))?;
+                    .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {e}")))?;
 
                 if result.status.success() {
                     return Ok(());
@@ -201,7 +207,7 @@ impl TuiKeyboardKit {
                 .arg("-e")
                 .arg(&script)
                 .output()
-                .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {}", e)))?;
+                .map_err(|e| TestError::Mcp(format!("Failed to execute osascript: {e}")))?;
 
             if !result.status.success() {
                 return Err(TestError::Mcp(format!(
@@ -281,7 +287,7 @@ impl TuiKeyboardKit {
             "x" => "7",
             "y" => "16",
             "z" => "6",
-            _ => return Err(TestError::Mcp(format!("Unknown key: {}", key))),
+            _ => return Err(TestError::Mcp(format!("Unknown key: {key}"))),
         };
 
         Ok(code.to_string())
@@ -296,7 +302,7 @@ impl Tool for TuiKeyboardKit {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let action: KeyboardAction = serde_json::from_value(args)
-            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {}", e)))?;
+            .map_err(|e| TestError::Mcp(format!("Invalid parameters: {e}")))?;
 
         match action {
             KeyboardAction::Key { key, modifiers } => {
