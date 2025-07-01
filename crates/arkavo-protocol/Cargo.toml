@@ -42,5 +42,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 [features]
 demo = ["clap", "tracing-subscriber"]
 
+[dev-dependencies]
+# For integration tests
+jsonrpsee = { version = "0.24", features = ["server", "macros"] }
+
 [lints]
 workspace = true

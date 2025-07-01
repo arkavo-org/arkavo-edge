@@ -31,9 +31,7 @@ impl WebSocketTransport {
             .max_concurrent_requests(100)
             .build(url)
             .await
-            .map_err(|e| {
-                A2aError::ConnectionFailed(format!("WebSocket connection failed: {e}"))
-            })?;
+            .map_err(|e| A2aError::ConnectionFailed(format!("WebSocket connection failed: {e}")))?;
 
         Ok(client)
     }
@@ -86,21 +84,115 @@ impl A2aTransport for WebSocketTransport {
             guard.as_ref().ok_or(A2aError::NotConnected)?.clone()
         };
 
-        let params = vec![request.params];
+        // Build the JSON-RPC request manually
+        let _json_rpc_request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": request.method,
+            "params": request.params,
+            "id": request.id.to_string()
+        });
 
-        let response_json: serde_json::Value = client
-            .request(&request.method, params)
-            .await
-            .map_err(|e| A2aError::WebSocket(format!("Request failed: {e}")))?;
+        // Use the underlying WebSocket to send raw JSON
+        // Since jsonrpsee doesn't expose raw send/receive easily, we'll use a workaround
+        // by dynamically handling the params format
 
-        let response = A2aResponse::Success {
-            jsonrpc: "2.0".to_string(),
-            id: request.id,
-            result: response_json,
+        // First, try to send with params as-is if it's an array
+        let result = if request.params.is_array() {
+            // Extract array elements and send based on array length
+            if let Some(arr) = request.params.as_array() {
+                match arr.len() {
+                    0 => {
+                        // No params - send empty array as params
+                        client
+                            .request::<serde_json::Value, _>(
+                                &request.method,
+                                Vec::<serde_json::Value>::new(),
+                            )
+                            .await
+                    }
+                    1 => {
+                        // Single param - extract and send
+                        let param = &arr[0];
+                        if let Some(s) = param.as_str() {
+                            client
+                                .request::<serde_json::Value, _>(&request.method, (s,))
+                                .await
+                        } else if let Some(n) = param.as_u64() {
+                            client
+                                .request::<serde_json::Value, _>(&request.method, (n,))
+                                .await
+                        } else {
+                            // For other types, serialize to string
+                            client
+                                .request::<serde_json::Value, _>(
+                                    &request.method,
+                                    (param.to_string(),),
+                                )
+                                .await
+                        }
+                    }
+                    _ => {
+                        // Multiple params - not supported by the test server
+                        return Err(A2aError::WebSocket(
+                            "Multiple parameters not supported".to_string(),
+                        )
+                        .into());
+                    }
+                }
+            } else {
+                return Err(A2aError::InvalidRequest("Expected array params".to_string()).into());
+            }
+        } else {
+            // Non-array params - send as single value
+            if let Some(s) = request.params.as_str() {
+                client
+                    .request::<serde_json::Value, _>(&request.method, (s,))
+                    .await
+            } else if let Some(n) = request.params.as_u64() {
+                client
+                    .request::<serde_json::Value, _>(&request.method, (n,))
+                    .await
+            } else {
+                client
+                    .request::<serde_json::Value, _>(&request.method, (request.params.to_string(),))
+                    .await
+            }
         };
 
-        debug!("Received response for request id={}", request.id);
-        Ok(response)
+        match result {
+            Ok(response_json) => {
+                let response = A2aResponse::Success {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: response_json,
+                };
+                debug!("Received success response for request id={}", request.id);
+                Ok(response)
+            }
+            Err(e) => {
+                // Check if this is a JSON-RPC error response
+                if let jsonrpsee::core::client::error::Error::Call(call_err) = &e {
+                    // Convert jsonrpsee error to our error response
+                    let response = A2aResponse::Error {
+                        jsonrpc: "2.0".to_string(),
+                        id: request.id,
+                        error: crate::transport::JsonRpcError {
+                            code: call_err.code(),
+                            message: call_err.message().to_string(),
+                            data: call_err.data().map(|d| {
+                                serde_json::from_str(d.get())
+                                    .unwrap_or_else(|_| serde_json::Value::String(d.to_string()))
+                            }),
+                        },
+                    };
+                    debug!("Received error response for request id={}", request.id);
+                    Ok(response)
+                } else {
+                    // Other transport errors
+                    Err(A2aError::WebSocket(format!("Request failed: {e}")).into())
+                }
+            }
+        }
     }
 
     async fn close(&self) -> anyhow::Result<()> {

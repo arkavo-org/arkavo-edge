@@ -100,7 +100,10 @@ impl SecurityConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.tls.enabled && self.tls.client_cert_path.is_some() && self.tls.client_key_path.is_none() {
+        if self.tls.enabled
+            && self.tls.client_cert_path.is_some()
+            && self.tls.client_key_path.is_none()
+        {
             return Err(crate::error::A2aError::Tls(
                 "Client certificate provided but client key is missing".to_string(),
             ));

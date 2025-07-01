@@ -34,12 +34,12 @@ pub enum A2aResponse {
     Error {
         jsonrpc: String,
         id: Uuid,
-        error: A2aError,
+        error: JsonRpcError,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct A2aError {
+pub struct JsonRpcError {
     pub code: i32,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -151,7 +151,7 @@ mod tests {
         let error_response = A2aResponse::Error {
             jsonrpc: "2.0".to_string(),
             id: Uuid::new_v4(),
-            error: A2aError {
+            error: JsonRpcError {
                 code: error_codes::METHOD_NOT_FOUND,
                 message: "Method not found".to_string(),
                 data: None,

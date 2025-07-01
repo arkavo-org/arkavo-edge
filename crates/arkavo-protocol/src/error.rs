@@ -41,6 +41,9 @@ pub enum A2aError {
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
 
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
+
     #[error("Transport not connected")]
     NotConnected,
 
@@ -70,6 +73,7 @@ impl A2aError {
             Self::ServiceDiscovery(_) => crate::transport::error_codes::SERVER_ERROR_START - 1,
             Self::AgentNotFound(_) => crate::transport::error_codes::SERVER_ERROR_START - 2,
             Self::InvalidResponse(_) => crate::transport::error_codes::INVALID_REQUEST,
+            Self::InvalidRequest(_) => crate::transport::error_codes::INVALID_REQUEST,
             Self::NotConnected => crate::transport::error_codes::CONNECTION_ERROR,
             Self::Cancelled => crate::transport::error_codes::SERVER_ERROR_START - 3,
             Self::RateLimitExceeded => crate::transport::error_codes::SERVER_ERROR_START - 4,

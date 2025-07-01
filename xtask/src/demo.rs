@@ -6,29 +6,36 @@ pub async fn run_a2a_demo(agent1_port: u16, agent2_port: u16, use_websocket: boo
     info!("Starting A2A Transport Demo");
     info!("Agent 1 port: {}", agent1_port);
     info!("Agent 2 port: {}", agent2_port);
-    info!("Transport: {}", if use_websocket { "WebSocket" } else { "HTTP" });
-    
+    info!(
+        "Transport: {}",
+        if use_websocket { "WebSocket" } else { "HTTP" }
+    );
+
     // First, ensure the library is built
     info!("Building arkavo-protocol library...");
     let output = Command::new("cargo")
         .args(&["build", "-p", "arkavo-protocol", "--lib"])
         .output()?;
-        
+
     if !output.status.success() {
         warn!("Failed to build arkavo-protocol:");
         warn!("{}", String::from_utf8_lossy(&output.stderr));
         return Err(anyhow::anyhow!("Build failed"));
     }
-    
+
     info!("Library built successfully!");
-    
+
     // Run the API demonstration
     demonstrate_api_usage(agent1_port, agent2_port, use_websocket).await?;
-    
+
     Ok(())
 }
 
-async fn demonstrate_api_usage(agent1_port: u16, agent2_port: u16, use_websocket: bool) -> Result<()> {
+async fn demonstrate_api_usage(
+    agent1_port: u16,
+    agent2_port: u16,
+    use_websocket: bool,
+) -> Result<()> {
     info!("");
     info!("=== A2A Transport Layer API Demonstration ===");
     info!("");
@@ -41,20 +48,28 @@ async fn demonstrate_api_usage(agent1_port: u16, agent2_port: u16, use_websocket
     info!("Example usage:");
     info!("");
     info!("// Create transport");
-    info!("let transport = {}Transport::new(TransportConfig::default());", 
-        if use_websocket { "WebSocket" } else { "Http" });
+    info!(
+        "let transport = {}Transport::new(TransportConfig::default());",
+        if use_websocket { "WebSocket" } else { "Http" }
+    );
     info!("");
     info!("// Define endpoints");
     info!("let agent1 = A2aEndpoint {{");
-    info!("    url: \"{}://localhost:{}\".to_string(),", 
-        if use_websocket { "ws" } else { "http" }, agent1_port);
+    info!(
+        "    url: \"{}://localhost:{}\".to_string(),",
+        if use_websocket { "ws" } else { "http" },
+        agent1_port
+    );
     info!("    agent_id: \"agent-1\".to_string(),");
     info!("    public_key: None,");
     info!("}};");
     info!("");
     info!("let agent2 = A2aEndpoint {{");
-    info!("    url: \"{}://localhost:{}\".to_string(),", 
-        if use_websocket { "ws" } else { "http" }, agent2_port);
+    info!(
+        "    url: \"{}://localhost:{}\".to_string(),",
+        if use_websocket { "ws" } else { "http" },
+        agent2_port
+    );
     info!("    agent_id: \"agent-2\".to_string(),");
     info!("    public_key: None,");
     info!("}};");
@@ -118,6 +133,6 @@ async fn demonstrate_api_usage(agent1_port: u16, agent2_port: u16, use_websocket
     info!("   - Exchange messages between agents");
     info!("");
     info!("Demo completed!");
-    
+
     Ok(())
 }

@@ -121,6 +121,22 @@ impl A2aTransport for HttpTransport {
                     let response: A2aResponse = resp.json().await.map_err(|e| {
                         A2aError::InvalidResponse(format!("Failed to parse response: {e}"))
                     })?;
+
+                    // Check if it's a retryable JSON-RPC error
+                    if let A2aResponse::Error { error, .. } = &response {
+                        // Retry on internal errors (-32603)
+                        if error.code == -32603 && retries < max_retries {
+                            warn!(
+                                "Request returned internal error, retrying... ({}/{})",
+                                retries + 1,
+                                max_retries
+                            );
+                            retries += 1;
+                            tokio::time::sleep(retry_delay).await;
+                            continue;
+                        }
+                    }
+
                     debug!("Received response for request id={}", request.id);
                     return Ok(response);
                 }

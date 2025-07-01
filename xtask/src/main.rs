@@ -27,14 +27,18 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    
+
     let cli = Cli::parse();
-    
+
     match cli.command {
-        Commands::RunDemo { agent1_port, agent2_port, use_websocket } => {
+        Commands::RunDemo {
+            agent1_port,
+            agent2_port,
+            use_websocket,
+        } => {
             demo::run_a2a_demo(agent1_port, agent2_port, use_websocket).await?;
         }
     }
-    
+
     Ok(())
 }
