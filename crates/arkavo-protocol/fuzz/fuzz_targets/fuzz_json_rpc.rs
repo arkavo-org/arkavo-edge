@@ -38,19 +38,25 @@ fuzz_target!(|data: &[u8]| {
             let serialized = serde_json::to_string(&response).unwrap();
             let reparsed: A2aResponse = serde_json::from_str(&serialized).unwrap();
             
-            assert_eq!(response.jsonrpc, reparsed.jsonrpc);
-            assert_eq!(response.id, reparsed.id);
+            // Check variant-specific fields
+            match (&response, &reparsed) {
+                (A2aResponse::Success { jsonrpc: j1, id: i1, .. }, 
+                 A2aResponse::Success { jsonrpc: j2, id: i2, .. }) => {
+                    assert_eq!(j1, j2);
+                    assert_eq!(i1, i2);
+                }
+                (A2aResponse::Error { jsonrpc: j1, id: i1, .. }, 
+                 A2aResponse::Error { jsonrpc: j2, id: i2, .. }) => {
+                    assert_eq!(j1, j2);
+                    assert_eq!(i1, i2);
+                }
+                _ => panic!("Response variant mismatch after round-trip"),
+            }
             
             // Schema round-trip validation: ensure canonical form
             let canonical = serde_json::to_string(&reparsed).unwrap();
             let recanonical = serde_json::to_string(&serde_json::from_str::<A2aResponse>(&canonical).unwrap()).unwrap();
             assert_eq!(canonical, recanonical, "Response schema round-trip failed");
-            
-            // Should have either result or error, not both
-            match (&response.result, &response.error) {
-                (Some(_), None) | (None, Some(_)) => {},
-                _ => panic!("Response must have exactly one of result or error"),
-            }
         }
     }
 });

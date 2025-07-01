@@ -1,4 +1,4 @@
-use arkavo_protocol::{generate_openrpc_schema, openrpc_to_json};
+use arkavo_protocol::openrpc_to_json;
 
 fn main() {
     match openrpc_to_json() {

@@ -54,6 +54,7 @@ dependencies = [
  "arbitrary",
  "arkavo-protocol",
  "libfuzzer-sys",
+ "serde_json",
 ]
 
 [[package]]
