@@ -1,7 +1,7 @@
 use crate::error::{A2aError, Result};
-use crate::transport::A2aEndpoint;
 #[cfg(feature = "mdns")]
 use crate::mdns::{MdnsManager, MdnsServiceInfo};
+use crate::transport::A2aEndpoint;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
@@ -193,20 +193,21 @@ impl DiscoveryService {
                 let endpoints = self.discovered_endpoints.read().unwrap();
                 endpoints.get(agent_id).cloned()
             };
-            
+
             if let Some(endpoint) = endpoint_opt {
                 info!("Found agent {} via mDNS at {}", agent_id, endpoint.url);
                 return Ok(endpoint);
             }
-            
+
             warn!("Agent {} not found via mDNS", agent_id);
             Err(A2aError::AgentNotFound(format!(
                 "Agent {agent_id} not found via mDNS discovery"
             )))
         }
-        
+
         #[cfg(not(feature = "mdns"))]
         {
+            let _ = agent_id; // Suppress unused warning when mdns feature is disabled
             warn!("mDNS discovery not available (compile with 'mdns' feature)");
             Err(A2aError::ServiceDiscovery(
                 "mDNS discovery not available".to_string(),
@@ -218,11 +219,17 @@ impl DiscoveryService {
         #[cfg(feature = "mdns")]
         {
             // Return all mDNS discovered endpoints from cache
-            let endpoints: Vec<A2aEndpoint> = self.discovered_endpoints.read().unwrap().values().cloned().collect();
+            let endpoints: Vec<A2aEndpoint> = self
+                .discovered_endpoints
+                .read()
+                .unwrap()
+                .values()
+                .cloned()
+                .collect();
             info!("Found {} agents via mDNS", endpoints.len());
             Ok(endpoints)
         }
-        
+
         #[cfg(not(feature = "mdns"))]
         {
             warn!("mDNS discovery not available (compile with 'mdns' feature)");
@@ -251,18 +258,18 @@ impl DiscoveryService {
     }
 
     /// Start mDNS discovery
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the RwLock is poisoned
     #[cfg(feature = "mdns")]
     pub async fn start_mdns_discovery(&self) -> Result<()> {
         self.mdns_manager.start_discovery().await?;
-        
+
         // Also share discovered endpoints with the main discovery cache
         let mdns_manager = self.mdns_manager.clone();
         let discovered_endpoints = self.discovered_endpoints.clone();
-        
+
         tokio::spawn(async move {
             loop {
                 // Sync mDNS discoveries to main cache
@@ -272,12 +279,12 @@ impl DiscoveryService {
                     for endpoint in mdns_endpoints {
                         cache.insert(endpoint.agent_id.clone(), endpoint);
                     }
-                }  // cache lock is dropped here
-                
+                } // cache lock is dropped here
+
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }
         });
-        
+
         info!("Started mDNS discovery");
         Ok(())
     }

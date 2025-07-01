@@ -1,0 +1,104 @@
+use arkavo_protocol::{spawn_cleanup_task, IpRateLimiter, RateLimitConfig};
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time;
+
+#[tokio::test]
+async fn test_rate_limit_eviction_with_background_task() {
+    let config = RateLimitConfig {
+        max_requests_per_second: 10,
+        burst_size: 1,
+        enabled: true,
+        max_ip_entries: 100,
+        ip_entry_ttl_seconds: 2, // Short TTL for testing
+    };
+    
+    let limiter = Arc::new(IpRateLimiter::new(config));
+    
+    // Spawn cleanup task
+    let cleanup_handle = spawn_cleanup_task(limiter.clone());
+    
+    // Add some IPs
+    for i in 0..50 {
+        let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+        let _ = limiter.check_rate_limit(ip);
+    }
+    
+    assert_eq!(limiter.entry_count(), 50);
+    
+    // Wait for TTL to expire
+    time::sleep(Duration::from_secs(3)).await;
+    
+    // Manually trigger cleanup since the background task runs every minute
+    limiter.cleanup_old_entries();
+    
+    // All old entries should be cleaned up except the ones we just added
+    assert_eq!(limiter.entry_count(), 0); // All entries should be expired
+    
+    // Cleanup
+    cleanup_handle.abort();
+}
+
+#[tokio::test]
+async fn test_rate_limit_headers() {
+    let config = RateLimitConfig::default();
+    let limiter = arkavo_protocol::RateLimiter::new(config);
+    
+    // Get status before any requests
+    let status = limiter.get_limit_status();
+    assert_eq!(status.limit, 100);
+    assert_eq!(status.remaining, 10); // burst size
+    assert!(status.reset_at > chrono::Utc::now());
+}
+
+#[tokio::test]
+async fn test_per_ip_rate_limiting_stress() {
+    let config = RateLimitConfig {
+        max_requests_per_second: 5,
+        burst_size: 2,
+        enabled: true,
+        max_ip_entries: 1000,
+        ip_entry_ttl_seconds: 60,
+    };
+    
+    let limiter = Arc::new(IpRateLimiter::new(config));
+    
+    // Simulate multiple IPs making requests concurrently
+    let mut handles = vec![];
+    
+    for i in 0..10 {
+        let limiter_clone = limiter.clone();
+        let handle = tokio::spawn(async move {
+            let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+            
+            let mut allowed = 0;
+            let mut blocked = 0;
+            
+            // Make 10 rapid requests
+            for _ in 0..10 {
+                match limiter_clone.check_rate_limit(ip) {
+                    Ok(_) => allowed += 1,
+                    Err(_) => blocked += 1,
+                }
+                time::sleep(Duration::from_millis(50)).await;
+            }
+            
+            (allowed, blocked)
+        });
+        handles.push(handle);
+    }
+    
+    // Wait for all tasks
+    let mut results = vec![];
+    for handle in handles {
+        results.push(handle.await.unwrap());
+    }
+    
+    // Each IP should have some allowed and some blocked
+    for (allowed, blocked) in results {
+        assert!(allowed > 0, "Should have some allowed requests");
+        assert!(blocked > 0, "Should have some blocked requests");
+        assert_eq!(allowed + blocked, 10, "Total should be 10");
+    }
+}

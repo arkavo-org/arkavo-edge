@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info};
 #[cfg(not(feature = "mdns"))]
 use tracing::warn;
+use tracing::{debug, info};
 
 #[cfg(feature = "mdns")]
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -45,8 +45,9 @@ impl MdnsManager {
     async fn ensure_daemon(&self) -> Result<()> {
         let mut daemon_guard = self.daemon.lock().await;
         if daemon_guard.is_none() {
-            let daemon = ServiceDaemon::new()
-                .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to create mDNS daemon: {e}")))?;
+            let daemon = ServiceDaemon::new().map_err(|e| {
+                A2aError::ServiceDiscovery(format!("Failed to create mDNS daemon: {e}"))
+            })?;
             *daemon_guard = Some(daemon);
             drop(daemon_guard);
         }
@@ -57,20 +58,20 @@ impl MdnsManager {
     #[cfg(feature = "mdns")]
     pub async fn register_service(&self, info: MdnsServiceInfo) -> Result<()> {
         self.ensure_daemon().await?;
-        
+
         let service_name = format!("arkavo-agent-{}", info.agent_id);
         let hostname = format!("{}.local.", info.agent_id);
-        
+
         // Create properties with service info
         let mut properties = HashMap::new();
         properties.insert("agent_id".to_string(), info.agent_id.clone());
         properties.insert("version".to_string(), info.version.clone());
         properties.insert("http_port".to_string(), info.http_port.to_string());
-        
+
         if let Some(ws_port) = info.ws_port {
             properties.insert("ws_port".to_string(), ws_port.to_string());
         }
-        
+
         // Add capabilities
         for (i, cap) in info.capabilities.iter().enumerate() {
             properties.insert(format!("cap_{i}"), cap.clone());
@@ -80,19 +81,23 @@ impl MdnsManager {
             &self.service_type,
             &service_name,
             &hostname,
-            (),  // Will use default IP
+            (), // Will use default IP
             info.http_port,
             Some(properties),
         )
         .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to create service info: {e}")))?;
 
         if let Some(daemon) = self.daemon.lock().await.as_ref() {
-            daemon.register(service_info)
-                .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to register service: {e}")))?;
-            
-            info!("Registered mDNS service: {} on port {}", service_name, info.http_port);
+            daemon.register(service_info).map_err(|e| {
+                A2aError::ServiceDiscovery(format!("Failed to register service: {e}"))
+            })?;
+
+            info!(
+                "Registered mDNS service: {} on port {}",
+                service_name, info.http_port
+            );
         }
-        
+
         Ok(())
     }
 
@@ -107,40 +112,43 @@ impl MdnsManager {
     #[cfg(feature = "mdns")]
     pub async fn start_discovery(&self) -> Result<()> {
         self.ensure_daemon().await?;
-        
+
         let discovered = self.discovered_services.clone();
         let service_type = self.service_type.clone();
-        
+
         if let Some(daemon) = self.daemon.lock().await.as_ref() {
-            let receiver = daemon.browse(&service_type)
+            let receiver = daemon
+                .browse(&service_type)
                 .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to start browser: {e}")))?;
-            
+
             // Spawn task to handle discovered services
             tokio::spawn(async move {
                 while let Ok(event) = receiver.recv() {
                     match event {
                         ServiceEvent::ServiceResolved(info) => {
                             debug!("Discovered service: {}", info.get_fullname());
-                            
+
                             // Extract agent info from properties
                             let properties = info.get_properties();
-                            if let (Some(agent_id_prop), Some(http_port_prop)) = (
-                                properties.get("agent_id"),
-                                properties.get("http_port"),
-                            ) {
+                            if let (Some(agent_id_prop), Some(http_port_prop)) =
+                                (properties.get("agent_id"), properties.get("http_port"))
+                            {
                                 let agent_id = agent_id_prop.val_str();
                                 if let Ok(http_port) = http_port_prop.val_str().parse::<u16>() {
                                     // Get addresses
                                     let addresses = info.get_addresses();
                                     if let Some(addr) = addresses.iter().next() {
-                                    let endpoint = A2aEndpoint {
-                                        agent_id: agent_id.to_string(),
-                                        url: format!("http://{addr}:{http_port}"),
-                                        public_key: None,
-                                    };
-                                    
-                                    discovered.write().await.insert(agent_id.to_string(), endpoint);
-                                    info!("Added mDNS discovered agent: {}", agent_id);
+                                        let endpoint = A2aEndpoint {
+                                            agent_id: agent_id.to_string(),
+                                            url: format!("http://{addr}:{http_port}"),
+                                            public_key: None,
+                                        };
+
+                                        discovered
+                                            .write()
+                                            .await
+                                            .insert(agent_id.to_string(), endpoint);
+                                        info!("Added mDNS discovered agent: {}", agent_id);
                                     }
                                 }
                             }
@@ -148,8 +156,11 @@ impl MdnsManager {
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             debug!("Service removed: {}", fullname);
                             // Extract agent_id from fullname if possible
-                            if let Some(agent_id) = fullname.split('.').next()
-                                .and_then(|s| s.strip_prefix("arkavo-agent-")) {
+                            if let Some(agent_id) = fullname
+                                .split('.')
+                                .next()
+                                .and_then(|s| s.strip_prefix("arkavo-agent-"))
+                            {
                                 discovered.write().await.remove(agent_id);
                                 info!("Removed mDNS agent: {}", agent_id);
                             }
@@ -159,7 +170,7 @@ impl MdnsManager {
                 }
             });
         }
-        
+
         info!("Started mDNS discovery for {} services", self.service_type);
         Ok(())
     }
@@ -173,7 +184,12 @@ impl MdnsManager {
 
     /// Get all discovered services
     pub async fn get_discovered_services(&self) -> Vec<A2aEndpoint> {
-        self.discovered_services.read().await.values().cloned().collect()
+        self.discovered_services
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Find a specific agent by ID
@@ -186,8 +202,9 @@ impl MdnsManager {
     pub async fn shutdown(&self) -> Result<()> {
         let daemon_opt = self.daemon.lock().await.take();
         if let Some(daemon) = daemon_opt {
-            daemon.shutdown()
-                .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to shutdown daemon: {e}")))?;
+            daemon.shutdown().map_err(|e| {
+                A2aError::ServiceDiscovery(format!("Failed to shutdown daemon: {e}"))
+            })?;
             info!("Shutdown mDNS daemon");
         }
         Ok(())

@@ -1,7 +1,7 @@
 //! mDNS Browser for A2A Protocol
-//! 
+//!
 //! This utility discovers A2A agents on the local network using mDNS.
-//! 
+//!
 //! Usage: cargo run --example mdns_browser --features mdns
 
 #![cfg(feature = "mdns")]
@@ -10,7 +10,7 @@ use arkavo_protocol::discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryServ
 use arkavo_protocol::mdns::MdnsServiceInfo;
 use std::time::Duration;
 use tokio::time;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             version: env!("CARGO_PKG_VERSION").to_string(),
             capabilities: vec!["discovery".to_string()],
         };
-        
+
         discovery.register_mdns_service(info).await?;
         info!("Registered mDNS browser as discoverable agent");
     }

@@ -19,6 +19,9 @@ pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
+pub use rate_limit::{
+    IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
+};
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};

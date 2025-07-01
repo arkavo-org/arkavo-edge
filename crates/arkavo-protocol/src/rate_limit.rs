@@ -1,10 +1,13 @@
+use chrono;
 use governor::{Jitter, Quota};
 use jsonrpsee::types::ErrorObjectOwned;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::time::interval;
+use tracing::debug;
 
 /// Configuration for rate limiting
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +18,10 @@ pub struct RateLimitConfig {
     pub burst_size: u32,
     /// Whether rate limiting is enabled
     pub enabled: bool,
+    /// Maximum number of IP entries to track (for per-IP limiting)
+    pub max_ip_entries: usize,
+    /// How long to keep IP entries before eviction
+    pub ip_entry_ttl_seconds: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -23,6 +30,8 @@ impl Default for RateLimitConfig {
             max_requests_per_second: 100,
             burst_size: 10,
             enabled: true,
+            max_ip_entries: 10_000,
+            ip_entry_ttl_seconds: 3600, // 1 hour
         }
     }
 }
@@ -93,11 +102,28 @@ impl RateLimiter {
             }
         }
     }
+
+    /// Get current rate limit status
+    pub fn get_limit_status(&self) -> RateLimitStatus {
+        // Since we can't access the internal state directly, we'll estimate
+        // based on configuration. In production, you might want to track this separately.
+        RateLimitStatus {
+            limit: self.config.max_requests_per_second,
+            remaining: self.config.burst_size, // This is an approximation
+            reset_at: chrono::Utc::now() + chrono::Duration::seconds(1),
+        }
+    }
+}
+
+/// Entry in the IP rate limiter, tracking limiter and last access time
+struct IpRateLimiterEntry {
+    limiter: Arc<governor::DefaultDirectRateLimiter>,
+    last_accessed: Instant,
 }
 
 /// Per-IP rate limiter for more granular control
 pub struct IpRateLimiter {
-    limiters: Arc<dashmap::DashMap<IpAddr, Arc<governor::DefaultDirectRateLimiter>>>,
+    limiters: Arc<dashmap::DashMap<IpAddr, IpRateLimiterEntry>>,
     config: RateLimitConfig,
 }
 
@@ -120,7 +146,12 @@ impl IpRateLimiter {
             return Ok(());
         }
 
-        let limiter = self.limiters.entry(ip).or_insert_with(|| {
+        // Check if we need to perform eviction due to size limit
+        if self.limiters.len() >= self.config.max_ip_entries {
+            self.evict_lru_entries();
+        }
+
+        let mut entry = self.limiters.entry(ip).or_insert_with(|| {
             let quota = Quota::per_second(
                 NonZeroU32::new(self.config.max_requests_per_second)
                     .unwrap_or(NonZeroU32::new(100).unwrap()),
@@ -128,10 +159,16 @@ impl IpRateLimiter {
             .allow_burst(
                 NonZeroU32::new(self.config.burst_size).unwrap_or(NonZeroU32::new(10).unwrap()),
             );
-            Arc::new(governor::RateLimiter::direct(quota))
+            IpRateLimiterEntry {
+                limiter: Arc::new(governor::RateLimiter::direct(quota)),
+                last_accessed: Instant::now(),
+            }
         });
 
-        match limiter.check() {
+        // Update last accessed time
+        entry.last_accessed = Instant::now();
+
+        match entry.limiter.check() {
             Ok(_) => Ok(()),
             Err(_) => Err(ErrorObjectOwned::owned(
                 -32001,
@@ -143,15 +180,77 @@ impl IpRateLimiter {
         }
     }
 
-    /// Clean up old entries (call periodically to prevent memory leaks)
-    pub fn cleanup_old_entries(&self, _max_age: Duration) {
-        // In a real implementation, we'd track last access time
-        // For now, we'll clear entries that haven't been used recently
-        // This is a simplified version
-        if self.limiters.len() > 10000 {
-            self.limiters.clear();
+    /// Clean up old entries based on TTL
+    pub fn cleanup_old_entries(&self) {
+        let ttl = Duration::from_secs(self.config.ip_entry_ttl_seconds);
+        let now = Instant::now();
+
+        self.limiters
+            .retain(|_ip, entry| now.duration_since(entry.last_accessed) < ttl);
+    }
+
+    /// Evict least recently used entries when at capacity
+    fn evict_lru_entries(&self) {
+        // Collect entries with their last access times
+        let mut entries: Vec<(IpAddr, Instant)> = self
+            .limiters
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().last_accessed))
+            .collect();
+
+        // Sort by last accessed time (oldest first)
+        entries.sort_by_key(|&(_, last_accessed)| last_accessed);
+
+        // Remove the oldest 10% of entries
+        let to_remove = self.config.max_ip_entries / 10;
+        for (ip, _) in entries.into_iter().take(to_remove) {
+            self.limiters.remove(&ip);
         }
     }
+
+    /// Get current rate limit status for an IP
+    pub fn get_limit_status(&self, ip: IpAddr) -> Option<RateLimitStatus> {
+        self.limiters.get(&ip).map(|_entry| {
+            // Since we can't access the internal state directly, we'll estimate
+            // based on configuration. In production, you might want to track this separately.
+            RateLimitStatus {
+                limit: self.config.max_requests_per_second,
+                remaining: self.config.burst_size, // This is an approximation
+                reset_at: chrono::Utc::now() + chrono::Duration::seconds(1),
+            }
+        })
+    }
+
+    /// Get the current number of tracked IPs
+    pub fn entry_count(&self) -> usize {
+        self.limiters.len()
+    }
+}
+
+/// Rate limit status information
+#[derive(Debug, Clone)]
+pub struct RateLimitStatus {
+    /// Maximum requests per window
+    pub limit: u32,
+    /// Remaining requests in current window
+    pub remaining: u32,
+    /// When the window resets
+    pub reset_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Spawn a background task to periodically clean up old IP rate limiter entries
+pub fn spawn_cleanup_task(limiter: Arc<IpRateLimiter>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut cleanup_interval = interval(Duration::from_secs(60)); // Run every minute
+        cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            cleanup_interval.tick().await;
+            debug!("Running rate limiter cleanup");
+            limiter.cleanup_old_entries();
+            debug!("Rate limiter has {} entries", limiter.entry_count());
+        }
+    })
 }
 
 #[cfg(test)]
@@ -164,6 +263,8 @@ mod tests {
         assert_eq!(config.max_requests_per_second, 100);
         assert_eq!(config.burst_size, 10);
         assert!(config.enabled);
+        assert_eq!(config.max_ip_entries, 10_000);
+        assert_eq!(config.ip_entry_ttl_seconds, 3600);
     }
 
     #[test]
@@ -207,6 +308,8 @@ mod tests {
             max_requests_per_second: 1,
             burst_size: 1,
             enabled: true,
+            max_ip_entries: 10_000,
+            ip_entry_ttl_seconds: 3600,
         };
         let limiter = IpRateLimiter::new(config);
 
@@ -221,5 +324,44 @@ mod tests {
 
         // First request from IP2 should succeed (different IP)
         assert!(limiter.check_rate_limit(ip2).is_ok());
+    }
+
+    #[test]
+    fn test_ip_rate_limiter_eviction() {
+        let config = RateLimitConfig {
+            max_requests_per_second: 10,
+            burst_size: 1,
+            enabled: true,
+            max_ip_entries: 10,
+            ip_entry_ttl_seconds: 3600,
+        };
+        let limiter = IpRateLimiter::new(config);
+
+        // Add entries up to the limit
+        for i in 0..10 {
+            let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+            let _ = limiter.check_rate_limit(ip);
+        }
+
+        assert_eq!(limiter.limiters.len(), 10);
+
+        // Add one more, triggering eviction
+        let ip: IpAddr = "192.168.1.10".parse().unwrap();
+        let _ = limiter.check_rate_limit(ip);
+
+        // Should have evicted some entries
+        assert!(limiter.limiters.len() <= 10);
+    }
+
+    #[test]
+    fn test_rate_limit_status() {
+        let config = RateLimitConfig::default();
+        let limiter = RateLimiter::new(config);
+
+        // Get initial status
+        let status = limiter.get_limit_status();
+        assert_eq!(status.limit, 100);
+        assert!(status.remaining <= 10); // burst size
+        assert!(status.reset_at > chrono::Utc::now());
     }
 }

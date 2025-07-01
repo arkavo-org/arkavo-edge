@@ -77,9 +77,7 @@ async fn test_mdns_discovery() {
 
     // Check if discovery1 can find agent2
     let agents = discovery1.discover_all().unwrap();
-    let found_agent2 = agents
-        .iter()
-        .any(|a| a.agent_id == "test-agent-mdns-2");
+    let found_agent2 = agents.iter().any(|a| a.agent_id == "test-agent-mdns-2");
 
     // Note: This might not work in all test environments due to network restrictions
     // In a real environment with proper mDNS support, this should pass
