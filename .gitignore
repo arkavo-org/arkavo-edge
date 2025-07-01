@@ -48,3 +48,7 @@ DerivedData/
 
 # Downloaded model files for arkavo-memory
 crates/arkavo-memory/models/
+
+# Fuzzing artifacts
+**/fuzz/artifacts/
+**/fuzz/corpus/**/

@@ -10,5 +10,73 @@ keywords = ["protocol", "mcp", "a2a", "adapter", "client"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
+# Core async runtime
+tokio = { version = "1.42", features = ["full"] }
+async-trait = "0.1"
+
+# JSON-RPC implementation
+jsonrpsee = { version = "0.24", features = ["ws-client", "server", "http-client", "macros"] }
+
+# Networking with rustls
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# Server dependencies
+tower = { version = "0.4", features = ["full"] }
+hyper = { version = "1.0", features = ["full"] }
+governor = { version = "0.6", features = ["std", "jitter"] }
+dashmap = { version = "5.5" }
+crossbeam-queue = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Schema generation
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+
+# Demo dependencies
+clap = { version = "4.5", features = ["derive"], optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+# mDNS dependencies
+mdns-sd = { version = "0.13", optional = true }
+
+# Metrics dependencies
+metrics = { version = "0.23", optional = true }
+metrics-exporter-prometheus = { version = "0.15", optional = true }
+
+[features]
+demo = ["clap", "tracing-subscriber"]
+stub_handlers = []
+mdns = ["mdns-sd"]
+metrics = ["dep:metrics", "metrics-exporter-prometheus"]
+
+[dev-dependencies]
+# For integration tests
+jsonrpsee = { version = "0.24", features = ["server", "macros"] }
+
+[[example]]
+name = "mdns_browser"
+required-features = ["mdns", "demo"]
+
+[[bin]]
+name = "export-schema"
+path = "src/bin/export-schema.rs"
+
+[[bin]]
+name = "validate-schema"
+path = "src/bin/validate-schema.rs"
+
 [lints]
 workspace = true
