@@ -1,0 +1,596 @@
+{
+  "components": {
+    "schemas": {
+      "AgentDiscoverFilter": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Filter criteria for agent discovery",
+        "properties": {
+          "promise_types": {
+            "description": "Filter by promise types",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "Filter by tags",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "AgentDiscoverFilter",
+        "type": "object"
+      },
+      "DiscoveredAgent": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Information about a discovered agent",
+        "properties": {
+          "agent_id": {
+            "description": "Unique identifier for the agent",
+            "format": "uuid",
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "Network endpoint for the agent",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Additional metadata about the agent"
+          },
+          "promises": {
+            "description": "Promise types the agent supports",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "agent_id",
+          "endpoint"
+        ],
+        "title": "DiscoveredAgent",
+        "type": "object"
+      },
+      "PromiseCapability": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "A promise capability that an agent can fulfill",
+        "properties": {
+          "constraints": {
+            "description": "Constraints on the promise"
+          },
+          "metadata": {
+            "description": "Additional metadata"
+          },
+          "type": {
+            "description": "Type of promise",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "PromiseCapability",
+        "type": "object"
+      },
+      "PromiseDeclareResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Response to a promise declaration",
+        "properties": {
+          "acknowledged": {
+            "description": "Whether the declaration was acknowledged",
+            "type": "boolean"
+          },
+          "timestamp": {
+            "description": "Timestamp of acknowledgment",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acknowledged",
+          "timestamp"
+        ],
+        "title": "PromiseDeclareResponse",
+        "type": "object"
+      },
+      "PromiseRequest": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Request to make a promise from another agent",
+        "properties": {
+          "agent_id": {
+            "description": "The ID of the requesting agent",
+            "examples": [
+              "550e8400-e29b-41d4-a716-446655440000"
+            ],
+            "type": "string"
+          },
+          "payload": {
+            "description": "Additional data for the promise request"
+          },
+          "promise_type": {
+            "description": "The type of promise being requested",
+            "examples": [
+              "data_access"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "promise_type"
+        ],
+        "title": "PromiseRequest",
+        "type": "object"
+      },
+      "PromiseResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "PromiseStatus": {
+            "description": "Status of a promise",
+            "oneOf": [
+              {
+                "description": "Promise has been accepted",
+                "enum": [
+                  "accepted"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Promise has been rejected",
+                "enum": [
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Promise is pending",
+                "enum": [
+                  "pending"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Promise has been fulfilled",
+                "enum": [
+                  "fulfilled"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Promise has been broken",
+                "enum": [
+                  "broken"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Response to a promise request",
+        "properties": {
+          "data": {
+            "description": "Additional data in the response"
+          },
+          "promise_id": {
+            "description": "Unique identifier for the promise",
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/PromiseStatus"
+              }
+            ],
+            "description": "Current status of the promise"
+          }
+        },
+        "required": [
+          "promise_id",
+          "status"
+        ],
+        "title": "PromiseResponse",
+        "type": "object"
+      },
+      "PromiseStatus": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Status of a promise",
+        "oneOf": [
+          {
+            "description": "Promise has been accepted",
+            "enum": [
+              "accepted"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Promise has been rejected",
+            "enum": [
+              "rejected"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Promise is pending",
+            "enum": [
+              "pending"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Promise has been fulfilled",
+            "enum": [
+              "fulfilled"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Promise has been broken",
+            "enum": [
+              "broken"
+            ],
+            "type": "string"
+          }
+        ],
+        "title": "PromiseStatus"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "email": null,
+      "name": "Arkavo Edge Contributors",
+      "url": "https://github.com/arkavo-org/arkavo-edge"
+    },
+    "description": "Agent-to-Agent communication protocol based on JSON-RPC 2.0",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    "title": "Arkavo A2A Transport Protocol",
+    "version": "0.20.0"
+  },
+  "methods": [
+    {
+      "description": "Request a promise from another agent",
+      "errors": [
+        {
+          "code": -32601,
+          "data": null,
+          "message": "Method not found"
+        },
+        {
+          "code": -32602,
+          "data": null,
+          "message": "Invalid params"
+        }
+      ],
+      "examples": [
+        {
+          "description": null,
+          "name": "Simple promise request",
+          "params": [
+            {
+              "name": "agent_id",
+              "value": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            {
+              "name": "promise_type",
+              "value": "data_access"
+            }
+          ],
+          "result": {
+            "data": {},
+            "promise_id": "660e8400-e29b-41d4-a716-446655440001",
+            "status": "accepted"
+          }
+        }
+      ],
+      "name": "promise_request",
+      "params": [
+        {
+          "description": "The ID of the requesting agent",
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "The type of promise being requested",
+          "name": "promise_type",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Additional data for the promise request",
+          "name": "payload",
+          "required": false,
+          "schema": {
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "The promise response from the agent",
+        "name": "promise_response",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "PromiseStatus": {
+              "description": "Status of a promise",
+              "oneOf": [
+                {
+                  "description": "Promise has been accepted",
+                  "enum": [
+                    "accepted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Promise has been rejected",
+                  "enum": [
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Promise is pending",
+                  "enum": [
+                    "pending"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Promise has been fulfilled",
+                  "enum": [
+                    "fulfilled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Promise has been broken",
+                  "enum": [
+                    "broken"
+                  ],
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "description": "Response to a promise request",
+          "properties": {
+            "data": {
+              "description": "Additional data in the response"
+            },
+            "promise_id": {
+              "description": "Unique identifier for the promise",
+              "format": "uuid",
+              "type": "string"
+            },
+            "status": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/PromiseStatus"
+                }
+              ],
+              "description": "Current status of the promise"
+            }
+          },
+          "required": [
+            "promise_id",
+            "status"
+          ],
+          "title": "PromiseResponse",
+          "type": "object"
+        }
+      },
+      "summary": "Promise request"
+    },
+    {
+      "description": "Declare a promise capability to other agents",
+      "errors": null,
+      "examples": null,
+      "name": "promise_declare",
+      "params": [
+        {
+          "description": "The ID of the declaring agent",
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "List of promises the agent can fulfill",
+          "name": "promises",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "definitions": {
+              "PromiseCapability": {
+                "description": "A promise capability that an agent can fulfill",
+                "properties": {
+                  "constraints": {
+                    "description": "Constraints on the promise"
+                  },
+                  "metadata": {
+                    "description": "Additional metadata"
+                  },
+                  "type": {
+                    "description": "Type of promise",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              }
+            },
+            "items": {
+              "$ref": "#/definitions/PromiseCapability"
+            },
+            "title": "Array_of_PromiseCapability",
+            "type": "array"
+          }
+        }
+      ],
+      "result": {
+        "description": "Confirmation of promise declaration",
+        "name": "declaration_result",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "description": "Response to a promise declaration",
+          "properties": {
+            "acknowledged": {
+              "description": "Whether the declaration was acknowledged",
+              "type": "boolean"
+            },
+            "timestamp": {
+              "description": "Timestamp of acknowledgment",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          "required": [
+            "acknowledged",
+            "timestamp"
+          ],
+          "title": "PromiseDeclareResponse",
+          "type": "object"
+        }
+      },
+      "summary": "Promise declaration"
+    },
+    {
+      "description": "Discover available agents in the network",
+      "errors": null,
+      "examples": null,
+      "name": "agent_discover",
+      "params": [
+        {
+          "description": "Optional filter criteria for agent discovery",
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AgentDiscoverFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "definitions": {
+              "AgentDiscoverFilter": {
+                "description": "Filter criteria for agent discovery",
+                "properties": {
+                  "promise_types": {
+                    "description": "Filter by promise types",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "tags": {
+                    "description": "Filter by tags",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "title": "Nullable_AgentDiscoverFilter"
+          }
+        }
+      ],
+      "result": {
+        "description": "List of discovered agents",
+        "name": "discovered_agents",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "DiscoveredAgent": {
+              "description": "Information about a discovered agent",
+              "properties": {
+                "agent_id": {
+                  "description": "Unique identifier for the agent",
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "endpoint": {
+                  "description": "Network endpoint for the agent",
+                  "type": "string"
+                },
+                "metadata": {
+                  "description": "Additional metadata about the agent"
+                },
+                "promises": {
+                  "description": "Promise types the agent supports",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "agent_id",
+                "endpoint"
+              ],
+              "type": "object"
+            }
+          },
+          "items": {
+            "$ref": "#/definitions/DiscoveredAgent"
+          },
+          "title": "Array_of_DiscoveredAgent",
+          "type": "array"
+        }
+      },
+      "summary": "Agent discovery"
+    }
+  ],
+  "openrpc": "1.2.6",
+  "servers": [
+    {
+      "description": "Default local development server for testing",
+      "name": "Local Development",
+      "summary": "Local development server",
+      "url": "http://localhost:8765"
+    },
+    {
+      "description": "Production A2A endpoint (example)",
+      "name": "Production",
+      "summary": "Production server",
+      "url": "https://api.arkavo.io/a2a"
+    }
+  ]
+}

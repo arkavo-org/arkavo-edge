@@ -1,0 +1,49 @@
+name: Nightly
+
+on:
+  schedule:
+    # Run nightly fuzzing
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/arkavo-protocol/**'
+      - '.github/workflows/fuzz.yaml'
+
+jobs:
+  fuzz:
+    name: Fuzz arkavo-protocol
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [fuzz_rate_limit, fuzz_json_rpc, fuzz_rate_limit_concurrent]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+        
+      - name: Cache fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: crates/arkavo-protocol/fuzz/corpus
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+            
+      - name: Run fuzzing
+        working-directory: crates/arkavo-protocol
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
+        env:
+          RUST_BACKTRACE: 1
+          
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: crates/arkavo-protocol/fuzz/artifacts/

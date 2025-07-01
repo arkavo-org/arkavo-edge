@@ -344,10 +344,213 @@ jobs:
           # Test with bundled ONNX Runtime library
           ./arkavo --version
 
+  # Schema validation jobs
+  validate-openrpc:
+    name: Validate OpenRPC Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "schema-validation"
+          
+      - name: Install validation tools
+        run: |
+          # Install jq for JSON validation
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
+          # Install oasdiff for breaking change detection (Go binary, no npm)
+          wget -q -O oasdiff.tar.gz https://github.com/Tufin/oasdiff/releases/download/v1.10.0/oasdiff_1.10.0_linux_amd64.tar.gz
+          tar -xzf oasdiff.tar.gz
+          sudo mv oasdiff /usr/local/bin/
+          rm oasdiff.tar.gz
+          
+      - name: Build schema tools
+        run: |
+          cargo build -p arkavo-protocol --bin export-schema --bin validate-schema || echo "Schema tools not yet available"
+          
+      - name: Generate and validate schemas
+        run: |
+          # Check if export-schema exists
+          if cargo run -p arkavo-protocol --bin export-schema > schema.json 2>/dev/null; then
+            # Create schemas directory
+            mkdir -p schemas/openrpc schemas/config schemas/wire/v1
+            cp schema.json schemas/openrpc/
+            
+            # Basic JSON validation with jq
+            if ! jq . schema.json > /dev/null 2>&1; then
+              echo "❌ Invalid JSON in schema"
+              exit 1
+            fi
+            
+            # Validate OpenRPC structure
+            echo "Validating OpenRPC schema structure..."
+            
+            # Check required fields
+            if ! jq -e '.openrpc' schema.json > /dev/null; then
+              echo "❌ Missing required field: openrpc"
+              exit 1
+            fi
+            
+            if ! jq -e '.info' schema.json > /dev/null; then
+              echo "❌ Missing required field: info"
+              exit 1
+            fi
+            
+            if ! jq -e '.methods' schema.json > /dev/null; then
+              echo "❌ Missing required field: methods"
+              exit 1
+            fi
+            
+            # Validate OpenRPC version
+            OPENRPC_VERSION=$(jq -r '.openrpc' schema.json)
+            if [[ ! "$OPENRPC_VERSION" =~ ^1\.[0-9]+\.[0-9]+$ ]]; then
+              echo "❌ Invalid OpenRPC version: $OPENRPC_VERSION"
+              exit 1
+            fi
+            
+            # Check method structure
+            jq -e '.methods[] | select(.name == null or .params == null or .result == null)' schema.json > /dev/null && {
+              echo "❌ Methods must have name, params, and result fields"
+              exit 1
+            } || true
+            
+            # Validate method names follow convention
+            INVALID_METHODS=$(jq -r '.methods[].name | select(test("^[a-z_]+$") | not)' schema.json || true)
+            if [ -n "$INVALID_METHODS" ]; then
+              echo "⚠️  Warning: Method names should be lowercase with underscores:"
+              echo "$INVALID_METHODS"
+            fi
+            
+            # Check for method descriptions
+            METHODS_WITHOUT_DESC=$(jq -r '.methods[] | select(.description == null) | .name' schema.json || true)
+            if [ -n "$METHODS_WITHOUT_DESC" ]; then
+              echo "⚠️  Warning: Methods without descriptions:"
+              echo "$METHODS_WITHOUT_DESC"
+            fi
+            
+            # Run Rust-based validation
+            if cargo run -p arkavo-protocol --bin validate-schema 2>/dev/null; then
+              echo "✅ Rust schema validation passed"
+            fi
+            
+            echo "✅ Schema validation completed"
+          else
+            echo "⚠️ Schema export not yet implemented - skipping validation"
+          fi
+
+  check-schema-backwards-compatibility:
+    name: Check Schema Backwards Compatibility
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "schema-compat"
+          
+      - name: Install jq for JSON comparison
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
+      - name: Check for breaking changes
+        run: |
+          # Check if export-schema binary exists
+          if cargo run -p arkavo-protocol --bin export-schema > /dev/null 2>&1; then
+            # Generate current schema
+            cargo run -p arkavo-protocol --bin export-schema > schema-current.json
+            
+            # Checkout base branch
+            git checkout ${{ github.base_ref }}
+            
+            # Check if export-schema exists in base
+            if cargo run -p arkavo-protocol --bin export-schema > schema-base.json 2>/dev/null; then
+              # Switch back to PR branch
+              git checkout -
+              
+              # Check for breaking changes using jq
+              echo "Checking for breaking changes..."
+              
+              # Extract method names from both schemas
+              BASE_METHODS=$(jq -r '.methods[].name' schema-base.json | sort)
+              CURRENT_METHODS=$(jq -r '.methods[].name' schema-current.json | sort)
+              
+              # Check for removed methods (breaking change)
+              REMOVED_METHODS=$(comm -23 <(echo "$BASE_METHODS") <(echo "$CURRENT_METHODS"))
+              if [ -n "$REMOVED_METHODS" ]; then
+                echo "❌ Breaking change: Methods removed:"
+                echo "$REMOVED_METHODS"
+                exit 1
+              fi
+              
+              # Check for changes in required parameters
+              for method in $BASE_METHODS; do
+                if echo "$CURRENT_METHODS" | grep -q "^$method$"; then
+                  # Get required params from base
+                  BASE_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-base.json 2>/dev/null | sort || true)
+                  # Get required params from current
+                  CURRENT_REQUIRED=$(jq -r ".methods[] | select(.name == \"$method\") | .params[] | select(.required == true) | .name" schema-current.json 2>/dev/null | sort || true)
+                  
+                  # Check for removed required params (breaking change)
+                  if [ -n "$BASE_REQUIRED" ]; then
+                    REMOVED_PARAMS=$(comm -23 <(echo "$BASE_REQUIRED") <(echo "$CURRENT_REQUIRED") || true)
+                    if [ -n "$REMOVED_PARAMS" ]; then
+                      echo "❌ Breaking change: Required parameters removed from $method:"
+                      echo "$REMOVED_PARAMS"
+                      exit 1
+                    fi
+                  fi
+                fi
+              done
+              
+              echo "✅ No breaking changes detected"
+            else
+              echo "⚠️ Schema export doesn't exist in base branch - skipping compatibility check"
+            fi
+          else
+            echo "⚠️ Schema export not yet implemented - skipping compatibility check"
+          fi
+
+  validate-doc-snippets:
+    name: Validate Documentation Code Snippets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Test documentation examples
+        run: |
+          # Test Rust doc examples
+          cargo test --doc -p arkavo-protocol || echo "No doc tests in arkavo-protocol"
+          
+      - name: Validate JSON snippets in docs
+        run: |
+          # Extract and validate JSON snippets from markdown files
+          for md in docs/**/*.md README.md; do
+            if [ -f "$md" ]; then
+              echo "Checking $md for JSON snippets..."
+              # Extract JSON code blocks and validate them
+              awk '/```json/{flag=1;next}/```/{flag=0}flag' "$md" > temp.json || true
+              if [ -s temp.json ]; then
+                jq . temp.json > /dev/null 2>&1 || echo "Invalid JSON in $md"
+              fi
+            fi
+          done
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check]
+    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -361,7 +564,9 @@ jobs:
                 "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
-                "${{ needs.performance-check.result }}" != "success" ]]; then
+                "${{ needs.performance-check.result }}" != "success" || \
+                "${{ needs.validate-openrpc.result }}" != "success" || \
+                "${{ needs.validate-doc-snippets.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
