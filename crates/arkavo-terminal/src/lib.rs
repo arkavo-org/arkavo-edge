@@ -474,6 +474,18 @@ pub async fn run() -> Result<()> {
                         let _ = response_tx.send(full_response).await;
                     }
                     Err(e) => {
+                        // Provide more informative error messages
+                        let error_msg = if e.to_string().contains("404")
+                            || e.to_string().contains("not found")
+                        {
+                            format!(
+                                "Model '{}' not found on server {}. Please check available models for this server.",
+                                actual_model, server_url
+                            )
+                        } else {
+                            format!("Failed to get LLM response from {}: {}", server_url, e)
+                        };
+
                         let _ = llm_tx
                             .send(LlmResponse {
                                 task_id: request.task_id,
@@ -481,7 +493,7 @@ pub async fn run() -> Result<()> {
                                 content: String::new(),
                                 is_streaming: false,
                                 is_complete: true,
-                                error: Some(format!("Failed to get LLM response: {e}")),
+                                error: Some(error_msg),
                                 mcp_status: None,
                             })
                             .await;

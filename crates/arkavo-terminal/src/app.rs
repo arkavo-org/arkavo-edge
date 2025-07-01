@@ -442,18 +442,23 @@ impl App {
         }
 
         // Try saved configurations - filter for Ollama server configs
+        // Sort configs by URL to ensure consistent server numbering
+        let mut sorted_configs: Vec<_> = saved_configs
+            .iter()
+            .filter(|c| {
+                let url = &c.memory.content;
+                url != "CLEARED" && url != "http://localhost:11434" && url.starts_with("http")
+            })
+            .collect();
+        sorted_configs.sort_by(|a, b| a.memory.content.cmp(&b.memory.content));
+
         let mut server_idx = 1;
         self.add_debug_log(
             crate::ui::debug::LogLevel::Debug,
-            format!("[Models] Checking {} saved configs", saved_configs.len()),
+            format!("[Models] Checking {} saved configs", sorted_configs.len()),
         );
-        for config in saved_configs.iter() {
+        for config in sorted_configs.iter() {
             let server_url = &config.memory.content;
-
-            // Skip cleared configs and localhost (we already tried it)
-            if server_url == "CLEARED" || server_url == "http://localhost:11434" {
-                continue;
-            }
 
             self.add_debug_log(
                 crate::ui::debug::LogLevel::Debug,
@@ -822,6 +827,32 @@ impl App {
                                         // Create or update task window for non-configuration models
                                         let model_name =
                                             self.active_model.as_ref().unwrap().clone();
+
+                                        // Validate the model exists on its server
+                                        let model_valid = if let Some((server_prefix, _)) =
+                                            model_name.split_once('/')
+                                        {
+                                            // Find the provider for this server
+                                            self.providers.iter().any(|p| {
+                                                p.name.contains(server_prefix)
+                                                    && p.status == ProviderStatus::Connected
+                                                    && p.models
+                                                        .iter()
+                                                        .any(|m| model_name.ends_with(m))
+                                            })
+                                        } else {
+                                            true // Assume valid if no server prefix
+                                        };
+
+                                        if !model_valid {
+                                            self.add_debug_log(
+                                                crate::ui::debug::LogLevel::Warning,
+                                                format!(
+                                                    "[UI] Model {} not available on its server",
+                                                    model_name
+                                                ),
+                                            );
+                                        }
 
                                         // Check if we already have a task for this model
                                         let existing_task = self
