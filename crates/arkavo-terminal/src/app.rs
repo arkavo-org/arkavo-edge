@@ -1041,15 +1041,11 @@ impl App {
 
             // Only render when there are updates or user input
             if needs_redraw || has_llm_updates {
-                if self.input_focused {
-                    terminal.draw(|f| {
-                        // Clear the entire frame first when input is active
-                        f.render_widget(ratatui::widgets::Clear, f.area());
-                        self.render(f);
-                    })?;
-                } else {
-                    terminal.draw(|f| self.render(f))?;
-                }
+                terminal.draw(|f| {
+                    // Always clear the entire frame to prevent artifacts
+                    f.render_widget(ratatui::widgets::Clear, f.area());
+                    self.render(f);
+                })?;
             }
 
             // Track frame timing
