@@ -25,8 +25,8 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
-mdns-sd = "0.13"
 gethostname = "0.5"
+zeroconf = "0.14"
 async-trait = "0.1"
 log = "0.4"
 anyhow = "1.0"

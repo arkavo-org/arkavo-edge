@@ -218,13 +218,14 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     if config.mdns_enabled {
         println!("Starting mDNS broadcasting...");
         let config_clone = config.clone();
-        tokio::spawn(async move {
-            println!("mDNS task spawned");
-            if let Err(e) = broadcast_agent_mdns(&config_clone).await {
+        // Use std::thread since zeroconf is not Send
+        std::thread::spawn(move || {
+            println!("mDNS thread spawned");
+            if let Err(e) = broadcast_agent_mdns_sync(&config_clone) {
                 eprintln!("mDNS broadcast error: {}", e);
             }
         });
-        // Give the mDNS task a moment to start
+        // Give the mDNS thread a moment to start
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     } else {
         println!("mDNS broadcasting disabled");
@@ -240,59 +241,45 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-async fn broadcast_agent_mdns(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn broadcast_agent_mdns_sync(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use std::collections::HashMap;
+    use std::thread;
+    use std::time::Duration;
+    use zeroconf::{MdnsService, ServiceType, TxtRecord, prelude::*};
+
     println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
 
     let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
     println!("broadcast_agent_mdns: Parsed port: {port}");
 
-    // Try using mdns-sd directly without the wrapper
-    use mdns_sd::{ServiceDaemon, ServiceInfo};
-    use std::collections::HashMap;
-
-    println!("Creating ServiceDaemon directly...");
-    let mdns = ServiceDaemon::new().map_err(|e| format!("Failed to create ServiceDaemon: {e}"))?;
-
-    let mut hostname = gethostname::gethostname().to_string_lossy().into_owned();
-
-    // Fix hostname
-    while hostname.ends_with('.') {
-        hostname.pop();
-    }
-    if !hostname.ends_with(".local") {
-        hostname.push_str(".local");
-    }
-    hostname.push('.');
-
-    println!("Using hostname: {hostname}");
-
+    let mut txt = TxtRecord::new();
     let mut properties = HashMap::new();
-    properties.insert("agent_id".to_string(), config.name.clone());
-    properties.insert("purpose".to_string(), config.purpose.clone());
-    properties.insert("model".to_string(), config.model.clone());
+    properties.insert("agent_id", config.name.clone());
+    properties.insert("purpose", config.purpose.clone());
+    properties.insert("model", config.model.clone());
 
-    let service_info = ServiceInfo::new(
-        "_a2a._tcp.local.",
-        &format!("arkavo-agent-{}", config.name),
-        &hostname,
-        (),
-        port,
-        Some(properties),
-    )
-    .map_err(|e| format!("Failed to create ServiceInfo: {e}"))?;
+    for (key, value) in &properties {
+        txt.insert(key, value)?;
+    }
 
-    println!("Registering service...");
-    mdns.register(service_info)
-        .map_err(|e| format!("Failed to register: {e}"))?;
+    let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
+    service.set_name(&format!("arkavo-agent-{}", config.name));
+    service.set_txt_record(txt);
+
+    let service = service.register()?;
 
     println!("mDNS service registered successfully!");
+    println!("Service name: arkavo-agent-{}", config.name);
+    println!("Service type: _a2a._tcp");
+    println!("Port: {}", port);
     println!("Check with: dns-sd -B _a2a._tcp local.");
 
-    // Keep the daemon alive
+    // The service automatically unregisters when it goes out of scope.
+    // We need to keep it alive.
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-        println!("mDNS daemon still alive...");
+        thread::sleep(Duration::from_secs(30));
+        println!("mDNS service still broadcasting...");
         // Keep reference to prevent dropping
-        let _ = &mdns;
+        let _ = &service;
     }
 }

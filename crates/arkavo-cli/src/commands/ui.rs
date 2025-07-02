@@ -98,55 +98,104 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 async fn run_mdns_discovery(
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_protocol::mdns::MdnsManager;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     println!("Starting mDNS discovery service...");
-    let mdns = MdnsManager::new();
 
-    // Start mDNS discovery
-    mdns.start_discovery().await?;
-    println!("mDNS discovery started, looking for _a2a._tcp services");
+    // Create a channel to communicate between threads
+    let (tx, rx) = mpsc::channel::<serde_json::Value>();
 
-    // Poll for discovered services
-    let mut poll_count = 0;
+    // Run zeroconf in a separate thread since it's not Send
+    std::thread::spawn(move || {
+        use zeroconf::{MdnsBrowser, ServiceType, prelude::*};
+
+        let service_type = ServiceType::new("a2a", "tcp").unwrap();
+        let mut browser = MdnsBrowser::new(service_type);
+
+        let tx_clone = tx.clone();
+        browser.set_service_discovered_callback(Box::new(move |result, _| {
+            match result {
+                Ok(service) => {
+                    let host = service.address().to_string();
+
+                    println!(
+                        "UI: Discovered service: {} at {}:{}",
+                        service.name(),
+                        host,
+                        service.port()
+                    );
+
+                    // Extract agent info from TXT record
+                    let mut agent_id = service.name().to_string();
+                    if agent_id.starts_with("arkavo-agent-") {
+                        agent_id = agent_id.trim_start_matches("arkavo-agent-").to_string();
+                    }
+
+                    let mut purpose = "Agent discovered via mDNS".to_string();
+                    let mut model = "Unknown".to_string();
+
+                    if let Some(txt) = service.txt() {
+                        for (key, value) in txt.iter() {
+                            match key.as_str() {
+                                "agent_id" => agent_id = value.clone(),
+                                "purpose" => purpose = value.clone(),
+                                "model" => model = value.clone(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    let agent_info = serde_json::json!({
+                        "id": agent_id.clone(),
+                        "name": agent_id.clone(),
+                        "purpose": purpose,
+                        "model": model,
+                        "endpoint": format!("{}:{}", host, service.port())
+                    });
+
+                    // Send to the channel
+                    let _ = tx_clone.send(agent_info);
+                }
+                Err(e) => {
+                    eprintln!("UI: Error discovering service: {}", e);
+                }
+            }
+        }));
+
+        match browser.browse_services() {
+            Ok(event_loop) => {
+                println!("mDNS browser started, looking for _a2a._tcp services");
+                let _ = event_loop.poll(Duration::from_secs(3600)); // Poll for 1 hour
+            }
+            Err(e) => {
+                eprintln!("Failed to start mDNS browser: {}", e);
+            }
+        }
+    });
+
+    // Process discovered services
+    let mut discovered_agents = std::collections::HashMap::new();
+
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        poll_count += 1;
-
-        if poll_count % 5 == 0 {
-            // Log every 10 seconds
-            println!(
-                "UI: mDNS discovery poll #{}, checking for services...",
-                poll_count
-            );
+        // Check for new discoveries
+        while let Ok(agent_info) = rx.try_recv() {
+            if let Some(id) = agent_info.get("id").and_then(|v| v.as_str()) {
+                discovered_agents.insert(id.to_string(), agent_info);
+            }
         }
 
-        let discovered = mdns.get_discovered_services().await;
-
+        // Update the shared agents list
         let mut agents_list = agents.write().await;
         agents_list.clear();
+        agents_list.extend(discovered_agents.values().cloned());
 
-        // If mDNS found agents, use them
-        if !discovered.is_empty() {
-            println!("UI: Found {} agents via mDNS!", discovered.len());
-            for endpoint in discovered {
-                println!(
-                    "UI: Discovered agent: {} at {}",
-                    endpoint.agent_id, endpoint.url
-                );
-
-                let url = endpoint.url.replace("http://", "");
-                let agent_info = serde_json::json!({
-                    "id": endpoint.agent_id.clone(),
-                    "name": endpoint.agent_id.clone(),
-                    "purpose": "Agent discovered via mDNS",
-                    "model": "Unknown",
-                    "endpoint": url
-                });
-                agents_list.push(agent_info);
-            }
-        } else if poll_count % 5 == 0 {
-            println!("UI: No agents discovered via mDNS (poll #{})", poll_count);
+        if !agents_list.is_empty() {
+            println!("UI: {} agents currently discovered", agents_list.len());
         }
+
+        drop(agents_list); // Release the lock
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 }
