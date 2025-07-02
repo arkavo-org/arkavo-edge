@@ -54,7 +54,7 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 ## {}
 purpose: Describe what this agent does
-model:   ollama://localhost:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
 discovery:
   mdns: true

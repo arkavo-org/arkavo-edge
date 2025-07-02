@@ -17,7 +17,7 @@ arkavo agent run
 
 # In another terminal, launch the UI
 arkavo ui
-# Open http://localhost:7700 in your browser
+# Open http://127.0.0.1:7700 in your browser
 ```
 
 See the [Getting Started Guide](docs/GETTING_STARTED.md) for detailed instructions.

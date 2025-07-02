@@ -34,7 +34,7 @@ This creates an `AGENTS.md` file with a template configuration. The file uses a 
 
 ## build-doc-bot
 purpose: Generate developer docs from repo README files
-model:   ollama://localhost:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
 discovery:
   mdns: true
@@ -54,7 +54,7 @@ You should see:
 ```
 Starting agent: build-doc-bot
 Purpose: Generate developer docs from repo README files
-Model: ollama://localhost:11434/qwen:0.6b
+Model: ollama://127.0.0.1:11434/qwen:0.6b
 Listen: 0.0.0.0:8342
 Agent server started on 0.0.0.0:8342
 mDNS service registered for agent: build-doc-bot
@@ -71,14 +71,14 @@ arkavo ui
 
 You'll see:
 ```
-Starting Arkavo UI server on http://localhost:7700
+Starting Arkavo UI server on http://127.0.0.1:7700
 Open this URL in your web browser
 Press Ctrl+C to stop
 ```
 
 ## Step 5: Test the Agent
 
-1. Open your web browser and navigate to **http://localhost:7700**
+1. Open your web browser and navigate to **http://127.0.0.1:7700**
 2. You should see your `build-doc-bot` agent appear as a card (it may take a few seconds for discovery)
 3. Click on the agent card to open the interaction panel
 4. The `promise_request` method will be pre-selected

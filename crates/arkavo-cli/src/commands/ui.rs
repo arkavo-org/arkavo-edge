@@ -84,7 +84,7 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let routes = static_files.or(agent_events);
 
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
-    println!("Starting Arkavo UI server on http://localhost:{}", port);
+    println!("Starting Arkavo UI server on http://127.0.0.1:{}", port);
     println!("Open this URL in your web browser");
     println!("Press Ctrl+C to stop");
 
