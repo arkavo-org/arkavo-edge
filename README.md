@@ -2,6 +2,26 @@
 
 AI-powered developer toolkit for secure, intelligent code transformation and testing.
 
+## Quick Start
+
+Get your first AI agent running in under 5 minutes:
+
+```bash
+# Install (macOS Apple Silicon)
+curl -L https://github.com/arkavo-org/arkavo-edge/releases/download/v0.21.0-alpha/arkavo-macos-aarch64.tar.gz | tar -xz
+mv arkavo /usr/local/bin
+
+# Create and run your first agent
+arkavo agent init my-agent
+arkavo agent run
+
+# In another terminal, launch the UI
+arkavo ui
+# Open http://localhost:7700 in your browser
+```
+
+See the [Getting Started Guide](docs/GETTING_STARTED.md) for detailed instructions.
+
 ## Key Features
 
 ### 🤖 AI Code Agent

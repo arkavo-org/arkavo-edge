@@ -24,9 +24,12 @@ arkavo-llm = { path = "../arkavo-llm" }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
+arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
 async-trait = "0.1"
 log = "0.4"
 anyhow = "1.0"
+warp = "0.3"
+futures = "0.3"
 jsonschema = "0.26"
 tokio = { version = "1.41", features = ["rt", "macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
