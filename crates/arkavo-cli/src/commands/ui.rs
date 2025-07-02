@@ -115,6 +115,7 @@ async fn run_mdns_discovery(
             let service_type = ServiceType::new("a2a", "tcp").unwrap();
             let mut browser = MdnsBrowser::new(service_type);
 
+            let tx_clone = tx;
             browser.set_service_discovered_callback(Box::new(move |result, _| {
                 match result {
                     Ok(service) => {
@@ -148,8 +149,8 @@ async fn run_mdns_discovery(
                         }
 
                         let agent_info = serde_json::json!({
-                            "id": agent_id.clone(),
-                            "name": agent_id.clone(),
+                            "id": agent_id,
+                            "name": agent_id,
                             "purpose": purpose,
                             "model": model,
                             "endpoint": format!("{}:{}", host, service.port())

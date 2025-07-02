@@ -51,7 +51,7 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let template = format!(
         r#"# AGENTS.md
 
-## {}
+## {name}
 purpose: Describe what this agent does
 model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
@@ -77,8 +77,7 @@ listen:  0.0.0.0:8342
 # listen:  0.0.0.0:8344
 # discovery:
 #   mdns: false  # Explicitly disable mDNS for this agent
-"#,
-        name
+"#
     );
 
     fs::write(agents_path, template)?;
