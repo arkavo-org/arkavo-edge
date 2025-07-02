@@ -251,8 +251,7 @@ async fn broadcast_agent_mdns(config: &AgentConfig) -> Result<(), Box<dyn std::e
     use std::collections::HashMap;
 
     println!("Creating ServiceDaemon directly...");
-    let mdns =
-        ServiceDaemon::new().map_err(|e| format!("Failed to create ServiceDaemon: {e}"))?;
+    let mdns = ServiceDaemon::new().map_err(|e| format!("Failed to create ServiceDaemon: {e}"))?;
 
     let mut hostname = gethostname::gethostname().to_string_lossy().into_owned();
 
