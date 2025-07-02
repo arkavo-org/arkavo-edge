@@ -82,7 +82,7 @@ listen:  0.0.0.0:8342
     );
 
     fs::write(agents_path, template)?;
-    println!("Created AGENTS.md with agent configuration for '{}'", name);
+    println!("Created AGENTS.md with agent configuration for '{name}'");
     println!("Edit AGENTS.md to customize your agent, then run:");
     println!("  arkavo agent run");
 
@@ -96,9 +96,9 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     let config_path = Path::new(config_file);
 
     if !config_path.exists() {
-        eprintln!("Error: Configuration file '{}' not found", config_file);
+        eprintln!("Error: Configuration file '{config_file}' not found");
         eprintln!("Run 'arkavo agent init <name>' to create one");
-        return Err(format!("Config file not found: {}", config_file).into());
+        return Err(format!("Config file not found: {config_file}").into());
     }
 
     let config_content = fs::read_to_string(config_path)?;
@@ -222,7 +222,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         std::thread::spawn(move || {
             println!("mDNS thread spawned");
             if let Err(e) = broadcast_agent_mdns_sync(&config_clone) {
-                eprintln!("mDNS broadcast error: {}", e);
+                eprintln!("mDNS broadcast error: {e}");
             }
         });
         // Give the mDNS thread a moment to start
@@ -241,9 +241,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-fn broadcast_agent_mdns_sync(_config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(feature = "mdns")]
-    let config = _config;
+fn broadcast_agent_mdns_sync(
+    #[allow(unused_variables)] config: &AgentConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
         use std::collections::HashMap;
@@ -275,7 +275,7 @@ fn broadcast_agent_mdns_sync(_config: &AgentConfig) -> Result<(), Box<dyn std::e
         println!("mDNS service registered successfully!");
         println!("Service name: arkavo-agent-{}", config.name);
         println!("Service type: _a2a._tcp");
-        println!("Port: {}", port);
+        println!("Port: {port}");
         println!("Check with: dns-sd -B _a2a._tcp local.");
 
         // The service automatically unregisters when it goes out of scope.

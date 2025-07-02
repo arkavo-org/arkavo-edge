@@ -3,13 +3,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.len() > 0 && matches!(args[0].as_str(), "help" | "-h" | "--help") {
+    if !args.is_empty() && matches!(args[0].as_str(), "help" | "-h" | "--help") {
         print_usage();
         return Ok(());
     }
 
     // Parse optional port argument
-    let port = if args.len() > 0 {
+    let port = if !args.is_empty() {
         args[0].parse::<u16>().unwrap_or(7700)
     } else {
         7700
@@ -47,7 +47,7 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
         println!("UI: Spawning mDNS discovery task...");
         match run_mdns_discovery(agents_clone).await {
             Ok(_) => println!("UI: mDNS discovery task completed"),
-            Err(e) => eprintln!("UI: mDNS discovery error: {}", e),
+            Err(e) => eprintln!("UI: mDNS discovery error: {e}"),
         }
     });
 
@@ -86,7 +86,7 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let routes = static_files.or(agent_events);
 
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
-    println!("Starting Arkavo UI server on http://127.0.0.1:{}", port);
+    println!("Starting Arkavo UI server on http://127.0.0.1:{port}");
     println!("Open this URL in your web browser");
     println!("Press Ctrl+C to stop");
 
@@ -96,10 +96,8 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_mdns_discovery(
-    _agents: Arc<RwLock<Vec<serde_json::Value>>>,
+    #[allow(unused_variables)] agents: Arc<RwLock<Vec<serde_json::Value>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(feature = "mdns")]
-    let agents = _agents;
     #[cfg(feature = "mdns")]
     {
         use std::sync::mpsc;
@@ -117,7 +115,6 @@ async fn run_mdns_discovery(
             let service_type = ServiceType::new("a2a", "tcp").unwrap();
             let mut browser = MdnsBrowser::new(service_type);
 
-            let tx_clone = tx.clone();
             browser.set_service_discovered_callback(Box::new(move |result, _| {
                 match result {
                     Ok(service) => {
@@ -162,7 +159,7 @@ async fn run_mdns_discovery(
                         let _ = tx_clone.send(agent_info);
                     }
                     Err(e) => {
-                        eprintln!("UI: Error discovering service: {}", e);
+                        eprintln!("UI: Error discovering service: {e}");
                     }
                 }
             }));
@@ -173,7 +170,7 @@ async fn run_mdns_discovery(
                     let _ = event_loop.poll(Duration::from_secs(3600)); // Poll for 1 hour
                 }
                 Err(e) => {
-                    eprintln!("Failed to start mDNS browser: {}", e);
+                    eprintln!("Failed to start mDNS browser: {e}");
                 }
             }
         });
