@@ -241,45 +241,60 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-fn broadcast_agent_mdns_sync(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    use std::collections::HashMap;
-    use std::thread;
-    use std::time::Duration;
-    use zeroconf::{MdnsService, ServiceType, TxtRecord, prelude::*};
+fn broadcast_agent_mdns_sync(_config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "mdns")]
+    let config = _config;
+    #[cfg(feature = "mdns")]
+    {
+        use std::collections::HashMap;
+        use std::thread;
+        use std::time::Duration;
+        use zeroconf::{MdnsService, ServiceType, TxtRecord, prelude::*};
 
-    println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
+        println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
 
-    let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
-    println!("broadcast_agent_mdns: Parsed port: {port}");
+        let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
+        println!("broadcast_agent_mdns: Parsed port: {port}");
 
-    let mut txt = TxtRecord::new();
-    let mut properties = HashMap::new();
-    properties.insert("agent_id", config.name.clone());
-    properties.insert("purpose", config.purpose.clone());
-    properties.insert("model", config.model.clone());
+        let mut txt = TxtRecord::new();
+        let mut properties = HashMap::new();
+        properties.insert("agent_id", config.name.clone());
+        properties.insert("purpose", config.purpose.clone());
+        properties.insert("model", config.model.clone());
 
-    for (key, value) in &properties {
-        txt.insert(key, value)?;
+        for (key, value) in &properties {
+            txt.insert(key, value)?;
+        }
+
+        let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
+        service.set_name(&format!("arkavo-agent-{}", config.name));
+        service.set_txt_record(txt);
+
+        let service = service.register()?;
+
+        println!("mDNS service registered successfully!");
+        println!("Service name: arkavo-agent-{}", config.name);
+        println!("Service type: _a2a._tcp");
+        println!("Port: {}", port);
+        println!("Check with: dns-sd -B _a2a._tcp local.");
+
+        // The service automatically unregisters when it goes out of scope.
+        // We need to keep it alive.
+        loop {
+            thread::sleep(Duration::from_secs(30));
+            println!("mDNS service still broadcasting...");
+            // Keep reference to prevent dropping
+            let _ = &service;
+        }
     }
 
-    let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
-    service.set_name(&format!("arkavo-agent-{}", config.name));
-    service.set_txt_record(txt);
-
-    let service = service.register()?;
-
-    println!("mDNS service registered successfully!");
-    println!("Service name: arkavo-agent-{}", config.name);
-    println!("Service type: _a2a._tcp");
-    println!("Port: {}", port);
-    println!("Check with: dns-sd -B _a2a._tcp local.");
-
-    // The service automatically unregisters when it goes out of scope.
-    // We need to keep it alive.
-    loop {
-        thread::sleep(Duration::from_secs(30));
-        println!("mDNS service still broadcasting...");
-        // Keep reference to prevent dropping
-        let _ = &service;
+    #[cfg(not(feature = "mdns"))]
+    {
+        println!("mDNS support not compiled in (disabled for musl builds)");
+        println!("Agent will run without mDNS discovery");
+        // Keep the thread alive so the agent doesn't exit
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
     }
 }

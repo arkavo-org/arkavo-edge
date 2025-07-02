@@ -96,106 +96,121 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_mdns_discovery(
-    agents: Arc<RwLock<Vec<serde_json::Value>>>,
+    _agents: Arc<RwLock<Vec<serde_json::Value>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use std::sync::mpsc;
-    use std::time::Duration;
+    #[cfg(feature = "mdns")]
+    let agents = _agents;
+    #[cfg(feature = "mdns")]
+    {
+        use std::sync::mpsc;
+        use std::time::Duration;
 
-    println!("Starting mDNS discovery service...");
+        println!("Starting mDNS discovery service...");
 
-    // Create a channel to communicate between threads
-    let (tx, rx) = mpsc::channel::<serde_json::Value>();
+        // Create a channel to communicate between threads
+        let (tx, rx) = mpsc::channel::<serde_json::Value>();
 
-    // Run zeroconf in a separate thread since it's not Send
-    std::thread::spawn(move || {
-        use zeroconf::{MdnsBrowser, ServiceType, prelude::*};
+        // Run zeroconf in a separate thread since it's not Send
+        std::thread::spawn(move || {
+            use zeroconf::{MdnsBrowser, ServiceType, prelude::*};
 
-        let service_type = ServiceType::new("a2a", "tcp").unwrap();
-        let mut browser = MdnsBrowser::new(service_type);
+            let service_type = ServiceType::new("a2a", "tcp").unwrap();
+            let mut browser = MdnsBrowser::new(service_type);
 
-        let tx_clone = tx.clone();
-        browser.set_service_discovered_callback(Box::new(move |result, _| {
-            match result {
-                Ok(service) => {
-                    let host = service.address().to_string();
+            let tx_clone = tx.clone();
+            browser.set_service_discovered_callback(Box::new(move |result, _| {
+                match result {
+                    Ok(service) => {
+                        let host = service.address().to_string();
 
-                    println!(
-                        "UI: Discovered service: {} at {}:{}",
-                        service.name(),
-                        host,
-                        service.port()
-                    );
+                        println!(
+                            "UI: Discovered service: {} at {}:{}",
+                            service.name(),
+                            host,
+                            service.port()
+                        );
 
-                    // Extract agent info from TXT record
-                    let mut agent_id = service.name().to_string();
-                    if agent_id.starts_with("arkavo-agent-") {
-                        agent_id = agent_id.trim_start_matches("arkavo-agent-").to_string();
-                    }
+                        // Extract agent info from TXT record
+                        let mut agent_id = service.name().to_string();
+                        if agent_id.starts_with("arkavo-agent-") {
+                            agent_id = agent_id.trim_start_matches("arkavo-agent-").to_string();
+                        }
 
-                    let mut purpose = "Agent discovered via mDNS".to_string();
-                    let mut model = "Unknown".to_string();
+                        let mut purpose = "Agent discovered via mDNS".to_string();
+                        let mut model = "Unknown".to_string();
 
-                    if let Some(txt) = service.txt() {
-                        for (key, value) in txt.iter() {
-                            match key.as_str() {
-                                "agent_id" => agent_id = value.clone(),
-                                "purpose" => purpose = value.clone(),
-                                "model" => model = value.clone(),
-                                _ => {}
+                        if let Some(txt) = service.txt() {
+                            for (key, value) in txt.iter() {
+                                match key.as_str() {
+                                    "agent_id" => agent_id = value.clone(),
+                                    "purpose" => purpose = value.clone(),
+                                    "model" => model = value.clone(),
+                                    _ => {}
+                                }
                             }
                         }
+
+                        let agent_info = serde_json::json!({
+                            "id": agent_id.clone(),
+                            "name": agent_id.clone(),
+                            "purpose": purpose,
+                            "model": model,
+                            "endpoint": format!("{}:{}", host, service.port())
+                        });
+
+                        // Send to the channel
+                        let _ = tx_clone.send(agent_info);
                     }
+                    Err(e) => {
+                        eprintln!("UI: Error discovering service: {}", e);
+                    }
+                }
+            }));
 
-                    let agent_info = serde_json::json!({
-                        "id": agent_id.clone(),
-                        "name": agent_id.clone(),
-                        "purpose": purpose,
-                        "model": model,
-                        "endpoint": format!("{}:{}", host, service.port())
-                    });
-
-                    // Send to the channel
-                    let _ = tx_clone.send(agent_info);
+            match browser.browse_services() {
+                Ok(event_loop) => {
+                    println!("mDNS browser started, looking for _a2a._tcp services");
+                    let _ = event_loop.poll(Duration::from_secs(3600)); // Poll for 1 hour
                 }
                 Err(e) => {
-                    eprintln!("UI: Error discovering service: {}", e);
+                    eprintln!("Failed to start mDNS browser: {}", e);
                 }
             }
-        }));
+        });
 
-        match browser.browse_services() {
-            Ok(event_loop) => {
-                println!("mDNS browser started, looking for _a2a._tcp services");
-                let _ = event_loop.poll(Duration::from_secs(3600)); // Poll for 1 hour
+        // Process discovered services
+        let mut discovered_agents = std::collections::HashMap::new();
+
+        loop {
+            // Check for new discoveries
+            while let Ok(agent_info) = rx.try_recv() {
+                if let Some(id) = agent_info.get("id").and_then(|v| v.as_str()) {
+                    discovered_agents.insert(id.to_string(), agent_info);
+                }
             }
-            Err(e) => {
-                eprintln!("Failed to start mDNS browser: {}", e);
+
+            // Update the shared agents list
+            let mut agents_list = agents.write().await;
+            agents_list.clear();
+            agents_list.extend(discovered_agents.values().cloned());
+
+            if !agents_list.is_empty() {
+                println!("UI: {} agents currently discovered", agents_list.len());
             }
+
+            drop(agents_list); // Release the lock
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
-    });
+    }
 
-    // Process discovered services
-    let mut discovered_agents = std::collections::HashMap::new();
-
-    loop {
-        // Check for new discoveries
-        while let Ok(agent_info) = rx.try_recv() {
-            if let Some(id) = agent_info.get("id").and_then(|v| v.as_str()) {
-                discovered_agents.insert(id.to_string(), agent_info);
-            }
+    #[cfg(not(feature = "mdns"))]
+    {
+        println!("mDNS discovery not compiled in (disabled for musl builds)");
+        println!("UI will not discover agents via mDNS");
+        // Just sleep forever
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
-
-        // Update the shared agents list
-        let mut agents_list = agents.write().await;
-        agents_list.clear();
-        agents_list.extend(discovered_agents.values().cloned());
-
-        if !agents_list.is_empty() {
-            println!("UI: {} agents currently discovered", agents_list.len());
-        }
-
-        drop(agents_list); // Release the lock
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 }
