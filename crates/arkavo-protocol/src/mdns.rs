@@ -45,11 +45,16 @@ impl MdnsManager {
     async fn ensure_daemon(&self) -> Result<()> {
         let mut daemon_guard = self.daemon.lock().await;
         if daemon_guard.is_none() {
+            println!("mDNS: Creating new ServiceDaemon...");
             let daemon = ServiceDaemon::new().map_err(|e| {
+                eprintln!("mDNS: Failed to create ServiceDaemon: {e}");
                 A2aError::ServiceDiscovery(format!("Failed to create mDNS daemon: {e}"))
             })?;
+            println!("mDNS: ServiceDaemon created successfully");
             *daemon_guard = Some(daemon);
             drop(daemon_guard);
+        } else {
+            println!("mDNS: ServiceDaemon already exists");
         }
         Ok(())
     }
@@ -60,7 +65,22 @@ impl MdnsManager {
         self.ensure_daemon().await?;
 
         let service_name = format!("arkavo-agent-{}", info.agent_id);
-        let hostname = format!("{}.local.", info.agent_id);
+        // Use the local machine's hostname for mDNS
+        let mut hostname = gethostname::gethostname().to_string_lossy().into_owned();
+
+        // Fix hostname to be a proper FQDN
+        // Strip any trailing dots first
+        while hostname.ends_with('.') {
+            hostname.pop();
+        }
+
+        // Add .local if not already present
+        if !hostname.ends_with(".local") {
+            hostname.push_str(".local");
+        }
+
+        // Add final dot for FQDN
+        hostname.push('.');
 
         // Create properties with service info
         let mut properties = HashMap::new();
@@ -77,25 +97,40 @@ impl MdnsManager {
             properties.insert(format!("cap_{i}"), cap.clone());
         }
 
+        println!("mDNS: Creating ServiceInfo with:");
+        println!("  - service_type: {}", self.service_type);
+        println!("  - service_name: {service_name}");
+        println!("  - hostname: {hostname}");
+        println!("  - port: {}", info.http_port);
+
         let service_info = ServiceInfo::new(
             &self.service_type,
             &service_name,
             &hostname,
-            (), // Will use default IP
+            (), // Will auto-detect IP addresses
             info.http_port,
             Some(properties),
         )
         .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to create service info: {e}")))?;
 
         if let Some(daemon) = self.daemon.lock().await.as_ref() {
+            println!("mDNS: About to call daemon.register()...");
             daemon.register(service_info).map_err(|e| {
+                eprintln!("mDNS: daemon.register() failed: {e}");
                 A2aError::ServiceDiscovery(format!("Failed to register service: {e}"))
             })?;
+            println!("mDNS: daemon.register() succeeded!");
 
+            println!(
+                "mDNS: Registered service: {} on port {} with type {}",
+                service_name, info.http_port, self.service_type
+            );
             info!(
                 "Registered mDNS service: {} on port {}",
                 service_name, info.http_port
             );
+        } else {
+            eprintln!("mDNS: No daemon available!");
         }
 
         Ok(())
@@ -117,16 +152,20 @@ impl MdnsManager {
         let service_type = self.service_type.clone();
 
         if let Some(daemon) = self.daemon.lock().await.as_ref() {
+            println!("mDNS: Creating browser for service type: {service_type}");
             let receiver = daemon
                 .browse(&service_type)
                 .map_err(|e| A2aError::ServiceDiscovery(format!("Failed to start browser: {e}")))?;
+            println!("mDNS: Browser created successfully");
 
             // Spawn task to handle discovered services
             tokio::spawn(async move {
                 while let Ok(event) = receiver.recv() {
                     match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            debug!("Discovered service: {}", info.get_fullname());
+                            let fullname = info.get_fullname();
+                            println!("mDNS: ServiceResolved event for: {fullname}");
+                            debug!("Discovered service: {}", fullname);
 
                             // Extract agent info from properties
                             let properties = info.get_properties();
@@ -174,6 +213,7 @@ impl MdnsManager {
             });
         }
 
+        println!("mDNS: Started discovery for {} services", self.service_type);
         info!("Started mDNS discovery for {} services", self.service_type);
         Ok(())
     }

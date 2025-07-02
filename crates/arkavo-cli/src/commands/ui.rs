@@ -44,8 +44,10 @@ async fn start_ui_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 
     // Start mDNS discovery in background
     tokio::spawn(async move {
-        if let Err(e) = run_mdns_discovery(agents_clone).await {
-            eprintln!("mDNS discovery error: {}", e);
+        println!("UI: Spawning mDNS discovery task...");
+        match run_mdns_discovery(agents_clone).await {
+            Ok(_) => println!("UI: mDNS discovery task completed"),
+            Err(e) => eprintln!("UI: mDNS discovery error: {}", e),
         }
     });
 
@@ -98,32 +100,53 @@ async fn run_mdns_discovery(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_protocol::mdns::MdnsManager;
 
+    println!("Starting mDNS discovery service...");
     let mdns = MdnsManager::new();
 
     // Start mDNS discovery
     mdns.start_discovery().await?;
+    println!("mDNS discovery started, looking for _a2a._tcp services");
 
     // Poll for discovered services
+    let mut poll_count = 0;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        poll_count += 1;
+
+        if poll_count % 5 == 0 {
+            // Log every 10 seconds
+            println!(
+                "UI: mDNS discovery poll #{}, checking for services...",
+                poll_count
+            );
+        }
 
         let discovered = mdns.get_discovered_services().await;
+
         let mut agents_list = agents.write().await;
         agents_list.clear();
 
-        for endpoint in discovered {
-            // Parse the agent URL to extract host and port
-            let url = endpoint.url.replace("http://", "");
+        // If mDNS found agents, use them
+        if !discovered.is_empty() {
+            println!("UI: Found {} agents via mDNS!", discovered.len());
+            for endpoint in discovered {
+                println!(
+                    "UI: Discovered agent: {} at {}",
+                    endpoint.agent_id, endpoint.url
+                );
 
-            let agent_info = serde_json::json!({
-                "id": endpoint.agent_id.clone(),
-                "name": endpoint.agent_id.clone(),
-                "purpose": "Agent discovered via mDNS",
-                "model": "Unknown",
-                "endpoint": url
-            });
-
-            agents_list.push(agent_info);
+                let url = endpoint.url.replace("http://", "");
+                let agent_info = serde_json::json!({
+                    "id": endpoint.agent_id.clone(),
+                    "name": endpoint.agent_id.clone(),
+                    "purpose": "Agent discovered via mDNS",
+                    "model": "Unknown",
+                    "endpoint": url
+                });
+                agents_list.push(agent_info);
+            }
+        } else if poll_count % 5 == 0 {
+            println!("UI: No agents discovered via mDNS (poll #{})", poll_count);
         }
     }
 }

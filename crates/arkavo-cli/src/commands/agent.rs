@@ -1,4 +1,3 @@
-use log::info;
 use std::fs;
 use std::path::Path;
 
@@ -119,6 +118,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     println!("Purpose: {}", agent_config.purpose);
     println!("Model: {}", agent_config.model);
     println!("Listen: {}", agent_config.listen);
+    println!("mDNS enabled: {}", agent_config.mdns_enabled);
 
     // Start the A2A server with the agent configuration
     let runtime = tokio::runtime::Runtime::new()?;
@@ -211,14 +211,23 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     let server = A2aServer::new(server_config);
     let handle = server.start().await?;
 
+    // Give the server a moment to fully initialize
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     // Start mDNS broadcasting if enabled
     if config.mdns_enabled {
+        println!("Starting mDNS broadcasting...");
         let config_clone = config.clone();
         tokio::spawn(async move {
+            println!("mDNS task spawned");
             if let Err(e) = broadcast_agent_mdns(&config_clone).await {
                 eprintln!("mDNS broadcast error: {}", e);
             }
         });
+        // Give the mDNS task a moment to start
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    } else {
+        println!("mDNS broadcasting disabled");
     }
 
     println!("Agent server started on {}", config.listen);
@@ -232,25 +241,59 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 }
 
 async fn broadcast_agent_mdns(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_protocol::mdns::{MdnsManager, MdnsServiceInfo};
+    println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
 
     let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
+    println!("broadcast_agent_mdns: Parsed port: {port}");
 
-    let service_info = MdnsServiceInfo {
-        agent_id: config.name.clone(),
-        http_port: port,
-        ws_port: None,
-        version: "0.1.0".to_string(),
-        capabilities: vec!["promise_request".to_string(), "rpc.discover".to_string()],
-    };
+    // Try using mdns-sd directly without the wrapper
+    use mdns_sd::{ServiceDaemon, ServiceInfo};
+    use std::collections::HashMap;
 
-    let mdns_manager = MdnsManager::new();
-    mdns_manager.register_service(service_info).await?;
+    println!("Creating ServiceDaemon directly...");
+    let mdns =
+        ServiceDaemon::new().map_err(|e| format!("Failed to create ServiceDaemon: {e}"))?;
 
-    info!("mDNS service registered for agent: {}", config.name);
+    let mut hostname = gethostname::gethostname().to_string_lossy().into_owned();
 
-    // Keep the mDNS service running
+    // Fix hostname
+    while hostname.ends_with('.') {
+        hostname.pop();
+    }
+    if !hostname.ends_with(".local") {
+        hostname.push_str(".local");
+    }
+    hostname.push('.');
+
+    println!("Using hostname: {hostname}");
+
+    let mut properties = HashMap::new();
+    properties.insert("agent_id".to_string(), config.name.clone());
+    properties.insert("purpose".to_string(), config.purpose.clone());
+    properties.insert("model".to_string(), config.model.clone());
+
+    let service_info = ServiceInfo::new(
+        "_a2a._tcp.local.",
+        &format!("arkavo-agent-{}", config.name),
+        &hostname,
+        (),
+        port,
+        Some(properties),
+    )
+    .map_err(|e| format!("Failed to create ServiceInfo: {e}"))?;
+
+    println!("Registering service...");
+    mdns.register(service_info)
+        .map_err(|e| format!("Failed to register: {e}"))?;
+
+    println!("mDNS service registered successfully!");
+    println!("Check with: dns-sd -B _a2a._tcp local.");
+
+    // Keep the daemon alive
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+        println!("mDNS daemon still alive...");
+        // Keep reference to prevent dropping
+        let _ = &mdns;
     }
 }

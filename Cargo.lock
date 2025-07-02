@@ -184,11 +184,13 @@ dependencies = [
  "chrono",
  "clap",
  "futures",
+ "gethostname",
  "ignore",
  "indicatif",
  "jsonschema 0.26.2",
  "log",
  "lru",
+ "mdns-sd",
  "serde",
  "serde_json",
  "sha2",
@@ -328,6 +330,7 @@ dependencies = [
  "clap",
  "crossbeam-queue",
  "dashmap 5.5.3",
+ "gethostname",
  "governor",
  "hyper 1.6.0",
  "jsonrpsee",
@@ -1650,6 +1653,16 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+]
+
+[[package]]
+name = "gethostname"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3655aa6818d65bc620d6911f05aa7b6aeb596291e1e9f79e52df85583d1e30"
+dependencies = [
+ "rustix 0.38.44",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
