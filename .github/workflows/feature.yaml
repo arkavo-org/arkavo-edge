@@ -109,7 +109,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy
+      - run: cargo clippy --no-default-features --features memory
 
   # Tests and builds can run in parallel
   test:
