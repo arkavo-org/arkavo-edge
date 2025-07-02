@@ -5,10 +5,6 @@ on:
     # Run nightly fuzzing
     - cron: '0 2 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'crates/arkavo-protocol/**'
-      - '.github/workflows/fuzz.yaml'
 
 jobs:
   fuzz:

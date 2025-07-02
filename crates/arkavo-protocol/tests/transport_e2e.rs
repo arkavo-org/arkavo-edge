@@ -25,12 +25,12 @@ struct TestApiImpl;
 #[async_trait]
 impl TestApiServer for TestApiImpl {
     async fn echo(&self, message: String) -> Result<String, ErrorObjectOwned> {
-        Ok(format!("Echo: {}", message))
+        Ok(format!("Echo: {message}"))
     }
 
     async fn delay(&self, millis: u64) -> Result<String, ErrorObjectOwned> {
         sleep(Duration::from_millis(millis)).await;
-        Ok(format!("Delayed {} ms", millis))
+        Ok(format!("Delayed {millis} ms"))
     }
 
     async fn error(&self) -> Result<String, ErrorObjectOwned> {
@@ -115,7 +115,7 @@ async fn test_transport_timeout(transport: Arc<dyn A2aTransport>, endpoint: &A2a
 async fn test_http_transport_echo() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("http://127.0.0.1:{}", port),
+        url: format!("http://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -128,7 +128,7 @@ async fn test_http_transport_echo() {
 async fn test_websocket_transport_echo() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("ws://127.0.0.1:{}", port),
+        url: format!("ws://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -141,7 +141,7 @@ async fn test_websocket_transport_echo() {
 async fn test_http_transport_error() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("http://127.0.0.1:{}", port),
+        url: format!("http://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -154,7 +154,7 @@ async fn test_http_transport_error() {
 async fn test_websocket_transport_error() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("ws://127.0.0.1:{}", port),
+        url: format!("ws://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -167,7 +167,7 @@ async fn test_websocket_transport_error() {
 async fn test_http_transport_timeout() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("http://127.0.0.1:{}", port),
+        url: format!("http://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -182,7 +182,7 @@ async fn test_http_transport_timeout() {
 async fn test_websocket_transport_timeout() {
     let (_server, port) = start_test_server().await.unwrap();
     let endpoint = A2aEndpoint {
-        url: format!("ws://127.0.0.1:{}", port),
+        url: format!("ws://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -225,7 +225,7 @@ async fn test_http_retry_mechanism() {
 
         async fn delay(&self, millis: u64) -> Result<String, ErrorObjectOwned> {
             sleep(Duration::from_millis(millis)).await;
-            Ok(format!("Delayed {} ms", millis))
+            Ok(format!("Delayed {millis} ms"))
         }
 
         async fn error(&self) -> Result<String, ErrorObjectOwned> {
@@ -240,7 +240,7 @@ async fn test_http_retry_mechanism() {
     let _server = server.start(RetryApi.into_rpc());
 
     let endpoint = A2aEndpoint {
-        url: format!("http://127.0.0.1:{}", port),
+        url: format!("http://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -276,13 +276,13 @@ async fn test_transport_parity() {
     let (_server, port) = start_test_server().await.unwrap();
 
     let http_endpoint = A2aEndpoint {
-        url: format!("http://127.0.0.1:{}", port),
+        url: format!("http://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
 
     let ws_endpoint = A2aEndpoint {
-        url: format!("ws://127.0.0.1:{}", port),
+        url: format!("ws://127.0.0.1:{port}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
