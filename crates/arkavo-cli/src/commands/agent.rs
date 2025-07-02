@@ -56,8 +56,11 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
 purpose: Describe what this agent does
 model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
-discovery:
-  mdns: true
+
+# mDNS discovery is enabled by default for zero-config networking
+# To disable mDNS, uncomment the following:
+# discovery:
+#   mdns: false
 
 # Additional agent configurations can be added below
 # Each agent starts with ## agent-name
@@ -68,15 +71,13 @@ discovery:
 # purpose: Review code for quality and suggest improvements
 # model:   openai://gpt-4
 # listen:  0.0.0.0:8343
-# discovery:
-#   mdns: true
 #
 # ## test-runner
 # purpose: Run tests and report results
 # model:   anthropic://claude-3-opus
 # listen:  0.0.0.0:8344
 # discovery:
-#   mdns: false
+#   mdns: false  # Explicitly disable mDNS for this agent
 "#,
         name
     );
@@ -155,7 +156,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 purpose: String::new(),
                 model: String::new(),
                 listen: String::new(),
-                mdns_enabled: false,
+                mdns_enabled: true, // Default to true for zero-config
             });
             in_agent_section = true;
             continue;
@@ -174,8 +175,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 agent.model = trimmed[6..].trim().to_string();
             } else if trimmed.starts_with("listen:") {
                 agent.listen = trimmed[7..].trim().to_string();
-            } else if trimmed.starts_with("mdns:") && trimmed.contains("true") {
-                agent.mdns_enabled = true;
+            } else if trimmed.starts_with("mdns:") {
+                // Only disable if explicitly set to false
+                agent.mdns_enabled = !trimmed.contains("false");
             }
         }
     }

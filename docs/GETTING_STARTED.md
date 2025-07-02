@@ -36,11 +36,9 @@ This creates an `AGENTS.md` file with a template configuration. The file uses a 
 purpose: Generate developer docs from repo README files
 model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
-discovery:
-  mdns: true
 ```
 
-You can edit this file to customize your agent's purpose, model, and network settings.
+You can edit this file to customize your agent's purpose, model, and network settings. mDNS discovery is enabled by default for zero-configuration networking.
 
 ## Step 3: Start the Agent
 
@@ -112,8 +110,9 @@ You've successfully:
 
 ### Agent doesn't appear in the UI
 - Ensure both `arkavo agent run` and `arkavo ui` are running
-- Check that `mdns: true` is set in your agent configuration
+- mDNS is enabled by default, but check it's not explicitly disabled with `mdns: false`
 - Verify firewall settings allow mDNS (port 5353) and your agent's port
+- Ensure you see "mDNS service registered" message when starting the agent
 
 ### "Method not implemented" error
 - This is the expected result for this tutorial
