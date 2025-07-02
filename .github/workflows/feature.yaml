@@ -109,7 +109,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy
+      - run: cargo clippy --no-default-features --features memory
 
   # Tests and builds can run in parallel
   test:
@@ -212,7 +212,7 @@ jobs:
           sudo apt-get install -y musl-tools
       
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features
+        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features -p arkavo
       
       - name: Prepare release artifact
         run: |

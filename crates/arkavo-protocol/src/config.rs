@@ -93,9 +93,7 @@ impl A2aConfig {
         if let Ok(discovery_method) = std::env::var("A2A_DISCOVERY_METHOD") {
             config.discovery.method = match discovery_method.to_lowercase().as_str() {
                 "static" => DiscoveryMethod::Static,
-                "mdns" => DiscoveryMethod::Mdns,
                 "dns" => DiscoveryMethod::Dns,
-                "env" | "environment" => DiscoveryMethod::Environment,
                 _ => DiscoveryMethod::Static,
             };
         }

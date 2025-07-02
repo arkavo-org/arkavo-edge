@@ -67,7 +67,7 @@ fn main() {
 
     for required in &required_methods {
         if !method_names.contains(required) {
-            errors.push(format!("Missing required method: {}", required));
+            errors.push(format!("Missing required method: {required}"));
         }
     }
 
@@ -78,7 +78,7 @@ fn main() {
     } else {
         eprintln!("❌ Schema validation failed:");
         for error in errors {
-            eprintln!("  - {}", error);
+            eprintln!("  - {error}");
         }
         process::exit(1);
     }

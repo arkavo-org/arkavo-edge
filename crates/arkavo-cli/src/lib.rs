@@ -12,10 +12,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match args[0].as_str() {
+        "agent" => commands::agent::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
         "plan" => commands::plan::execute(&args[1..]),
         "apply" => commands::apply::execute(&args[1..]),
         "test" => commands::test::execute(&args[1..]),
+        "ui" => commands::ui::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
         "dataflow" | "flow" => {
             let runtime = tokio::runtime::Runtime::new()?;
@@ -66,6 +68,7 @@ fn print_usage() {
     println!("    arkavo <COMMAND> [OPTIONS]");
     println!();
     println!("COMMANDS:");
+    println!("    agent     Configure and run AI agents");
     println!(
         "    chat      Start conversational agent with repository context (Terminal UI by default)"
     );
@@ -75,6 +78,7 @@ fn print_usage() {
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run intelligent tests (use --help for modes)");
+    println!("    ui        Launch web UI for agent orchestration");
     println!("    vault     Import/export notes to Edge Vault");
     println!("    dataflow  Manage dataflow pipelines (export/import blueprints)");
     println!("    serve     Run as MCP server for AI tools integration");
