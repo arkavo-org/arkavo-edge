@@ -6,21 +6,23 @@ use tokio_stream::Stream;
 use super::model_loader::{Model, ModelLoader};
 
 #[cfg(feature = "local")]
-use tokenizers::Tokenizer as HfTokenizer;
+use candle_core::Tensor;
+
+#[cfg(feature = "local")]
+use std::sync::{Arc, Mutex};
+
+#[cfg(feature = "local")]
+struct Inner {
+    model_loader: ModelLoader,
+    _seed: u64,
+    _temperature: f64,
+    _top_p: Option<f64>,
+}
 
 pub struct LocalProvider {
     #[cfg(feature = "local")]
-    model_loader: ModelLoader,
-    #[cfg(feature = "local")]
-    _tokenizer: Option<HfTokenizer>,
+    inner: Arc<Mutex<Inner>>,
     model_name: String,
-    _model_path: Option<String>,
-    #[cfg(feature = "local")]
-    _seed: u64,
-    #[cfg(feature = "local")]
-    _temperature: f64,
-    #[cfg(feature = "local")]
-    _top_p: Option<f64>,
 }
 
 impl LocalProvider {
@@ -37,74 +39,32 @@ impl LocalProvider {
             let model_loader = ModelLoader::new(&model_name, model_path.as_deref())?;
 
             Ok(Self {
-                model_loader,
-                _tokenizer: None,
+                inner: Arc::new(Mutex::new(Inner {
+                    model_loader,
+                    _seed: 42,
+                    _temperature: 0.8,
+                    _top_p: Some(0.95),
+                })),
                 model_name,
-                _model_path: model_path,
-                _seed: 42,
-                _temperature: 0.8,
-                _top_p: Some(0.9),
             })
         }
     }
 
     #[cfg(feature = "local")]
     #[allow(clippy::unused_async)]
-    pub async fn initialize(&mut self) -> Result<()> {
-        // Load the model
-        self.model_loader.load_model()?;
-
-        // Load tokenizer
-        // For now, we'll use a simple tokenizer
-        // In production, this would load the appropriate tokenizer for the model
-        tracing::info!("Initializing tokenizer for model '{}'", self.model_name);
-
-        // TODO: Load actual tokenizer based on model type
-        // For now, we'll skip tokenizer loading
-
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn initialize(&self) -> Result<()> {
+        let mut guard = self.inner.lock().unwrap();
+        guard.model_loader.load_model()?;
         Ok(())
-    }
-
-    #[cfg(feature = "local")]
-    #[allow(dead_code)]
-    fn generate_text(&mut self, prompt: &str, _max_tokens: usize) -> Result<String> {
-        let model = self
-            .model_loader
-            .get_model_mut()
-            .ok_or_else(|| Error::Model("Model not loaded".to_string()))?;
-
-        match model {
-            Model::Quantized(_weights) => {
-                // For MVP, return a demonstration response
-                // Full implementation would:
-                // 1. Tokenize the prompt
-                // 2. Create input tensor
-                // 3. Run forward pass through model
-                // 4. Sample from logits
-                // 5. Decode tokens back to text
-
-                tracing::info!(
-                    "Running inference with quantized model for prompt: {}",
-                    prompt
-                );
-
-                // Placeholder that shows the model is loaded and ready
-                Ok(format!(
-                    "Model loaded successfully! This is a placeholder response. \
-                     In a full implementation, the {} model would generate a response to: \"{}\"",
-                    self.model_name, prompt
-                ))
-            }
-            Model::Llama(_) => Err(Error::Model(
-                "Standard Llama inference not yet implemented".to_string(),
-            )),
-        }
     }
 }
 
 #[async_trait]
 impl Provider for LocalProvider {
-    async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
+    #[allow(clippy::significant_drop_tightening)]
+    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
         #[cfg(not(feature = "local"))]
         {
             return Err(Error::Config(
@@ -114,25 +74,86 @@ impl Provider for LocalProvider {
 
         #[cfg(feature = "local")]
         {
+            let prompt = messages
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let mut guard = self.inner.lock().unwrap();
+            let Inner { model_loader, .. } = &mut *guard;
+
             // Check if model is loaded
-            if !self.model_loader.is_loaded() {
+            if !model_loader.is_loaded() {
                 return Err(Error::Model(
                     "Model not loaded. Call initialize() first.".to_string(),
                 ));
             }
 
-            let prompt = _messages
-                .into_iter()
-                .map(|m| m.content)
-                .collect::<Vec<_>>()
-                .join("\n");
+            // Encode prompt - convert to i64 for tensor operations
+            let (mut ids, eos_token_id, _vocab_size) = {
+                let tokenizer = model_loader.tokenizer()?;
+                let encoding = tokenizer
+                    .encode(prompt.as_str(), true)
+                    .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
+                let ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
+                let vocab_size = tokenizer.get_vocab_size(false);
+                let eos_id = if vocab_size > 0 {
+                    i64::try_from(vocab_size - 1).unwrap_or(i64::MAX)
+                } else {
+                    0
+                };
+                (ids, eos_id, vocab_size)
+            };
 
-            // For now, return a simple response
-            // In a real implementation, we'd use Arc<Mutex> or similar for shared mutable access
-            Ok(format!(
-                "Local model '{}' would generate response to: {}",
-                self.model_name, prompt
-            ))
+            let device = model_loader.device().clone();
+            let max_tokens = 60;
+            let start_len = ids.len();
+
+            for _ in 0..max_tokens {
+                let input = Tensor::new(ids.as_slice(), &device)
+                    .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
+                    .unsqueeze(0)
+                    .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
+
+                let logits = match model_loader.get_model_mut().unwrap() {
+                    Model::Quantized(w) => w
+                        .forward(&input, ids.len() - 1)
+                        .map_err(|e| Error::Model(format!("Forward pass failed: {e}")))?,
+                    Model::Llama(_) => {
+                        return Err(Error::Model(
+                            "Standard Llama model not yet supported - use quantized models"
+                                .to_string(),
+                        ));
+                    }
+                };
+
+                let next = logits
+                    .squeeze(0)
+                    .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?
+                    .argmax(0)
+                    .map_err(|e| Error::Model(format!("Failed to argmax: {e}")))?
+                    .to_scalar::<i64>()
+                    .map_err(|e| Error::Model(format!("Failed to get scalar: {e}")))?;
+
+                ids.push(next);
+                if next == eos_token_id {
+                    break;
+                }
+            }
+
+            // Decode only the generated tokens
+            let generated_ids: Vec<u32> = ids[start_len..].iter().map(|&v| v as u32).collect();
+
+            // Get tokenizer again for decoding
+            let output = {
+                let tokenizer = model_loader.tokenizer()?;
+                tokenizer
+                    .decode(&generated_ids, true)
+                    .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?
+            };
+
+            Ok(output)
         }
     }
 

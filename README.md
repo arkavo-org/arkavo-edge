@@ -46,6 +46,12 @@ See the [Getting Started Guide](docs/GETTING_STARTED.md) for detailed instructio
 - Safe operations with automatic rollback
 - MCP tools for version control
 
+### 🏠 Local LLM Support (Experimental)
+- Run models locally with Candle ML framework
+- GGUF quantized model support
+- Metal acceleration on macOS (when compatible)
+- Privacy-first inference without external APIs
+
 ## MCP Server for Claude Code
 
 When downloaded to the project folder:

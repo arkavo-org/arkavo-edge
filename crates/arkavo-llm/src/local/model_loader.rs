@@ -3,6 +3,7 @@ use candle_core::{Device, Tensor};
 use candle_transformers::models::llama::{Config as LlamaConfig, Llama};
 use candle_transformers::models::quantized_llama::ModelWeights;
 use std::path::Path;
+use tokenizers::Tokenizer;
 
 pub enum Model {
     Llama(Llama),
@@ -16,6 +17,7 @@ pub struct ModelLoader {
     model: Option<Model>,
     config: Option<LlamaConfig>,
     tokenizer_path: Option<String>,
+    tokenizer: Option<Tokenizer>,
 }
 
 impl ModelLoader {
@@ -30,6 +32,7 @@ impl ModelLoader {
             model: None,
             config: None,
             tokenizer_path: None,
+            tokenizer: None,
         })
     }
 
@@ -71,11 +74,11 @@ impl ModelLoader {
         }
 
         tracing::info!(
-            "Loading model '{}' from {} on device {:?}",
+            "Loading model '{}' on device {:?}",
             self.model_name,
-            path,
             self.device
         );
+        tracing::debug!("Model path: {}", path);
 
         // Check if it's a GGUF file
         if path.ends_with(".gguf") || path.ends_with(".GGUF") {
@@ -99,8 +102,9 @@ impl ModelLoader {
 
     fn load_quantized_model(&mut self, path: &Path) -> Result<()> {
         use candle_core::quantized::gguf_file;
+        use std::io::Seek;
 
-        // Load GGUF file
+        // Load GGUF file - open once and clone for reuse
         let mut file = std::fs::File::open(path)
             .map_err(|e| Error::Model(format!("Failed to open model file: {e}")))?;
 
@@ -121,13 +125,12 @@ impl ModelLoader {
         // Extract config from model metadata first
         self.extract_config_from_gguf(&content);
 
-        // Create model weights from GGUF
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| Error::Model(format!("Failed to reopen model file: {e}")))?;
+        // Reset file position for weight loading
+        file.seek(std::io::SeekFrom::Start(0))
+            .map_err(|e| Error::Model(format!("Failed to seek in model file: {e}")))?;
 
-        let weights = ModelWeights::from_gguf(content, &mut file, &device).map_err(|e| {
-            Error::Model(format!("Failed to create model weights from GGUF: {e}"))
-        })?;
+        let weights = ModelWeights::from_gguf(content, &mut file, &device)
+            .map_err(|e| Error::Model(format!("Failed to create model weights from GGUF: {e}")))?;
 
         self.model = Some(Model::Quantized(weights));
         self.device = device; // Update device if it changed
@@ -140,6 +143,9 @@ impl ModelLoader {
         use candle_core::quantized::gguf_file::Value;
 
         let metadata = &content.metadata;
+
+        // Extract tokenizer data if available
+        self.extract_tokenizer_from_gguf(content);
 
         // Extract model parameters from metadata
         let hidden_size = metadata
@@ -228,6 +234,76 @@ impl ModelLoader {
         self.config = Some(config);
     }
 
+    fn extract_tokenizer_from_gguf(
+        &mut self,
+        content: &candle_core::quantized::gguf_file::Content,
+    ) {
+        use candle_core::quantized::gguf_file::Value;
+
+        let metadata = &content.metadata;
+
+        // Check if we have tokenizer model embedded in GGUF
+        // The tokenizer is often stored as an array of U8 values
+        if let Some(value) = metadata.get("tokenizer.ggml.model") {
+            match value {
+                Value::Array(values) => {
+                    // Extract bytes from array of U8 values
+                    let mut bytes = Vec::new();
+                    for val in values {
+                        if let Value::U8(byte) = val {
+                            bytes.push(*byte);
+                        }
+                    }
+
+                    if !bytes.is_empty() {
+                        let temp_dir = std::env::temp_dir();
+                        let tokenizer_path = temp_dir.join(format!("{}.spm", self.model_name));
+
+                        match std::fs::write(&tokenizer_path, &bytes) {
+                            Ok(_) => {
+                                // Try to load the tokenizer
+                                match Tokenizer::from_file(&tokenizer_path) {
+                                    Ok(tokenizer) => {
+                                        self.tokenizer = Some(tokenizer);
+                                        self.tokenizer_path =
+                                            Some(tokenizer_path.to_string_lossy().into_owned());
+                                        tracing::info!("Successfully loaded tokenizer from GGUF");
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to load tokenizer from GGUF: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to write tokenizer to temp file: {}", e);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    tracing::debug!("Tokenizer model in GGUF is not in expected array format");
+                }
+            }
+        } else if let Some(model_path) = &self.model_path {
+            // Fallback: look for tokenizer.model alongside the .gguf
+            let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
+            if tokenizer_path.exists() {
+                match Tokenizer::from_file(&tokenizer_path) {
+                    Ok(tokenizer) => {
+                        self.tokenizer = Some(tokenizer);
+                        self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
+                        tracing::info!("Loaded tokenizer from file: tokenizer.model");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load tokenizer from file: {}", e);
+                    }
+                }
+            } else {
+                tracing::debug!("No tokenizer.model found alongside GGUF file");
+            }
+        }
+    }
+
     pub fn create_tensor(&self, data: &[f32], shape: &[usize]) -> Result<Tensor> {
         Tensor::from_slice(data, shape, &self.device)
             .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))
@@ -262,5 +338,15 @@ impl ModelLoader {
 
     pub fn get_tokenizer_path(&self) -> Option<&str> {
         self.tokenizer_path.as_deref()
+    }
+
+    pub fn tokenizer(&self) -> Result<&Tokenizer> {
+        self.tokenizer
+            .as_ref()
+            .ok_or_else(|| Error::Model("Tokenizer not loaded".into()))
+    }
+
+    pub fn has_tokenizer(&self) -> bool {
+        self.tokenizer.is_some()
     }
 }

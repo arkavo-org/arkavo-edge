@@ -354,15 +354,17 @@ impl ProviderFactory for LocalProviderFactory {
             .map(std::string::ToString::to_string);
 
         // Create local provider
-        let mut provider = arkavo_llm::local::LocalProvider::new(model_name, model_path)?;
-        
+        let provider = arkavo_llm::local::LocalProvider::new(model_name, model_path)?;
+
         // Initialize the provider (load model)
         #[cfg(feature = "local")]
         {
-            provider.initialize().await
+            provider
+                .initialize()
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {}", e))?;
         }
-        
+
         Ok(Box::new(provider))
     }
 
