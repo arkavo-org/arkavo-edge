@@ -120,6 +120,18 @@ impl Provider for LocalProvider {
             const MAX_GENERATION_TOKENS: usize = 2048;
             let max_tokens = 60.min(MAX_GENERATION_TOKENS);
             let start_len = ids.len();
+            
+            // Check prompt length
+            const MAX_PROMPT_TOKENS: usize = 4096;
+            if ids.len() > MAX_PROMPT_TOKENS {
+                return Err(Error::Model(format!(
+                    "Prompt too long: {} tokens (max: {})",
+                    ids.len(),
+                    MAX_PROMPT_TOKENS
+                )));
+            }
+            
+            let start_time = std::time::Instant::now();
 
             // Reserve capacity for generated tokens
             ids.reserve(max_tokens);
@@ -183,6 +195,24 @@ impl Provider for LocalProvider {
             let output = tokenizer
                 .decode(&generated_ids, true)
                 .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?;
+            
+            // Log generation metrics
+            let generation_time = start_time.elapsed();
+            let tokens_generated = ids.len() - start_len;
+            let device_name = {
+                let guard = self.inner.lock().await;
+                format!("{:?}", guard.model_loader.device())
+            };
+            
+            tracing::info!(
+                model = %self.model_name,
+                device = %device_name,
+                prompt_tokens = %start_len,
+                generated_tokens = %tokens_generated,
+                generation_ms = %generation_time.as_millis(),
+                tokens_per_second = %(tokens_generated as f64 / generation_time.as_secs_f64()),
+                "Local generation completed"
+            );
 
             Ok(output)
         }
