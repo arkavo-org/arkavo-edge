@@ -16,6 +16,7 @@ default = ["memory", "mdns"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]
+local = ["arkavo-cli/local"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
