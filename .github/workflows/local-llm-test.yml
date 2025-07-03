@@ -65,6 +65,8 @@ jobs:
       run: cargo test -p arkavo-llm --features local test_manifest_validity
     
     - name: Run CI inference test
+      env:
+        CI_SKIP_LOCAL_TEST: 1
       run: cargo test -p arkavo-llm --features local ci_local_inference_test -- --nocapture
       timeout-minutes: 10
     

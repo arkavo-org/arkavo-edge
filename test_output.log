@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/arkavo chat --model gemma3n-e2b-it --prompt 'Say hello'`
+tab 1 of window id 14026
