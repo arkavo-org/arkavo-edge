@@ -53,8 +53,17 @@ impl ModelDownloader {
     /// Create a new downloader with default cache directory
     pub fn new() -> Result<Self> {
         let cache_dir = Self::default_cache_dir()?;
-        let api =
-            Api::new().map_err(|e| Error::Model(format!("Failed to create HF API client: {e}")))?;
+        
+        // Create API - it will use HF_TOKEN env var automatically
+        let api = Api::new()
+            .map_err(|e| Error::Model(format!("Failed to create HF API client: {e}")))?;
+        
+        // Check if token is available
+        if std::env::var("HF_TOKEN").is_ok() || std::env::var("HUGGING_FACE_HUB_TOKEN").is_ok() {
+            tracing::info!("HuggingFace token found in environment");
+        } else {
+            tracing::info!("No HuggingFace token found, using anonymous access");
+        }
 
         Ok(Self { cache_dir, api })
     }
