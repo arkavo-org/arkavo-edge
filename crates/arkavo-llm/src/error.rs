@@ -25,6 +25,9 @@ pub enum Error {
 
     #[error("Invalid image path: {0}")]
     InvalidImagePath(String),
+
+    #[error("Model error: {0}")]
+    Model(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -19,6 +19,28 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "test" => commands::test::execute(&args[1..]),
         "ui" => commands::ui::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
+        "model" => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async {
+                use clap::Parser;
+
+                #[derive(Parser)]
+                #[command(name = "model")]
+                #[command(about = "Manage local LLM models")]
+                struct Cli {
+                    #[command(flatten)]
+                    command: commands::model::ModelCommand,
+                }
+
+                let cli = Cli::parse_from(
+                    std::iter::once("model")
+                        .chain(args[1..].iter().map(std::string::String::as_str)),
+                );
+                commands::model::run(&cli.command)
+                    .await
+                    .map_err(std::convert::Into::into)
+            })
+        }
         "dataflow" | "flow" => {
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async {
@@ -80,6 +102,7 @@ fn print_usage() {
     println!("    test      Run intelligent tests (use --help for modes)");
     println!("    ui        Launch web UI for agent orchestration");
     println!("    vault     Import/export notes to Edge Vault");
+    println!("    model     Manage local LLM models (list, download, switch, add)");
     println!("    dataflow  Manage dataflow pipelines (export/import blueprints)");
     println!("    serve     Run as MCP server for AI tools integration");
     println!("    help      Print this help message");
