@@ -1,7 +1,7 @@
 use tokenizers::Tokenizer;
 
 /// Extract EOS token ID from tokenizer
-/// 
+///
 /// Tries multiple methods to find the EOS token:
 /// 1. Check for explicit EOS token in tokenizer
 /// 2. Look for common EOS token strings
@@ -11,7 +11,7 @@ pub fn get_eos_token_id(tokenizer: &Tokenizer) -> Option<u32> {
     if let Some(eos_id) = tokenizer.token_to_id("</s>") {
         return Some(eos_id);
     }
-    
+
     // Try common EOS token variations
     let eos_variants = ["<|endoftext|>", "<|end|>", "<eos>", "[EOS]", "<|im_end|>"];
     for variant in &eos_variants {
@@ -19,7 +19,7 @@ pub fn get_eos_token_id(tokenizer: &Tokenizer) -> Option<u32> {
             return Some(id);
         }
     }
-    
+
     // Check if tokenizer has get_vocab method
     let vocab_size = tokenizer.get_vocab_size(false);
     if vocab_size > 0 {
@@ -36,14 +36,20 @@ pub fn get_bos_token_id(tokenizer: &Tokenizer) -> Option<u32> {
     if let Some(bos_id) = tokenizer.token_to_id("<s>") {
         return Some(bos_id);
     }
-    
-    let bos_variants = ["<|startoftext|>", "<|begin|>", "<bos>", "[BOS]", "<|im_start|>"];
+
+    let bos_variants = [
+        "<|startoftext|>",
+        "<|begin|>",
+        "<bos>",
+        "[BOS]",
+        "<|im_start|>",
+    ];
     for variant in &bos_variants {
         if let Some(id) = tokenizer.token_to_id(variant) {
             return Some(id);
         }
     }
-    
+
     // BOS is often token ID 1
     Some(1)
 }

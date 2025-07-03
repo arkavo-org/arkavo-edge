@@ -23,8 +23,8 @@ enum ModelSubcommand {
 
     /// Download a model from the registry
     Download {
-        /// Name of the model to download
-        name: String,
+        /// Name of the model to download (defaults to gemma3n-e2b-it)
+        name: Option<String>,
     },
 
     /// Add a local model file
@@ -227,20 +227,23 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             {
                 use arkavo_llm::local::{ModelDownloader, ModelManifest};
 
+                // Default to gemma3n-e2b-it if no name provided
+                let model_name = name.as_deref().unwrap_or("gemma3n-e2b-it");
+
                 // Load model manifest
                 let manifest = ModelManifest::load()?;
 
                 // Find the model spec
-                let spec = manifest
-                    .find(name)
-                    .ok_or_else(|| anyhow::anyhow!("Model '{}' not found in manifest", name))?;
+                let spec = manifest.find(model_name).ok_or_else(|| {
+                    anyhow::anyhow!("Model '{}' not found in manifest", model_name)
+                })?;
 
                 // Create downloader
                 let downloader = ModelDownloader::new()?;
 
                 // Check if already downloaded
                 if downloader.is_downloaded(spec) {
-                    println!("Model '{}' is already downloaded", name);
+                    println!("Model '{}' is already downloaded", model_name);
 
                     // Update registry to ensure it's recorded
                     let model_path = downloader.get_model_path(spec);
@@ -261,12 +264,12 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                         registry.save_to_storage(&storage).await?;
                     }
                 } else {
-                    println!("Downloading model '{}'...", name);
+                    println!("Downloading model '{}'...", model_name);
 
                     // Download the model
                     let model_path = downloader.download(spec).await?;
 
-                    println!("Successfully downloaded model '{}'", name);
+                    println!("Successfully downloaded model '{}'", model_name);
 
                     // Add to registry
                     let model = ModelMeta {
