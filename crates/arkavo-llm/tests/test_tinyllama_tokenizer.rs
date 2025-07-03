@@ -40,7 +40,10 @@ async fn test_tinyllama_has_embedded_tokenizer() -> anyhow::Result<()> {
     }];
 
     let reply = provider.complete(messages).await?;
-    assert!(!reply.trim().is_empty(), "Model should return non-empty response");
+    assert!(
+        !reply.trim().is_empty(),
+        "Model should return non-empty response"
+    );
     eprintln!("✓ Model response: {}", reply.trim());
 
     Ok(())

@@ -241,37 +241,19 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 // Create downloader
                 let downloader = ModelDownloader::new()?;
 
-                // Check if already downloaded
-                if downloader.is_downloaded(spec) {
-                    println!("Model '{}' is already downloaded", model_name);
+                println!("Downloading model '{}'...", model_name);
 
-                    // Update registry to ensure it's recorded
-                    let model_path = downloader.get_model_path(spec);
-                    let model = ModelMeta {
-                        name: spec.name.clone(),
-                        format: ModelFormat::Gguf,
-                        context_length: spec.context_length,
-                        hf_repo_id: Some(spec.hf_repo_id.clone()),
-                        sha256: spec.sha256.clone(),
-                        size_gb: spec.size_gb,
-                        local_path: Some(model_path),
-                        is_active: registry.models.is_empty(),
-                    };
+                // Download the model (or get from cache if already downloaded)
+                let model_path = downloader.download(spec).await?;
 
-                    // Check if already in registry
-                    if !registry.models.iter().any(|m| m.name == spec.name) {
-                        registry.models.push(model);
-                        registry.save_to_storage(&storage).await?;
-                    }
+                println!("Model '{}' ready at: {:?}", model_name, model_path);
+
+                // Check if already in registry and update or add
+                if let Some(existing) = registry.models.iter_mut().find(|m| m.name == spec.name) {
+                    // Update existing entry
+                    existing.local_path = Some(model_path);
                 } else {
-                    println!("Downloading model '{}'...", model_name);
-
-                    // Download the model
-                    let model_path = downloader.download(spec).await?;
-
-                    println!("Successfully downloaded model '{}'", model_name);
-
-                    // Add to registry
+                    // Add new entry
                     let model = ModelMeta {
                         name: spec.name.clone(),
                         format: ModelFormat::Gguf,
@@ -282,10 +264,10 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                         local_path: Some(model_path),
                         is_active: registry.models.is_empty(),
                     };
-
                     registry.models.push(model);
-                    registry.save_to_storage(&storage).await?;
                 }
+
+                registry.save_to_storage(&storage).await?;
             }
         }
 

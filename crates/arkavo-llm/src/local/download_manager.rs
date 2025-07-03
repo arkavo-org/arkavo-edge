@@ -1,11 +1,9 @@
 use crate::{Error, Result};
 use hf_hub::api::tokio::Api;
-use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncWriteExt;
 
 /// Model specification from models.toml
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,183 +43,73 @@ impl ModelManifest {
 
 /// Model downloader with progress and verification
 pub struct ModelDownloader {
-    cache_dir: PathBuf,
     api: Api,
 }
 
 impl ModelDownloader {
-    /// Create a new downloader with default cache directory
+    /// Create a new downloader
     pub fn new() -> Result<Self> {
-        let cache_dir = Self::default_cache_dir()?;
-        
-        // Create API - it will use HF_TOKEN env var automatically
-        let api = Api::new()
-            .map_err(|e| Error::Model(format!("Failed to create HF API client: {e}")))?;
-        
-        // Check if token is available
-        if std::env::var("HF_TOKEN").is_ok() || std::env::var("HUGGING_FACE_HUB_TOKEN").is_ok() {
-            tracing::info!("HuggingFace token found in environment");
+        // Create API builder
+        let mut api_builder = hf_hub::api::tokio::ApiBuilder::new();
+
+        // Set token if available from various sources
+        let token = std::env::var("HF_TOKEN")
+            .or_else(|_| std::env::var("HUGGING_FACE_HUB_TOKEN"))
+            .ok();
+
+        if let Some(ref token) = token {
+            api_builder = api_builder.with_token(Some(token.clone()));
+            tracing::info!("HuggingFace token configured");
         } else {
             tracing::info!("No HuggingFace token found, using anonymous access");
         }
 
-        Ok(Self { cache_dir, api })
+        // Build the API
+        let api = api_builder
+            .build()
+            .map_err(|e| Error::Model(format!("Failed to create HF API client: {e}")))?;
+
+        Ok(Self { api })
     }
 
-    /// Get the default cache directory (~/.cache/arkavo/models)
-    fn default_cache_dir() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| Error::Config("Could not determine home directory".to_string()))?;
-        let cache_dir = home.join(".cache").join("arkavo").join("models");
-        Ok(cache_dir)
-    }
-
-    /// Get the path where a model would be stored
-    pub fn get_model_path(&self, spec: &ModelSpec) -> PathBuf {
-        self.cache_dir.join(&spec.hf_filename)
-    }
-
-    /// Check if a model is already downloaded and verified
-    pub fn is_downloaded(&self, spec: &ModelSpec) -> bool {
-        let model_path = self.get_model_path(spec);
-        if !model_path.exists() {
-            return false;
-        }
-
-        // Verify checksum
-        self.verify_checksum(&model_path, &spec.sha256)
-            .unwrap_or_default()
-    }
-
-    /// Download a model with progress and verification
-    /// Download a model with progress and verification
-    ///
-    /// # Panics
-    ///
-    /// Panics if the progress bar template is invalid (should never happen with hardcoded template)
-    pub async fn download(&self, spec: &ModelSpec) -> Result<PathBuf> {
-        let model_path = self.get_model_path(spec);
-
-        // Check if already downloaded
-        if self.is_downloaded(spec) {
-            tracing::info!("Model {} already downloaded and verified", spec.name);
-            return Ok(model_path);
-        }
-
-        // Ensure cache directory exists
-        fs::create_dir_all(&self.cache_dir).map_err(Error::Io)?;
-
-        // Set up progress bar
-        let pb = ProgressBar::new((spec.size_gb * 1024.0 * 1024.0 * 1024.0) as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-        pb.set_message(format!("Downloading {}", spec.name));
-
-        // Download to temporary file
-        let temp_path = self.cache_dir.join(format!("{}.partial", spec.hf_filename));
-
-        // Download using async API
+    /// Get the path where a model is stored in HuggingFace cache
+    pub async fn get_model_path(&self, spec: &ModelSpec) -> Result<PathBuf> {
+        // Try to get the model from cache without downloading
         let repo = self.api.model(spec.hf_repo_id.clone());
-
-        // Create temp file for writing
-        let mut file = tokio::fs::File::create(&temp_path)
-            .await
-            .map_err(Error::Io)?;
-
-        // Set up cleanup guard
-        let guard = PartialFileGuard::new(temp_path.clone());
-
-        // Download the file using HF API
-        let download_url = repo.url(&spec.hf_filename);
-        tracing::info!("Download URL: {}", download_url);
-        
-        // Create a client with the token if available
-        let client = reqwest::Client::new();
-        let mut request = client.get(&download_url);
-        
-        // Add authorization header if token is available
-        if let Ok(token) = std::env::var("HF_TOKEN") {
-            request = request.header("Authorization", format!("Bearer {}", token));
-            tracing::debug!("Added HF token to download request");
-        } else if let Ok(token_data) = std::fs::read_to_string(
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".cache/huggingface/token")
-        ) {
-            if let Ok(token_json) = serde_json::from_str::<serde_json::Value>(&token_data) {
-                if let Some(token) = token_json.get("token").and_then(|t| t.as_str()) {
-                    request = request.header("Authorization", format!("Bearer {}", token));
-                    tracing::debug!("Added HF token from cache to download request");
-                }
+        match repo.get(&spec.hf_filename).await {
+            Ok(path) => Ok(path),
+            Err(_) => {
+                // Model not in cache, need to download
+                self.download(spec).await
             }
         }
+    }
 
-        let response = request
-            .send()
+    /// Download a model with progress and verification
+    pub async fn download(&self, spec: &ModelSpec) -> Result<PathBuf> {
+        tracing::info!(
+            "Downloading '{}' from repo '{}'...",
+            spec.hf_filename,
+            spec.hf_repo_id
+        );
+
+        // Use the hf-hub crate's built-in download method
+        // This handles LFS, caching, and authentication automatically
+        let repo = self.api.model(spec.hf_repo_id.clone());
+        let hf_cache_path = repo
+            .get(&spec.hf_filename)
             .await
-            .map_err(|e| Error::Model(format!("Failed to start download: {e}")))?;
+            .map_err(|e| Error::Model(format!("Failed to download model: {e}")))?;
 
-        if !response.status().is_success() {
-            return Err(Error::Model(format!(
-                "Download failed with status: {}",
-                response.status()
-            )));
+        // Verify the downloaded file's checksum
+        if !self.verify_checksum(&hf_cache_path, &spec.sha256)? {
+            return Err(Error::Model(
+                "SHA256 mismatch for downloaded file".to_string(),
+            ));
         }
 
-        // Set up SHA256 hasher
-        let mut hasher = Sha256::new();
-        let mut bytes_written = 0u64;
-
-        // Stream the download
-        let mut stream = response.bytes_stream();
-        use futures::StreamExt;
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| Error::Model(format!("Download chunk failed: {e}")))?;
-
-            // Update progress
-            bytes_written += chunk.len() as u64;
-            pb.set_position(bytes_written);
-
-            // Update hash
-            hasher.update(&chunk);
-
-            // Write to file
-            file.write_all(&chunk).await.map_err(Error::Io)?;
-        }
-
-        // Finalize the file
-        file.flush().await.map_err(Error::Io)?;
-        drop(file);
-
-        // Verify checksum
-        let computed_hash = format!("{:x}", hasher.finalize());
-        if computed_hash != spec.sha256 {
-            return Err(Error::Model(format!(
-                "SHA256 mismatch: expected {}, got {}",
-                spec.sha256, computed_hash
-            )));
-        }
-
-        pb.finish_with_message("Download complete");
-
-        // Disarm the cleanup guard since download succeeded
-        guard.disarm();
-
-        // Atomic rename to final location
-        fs::rename(&temp_path, &model_path).map_err(Error::Io)?;
-
-        // Write Notice.txt for Gemma models
-        if spec.license == "gemma" {
-            self.write_gemma_notice(&spec)?;
-        }
-
-        tracing::info!("Successfully downloaded and verified {}", spec.name);
-        Ok(model_path)
+        tracing::info!("Model {} successfully downloaded and verified", spec.name);
+        Ok(hf_cache_path)
     }
 
     /// Verify SHA256 checksum of a file
@@ -232,56 +120,5 @@ impl ModelDownloader {
 
         let computed = format!("{:x}", hasher.finalize());
         Ok(computed == expected)
-    }
-
-    /// Write Notice.txt for Gemma models
-    fn write_gemma_notice(&self, spec: &ModelSpec) -> Result<()> {
-        let notice_path = self
-            .cache_dir
-            .join(format!("{}.Notice.txt", spec.hf_filename));
-        let notice_content = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../THIRD-PARTY-LICENSES.md"
-        ));
-
-        // Extract Gemma section from THIRD-PARTY-LICENSES.md
-        let gemma_section = notice_content
-            .split("## Gemma")
-            .nth(1)
-            .and_then(|s| s.split("##").next())
-            .unwrap_or(
-                "See https://www.kaggle.com/models/google/gemma/license/consent for license terms.",
-            );
-
-        fs::write(
-            &notice_path,
-            format!("Gemma Model License\n\n{}", gemma_section.trim()),
-        )
-        .map_err(Error::Io)?;
-
-        Ok(())
-    }
-}
-
-/// Cleanup guard to remove partial files on drop
-pub struct PartialFileGuard {
-    path: Option<PathBuf>,
-}
-
-impl PartialFileGuard {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path: Some(path) }
-    }
-
-    pub fn disarm(mut self) {
-        self.path = None;
-    }
-}
-
-impl Drop for PartialFileGuard {
-    fn drop(&mut self) {
-        if let Some(path) = &self.path {
-            let _ = fs::remove_file(path);
-        }
     }
 }

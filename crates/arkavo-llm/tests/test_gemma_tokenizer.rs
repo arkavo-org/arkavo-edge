@@ -15,7 +15,7 @@ async fn test_gemma_without_tokenizer() -> anyhow::Result<()> {
 
     let model_path = PathBuf::from(std::env::var("HOME").unwrap())
         .join(".cache/arkavo/models/gemma-3n-E2B-it-Q4_K_M.gguf");
-    
+
     if !model_path.exists() {
         eprintln!("Gemma model not found at {:?}, skipping test", model_path);
         return Ok(());
@@ -31,7 +31,7 @@ async fn test_gemma_without_tokenizer() -> anyhow::Result<()> {
     match provider.initialize().await {
         Ok(()) => {
             eprintln!("✓ Gemma initialized successfully");
-            
+
             // Try inference
             let messages = vec![Message {
                 role: Role::User,

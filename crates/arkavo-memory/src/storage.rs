@@ -177,14 +177,20 @@ impl MemoryStorage {
 
             let id = Uuid::parse_str(&id_str)
                 .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?;
-            let embedding: Vec<f32> = bytemuck::cast_slice(&embedding_blob).to_vec();
+            let embedding: Vec<f32> = embedding_blob
+                .chunks_exact(4)
+                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                .collect();
 
-            embeddings.insert(id, embedding.clone());
-            id_mapping.insert(idx, id);
+            // Skip empty embeddings (e.g., from config entries)
+            if !embedding.is_empty() {
+                embeddings.insert(id, embedding.clone());
+                id_mapping.insert(idx, id);
 
-            let mut point_data = Vec::with_capacity(embedding.len());
-            point_data.extend_from_slice(&embedding);
-            index.insert((&point_data, idx));
+                let mut point_data = Vec::with_capacity(embedding.len());
+                point_data.extend_from_slice(&embedding);
+                index.insert((&point_data, idx));
+            }
         }
 
         Ok(())
@@ -197,7 +203,11 @@ impl MemoryStorage {
 
     pub async fn store(&self, memory: Memory) -> Result<()> {
         let id_str = memory.id.to_string();
-        let embedding_blob: Vec<u8> = bytemuck::cast_slice(&memory.embedding).to_vec();
+        let embedding_blob: Vec<u8> = memory
+            .embedding
+            .iter()
+            .flat_map(|&f| f.to_le_bytes())
+            .collect();
         let metadata_json = memory
             .metadata
             .as_ref()
@@ -220,23 +230,26 @@ impl MemoryStorage {
         .execute(&self.pool)
         .await?;
 
-        let next_idx = self.get_next_index();
+        // Only update indexes if embedding is not empty
+        if !memory.embedding.is_empty() {
+            let next_idx = self.get_next_index();
 
-        {
-            let mut embeddings = self.embeddings.write().unwrap();
-            embeddings.insert(memory.id, memory.embedding.clone());
-        }
+            {
+                let mut embeddings = self.embeddings.write().unwrap();
+                embeddings.insert(memory.id, memory.embedding.clone());
+            }
 
-        {
-            let mut id_mapping = self.id_mapping.write().unwrap();
-            id_mapping.insert(next_idx, memory.id);
-        }
+            {
+                let mut id_mapping = self.id_mapping.write().unwrap();
+                id_mapping.insert(next_idx, memory.id);
+            }
 
-        {
-            let index = self.index.write().unwrap();
-            let mut point_data = Vec::with_capacity(memory.embedding.len());
-            point_data.extend_from_slice(&memory.embedding);
-            index.insert((&point_data, next_idx));
+            {
+                let index = self.index.write().unwrap();
+                let mut point_data = Vec::with_capacity(memory.embedding.len());
+                point_data.extend_from_slice(&memory.embedding);
+                index.insert((&point_data, next_idx));
+            }
         }
 
         Ok(())
@@ -354,7 +367,11 @@ impl MemoryStorage {
         for row in rows {
             if let Some(category) = row.category {
                 // Convert binary blob to f32 vector
-                let mem_embedding: Vec<f32> = bytemuck::cast_slice(&row.embedding_blob).to_vec();
+                let mem_embedding: Vec<f32> = row
+                    .embedding_blob
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect();
                 let score = EmbeddingService::cosine_similarity(&embedding, &mem_embedding);
 
                 if score > best_score {
