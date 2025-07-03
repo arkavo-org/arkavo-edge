@@ -9,7 +9,10 @@ use super::model_loader::{Model, ModelLoader};
 use candle_core::Tensor;
 
 #[cfg(feature = "local")]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[cfg(feature = "local")]
+use tokio::sync::Mutex;
 
 #[cfg(feature = "local")]
 struct Inner {
@@ -51,11 +54,10 @@ impl LocalProvider {
     }
 
     #[cfg(feature = "local")]
-    #[allow(clippy::unused_async)]
     #[allow(clippy::missing_panics_doc)]
     #[allow(clippy::significant_drop_tightening)]
     pub async fn initialize(&self) -> Result<()> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = self.inner.lock().await;
         guard.model_loader.load_model()?;
         Ok(())
     }
@@ -80,35 +82,53 @@ impl Provider for LocalProvider {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let mut guard = self.inner.lock().unwrap();
-            let Inner { model_loader, .. } = &mut *guard;
+            // First, get tokenizer and encode the prompt (clone tokenizer for safety)
+            let (mut ids, eos_token_id, tokenizer) = {
+                let guard = self.inner.lock().await;
 
-            // Check if model is loaded
-            if !model_loader.is_loaded() {
-                return Err(Error::Model(
-                    "Model not loaded. Call initialize() first.".to_string(),
-                ));
-            }
+                // Check if model is loaded
+                if !guard.model_loader.is_loaded() {
+                    return Err(Error::Model(
+                        "Model not loaded. Call initialize() first.".to_string(),
+                    ));
+                }
 
-            // Encode prompt - convert to i64 for tensor operations
-            let (mut ids, eos_token_id, _vocab_size) = {
-                let tokenizer = model_loader.tokenizer()?;
+                let tokenizer = guard.model_loader.tokenizer()?;
                 let encoding = tokenizer
                     .encode(prompt.as_str(), true)
                     .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
                 let ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
-                let vocab_size = tokenizer.get_vocab_size(false);
-                let eos_id = if vocab_size > 0 {
-                    i64::try_from(vocab_size - 1).unwrap_or(i64::MAX)
-                } else {
-                    0
-                };
-                (ids, eos_id, vocab_size)
+
+                // Get EOS token from metadata or fallback to vocab_size - 1
+                let eos_id = guard
+                    .model_loader
+                    .eos_token_id()
+                    .map(|id| id as i64)
+                    .unwrap_or_else(|| {
+                        let vocab_size = tokenizer.get_vocab_size(false);
+                        if vocab_size > 0 {
+                            i64::try_from(vocab_size - 1).unwrap_or(i64::MAX)
+                        } else {
+                            0
+                        }
+                    });
+
+                (ids, eos_id, tokenizer)
             };
 
-            let device = model_loader.device().clone();
-            let max_tokens = 60;
+            // Add max_tokens limit with reasonable default
+            const MAX_GENERATION_TOKENS: usize = 2048;
+            let max_tokens = 60.min(MAX_GENERATION_TOKENS);
             let start_len = ids.len();
+
+            // Reserve capacity for generated tokens
+            ids.reserve(max_tokens);
+
+            // Get device from model loader
+            let device = {
+                let guard = self.inner.lock().await;
+                guard.model_loader.device().clone()
+            };
 
             for _ in 0..max_tokens {
                 let input = Tensor::new(ids.as_slice(), &device)
@@ -116,25 +136,39 @@ impl Provider for LocalProvider {
                     .unsqueeze(0)
                     .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
 
-                let logits = match model_loader.get_model_mut().unwrap() {
-                    Model::Quantized(w) => w
-                        .forward(&input, ids.len() - 1)
-                        .map_err(|e| Error::Model(format!("Forward pass failed: {e}")))?,
-                    Model::Llama(_) => {
-                        return Err(Error::Model(
-                            "Standard Llama model not yet supported - use quantized models"
-                                .to_string(),
-                        ));
-                    }
-                };
+                // Lock for forward pass
+                let next = {
+                    let mut guard = self.inner.lock().await;
+                    let seq_len = ids.len();
 
-                let next = logits
-                    .squeeze(0)
-                    .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?
-                    .argmax(0)
-                    .map_err(|e| Error::Model(format!("Failed to argmax: {e}")))?
-                    .to_scalar::<i64>()
-                    .map_err(|e| Error::Model(format!("Failed to get scalar: {e}")))?;
+                    // Check model type first
+                    let is_quantized =
+                        matches!(guard.model_loader.get_model(), Some(Model::Quantized(_)));
+
+                    let logits = if is_quantized {
+                        // Simple path for quantized models
+                        match guard.model_loader.get_model_mut() {
+                            Some(Model::Quantized(w)) => w
+                                .forward(&input, seq_len - 1)
+                                .map_err(|e| Error::Model(format!("Forward pass failed: {e}")))?,
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        // Non-quantized models require proper cache management
+                        // TODO: Implement with worker task pattern to avoid borrow checker issues
+                        return Err(Error::Model(
+                            "Standard Llama models not yet supported - use quantized models (.gguf) for now".to_string()
+                        ));
+                    };
+
+                    logits
+                        .squeeze(0)
+                        .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?
+                        .argmax(0)
+                        .map_err(|e| Error::Model(format!("Failed to argmax: {e}")))?
+                        .to_scalar::<i64>()
+                        .map_err(|e| Error::Model(format!("Failed to get scalar: {e}")))?
+                };
 
                 ids.push(next);
                 if next == eos_token_id {
@@ -145,13 +179,10 @@ impl Provider for LocalProvider {
             // Decode only the generated tokens
             let generated_ids: Vec<u32> = ids[start_len..].iter().map(|&v| v as u32).collect();
 
-            // Get tokenizer again for decoding
-            let output = {
-                let tokenizer = model_loader.tokenizer()?;
-                tokenizer
-                    .decode(&generated_ids, true)
-                    .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?
-            };
+            // Use cloned tokenizer for decoding
+            let output = tokenizer
+                .decode(&generated_ids, true)
+                .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?;
 
             Ok(output)
         }

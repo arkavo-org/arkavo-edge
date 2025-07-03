@@ -3,6 +3,7 @@ use candle_core::{Device, Tensor};
 use candle_transformers::models::llama::{Config as LlamaConfig, Llama};
 use candle_transformers::models::quantized_llama::ModelWeights;
 use std::path::Path;
+use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 pub enum Model {
@@ -17,7 +18,8 @@ pub struct ModelLoader {
     model: Option<Model>,
     config: Option<LlamaConfig>,
     tokenizer_path: Option<String>,
-    tokenizer: Option<Tokenizer>,
+    tokenizer: Option<Arc<Tokenizer>>,
+    eos_token_id: Option<u32>,
 }
 
 impl ModelLoader {
@@ -33,6 +35,7 @@ impl ModelLoader {
             config: None,
             tokenizer_path: None,
             tokenizer: None,
+            eos_token_id: None,
         })
     }
 
@@ -123,7 +126,11 @@ impl ModelLoader {
         }
 
         // Extract config from model metadata first
-        self.extract_config_from_gguf(&content);
+        let eos_token_id = self.extract_config_from_gguf(&content);
+        if let Some(eos_id) = eos_token_id {
+            self.eos_token_id = Some(eos_id);
+            tracing::debug!("Found EOS token ID in GGUF metadata: {}", eos_id);
+        }
 
         // Reset file position for weight loading
         file.seek(std::io::SeekFrom::Start(0))
@@ -139,7 +146,10 @@ impl ModelLoader {
         Ok(())
     }
 
-    fn extract_config_from_gguf(&mut self, content: &candle_core::quantized::gguf_file::Content) {
+    fn extract_config_from_gguf(
+        &mut self,
+        content: &candle_core::quantized::gguf_file::Content,
+    ) -> Option<u32> {
         use candle_core::quantized::gguf_file::Value;
 
         let metadata = &content.metadata;
@@ -232,6 +242,35 @@ impl ModelLoader {
         };
 
         self.config = Some(config);
+
+        // Try to find EOS token ID from metadata
+        metadata
+            .get("tokenizer.ggml.eos_token_id")
+            .and_then(|v| {
+                if let Value::U32(id) = v {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                // Fallback: look for EOS in token types
+                if let Some(Value::Array(token_types)) = metadata.get("tokenizer.ggml.token_type") {
+                    // EOS token type is typically 3
+                    token_types
+                        .iter()
+                        .position(|v| {
+                            if let Value::U32(token_type) = v {
+                                *token_type == 3
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|pos| pos as u32)
+                } else {
+                    None
+                }
+            })
     }
 
     fn extract_tokenizer_from_gguf(
@@ -264,7 +303,7 @@ impl ModelLoader {
                                 // Try to load the tokenizer
                                 match Tokenizer::from_file(&tokenizer_path) {
                                     Ok(tokenizer) => {
-                                        self.tokenizer = Some(tokenizer);
+                                        self.tokenizer = Some(Arc::new(tokenizer));
                                         self.tokenizer_path =
                                             Some(tokenizer_path.to_string_lossy().into_owned());
                                         tracing::info!("Successfully loaded tokenizer from GGUF");
@@ -290,7 +329,7 @@ impl ModelLoader {
             if tokenizer_path.exists() {
                 match Tokenizer::from_file(&tokenizer_path) {
                     Ok(tokenizer) => {
-                        self.tokenizer = Some(tokenizer);
+                        self.tokenizer = Some(Arc::new(tokenizer));
                         self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
                         tracing::info!("Loaded tokenizer from file: tokenizer.model");
                     }
@@ -340,13 +379,17 @@ impl ModelLoader {
         self.tokenizer_path.as_deref()
     }
 
-    pub fn tokenizer(&self) -> Result<&Tokenizer> {
+    pub fn tokenizer(&self) -> Result<Arc<Tokenizer>> {
         self.tokenizer
-            .as_ref()
+            .clone()
             .ok_or_else(|| Error::Model("Tokenizer not loaded".into()))
     }
 
     pub fn has_tokenizer(&self) -> bool {
         self.tokenizer.is_some()
+    }
+
+    pub fn eos_token_id(&self) -> Option<u32> {
+        self.eos_token_id
     }
 }
