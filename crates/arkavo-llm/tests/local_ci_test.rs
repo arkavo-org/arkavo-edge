@@ -3,13 +3,15 @@
 use arkavo_llm::local::{LocalProvider, ModelDownloader, ModelManifest};
 use arkavo_llm::{Message, Provider, Role};
 
-/// CI smoke test that downloads TinyLlama if needed and runs inference
+/// CI smoke test that downloads gemma3n-e2b-it if needed and runs inference
 ///
 /// This test is designed to run in CI environments and will:
-/// 1. Download TinyLlama model if not already cached
+/// 1. Download gemma3n-e2b-it model if not already cached
 /// 2. Verify the download with SHA-256
 /// 3. Run a simple inference test
 ///
+/// Note: Many GGUF models from unsloth don't include embedded tokenizers,
+/// so this test will gracefully skip if tokenizer loading fails.
 /// Set CI_SKIP_LOCAL_TEST=1 to skip this test in CI
 #[tokio::test]
 async fn ci_local_inference_test() -> anyhow::Result<()> {
@@ -19,19 +21,19 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Load manifest and find TinyLlama
+    // Load manifest and find gemma3n-e2b-it
     let manifest = ModelManifest::load()?;
     let spec = manifest
-        .find("tinyllama-1b-chat")
-        .ok_or_else(|| anyhow::anyhow!("TinyLlama not found in manifest"))?;
+        .find("gemma3n-e2b-it")
+        .ok_or_else(|| anyhow::anyhow!("gemma3n-e2b-it not found in manifest"))?;
 
     // Create downloader and ensure model is available
     let downloader = ModelDownloader::new()?;
     let model_path = if downloader.is_downloaded(spec) {
-        eprintln!("Using cached TinyLlama model");
+        eprintln!("Using cached gemma3n-e2b-it model");
         downloader.get_model_path(spec)
     } else {
-        eprintln!("Downloading TinyLlama model for CI test...");
+        eprintln!("Downloading gemma3n-e2b-it model for CI test...");
         downloader.download(spec).await?
     };
 
@@ -44,7 +46,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
 
     // Create and initialize provider
     let provider = LocalProvider::new(
-        "tinyllama".to_string(),
+        "gemma3n-e2b-it".to_string(),
         Some(model_path.to_string_lossy().into_owned()),
     )?;
 
@@ -99,10 +101,10 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
 fn test_manifest_validity() -> anyhow::Result<()> {
     let manifest = ModelManifest::load()?;
 
-    // Verify TinyLlama is present (required for CI)
+    // Verify gemma3n-e2b-it is present (required for CI)
     assert!(
-        manifest.find("tinyllama-1b-chat").is_some(),
-        "TinyLlama must be in manifest for CI tests"
+        manifest.find("gemma3n-e2b-it").is_some(),
+        "gemma3n-e2b-it must be in manifest for CI tests"
     );
 
     // Verify all models have valid checksums (64 char hex)

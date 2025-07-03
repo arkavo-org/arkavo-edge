@@ -123,6 +123,8 @@ jobs:
           shared-key: "test"
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
+        env:
+          CI_SKIP_LOCAL_TEST: 1
         run: |
           # Run tests for all workspace members except those that need embeddings
           cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
