@@ -252,6 +252,7 @@ dependencies = [
 name = "arkavo-llm"
 version = "0.21.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.22.1",
  "bytemuck",
@@ -259,6 +260,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "cfg-if",
+ "dirs 5.0.1",
  "futures",
  "hf-hub 0.3.2",
  "indicatif",
@@ -272,6 +274,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-stream",
+ "toml",
  "tracing",
 ]
 
@@ -6410,8 +6413,15 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
+ "toml_write",
  "winnow",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tower"

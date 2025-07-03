@@ -130,23 +130,69 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 
     match &cmd.command {
         ModelSubcommand::List => {
-            if registry.models.is_empty() {
-                println!(
-                    "No models available. Use 'arkavo model download' or 'arkavo model add' to add models."
-                );
-            } else {
+            #[cfg(feature = "local")]
+            {
+                use arkavo_llm::local::ModelManifest;
+
+                // Load manifest to show available models
+                let manifest = ModelManifest::load()?;
+
                 println!("Available models:");
-                for model in &registry.models {
-                    let active = if model.is_active { " (active)" } else { "" };
-                    let status = if model.local_path.is_some() {
-                        "downloaded"
+
+                // Show manifest models with download status
+                for spec in &manifest.models {
+                    // Check if in registry
+                    let registry_model = registry.models.iter().find(|m| m.name == spec.name);
+                    let active = registry_model.map_or(false, |m| m.is_active);
+                    let downloaded = registry_model.and_then(|m| m.local_path.as_ref()).is_some();
+
+                    let status = if downloaded {
+                        "✓ downloaded"
                     } else {
-                        "available"
+                        "  available"
                     };
+                    let active_marker = if active { " (active)" } else { "" };
+
                     println!(
-                        "  {} - {} ({:.1} GB, {}){}",
-                        model.name, status, model.size_gb, model.context_length, active
+                        "  {} {} - {} ({:.1} GB){}",
+                        status, spec.name, spec.description, spec.size_gb, active_marker
                     );
+                }
+
+                // Show any additional local models not in manifest
+                for model in &registry.models {
+                    if !manifest.models.iter().any(|s| s.name == model.name) {
+                        let active = if model.is_active { " (active)" } else { "" };
+                        println!(
+                            "  ✓ {} - local ({:.1} GB){}",
+                            model.name, model.size_gb, active
+                        );
+                    }
+                }
+
+                if registry.models.is_empty() {
+                    println!("\nUse 'arkavo model download <name>' to download a model.");
+                }
+            }
+
+            #[cfg(not(feature = "local"))]
+            {
+                if registry.models.is_empty() {
+                    println!("No models available. Use 'arkavo model add' to add models.");
+                } else {
+                    println!("Available models:");
+                    for model in &registry.models {
+                        let active = if model.is_active { " (active)" } else { "" };
+                        let status = if model.local_path.is_some() {
+                            "downloaded"
+                        } else {
+                            "available"
+                        };
+                        println!(
+                            "  {} - {} ({:.1} GB, {}){}",
+                            model.name, status, model.size_gb, model.context_length, active
+                        );
+                    }
                 }
             }
         }
@@ -171,8 +217,73 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
         }
 
         ModelSubcommand::Download { name } => {
-            // TODO: Implement model downloading
-            println!("Downloading model '{}' (not yet implemented)", name);
+            // Check if 'local' feature is enabled
+            #[cfg(not(feature = "local"))]
+            {
+                anyhow::bail!("Model downloading requires the 'local' feature to be enabled");
+            }
+
+            #[cfg(feature = "local")]
+            {
+                use arkavo_llm::local::{ModelDownloader, ModelManifest};
+
+                // Load model manifest
+                let manifest = ModelManifest::load()?;
+
+                // Find the model spec
+                let spec = manifest
+                    .find(name)
+                    .ok_or_else(|| anyhow::anyhow!("Model '{}' not found in manifest", name))?;
+
+                // Create downloader
+                let downloader = ModelDownloader::new()?;
+
+                // Check if already downloaded
+                if downloader.is_downloaded(spec) {
+                    println!("Model '{}' is already downloaded", name);
+
+                    // Update registry to ensure it's recorded
+                    let model_path = downloader.get_model_path(spec);
+                    let model = ModelMeta {
+                        name: spec.name.clone(),
+                        format: ModelFormat::Gguf,
+                        context_length: spec.context_length,
+                        hf_repo_id: Some(spec.hf_repo_id.clone()),
+                        sha256: spec.sha256.clone(),
+                        size_gb: spec.size_gb,
+                        local_path: Some(model_path),
+                        is_active: registry.models.is_empty(),
+                    };
+
+                    // Check if already in registry
+                    if !registry.models.iter().any(|m| m.name == spec.name) {
+                        registry.models.push(model);
+                        registry.save_to_storage(&storage).await?;
+                    }
+                } else {
+                    println!("Downloading model '{}'...", name);
+
+                    // Download the model
+                    let model_path = downloader.download(spec).await?;
+
+                    println!("Successfully downloaded model '{}'", name);
+
+                    // Add to registry
+                    let model = ModelMeta {
+                        name: spec.name.clone(),
+                        format: ModelFormat::Gguf,
+                        context_length: spec.context_length,
+                        hf_repo_id: Some(spec.hf_repo_id.clone()),
+                        sha256: spec.sha256.clone(),
+                        size_gb: spec.size_gb,
+                        local_path: Some(model_path),
+                        is_active: registry.models.is_empty(),
+                    };
+
+                    registry.models.push(model);
+                    registry.save_to_storage(&storage).await?;
+                }
+            }
         }
 
         ModelSubcommand::Add { path, name } => {
