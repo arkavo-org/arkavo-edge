@@ -23,7 +23,7 @@ enum ModelSubcommand {
 
     /// Download a model from the registry
     Download {
-        /// Name of the model to download (defaults to gemma3n-e2b-it)
+        /// Name of the model to download (defaults to gemma3-1b-it-qat)
         name: Option<String>,
     },
 
@@ -227,8 +227,8 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             {
                 use arkavo_llm::local::{ModelDownloader, ModelManifest};
 
-                // Default to gemma3n-e2b-it if no name provided
-                let model_name = name.as_deref().unwrap_or("gemma3n-e2b-it");
+                // Default to gemma3-1b-it-qat if no name provided
+                let model_name = name.as_deref().unwrap_or("gemma3-1b-it-qat");
 
                 // Load model manifest
                 let manifest = ModelManifest::load()?;
