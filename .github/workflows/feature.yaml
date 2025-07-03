@@ -197,6 +197,28 @@ jobs:
 
           echo "Running tarpaulin on packages: $PACKAGE_ARGS"
 
+          # Run tarpaulin with optimizations.
+          # The --exclude flags were removed because they require the --workspace flag,
+          # but we are using specific -p flags instead. The packages are already
+          # excluded in the "Detect changed packages" step.
+          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --no-default-features --out Xml --timeout 120 --skip-clean --locked --jobs 2
+
+      - name: Check test coverage
+        run: |
+          COVERAGE=$(grep -E 'line-rate="[0-9.]+"' cobertura.xml | head -1 | grep -oE '[0-9.]+')
+          COVERAGE_PERCENT=$(awk -v cov="$COVERAGE" 'BEGIN {printf "%.2f", cov * 100}')
+          echo "Coverage: $COVERAGE_PERCENT%"
+
+      - name: Generate test coverage
+        run: |
+          # Convert space-separated list to package args
+          PACKAGE_ARGS=""
+          for CRATE in ${{ steps.changed-packages.outputs.changed_crates }}; do
+            PACKAGE_ARGS="$PACKAGE_ARGS -p $CRATE"
+          done
+
+          echo "Running tarpaulin on packages: $PACKAGE_ARGS"
+
           # Run tarpaulin with optimizations
           cargo tarpaulin --ignore-tests $PACKAGE_ARGS --exclude arkavo-memory --exclude arkavo-test --no-default-features --out Xml --timeout 120 --skip-clean --locked --jobs 2
 
