@@ -296,7 +296,12 @@ impl ModelLoader {
 
                     if !bytes.is_empty() {
                         let temp_dir = std::env::temp_dir();
-                        let tokenizer_path = temp_dir.join(format!("{}.spm", self.model_name));
+                        // Use process ID to ensure unique filename
+                        let tokenizer_path = temp_dir.join(format!(
+                            "arkavo_tokenizer_{}_{}.spm",
+                            self.model_name,
+                            std::process::id()
+                        ));
 
                         match std::fs::write(&tokenizer_path, &bytes) {
                             Ok(_) => {

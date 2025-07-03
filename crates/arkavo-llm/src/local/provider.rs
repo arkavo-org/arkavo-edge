@@ -99,12 +99,17 @@ impl Provider for LocalProvider {
                     .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
                 let ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
 
-                // Get EOS token from metadata or fallback to vocab_size - 1
+                // Get EOS token from metadata or tokenizer
                 let eos_id = guard
                     .model_loader
                     .eos_token_id()
+                    .or_else(|| {
+                        // Try to get from tokenizer's special tokens
+                        super::tokenizer_utils::get_eos_token_id(&tokenizer)
+                    })
                     .map(|id| id as i64)
                     .unwrap_or_else(|| {
+                        // Final fallback
                         let vocab_size = tokenizer.get_vocab_size(false);
                         if vocab_size > 0 {
                             i64::try_from(vocab_size - 1).unwrap_or(i64::MAX)

@@ -4,7 +4,14 @@ mod local_smoke_tests {
     use arkavo_llm::{Message, Provider, Role};
     use std::path::PathBuf;
 
+    /// Manual smoke test for local development
+    /// 
+    /// This test requires a model file to be present and is intended for
+    /// manual testing during development. For CI, use local_ci_test.rs instead.
+    /// 
+    /// Run with: cargo test --features local tinyllama_speaks -- --ignored
     #[tokio::test]
+    #[ignore = "requires manual setup - use ci_local_inference_test for CI"]
     async fn tinyllama_speaks() {
         // Check for env var first
         let model_path = if let Ok(path) = std::env::var("TINY_MODEL_PATH") {

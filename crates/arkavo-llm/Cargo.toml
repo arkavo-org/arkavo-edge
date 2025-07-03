@@ -27,6 +27,7 @@ tracing = "0.1"
 async-trait = "0.1"
 tokio-stream = "0.1"
 base64 = "0.22"
+anyhow = "1.0"
 
 # Local inference dependencies (optional)
 candle-core = { version = "0.8", optional = true }

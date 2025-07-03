@@ -15,6 +15,9 @@ pub mod model_loader;
 pub mod tokenizer;
 
 #[cfg(feature = "local")]
+pub mod tokenizer_utils;
+
+#[cfg(feature = "local")]
 pub use config::LocalConfig;
 
 #[cfg(feature = "local")]

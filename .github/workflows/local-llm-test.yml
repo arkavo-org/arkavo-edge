@@ -1,0 +1,134 @@
+name: Local LLM Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'crates/arkavo-llm/**'
+      - 'assets/models.toml'
+      - '.github/workflows/local-llm-test.yml'
+  pull_request:
+    paths:
+      - 'crates/arkavo-llm/**'
+      - 'assets/models.toml'
+      - '.github/workflows/local-llm-test.yml'
+  schedule:
+    # Run daily at 2 AM UTC to catch upstream model changes
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-local-inference:
+    name: Test Local LLM Inference
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+    
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Cache Models
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/arkavo/models
+        key: ${{ runner.os }}-models-${{ hashFiles('assets/models.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-models-
+    
+    - name: Build with local feature
+      run: cargo build --features local -p arkavo-llm
+    
+    - name: Run manifest tests
+      run: cargo test -p arkavo-llm --features local test_manifest_validity
+    
+    - name: Run CI inference test
+      run: cargo test -p arkavo-llm --features local ci_local_inference_test -- --nocapture
+      timeout-minutes: 10
+    
+    - name: Run all local tests
+      run: cargo test -p arkavo-llm --features local
+    
+  verify-checksums:
+    name: Verify Model Checksums
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install requests pyyaml toml
+    
+    - name: Verify checksums
+      run: |
+        python3 - <<'EOF'
+        import toml
+        import requests
+        import sys
+        
+        # Load models.toml
+        with open('assets/models.toml', 'r') as f:
+            manifest = toml.load(f)
+        
+        errors = []
+        for model in manifest['models']:
+            print(f"Checking {model['name']}...")
+            
+            # Get file info from HF API
+            api_url = f"https://huggingface.co/api/models/{model['hf_repo_id']}/tree/main"
+            try:
+                resp = requests.get(api_url)
+                resp.raise_for_status()
+                files = resp.json()
+                
+                # Find our file
+                file_info = next((f for f in files if f['path'] == model['hf_filename']), None)
+                if not file_info:
+                    errors.append(f"{model['name']}: File {model['hf_filename']} not found in repo")
+                    continue
+                
+                # Check SHA matches
+                if file_info['lfs']['oid'] != model['sha256']:
+                    errors.append(f"{model['name']}: SHA mismatch! Expected {model['sha256']}, got {file_info['lfs']['oid']}")
+                else:
+                    print(f"  ✓ SHA256 matches")
+                    
+            except Exception as e:
+                errors.append(f"{model['name']}: Failed to check - {e}")
+        
+        if errors:
+            print("\n❌ Checksum verification failed:")
+            for error in errors:
+                print(f"  - {error}")
+            sys.exit(1)
+        else:
+            print("\n✅ All checksums verified!")
+        EOF
