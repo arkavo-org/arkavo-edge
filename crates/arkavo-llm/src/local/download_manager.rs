@@ -100,8 +100,7 @@ impl ModelDownloader {
         }
 
         // Ensure cache directory exists
-        fs::create_dir_all(&self.cache_dir)
-            .map_err(Error::Io)?;
+        fs::create_dir_all(&self.cache_dir).map_err(Error::Io)?;
 
         // Set up progress bar
         let pb = ProgressBar::new((spec.size_gb * 1024.0 * 1024.0 * 1024.0) as u64);
@@ -160,15 +159,11 @@ impl ModelDownloader {
             hasher.update(&chunk);
 
             // Write to file
-            file.write_all(&chunk)
-                .await
-                .map_err(Error::Io)?;
+            file.write_all(&chunk).await.map_err(Error::Io)?;
         }
 
         // Finalize the file
-        file.flush()
-            .await
-            .map_err(Error::Io)?;
+        file.flush().await.map_err(Error::Io)?;
         drop(file);
 
         // Verify checksum
@@ -186,8 +181,7 @@ impl ModelDownloader {
         guard.disarm();
 
         // Atomic rename to final location
-        fs::rename(&temp_path, &model_path)
-            .map_err(Error::Io)?;
+        fs::rename(&temp_path, &model_path).map_err(Error::Io)?;
 
         // Write Notice.txt for Gemma models
         if spec.license == "gemma" {
@@ -200,11 +194,9 @@ impl ModelDownloader {
 
     /// Verify SHA256 checksum of a file
     fn verify_checksum(&self, path: &Path, expected: &str) -> Result<bool> {
-        let mut file = fs::File::open(path)
-            .map_err(Error::Io)?;
+        let mut file = fs::File::open(path).map_err(Error::Io)?;
         let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher)
-            .map_err(Error::Io)?;
+        std::io::copy(&mut file, &mut hasher).map_err(Error::Io)?;
 
         let computed = format!("{:x}", hasher.finalize());
         Ok(computed == expected)
