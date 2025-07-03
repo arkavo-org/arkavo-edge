@@ -23,11 +23,16 @@ pub struct ModelWorker {
     model: Llama,
     cache: Cache,
     device: Device,
+    #[allow(dead_code)]
     config: LlamaConfig,
 }
 
 impl ModelWorker {
     /// Create a new model worker
+    ///
+    /// # Panics
+    ///
+    /// Panics if cache creation fails
     pub fn new(model: Llama, config: LlamaConfig, device: Device) -> Self {
         let cache = Cache::new(true, candle_core::DType::F32, &config, &device)
             .expect("Failed to create cache");
@@ -50,7 +55,7 @@ impl ModelWorker {
                     eos_token_id,
                     response,
                 } => {
-                    let result = self.generate(prompt_ids, max_tokens, eos_token_id).await;
+                    let result = self.generate(prompt_ids, max_tokens, eos_token_id);
                     let _ = response.send(result);
                 }
                 WorkerRequest::Shutdown => {
@@ -62,7 +67,7 @@ impl ModelWorker {
     }
 
     /// Generate tokens
-    async fn generate(
+    fn generate(
         &mut self,
         mut ids: Vec<i64>,
         max_tokens: usize,
@@ -179,11 +184,16 @@ pub struct StreamingWorker {
     model: Llama,
     cache: Cache,
     device: Device,
+    #[allow(dead_code)]
     config: LlamaConfig,
 }
 
 impl StreamingWorker {
     /// Create a new streaming worker
+    ///
+    /// # Panics
+    ///
+    /// Panics if cache creation fails
     pub fn new(model: Llama, config: LlamaConfig, device: Device) -> Self {
         let cache = Cache::new(true, candle_core::DType::F32, &config, &device)
             .expect("Failed to create cache");
@@ -197,7 +207,11 @@ impl StreamingWorker {
     }
 
     /// Generate tokens with streaming
-    pub async fn generate_stream(
+    ///
+    /// # Panics
+    ///
+    /// May panic if prompt_ids is empty (when calling last().unwrap())
+    pub fn generate_stream(
         mut self,
         prompt_ids: Vec<i64>,
         max_tokens: usize,
@@ -205,7 +219,7 @@ impl StreamingWorker {
         tokenizer: Arc<Tokenizer>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
         let (tx, rx) = mpsc::channel(32);
-        let mut ids = prompt_ids.clone();
+        let mut ids = prompt_ids;
         let start_len = ids.len();
 
         // Spawn task to generate tokens
@@ -227,7 +241,10 @@ impl StreamingWorker {
                     }
                 } else {
                     // Subsequent iterations: process only the last token
-                    match Tensor::new(&[*ids.last().unwrap()], &self.device)
+                    match ids
+                        .last()
+                        .map(|&id| Tensor::new(&[id], &self.device))
+                        .unwrap_or_else(|| Err(candle_core::Error::Msg("Empty ids".to_string())))
                         .and_then(|t| t.unsqueeze(0))
                     {
                         Ok(t) => t,

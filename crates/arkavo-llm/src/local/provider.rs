@@ -20,6 +20,7 @@ use super::worker::WorkerHandle;
 #[cfg(feature = "local")]
 struct Inner {
     model_loader: ModelLoader,
+    #[allow(dead_code)]
     worker_handle: Option<WorkerHandle>,
     _seed: u64,
     _temperature: f64,

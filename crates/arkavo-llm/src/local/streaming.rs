@@ -21,7 +21,6 @@ pub fn create_quantized_stream(
     tokio::spawn(async move {
         let mut ids = prompt_ids.clone();
         let _start_len = ids.len();
-        let mut generated_text = String::new();
 
         for _i in 0..max_tokens {
             // Create input tensor
@@ -66,8 +65,6 @@ pub fn create_quantized_stream(
             // Decode only the new token
             match tokenizer.decode(&[next as u32], false) {
                 Ok(text) => {
-                    generated_text.push_str(&text);
-
                     // Send streaming response
                     let response = StreamResponse {
                         content: text,
@@ -105,7 +102,7 @@ pub fn create_quantized_stream(
 }
 
 /// Helper to create a box stream from quantized model
-pub async fn stream_quantized_response(
+pub fn stream_quantized_response(
     model: ModelWeights,
     tokenizer: Arc<Tokenizer>,
     prompt_ids: Vec<i64>,
