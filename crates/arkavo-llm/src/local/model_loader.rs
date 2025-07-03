@@ -277,59 +277,19 @@ impl ModelLoader {
         &mut self,
         content: &candle_core::quantized::gguf_file::Content,
     ) {
-        use candle_core::quantized::gguf_file::Value;
-
         let metadata = &content.metadata;
 
-        // Check if we have tokenizer model embedded in GGUF
-        // The tokenizer is often stored as an array of U8 values
+        // Try multiple approaches to get a tokenizer
+
+        // 1. Try embedded tokenizer model
         if let Some(value) = metadata.get("tokenizer.ggml.model") {
-            match value {
-                Value::Array(values) => {
-                    // Extract bytes from array of U8 values
-                    let mut bytes = Vec::new();
-                    for val in values {
-                        if let Value::U8(byte) = val {
-                            bytes.push(*byte);
-                        }
-                    }
-
-                    if !bytes.is_empty() {
-                        let temp_dir = std::env::temp_dir();
-                        // Use process ID to ensure unique filename
-                        let tokenizer_path = temp_dir.join(format!(
-                            "arkavo_tokenizer_{}_{}.spm",
-                            self.model_name,
-                            std::process::id()
-                        ));
-
-                        match std::fs::write(&tokenizer_path, &bytes) {
-                            Ok(_) => {
-                                // Try to load the tokenizer
-                                match Tokenizer::from_file(&tokenizer_path) {
-                                    Ok(tokenizer) => {
-                                        self.tokenizer = Some(Arc::new(tokenizer));
-                                        self.tokenizer_path =
-                                            Some(tokenizer_path.to_string_lossy().into_owned());
-                                        tracing::info!("Successfully loaded tokenizer from GGUF");
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("Failed to load tokenizer from GGUF: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to write tokenizer to temp file: {}", e);
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    tracing::debug!("Tokenizer model in GGUF is not in expected array format");
-                }
+            if self.try_embedded_tokenizer(value) {
+                return;
             }
-        } else if let Some(model_path) = &self.model_path {
-            // Fallback: look for tokenizer.model alongside the .gguf
+        }
+
+        // 2. Fallback: look for tokenizer.model alongside the .gguf
+        if let Some(model_path) = &self.model_path {
             let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
             if tokenizer_path.exists() {
                 match Tokenizer::from_file(&tokenizer_path) {
@@ -337,15 +297,59 @@ impl ModelLoader {
                         self.tokenizer = Some(Arc::new(tokenizer));
                         self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
                         tracing::info!("Loaded tokenizer from file: tokenizer.model");
+                        return;
                     }
                     Err(e) => {
                         tracing::warn!("Failed to load tokenizer from file: {}", e);
                     }
                 }
-            } else {
-                tracing::debug!("No tokenizer.model found alongside GGUF file");
             }
         }
+
+        tracing::error!(
+            "Could not create tokenizer for model {}. GGUF file may not contain embedded tokenizer. \
+            Please ensure tokenizer.model exists alongside the GGUF file.",
+            self.model_name
+        );
+    }
+
+    fn try_embedded_tokenizer(&mut self, value: &candle_core::quantized::gguf_file::Value) -> bool {
+        use candle_core::quantized::gguf_file::Value;
+
+        match value {
+            Value::Array(values) => {
+                // Extract bytes from array of U8 values
+                let mut bytes = Vec::new();
+                for val in values {
+                    if let Value::U8(byte) = val {
+                        bytes.push(*byte);
+                    }
+                }
+
+                if !bytes.is_empty() {
+                    let temp_dir = std::env::temp_dir();
+                    let tokenizer_path = temp_dir.join(format!(
+                        "arkavo_tokenizer_{}_{}.spm",
+                        self.model_name,
+                        std::process::id()
+                    ));
+
+                    if let Ok(()) = std::fs::write(&tokenizer_path, &bytes) {
+                        if let Ok(tokenizer) = Tokenizer::from_file(&tokenizer_path) {
+                            self.tokenizer = Some(Arc::new(tokenizer));
+                            self.tokenizer_path =
+                                Some(tokenizer_path.to_string_lossy().into_owned());
+                            tracing::info!("Successfully loaded embedded tokenizer from GGUF");
+                            return true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                tracing::debug!("Embedded tokenizer not in expected array format");
+            }
+        }
+        false
     }
 
     pub fn create_tensor(&self, data: &[f32], shape: &[usize]) -> Result<Tensor> {
