@@ -7,8 +7,9 @@ fn main() {
 
     // Check if we need to relaunch in Terminal (macOS only)
     // Skip for serve command which needs to stay in current process
+    // Also skip if --prompt is provided (for testing/CI)
     #[cfg(target_os = "macos")]
-    if args.get(1).is_none_or(|s| s != "serve") {
+    if args.get(1).is_none_or(|s| s != "serve") && !args.iter().any(|arg| arg == "--prompt") {
         maybe_relaunch_in_terminal();
     }
 
@@ -44,11 +45,6 @@ fn maybe_relaunch_in_terminal() {
         return; // Already in terminal
     }
 
-    // Check if we've already been relaunched
-    if env::var_os("ARKAVO_LAUNCHED").is_some() {
-        return; // Avoid infinite loop
-    }
-
     // Get the path to our executable
     if let Ok(exe) = env::current_exe() {
         // Build command with arguments
@@ -59,11 +55,11 @@ fn maybe_relaunch_in_terminal() {
             args.join(" ")
         };
 
-        // Launch in Terminal.app using AppleScript with environment variable
+        // Launch in Terminal.app using AppleScript
         let script = format!(
             r#"tell application "Terminal"
                 activate
-                do script "ARKAVO_LAUNCHED=1 {} {}"
+                do script "{} {}"
             end tell"#,
             exe.to_string_lossy(),
             arg_string

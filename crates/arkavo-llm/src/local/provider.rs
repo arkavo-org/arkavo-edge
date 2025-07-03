@@ -67,7 +67,7 @@ impl LocalProvider {
         guard.model_loader.load_model()?;
 
         // If it's a non-quantized model, create the worker
-        if let Some(Model::Llama(_model)) = guard.model_loader.get_model() {
+        if let Some(Model::QuantizedLlama(_model)) = guard.model_loader.get_model() {
             if let Some(_config) = guard.model_loader.get_config() {
                 let _device = guard.model_loader.device().clone();
                 // We need to move the model out temporarily
@@ -177,24 +177,19 @@ impl Provider for LocalProvider {
                     let mut guard = self.inner.lock().await;
                     let seq_len = ids.len();
 
-                    // Check model type first
-                    let is_quantized =
-                        matches!(guard.model_loader.get_model(), Some(Model::Quantized(_)));
-
-                    let logits = if is_quantized {
-                        // Simple path for quantized models
-                        match guard.model_loader.get_model_mut() {
-                            Some(Model::Quantized(w)) => w
-                                .forward(&input, seq_len - 1)
-                                .map_err(|e| Error::Model(format!("Forward pass failed: {e}")))?,
-                            _ => unreachable!(),
+                    // Forward pass based on model architecture
+                    let logits = match guard.model_loader.get_model_mut() {
+                        Some(Model::QuantizedGemma3(model)) => {
+                            model.forward(&input, seq_len - 1).map_err(|e| {
+                                Error::Model(format!("Gemma3 forward pass failed: {e}"))
+                            })?
                         }
-                    } else {
-                        // Non-quantized models require proper cache management
-                        // TODO: Implement with worker task pattern to avoid borrow checker issues
-                        return Err(Error::Model(
-                            "Standard Llama models not yet supported - use quantized models (.gguf) for now".to_string()
-                        ));
+                        Some(Model::QuantizedLlama(model)) => model
+                            .forward(&input, seq_len - 1)
+                            .map_err(|e| Error::Model(format!("Llama forward pass failed: {e}")))?,
+                        None => {
+                            return Err(Error::Model("Model not loaded".to_string()));
+                        }
                     };
 
                     logits
@@ -285,13 +280,13 @@ impl Provider for LocalProvider {
                 .map(|id| id as i64)
                 .unwrap_or(0);
 
-            // Check model type
-            let is_quantized = matches!(guard.model_loader.get_model(), Some(Model::Quantized(_)));
+            // Check if we have a model loaded
+            let has_model = guard.model_loader.get_model().is_some();
 
             drop(guard); // Release lock before streaming
 
-            if is_quantized {
-                // For quantized models, fall back to non-streaming for now
+            if has_model {
+                // Fall back to non-streaming for now
                 let response = self.complete(_messages).await?;
                 let items = vec![Ok(StreamResponse {
                     content: response,

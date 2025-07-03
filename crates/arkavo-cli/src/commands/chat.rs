@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
+use uuid;
 
 // Global flag to control whether to show debug messages (kept for future use)
 #[allow(dead_code)]
@@ -306,8 +307,13 @@ Repository details:
 
     // Get conversation context with system message
     let system_message = Message::system(&system_prompt);
-    let mut messages = runtime
-        .block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?;
+    let mut messages = if print_mode {
+        // In print mode, just create a simple message list
+        vec![system_message.clone()]
+    } else {
+        // In interactive mode, get full context from conversation manager
+        runtime.block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?
+    };
 
     // If prompt provided via command line, process it and exit
     if let Some(prompt_text) = prompt {
@@ -1196,46 +1202,86 @@ fn list_files(path: &str) -> Option<String> {
 }
 
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    // Initialize memory storage to check for saved configuration
+    // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
 
-    // Try to find saved Ollama server configuration
-    let saved_config = storage
-        .search("arkavo_ollama_server_config", 10, Some("config"))
-        .await?;
-
-    // Find a valid configuration (not cleared)
-    let valid_config = saved_config
-        .into_iter()
-        .find(|c| c.memory.content != "CLEARED" && c.memory.content.starts_with("http"));
-
-    if let Some(config) = valid_config {
-        // Use saved configuration
-        let server_url = &config.memory.content;
-        unsafe {
-            std::env::set_var("OLLAMA_BASE_URL", server_url);
-        }
-
-        // Try to connect with saved URL
-        if let Ok(client) = LlmClient::from_env() {
-            let test_message = vec![Message::user("ping")];
-            if client.complete(test_message).await.is_ok() {
-                if !print_mode {
-                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
+    // Check HuggingFace cache for default model
+    #[cfg(feature = "local")]
+    {
+        use arkavo_llm::local::{ModelDownloader, ModelManifest};
+        
+        // Load manifest and find default model
+        if let Ok(manifest) = ModelManifest::load() {
+            if let Some(spec) = manifest.find("gemma3-1b-it-qat") {
+                    // Create downloader to check cache
+                    if let Ok(downloader) = ModelDownloader::new() {
+                        // This will return cached path if already downloaded
+                        match downloader.get_model_path(spec).await {
+                        Ok(model_path) => {
+                            eprintln!("Found model at: {}", model_path.display());
+                            match LlmClient::from_local_model(&spec.name, model_path.to_string_lossy().to_string()).await {
+                                Ok(client) => {
+                                    if !print_mode {
+                                        eprintln!("✓ Using local model: {}", spec.name);
+                                    }
+                                    return Ok(client);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to initialize local model {}: {}", spec.name, e);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // Model not in cache, continue to other providers
+                        }
+                    }
                 }
-                return Ok(client);
             }
         }
-        // Saved config didn't work, fall through to prompt
     }
 
-    // Try default localhost first
+    // Check for previously selected provider
+    let saved_provider = storage
+        .search("llm_provider", 1, Some("llm_provider"))
+        .await?
+        .into_iter()
+        .find(|c| c.memory.content != "CLEARED");
+
+    if let Some(provider_config) = saved_provider {
+        if provider_config.memory.content.starts_with("local:") {
+            // Previously selected local model, but maybe not available now
+            // Fall through to try other options
+        } else if provider_config.memory.content.starts_with("http") {
+            // Ollama server
+            let server_url = &provider_config.memory.content;
+            unsafe {
+                std::env::set_var("OLLAMA_BASE_URL", server_url);
+            }
+
+            if let Ok(client) = LlmClient::from_env() {
+                let test_message = vec![Message::user("ping")];
+                if client.complete(test_message).await.is_ok() {
+                    if !print_mode {
+                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
+                    }
+                    return Ok(client);
+                }
+            }
+        }
+    }
+
+    // Try default localhost Ollama
     match LlmClient::from_env() {
         Ok(client) => {
             // Test if the client can connect by trying a minimal request
             let test_message = vec![Message::user("ping")];
             match client.complete(test_message).await {
-                Ok(_) => Ok(client),
+                Ok(_) => {
+                    if !print_mode {
+                        eprintln!("✓ Connected to Ollama at localhost:11434");
+                    }
+                    Ok(client)
+                },
                 Err(_) => {
                     // Connection failed, prompt for remote server
                     prompt_for_remote_ollama(print_mode, storage).await

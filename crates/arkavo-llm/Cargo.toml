@@ -30,9 +30,9 @@ base64 = "0.22"
 anyhow = "1.0"
 
 # Local inference dependencies (optional)
-candle-core = { version = "0.8", optional = true }
-candle-nn = { version = "0.8", optional = true }
-candle-transformers = { version = "0.8", optional = true }
+candle-core = { version = "0.9", optional = true }
+candle-nn = { version = "0.9", optional = true }
+candle-transformers = { version = "0.9", optional = true }
 hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
 tokenizers = { version = "0.21", optional = true }
 bytemuck = { version = "1.20", optional = true }

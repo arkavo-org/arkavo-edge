@@ -1,14 +1,19 @@
 use crate::{Error, Result};
+use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
-use candle_transformers::models::llama::{Config as LlamaConfig, Llama};
-use candle_transformers::models::quantized_llama::ModelWeights;
+use std::io::Seek;
 use std::path::Path;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+// Import the specific quantized models
+use candle_transformers::models::llama;
+use candle_transformers::models::quantized_gemma3;
+use candle_transformers::models::quantized_llama;
+
 pub enum Model {
-    Llama(Llama),
-    Quantized(ModelWeights),
+    QuantizedGemma3(quantized_gemma3::ModelWeights),
+    QuantizedLlama(quantized_llama::ModelWeights),
 }
 
 pub struct ModelLoader {
@@ -16,7 +21,7 @@ pub struct ModelLoader {
     model_name: String,
     model_path: Option<String>,
     model: Option<Model>,
-    config: Option<LlamaConfig>,
+    config: Option<llama::Config>,
     tokenizer_path: Option<String>,
     tokenizer: Option<Arc<Tokenizer>>,
     eos_token_id: Option<u32>,
@@ -76,14 +81,10 @@ impl ModelLoader {
             return Err(Error::Config(format!("Model file not found: {path}")));
         }
 
-        tracing::info!(
+        eprintln!(
             "Loading model '{}' on device {:?}",
-            self.model_name,
-            self.device
+            self.model_name, self.device
         );
-        tracing::info!("Model path: {}", path);
-        tracing::info!("Path ends with .gguf: {}", path.ends_with(".gguf"));
-        tracing::info!("Path ends with .GGUF: {}", path.ends_with(".GGUF"));
 
         // Check if it's a GGUF file
         if path.ends_with(".gguf") || path.ends_with(".GGUF") {
@@ -91,10 +92,8 @@ impl ModelLoader {
             match self.load_quantized_model(model_path) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to load as quantized model: {}. Trying standard load.",
-                        e
-                    );
+                    eprintln!("Failed to load as quantized model: {}", e);
+                    return Err(e);
                 }
             }
         }
@@ -107,7 +106,6 @@ impl ModelLoader {
 
     fn load_quantized_model(&mut self, path: &Path) -> Result<()> {
         use candle_core::quantized::gguf_file;
-        use std::io::Seek;
 
         // Load GGUF file - open once and clone for reuse
         let mut file = std::fs::File::open(path)
@@ -115,6 +113,21 @@ impl ModelLoader {
 
         let content = gguf_file::Content::read(&mut file)
             .map_err(|e| Error::Model(format!("Failed to read GGUF file: {e}")))?;
+
+        // Extract architecture from metadata
+        let arch = content
+            .metadata
+            .get("general.architecture")
+            .and_then(|v| {
+                if let gguf_file::Value::String(s) = v {
+                    Some(s.to_string())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| Error::Model("Missing architecture in GGUF metadata".to_string()))?;
+
+        eprintln!("Detected GGUF architecture: {}", arch);
 
         // Check if quantization is compatible with Metal
         let mut device = self.device.clone();
@@ -134,17 +147,32 @@ impl ModelLoader {
             tracing::debug!("Found EOS token ID in GGUF metadata: {}", eos_id);
         }
 
-        // Reset file position for weight loading
-        file.seek(std::io::SeekFrom::Start(0))
-            .map_err(|e| Error::Model(format!("Failed to seek in model file: {e}")))?;
+        // The unified, architecture-aware loading logic
+        let model = match arch.as_str() {
+            "gemma3" => {
+                eprintln!("Loading Gemma 3 GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model = quantized_gemma3::ModelWeights::from_gguf(content, &mut file, &device)
+                    .map_err(|e| Error::Model(format!("Failed to load Gemma3 model: {e}")))?;
+                Model::QuantizedGemma3(model)
+            }
+            "llama" => {
+                eprintln!("Loading Llama GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model =
+                    quantized_llama::ModelWeights::from_gguf(content, &mut file, &device)
+                        .map_err(|e| Error::Model(format!("Failed to load Llama model: {e}")))?;
+                Model::QuantizedLlama(model)
+            }
+            _ => return Err(Error::Model(format!("Unsupported architecture: {}", arch))),
+        };
 
-        let weights = ModelWeights::from_gguf(content, &mut file, &device)
-            .map_err(|e| Error::Model(format!("Failed to create model weights from GGUF: {e}")))?;
-
-        self.model = Some(Model::Quantized(weights));
+        self.model = Some(model);
         self.device = device; // Update device if it changed
 
-        tracing::info!("Successfully loaded GGUF model");
+        eprintln!("Successfully loaded {} model", arch);
         Ok(())
     }
 
@@ -226,7 +254,7 @@ impl ModelLoader {
             })
             .unwrap_or(10_000.0);
 
-        let config = LlamaConfig {
+        let config = llama::Config {
             hidden_size,
             intermediate_size: hidden_size * 4, // Standard ratio
             vocab_size,
@@ -384,7 +412,7 @@ impl ModelLoader {
         self.model.as_mut()
     }
 
-    pub fn get_config(&self) -> Option<&LlamaConfig> {
+    pub fn get_config(&self) -> Option<&llama::Config> {
         self.config.as_ref()
     }
 
