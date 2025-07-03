@@ -118,7 +118,8 @@ async fn test_provider_factory_registry() {
     assert!(types.contains(&ProviderType::Ollama));
     assert!(types.contains(&ProviderType::OpenAI));
     assert!(types.contains(&ProviderType::Anthropic));
-    assert_eq!(types.len(), 3);
+    assert!(types.contains(&ProviderType::Local));
+    assert_eq!(types.len(), 4);
 }
 
 #[tokio::test]
