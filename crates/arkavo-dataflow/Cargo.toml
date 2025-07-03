@@ -11,6 +11,7 @@ description.workspace = true
 default = ["nl", "sandbox"]
 nl = []
 sandbox = []
+local = ["arkavo-llm/local"]
 
 [dependencies]
 anyhow = "1.0"

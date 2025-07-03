@@ -46,6 +46,25 @@ See the [Getting Started Guide](docs/GETTING_STARTED.md) for detailed instructio
 - Safe operations with automatic rollback
 - MCP tools for version control
 
+### 🏠 Local LLM Support (Experimental)
+- Run models locally with Candle ML framework
+- **Currently supports only quantized GGUF models** (e.g., Q4_K_M, Q5_K_S)
+- Metal acceleration falls back to CPU for quantized models
+- Privacy-first inference without external APIs
+
+**Quick Start with TinyLlama:**
+```bash
+# Download a compatible model (4.4 GB)
+curl -L https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
+  -o ~/Downloads/tinyllama.gguf
+
+# Set environment variable and run
+export TINY_MODEL_PATH=~/Downloads/tinyllama.gguf
+cargo test --features local -p arkavo-llm tinyllama_speaks
+```
+
+**Note:** Full fp32 model support and automatic downloads coming soon.
+
 ## MCP Server for Claude Code
 
 When downloaded to the project folder:

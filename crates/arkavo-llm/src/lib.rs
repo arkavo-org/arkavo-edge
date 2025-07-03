@@ -2,6 +2,7 @@ pub mod chat;
 pub mod client;
 pub mod error;
 pub mod image;
+pub mod local;
 pub mod message;
 pub mod ollama;
 pub mod provider;
