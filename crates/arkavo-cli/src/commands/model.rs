@@ -40,7 +40,6 @@ enum ModelSubcommand {
 // These are no longer needed with the simplified zero-config approach
 
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
-
     match &cmd.command {
         ModelSubcommand::List => {
             #[cfg(feature = "local")]
@@ -57,15 +56,19 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 for spec in &manifest.models {
                     // Check if model exists in HF cache
                     let downloaded = downloader.get_model_path(spec).await.is_ok();
-                    
+
                     let status = if downloaded {
                         "✓ downloaded"
                     } else {
                         "  available"
                     };
-                    
+
                     // Mark default model
-                    let default_marker = if spec.name == "gemma3-1b-it-qat" { " (default)" } else { "" };
+                    let default_marker = if spec.name == "gemma3-1b-it-qat" {
+                        " (default)"
+                    } else {
+                        ""
+                    };
 
                     println!(
                         "  {} {} - {} ({:.1} GB){}",
@@ -84,7 +87,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 
         ModelSubcommand::Switch { name } => {
             // For future multi-model support
-            println!("Model switching is not yet implemented. The default model (gemma3-1b-it-qat) will be used if available.");
+            println!(
+                "Model switching is not yet implemented. The default model (gemma3-1b-it-qat) will be used if available."
+            );
             let _ = name; // Suppress unused warning
         }
 
@@ -126,7 +131,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 
         ModelSubcommand::Add { path, name } => {
             // For future extensibility
-            println!("Manual model addition is not yet implemented. Please download models using 'arkavo model download'.");
+            println!(
+                "Manual model addition is not yet implemented. Please download models using 'arkavo model download'."
+            );
             let _ = (path, name); // Suppress unused warnings
         }
     }

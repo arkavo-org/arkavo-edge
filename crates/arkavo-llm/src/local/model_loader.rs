@@ -311,14 +311,30 @@ impl ModelLoader {
 
         // Try multiple approaches to get a tokenizer
 
-        // 1. Try embedded tokenizer model
+        // 1. Try embedded tokenizer model (check if it's actually binary data)
         if let Some(value) = metadata.get("tokenizer.ggml.model") {
-            if self.try_embedded_tokenizer(value) {
-                return;
+            // Check if it's actually binary data or just a string marker
+            match value {
+                gguf_file::Value::String(s) if s == "llama" => {
+                    // This is just a marker, not actual tokenizer data
+                    tracing::debug!("Found 'llama' marker instead of embedded tokenizer");
+                }
+                _ => {
+                    // Try to load as embedded tokenizer
+                    if self.try_embedded_tokenizer(value) {
+                        return;
+                    }
+                }
             }
         }
 
-        // 2. Fallback: look for tokenizer.model alongside the .gguf
+        // 2. For Gemma models, try to construct a simple tokenizer from metadata
+        // This is a temporary solution until we can bundle the actual tokenizer
+        if self.try_construct_tokenizer_from_metadata(content) {
+            return;
+        }
+
+        // 3. Fallback: look for tokenizer.model alongside the .gguf
         if let Some(model_path) = &self.model_path {
             let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
             if tokenizer_path.exists() {
@@ -335,7 +351,7 @@ impl ModelLoader {
                 }
             }
 
-            // 3. Try tokenizer.json for Gemma models
+            // 4. Try tokenizer.json for Gemma models
             let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
             if tokenizer_json_path.exists() {
                 match Tokenizer::from_file(&tokenizer_json_path) {
@@ -360,40 +376,84 @@ impl ModelLoader {
         );
     }
 
+    fn try_construct_tokenizer_from_metadata(
+        &mut self,
+        content: &candle_core::quantized::gguf_file::Content,
+    ) -> bool {
+        // For now, we'll create a simple tokenizer that can at least encode/decode basic text
+        // This is a temporary solution until we can bundle the actual Gemma tokenizer
+
+        // Check if we have the token list
+        if let Some(gguf_file::Value::Array(tokens)) = content.metadata.get("tokenizer.ggml.tokens")
+        {
+            // For now, just log that we found tokens but can't construct a full tokenizer
+            tracing::warn!(
+                "Found {} tokens in GGUF metadata, but cannot construct a full tokenizer without the SentencePiece model. \
+                Please download tokenizer.model separately.",
+                tokens.len()
+            );
+
+            // TODO: When we have the bundled tokenizer, we'll load it here
+            // let tokenizer_bytes = include_bytes!("../assets/gemma_tokenizer.model");
+            // let tokenizer = Tokenizer::from_bytes(tokenizer_bytes)?;
+        }
+
+        false
+    }
+
     fn try_embedded_tokenizer(&mut self, value: &candle_core::quantized::gguf_file::Value) -> bool {
         use candle_core::quantized::gguf_file::Value;
 
-        match value {
+        let bytes = match value {
+            // Handle Binary blob (most common for SentencePiece models)
+            Value::Binary(data) => {
+                tracing::debug!("Found tokenizer as Binary blob, {} bytes", data.len());
+                data.clone()
+            }
+            // Handle Array of U8 values (less common)
             Value::Array(values) => {
-                // Extract bytes from array of U8 values
                 let mut bytes = Vec::new();
                 for val in values {
                     if let Value::U8(byte) = val {
                         bytes.push(*byte);
                     }
                 }
-
-                if !bytes.is_empty() {
-                    let temp_dir = std::env::temp_dir();
-                    let tokenizer_path = temp_dir.join(format!(
-                        "arkavo_tokenizer_{}_{}.spm",
-                        self.model_name,
-                        std::process::id()
-                    ));
-
-                    if let Ok(()) = std::fs::write(&tokenizer_path, &bytes) {
-                        if let Ok(tokenizer) = Tokenizer::from_file(&tokenizer_path) {
-                            self.tokenizer = Some(Arc::new(tokenizer));
-                            self.tokenizer_path =
-                                Some(tokenizer_path.to_string_lossy().into_owned());
-                            tracing::info!("Successfully loaded embedded tokenizer from GGUF");
-                            return true;
-                        }
-                    }
+                if bytes.is_empty() {
+                    tracing::debug!("Array format tokenizer is empty");
+                    return false;
                 }
+                tracing::debug!("Found tokenizer as Array of U8, {} bytes", bytes.len());
+                bytes
             }
             _ => {
-                tracing::debug!("Embedded tokenizer not in expected array format");
+                tracing::debug!("Embedded tokenizer not in expected Binary or Array format");
+                return false;
+            }
+        };
+
+        // Write to temporary file and load tokenizer
+        let temp_dir = std::env::temp_dir();
+        let tokenizer_path = temp_dir.join(format!(
+            "arkavo_tokenizer_{}_{}.spm",
+            self.model_name,
+            std::process::id()
+        ));
+
+        if let Ok(()) = std::fs::write(&tokenizer_path, &bytes) {
+            match Tokenizer::from_file(&tokenizer_path) {
+                Ok(tokenizer) => {
+                    self.tokenizer = Some(Arc::new(tokenizer));
+                    self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
+                    tracing::info!("Successfully loaded embedded tokenizer from GGUF");
+
+                    // Clean up temp file
+                    let _ = std::fs::remove_file(&tokenizer_path);
+                    return true;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load tokenizer from temp file: {}", e);
+                    let _ = std::fs::remove_file(&tokenizer_path);
+                }
             }
         }
         false

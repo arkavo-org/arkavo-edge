@@ -1209,17 +1209,22 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     #[cfg(feature = "local")]
     {
         use arkavo_llm::local::{ModelDownloader, ModelManifest};
-        
+
         // Load manifest and find default model
         if let Ok(manifest) = ModelManifest::load() {
             if let Some(spec) = manifest.find("gemma3-1b-it-qat") {
-                    // Create downloader to check cache
-                    if let Ok(downloader) = ModelDownloader::new() {
-                        // This will return cached path if already downloaded
-                        match downloader.get_model_path(spec).await {
+                // Create downloader to check cache
+                if let Ok(downloader) = ModelDownloader::new() {
+                    // This will return cached path if already downloaded
+                    match downloader.get_model_path(spec).await {
                         Ok(model_path) => {
                             eprintln!("Found model at: {}", model_path.display());
-                            match LlmClient::from_local_model(&spec.name, model_path.to_string_lossy().to_string()).await {
+                            match LlmClient::from_local_model(
+                                &spec.name,
+                                model_path.to_string_lossy().to_string(),
+                            )
+                            .await
+                            {
                                 Ok(client) => {
                                     if !print_mode {
                                         eprintln!("✓ Using local model: {}", spec.name);
@@ -1227,7 +1232,10 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                                     return Ok(client);
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to initialize local model {}: {}", spec.name, e);
+                                    eprintln!(
+                                        "Failed to initialize local model {}: {}",
+                                        spec.name, e
+                                    );
                                 }
                             }
                         }
@@ -1281,7 +1289,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                         eprintln!("✓ Connected to Ollama at localhost:11434");
                     }
                     Ok(client)
-                },
+                }
                 Err(_) => {
                     // Connection failed, prompt for remote server
                     prompt_for_remote_ollama(print_mode, storage).await
