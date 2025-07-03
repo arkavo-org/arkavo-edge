@@ -135,10 +135,33 @@ impl ModelDownloader {
         // Set up cleanup guard
         let guard = PartialFileGuard::new(temp_path.clone());
 
-        // Download the file
+        // Download the file using HF API
         let download_url = repo.url(&spec.hf_filename);
+        tracing::info!("Download URL: {}", download_url);
+        
+        // Create a client with the token if available
+        let client = reqwest::Client::new();
+        let mut request = client.get(&download_url);
+        
+        // Add authorization header if token is available
+        if let Ok(token) = std::env::var("HF_TOKEN") {
+            request = request.header("Authorization", format!("Bearer {}", token));
+            tracing::debug!("Added HF token to download request");
+        } else if let Ok(token_data) = std::fs::read_to_string(
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".cache/huggingface/token")
+        ) {
+            if let Ok(token_json) = serde_json::from_str::<serde_json::Value>(&token_data) {
+                if let Some(token) = token_json.get("token").and_then(|t| t.as_str()) {
+                    request = request.header("Authorization", format!("Bearer {}", token));
+                    tracing::debug!("Added HF token from cache to download request");
+                }
+            }
+        }
 
-        let response = reqwest::get(&download_url)
+        let response = request
+            .send()
             .await
             .map_err(|e| Error::Model(format!("Failed to start download: {e}")))?;
 
