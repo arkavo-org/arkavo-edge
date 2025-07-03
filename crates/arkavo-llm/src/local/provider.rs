@@ -15,8 +15,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[cfg(feature = "local")]
+use super::worker::WorkerHandle;
+
+#[cfg(feature = "local")]
 struct Inner {
     model_loader: ModelLoader,
+    worker_handle: Option<WorkerHandle>,
     _seed: u64,
     _temperature: f64,
     _top_p: Option<f64>,
@@ -44,6 +48,7 @@ impl LocalProvider {
             Ok(Self {
                 inner: Arc::new(Mutex::new(Inner {
                     model_loader,
+                    worker_handle: None,
                     _seed: 42,
                     _temperature: 0.8,
                     _top_p: Some(0.95),
@@ -59,6 +64,19 @@ impl LocalProvider {
     pub async fn initialize(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;
         guard.model_loader.load_model()?;
+
+        // If it's a non-quantized model, create the worker
+        if let Some(Model::Llama(_model)) = guard.model_loader.get_model() {
+            if let Some(_config) = guard.model_loader.get_config() {
+                let _device = guard.model_loader.device().clone();
+                // We need to move the model out temporarily
+                // This is a limitation we'll need to work around
+                tracing::warn!(
+                    "Non-quantized model detected. Worker pattern not yet fully integrated."
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -236,22 +254,60 @@ impl Provider for LocalProvider {
 
         #[cfg(feature = "local")]
         {
-            // For now, return a simple stream implementation
-            // This will be implemented with actual streaming inference
-            let response = self.complete(_messages).await?;
+            let prompt = _messages
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
 
-            // Create a vector stream that implements Unpin
-            let items = vec![Ok(StreamResponse {
-                content: response,
-                done: true,
-            })];
+            // Lock once to check model type and get necessary data
+            let guard = self.inner.lock().await;
 
-            let stream = tokio_stream::iter(items);
+            // Check if model is loaded
+            if !guard.model_loader.is_loaded() {
+                return Err(Error::Model(
+                    "Model not loaded. Call initialize() first.".to_string(),
+                ));
+            }
 
-            Ok(Box::new(stream)
-                as Box<
-                    dyn Stream<Item = Result<StreamResponse>> + Send + Unpin,
-                >)
+            let tokenizer = guard.model_loader.tokenizer()?;
+            let encoding = tokenizer
+                .encode(prompt.as_str(), true)
+                .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
+            let _ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
+
+            // Get EOS token
+            let _eos_id = guard
+                .model_loader
+                .eos_token_id()
+                .or_else(|| super::tokenizer_utils::get_eos_token_id(&tokenizer))
+                .map(|id| id as i64)
+                .unwrap_or(0);
+
+            // Check model type
+            let is_quantized = matches!(guard.model_loader.get_model(), Some(Model::Quantized(_)));
+
+            drop(guard); // Release lock before streaming
+
+            if is_quantized {
+                // For quantized models, fall back to non-streaming for now
+                let response = self.complete(_messages).await?;
+                let items = vec![Ok(StreamResponse {
+                    content: response,
+                    done: true,
+                })];
+                let stream = tokio_stream::iter(items);
+                Ok(Box::new(stream)
+                    as Box<
+                        dyn Stream<Item = Result<StreamResponse>> + Send + Unpin,
+                    >)
+            } else {
+                // For non-quantized models, we would use the streaming worker
+                // but we need to properly handle model ownership first
+                return Err(Error::Model(
+                    "Streaming for non-quantized models not yet implemented".to_string(),
+                ));
+            }
         }
     }
 
