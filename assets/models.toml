@@ -1,0 +1,32 @@
+# Model manifest for Arkavo Edge
+# This file defines the officially supported models with their metadata
+
+[[models]]
+name = "gemma3n-e2b-it"
+description = "Gemma 3n E2B Instruct (Q4_K_M) - 2.8GB"
+hf_repo_id = "unsloth/gemma-3n-E2B-it-GGUF"
+hf_filename = "gemma-3n-E2B-it-Q4_K_M.gguf"
+sha256 = "189d42b4303cb1078ea8d00963f437cd6d884069b7ba2ba80b38cd09585dc415"
+size_gb = 2.82
+context_length = 8192
+license = "gemma"
+
+[[models]]
+name = "gemma3n-e4b-it"
+description = "Gemma 3n E4B Instruct (Q4_K_M) - 4.2GB"
+hf_repo_id = "unsloth/gemma-3n-E4B-it-GGUF"
+hf_filename = "gemma-3n-E4B-it-Q4_K_M.gguf"
+sha256 = "43b489bb77a81bda85180e7c490d40ad7f1d5c2ce654c9b05e15e104bd3c777e"
+size_gb = 4.23
+context_length = 8192
+license = "gemma"
+
+[[models]]
+name = "tinyllama-1b-chat"
+description = "TinyLlama 1.1B Chat (Q4_K_M) for testing"
+hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+hf_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+sha256 = "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0"
+size_gb = 0.64
+context_length = 2048
+license = "apache-2.0"

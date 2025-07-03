@@ -49,21 +49,43 @@ See the [Getting Started Guide](docs/GETTING_STARTED.md) for detailed instructio
 ### 🏠 Local LLM Support (Experimental)
 - Run models locally with Candle ML framework
 - **Currently supports only quantized GGUF models** (e.g., Q4_K_M, Q5_K_S)
-- Metal acceleration falls back to CPU for quantized models
+- Metal acceleration on macOS, CPU fallback on other platforms
 - Privacy-first inference without external APIs
+- Built-in model management with automatic downloads
 
-**Quick Start with TinyLlama:**
+**Model Management:**
 ```bash
-# Download a compatible model (4.4 GB)
-curl -L https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \
-  -o ~/Downloads/tinyllama.gguf
+# List available models
+arkavo model list
 
-# Set environment variable and run
-export TINY_MODEL_PATH=~/Downloads/tinyllama.gguf
-cargo test --features local -p arkavo-llm tinyllama_speaks
+# Download a model (with SHA-256 verification)
+arkavo model download tinyllama-1b-chat  # 640 MB test model
+arkavo model download gemma3n-e2b-it     # 2.8 GB Gemma model
+arkavo model download gemma3n-e4b-it     # 4.2 GB Gemma model
+
+# Switch active model
+arkavo model switch gemma3n-e2b-it
+
+# Add a custom local model
+arkavo model add /path/to/model.gguf --name my-model
 ```
 
-**Note:** Full fp32 model support and automatic downloads coming soon.
+**Supported Models:**
+- **Gemma 3n E2B/E4B**: Google's latest instruction-tuned models
+- **TinyLlama 1.1B**: Lightweight model for testing
+- Custom GGUF models via `arkavo model add`
+
+**Quick Test:**
+```bash
+# Build with local inference support
+cargo build --release --features local
+
+# Download and test with TinyLlama
+./target/release/arkavo model download tinyllama-1b-chat
+./target/release/arkavo chat --model tinyllama-1b-chat --local
+```
+
+**Note:** Models are stored in `~/.cache/arkavo/models/`. First download may take a few minutes depending on your connection.
 
 ## MCP Server for Claude Code
 

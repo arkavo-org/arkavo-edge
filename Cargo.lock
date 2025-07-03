@@ -165,14 +165,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
 name = "arkavo-cli"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -237,11 +237,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.21.0"
+version = "0.21.1"
 
 [[package]]
 name = "arkavo-git"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "git2",
  "tempfile",
@@ -250,8 +250,9 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
+ "anyhow",
  "async-trait",
  "base64 0.22.1",
  "bytemuck",
@@ -259,6 +260,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "cfg-if",
+ "dirs 5.0.1",
  "futures",
  "hf-hub 0.3.2",
  "indicatif",
@@ -272,12 +274,13 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tokio-stream",
+ "toml",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -286,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -296,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -314,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -334,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -362,11 +365,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.21.0"
+version = "0.21.1"
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -392,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -420,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.21.0"
+version = "0.21.1"
 
 [[package]]
 name = "arrayvec"
@@ -6410,8 +6413,15 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
+ "toml_write",
  "winnow",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tower"
