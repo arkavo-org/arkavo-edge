@@ -1,0 +1,56 @@
+   Compiling arkavo-llm v0.21.2 (/Users/paul/Projects/arkavo/arkavo-edge/crates/arkavo-llm)
+warning: unused import: `super::*`
+  --> crates/arkavo-llm/src/local/tokenizer_utils.rs:59:9
+   |
+59 |     use super::*;
+   |         ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: `arkavo-llm` (lib test) generated 1 warning (run `cargo fix --lib -p arkavo-llm --tests` to apply 1 suggestion)
+warning: unused import: `std::path::PathBuf`
+ --> crates/arkavo-llm/tests/tokenizer_cleanup_test.rs:3:5
+  |
+3 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused variable: `pattern`
+  --> crates/arkavo-llm/tests/tokenizer_cleanup_test.rs:14:9
+   |
+14 |     let pattern = format!("arkavo_tokenizer_{}_*.spm", test_model_name);
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_pattern`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `path`
+  --> crates/arkavo-llm/tests/tokenizer_cleanup_test.rs:70:9
+   |
+70 |     let path = temp_dir.join(&expected_pattern);
+   |         ^^^^ help: if this is intentional, prefix it with an underscore: `_path`
+
+warning: `arkavo-llm` (test "tokenizer_cleanup_test") generated 3 warnings (run `cargo fix --test "tokenizer_cleanup_test"` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.18s
+     Running unittests src/lib.rs (target/debug/deps/arkavo_llm-075e8cf5bd786eac)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+     Running tests/download_integration.rs (target/debug/deps/download_integration-98deecf52aedb239)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/integration_test.rs (target/debug/deps/integration_test-847fb501af988e90)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/local_ci_test.rs (target/debug/deps/local_ci_test-21582ab0fba02062)
+
+running 1 test
+Downloading TinyLlama model for CI test...

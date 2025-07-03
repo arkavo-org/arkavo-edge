@@ -23,7 +23,7 @@ license = "gemma"
 
 [[models]]
 name = "tinyllama-1b-chat"
-description = "TinyLlama 1.1B Chat (Q4_K_M) for testing"
+description = "TinyLlama 1.1B Chat (Q4_K_M) with embedded tokenizer - ideal for CI testing"
 hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
 hf_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 sha256 = "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0"

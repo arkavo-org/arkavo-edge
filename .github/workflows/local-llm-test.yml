@@ -50,13 +50,13 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
     
-    - name: Cache Models
+    - name: Cache TinyLlama Model
       uses: actions/cache@v4
       with:
-        path: ~/.cache/arkavo/models
-        key: ${{ runner.os }}-models-${{ hashFiles('assets/models.toml') }}
+        path: ~/.cache/arkavo/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+        key: tinyllama-chat-q4km-${{ hashFiles('assets/models.toml') }}
         restore-keys: |
-          ${{ runner.os }}-models-
+          tinyllama-chat-q4km-
     
     - name: Build with local feature
       run: cargo build --features local -p arkavo-llm
@@ -65,8 +65,6 @@ jobs:
       run: cargo test -p arkavo-llm --features local test_manifest_validity
     
     - name: Run CI inference test
-      env:
-        CI_SKIP_LOCAL_TEST: 1
       run: cargo test -p arkavo-llm --features local ci_local_inference_test -- --nocapture
       timeout-minutes: 10
     
