@@ -11,6 +11,10 @@ keywords = ["cli", "ai", "agent", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
 
+[features]
+default = []
+local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if"]
+
 [dependencies]
 tokio = { version = "1.42", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -22,6 +26,15 @@ tracing = "0.1"
 async-trait = "0.1"
 tokio-stream = "0.1"
 base64 = "0.22"
+
+# Local inference dependencies (optional)
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
+tokenizers = { version = "0.21", optional = true }
+bytemuck = { version = "1.20", optional = true }
+cfg-if = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

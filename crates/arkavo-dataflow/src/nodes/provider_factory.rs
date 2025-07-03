@@ -17,6 +17,7 @@ pub enum ProviderType {
     OpenAI,
     Anthropic,
     Gemini,
+    Local,
     Custom(String),
 }
 
@@ -27,6 +28,7 @@ impl ProviderType {
             n if n.contains("openai") => ProviderType::OpenAI,
             n if n.contains("anthropic") => ProviderType::Anthropic,
             n if n.contains("gemini") => ProviderType::Gemini,
+            n if n.contains("local") => ProviderType::Local,
             _ => ProviderType::Custom(name.to_string()),
         }
     }
@@ -117,6 +119,7 @@ impl ProviderFactoryRegistry {
         registry.register(Arc::new(OllamaProviderFactory));
         registry.register(Arc::new(OpenAIProviderFactory));
         registry.register(Arc::new(AnthropicProviderFactory));
+        registry.register(Arc::new(LocalProviderFactory));
 
         registry
     }
@@ -328,6 +331,53 @@ impl ProviderFactory for AnthropicProviderFactory {
     }
 }
 
+/// Factory for creating Local provider instances
+pub struct LocalProviderFactory;
+
+#[async_trait]
+impl ProviderFactory for LocalProviderFactory {
+    async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
+        // Validate configuration first
+        self.validate_config(config).await?;
+
+        // Extract model name and path from config
+        let model_name = config
+            .default_model
+            .clone()
+            .unwrap_or_else(|| "local-model".to_string());
+
+        let model_path = config
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("model_path"))
+            .and_then(|v| v.as_str())
+            .map(std::string::ToString::to_string);
+
+        // Create local provider
+        let provider = arkavo_llm::local::LocalProvider::new(model_name, model_path)?;
+        Ok(Box::new(provider))
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::Local
+    }
+
+    async fn validate_config(&self, config: &ProviderConfig) -> Result<()> {
+        // Local provider doesn't require auth_ref
+        // but might require a model path in metadata
+
+        // If base_url is provided, it should be a local:// URL
+        if !config.base_url.is_empty() && !config.base_url.starts_with("local://") {
+            return Err(anyhow::anyhow!(
+                "Local provider requires 'local://' URL scheme, got: {}",
+                config.base_url
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +393,8 @@ mod tests {
             ProviderType::Ollama
         );
         assert_eq!(ProviderType::from_name("openai"), ProviderType::OpenAI);
+        assert_eq!(ProviderType::from_name("local"), ProviderType::Local);
+        assert_eq!(ProviderType::from_name("local-gemma"), ProviderType::Local);
         assert_eq!(
             ProviderType::from_name("custom-llm"),
             ProviderType::Custom("custom-llm".to_string())
@@ -397,10 +449,12 @@ mod tests {
         assert!(types.contains(&ProviderType::Ollama));
         assert!(types.contains(&ProviderType::OpenAI));
         assert!(types.contains(&ProviderType::Anthropic));
+        assert!(types.contains(&ProviderType::Local));
 
         // Get factory
         assert!(registry.get_factory(&ProviderType::Ollama).is_some());
         assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
         assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
+        assert!(registry.get_factory(&ProviderType::Local).is_some());
     }
 }
