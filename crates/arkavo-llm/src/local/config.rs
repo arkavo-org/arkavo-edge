@@ -6,23 +6,23 @@ pub struct LocalConfig {
     /// Maximum tokens to generate (default: 60)
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
-    
+
     /// Maximum prompt tokens allowed (default: 4096)
     #[serde(default = "default_max_prompt_tokens")]
     pub max_prompt_tokens: usize,
-    
+
     /// Temperature for sampling (default: 0.8)
     #[serde(default = "default_temperature")]
     pub temperature: f64,
-    
+
     /// Top-p for nucleus sampling (default: 0.95)
     #[serde(default = "default_top_p")]
     pub top_p: Option<f64>,
-    
+
     /// Random seed for reproducibility (default: 42)
     #[serde(default = "default_seed")]
     pub seed: u64,
-    
+
     /// Device preference: "auto", "cpu", "metal" (default: "auto")
     #[serde(default = "default_device")]
     pub device: String,
