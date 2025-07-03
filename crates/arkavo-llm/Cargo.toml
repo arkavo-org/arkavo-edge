@@ -13,7 +13,8 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = []
-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if"]
+local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [dependencies]
 tokio = { version = "1.42", features = ["full"] }
@@ -35,6 +36,8 @@ hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
 tokenizers = { version = "0.21", optional = true }
 bytemuck = { version = "1.20", optional = true }
 cfg-if = { version = "1.0", optional = true }
+sha2 = { version = "0.10", optional = true }
+indicatif = { version = "0.17", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

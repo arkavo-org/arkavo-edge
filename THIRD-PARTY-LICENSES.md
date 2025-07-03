@@ -43,3 +43,35 @@ If not embedded, idb_companion can be installed via Homebrew:
 brew tap facebook/fb
 brew install idb-companion
 ```
+
+## Gemma Models
+
+**License:** Gemma Terms of Use  
+**Copyright:** Copyright 2024 Google LLC  
+**Source:** https://ai.google.dev/gemma/terms
+
+When Gemma models are downloaded and used by Arkavo Edge, they are subject to the Gemma Terms of Use. The models include the following notice:
+
+```
+NOTICE
+
+This repository contains pre-trained model weights for Gemma models.
+These model weights are licensed for use under the Gemma Terms of Use:
+https://ai.google.dev/gemma/terms
+```
+
+### Usage in This Project
+
+Gemma models can be optionally downloaded and used for local inference in Arkavo Edge. When downloaded, the models and their Notice.txt file are stored in the user's cache directory. The models are:
+
+- **gemma-2-2b-it-GGUF**: 2 billion parameter instruction-tuned model
+- **gemma-2-9b-it-GGUF**: 9 billion parameter instruction-tuned model
+- **gemma-2-27b-it-GGUF**: 27 billion parameter instruction-tuned model
+
+### Compliance
+
+When distributing Arkavo Edge with bundled Gemma models, the Notice.txt file must be included. The local inference system automatically manages this compliance by:
+
+1. Downloading the Notice.txt file along with model files
+2. Storing it in the model directory
+3. Including it in any redistribution of models

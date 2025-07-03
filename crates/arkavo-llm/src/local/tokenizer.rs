@@ -16,7 +16,7 @@ impl Tokenizer {
         })
     }
 
-    pub async fn load(&mut self) -> Result<()> {
+    pub fn load(&mut self) -> Result<()> {
         // Placeholder for tokenizer loading
         tracing::info!("Loading tokenizer for model '{}'", self.model_name);
 
@@ -32,7 +32,7 @@ impl Tokenizer {
         if let Some(tokenizer) = &self.inner {
             let encoding = tokenizer
                 .encode(text, false)
-                .map_err(|e| Error::Model(format!("Tokenization failed: {}", e)))?;
+                .map_err(|e| Error::Model(format!("Tokenization failed: {e}")))?;
             Ok(encoding.get_ids().to_vec())
         } else {
             // Fallback for when tokenizer isn't loaded
@@ -44,7 +44,7 @@ impl Tokenizer {
         if let Some(tokenizer) = &self.inner {
             tokenizer
                 .decode(tokens, true)
-                .map_err(|e| Error::Model(format!("Decoding failed: {}", e)))
+                .map_err(|e| Error::Model(format!("Decoding failed: {e}")))
         } else {
             // Fallback for when tokenizer isn't loaded
             Ok(tokens
