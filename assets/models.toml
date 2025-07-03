@@ -5,9 +5,9 @@
 name = "gemma3-1b-it-qat"
 description = "Official Google Gemma-3 1B IT QAT (Q4_0) - Self-contained GGUF"
 hf_repo_id = "google/gemma-3-1b-it-qat-q4_0-gguf"
-hf_filename = "gemma-3-1b-it-q4_0.gguf"
-sha256 = "6f52174a78673a25332f1a8c952766858e8e7a04918451842886131379b19808"
-size_gb = 1.62
+hf_filename = "gemma-3-1b-it-qat-q4_0.gguf"
+sha256 = "95e5b8d891cd6a794f66c2a6fb59a41e9562b4660560b854274eceffb628b22a"
+size_gb = 0.93
 context_length = 8192
 license = "gemma"
 
