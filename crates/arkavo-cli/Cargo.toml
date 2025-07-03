@@ -16,6 +16,7 @@ default = ["memory", "mdns"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 mdns = ["zeroconf"]
+local = ["arkavo-llm/local"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal" }
