@@ -81,7 +81,9 @@ impl ModelLoader {
             self.model_name,
             self.device
         );
-        tracing::debug!("Model path: {}", path);
+        tracing::info!("Model path: {}", path);
+        tracing::info!("Path ends with .gguf: {}", path.ends_with(".gguf"));
+        tracing::info!("Path ends with .GGUF: {}", path.ends_with(".GGUF"));
 
         // Check if it's a GGUF file
         if path.ends_with(".gguf") || path.ends_with(".GGUF") {
@@ -301,6 +303,22 @@ impl ModelLoader {
                     }
                     Err(e) => {
                         tracing::warn!("Failed to load tokenizer from file: {}", e);
+                    }
+                }
+            }
+            
+            // 3. Try tokenizer.json for Gemma models
+            let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+            if tokenizer_json_path.exists() {
+                match Tokenizer::from_file(&tokenizer_json_path) {
+                    Ok(tokenizer) => {
+                        self.tokenizer = Some(Arc::new(tokenizer));
+                        self.tokenizer_path = Some(tokenizer_json_path.to_string_lossy().into_owned());
+                        tracing::info!("Loaded tokenizer from file: tokenizer.json");
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load tokenizer from JSON file: {}", e);
                     }
                 }
             }
