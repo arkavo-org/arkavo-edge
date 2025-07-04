@@ -306,7 +306,13 @@ Repository details:
     };
 
     // Get conversation context with system message
-    let system_message = Message::system(&system_prompt);
+    let system_message = if print_mode {
+        // Use minimal system prompt for print mode to avoid token limit issues
+        Message::system("You are a helpful AI assistant.")
+    } else {
+        Message::system(&system_prompt)
+    };
+    
     let mut messages = if print_mode {
         // In print mode, just create a simple message list
         vec![system_message.clone()]
@@ -1210,37 +1216,43 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     {
         use arkavo_llm::local::{ModelDownloader, ModelManifest};
 
-        // Load manifest and find default model
+        // Load manifest and try models in priority order
         if let Ok(manifest) = ModelManifest::load() {
-            if let Some(spec) = manifest.find("gemma3-1b-it-qat") {
-                // Create downloader to check cache
-                if let Ok(downloader) = ModelDownloader::new() {
-                    // This will return cached path if already downloaded
-                    match downloader.get_model_path(spec).await {
-                        Ok(model_path) => {
-                            eprintln!("Found model at: {}", model_path.display());
-                            match LlmClient::from_local_model(
-                                &spec.name,
-                                model_path.to_string_lossy().to_string(),
-                            )
-                            .await
-                            {
-                                Ok(client) => {
-                                    if !print_mode {
-                                        eprintln!("✓ Using local model: {}", spec.name);
+            // Priority order: Phi-2 first (works with Candle), then TinyLlama, then Gemma
+            let model_priorities = ["tinyllama-110m-f16", "phi-2-q4k", "tinyllama-1b-chat-q2", "tinyllama-1b-chat-q3", "tinyllama-1b-chat", "gemma3-1b-it-qat"];
+            
+            for model_name in &model_priorities {
+                if let Some(spec) = manifest.find(model_name) {
+                    // Create downloader to check cache
+                    if let Ok(downloader) = ModelDownloader::new() {
+                        // This will return cached path if already downloaded
+                        match downloader.get_model_path(spec).await {
+                            Ok(model_path) => {
+                                eprintln!("Found model at: {}", model_path.display());
+                                match LlmClient::from_local_model(
+                                    &spec.name,
+                                    model_path.to_string_lossy().to_string(),
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        if !print_mode {
+                                            eprintln!("✓ Using local model: {}", spec.name);
+                                        }
+                                        return Ok(client);
                                     }
-                                    return Ok(client);
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "Failed to initialize local model {}: {}",
-                                        spec.name, e
-                                    );
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Failed to initialize local model {}: {}",
+                                            spec.name, e
+                                        );
+                                    }
                                 }
                             }
-                        }
-                        Err(_) => {
-                            // Model not in cache, continue to other providers
+                            Err(_) => {
+                                // Model not in cache, try next model
+                                continue;
+                            }
                         }
                     }
                 }

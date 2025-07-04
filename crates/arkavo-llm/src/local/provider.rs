@@ -116,7 +116,7 @@ impl Provider for LocalProvider {
                 let encoding = tokenizer
                     .encode(prompt.as_str(), true)
                     .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
-                let ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
+                let ids: Vec<u32> = encoding.get_ids().to_vec();
 
                 // Get EOS token from metadata or tokenizer
                 let eos_id = guard
@@ -126,12 +126,11 @@ impl Provider for LocalProvider {
                         // Try to get from tokenizer's special tokens
                         super::tokenizer_utils::get_eos_token_id(&tokenizer)
                     })
-                    .map(|id| id as i64)
                     .unwrap_or_else(|| {
                         // Final fallback
                         let vocab_size = tokenizer.get_vocab_size(false);
                         if vocab_size > 0 {
-                            i64::try_from(vocab_size - 1).unwrap_or(i64::MAX)
+                            (vocab_size - 1) as u32
                         } else {
                             0
                         }
@@ -140,20 +139,35 @@ impl Provider for LocalProvider {
                 (ids, eos_id, tokenizer)
             };
 
-            // Add max_tokens limit with reasonable default
-            const MAX_GENERATION_TOKENS: usize = 2048;
-            let max_tokens = 60.min(MAX_GENERATION_TOKENS);
-            let start_len = ids.len();
-
-            // Check prompt length
-            const MAX_PROMPT_TOKENS: usize = 4096;
-            if ids.len() > MAX_PROMPT_TOKENS {
+            // Get context window from model metadata
+            let context_window = {
+                let guard = self.inner.lock().await;
+                guard.model_loader.context_length()
+            };
+            
+            // Calculate how many tokens we can generate
+            let prompt_len = ids.len();
+            let context_remaining = context_window.saturating_sub(prompt_len);
+            
+            // Use full remaining context window (up to 2048 tokens)
+            let max_tokens = 2048.min(context_remaining);
+            
+            tracing::debug!(
+                "Context window: {}, prompt length: {}, max tokens to generate: {}",
+                context_window,
+                prompt_len,
+                max_tokens
+            );
+            
+            if max_tokens == 0 {
                 return Err(Error::Model(format!(
-                    "Prompt too long: {} tokens (max: {})",
-                    ids.len(),
-                    MAX_PROMPT_TOKENS
+                    "Prompt too long: {} tokens exceeds context window of {}",
+                    prompt_len,
+                    context_window
                 )));
             }
+            
+            let start_len = ids.len();
 
             let start_time = std::time::Instant::now();
 
@@ -166,53 +180,92 @@ impl Provider for LocalProvider {
                 guard.model_loader.device().clone()
             };
 
-            for _ in 0..max_tokens {
-                let input = Tensor::new(ids.as_slice(), &device)
-                    .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
-                    .unsqueeze(0)
-                    .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-
+            // Process the prompt first (all tokens at once)
+            let prompt_len = ids.len();
+            
+            for index in 0..max_tokens {
                 // Lock for forward pass
                 let next = {
                     let mut guard = self.inner.lock().await;
-                    let seq_len = ids.len();
+                    
+                    // On first iteration (index=0), process the entire prompt
+                    // On subsequent iterations, only process the last generated token
+                    let (input_tokens, position) = if index == 0 {
+                        // First pass: process entire prompt
+                        (ids.as_slice(), 0)
+                    } else {
+                        // Subsequent passes: only the last token
+                        (&ids[ids.len()-1..ids.len()], prompt_len + index - 1)
+                    };
 
                     // Forward pass based on model architecture
-                    let logits = match guard.model_loader.get_model_mut() {
+                    let mut logits = match guard.model_loader.get_model_mut() {
                         Some(Model::QuantizedGemma3(model)) => {
-                            model.forward(&input, seq_len - 1).map_err(|e| {
+                            // Gemma3 expects batch dimension
+                            let input = Tensor::new(input_tokens, &device)
+                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
+                                .unsqueeze(0)
+                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
+                            model.forward(&input, position).map_err(|e| {
                                 Error::Model(format!("Gemma3 forward pass failed: {e}"))
                             })?
                         }
-                        Some(Model::QuantizedLlama(model)) => model
-                            .forward(&input, seq_len - 1)
-                            .map_err(|e| Error::Model(format!("Llama forward pass failed: {e}")))?,
+                        Some(Model::QuantizedLlama(model)) => {
+                            // QuantizedLlama expects 2D tensor with shape [1, seq_len]
+                            let input = Tensor::new(input_tokens, &device)
+                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
+                                .unsqueeze(0)
+                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
+                            
+                            // Debug print input shape
+                            tracing::debug!("Llama input shape: {:?}, position: {}", input.shape(), position);
+                            
+                            model
+                                .forward(&input, position)
+                                .map_err(|e| Error::Model(format!("Llama forward pass failed: {e}")))?
+                        }
+                        Some(Model::QuantizedPhi(model)) => {
+                            // QuantizedPhi expects 2D tensor with shape [1, seq_len]
+                            let input = Tensor::new(input_tokens, &device)
+                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
+                                .unsqueeze(0)
+                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
+                            
+                            model
+                                .forward(&input, position)
+                                .map_err(|e| Error::Model(format!("Phi forward pass failed: {e}")))?
+                        }
                         None => {
                             return Err(Error::Model("Model not loaded".to_string()));
                         }
                     };
+
+                    // Ensure logits are F32 for subsequent operations
+                    if logits.dtype() != candle_core::DType::F32 {
+                        logits = logits.to_dtype(candle_core::DType::F32)
+                            .map_err(|e| Error::Model(format!("Failed to convert logits to F32: {e}")))?;
+                    }
 
                     logits
                         .squeeze(0)
                         .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?
                         .argmax(0)
                         .map_err(|e| Error::Model(format!("Failed to argmax: {e}")))?
-                        .to_scalar::<i64>()
+                        .to_scalar::<u32>()
                         .map_err(|e| Error::Model(format!("Failed to get scalar: {e}")))?
                 };
 
                 ids.push(next);
+                
+                // Early stop on EOS token
                 if next == eos_token_id {
                     break;
                 }
             }
 
-            // Decode only the generated tokens
-            let generated_ids: Vec<u32> = ids[start_len..].iter().map(|&v| v as u32).collect();
-
-            // Use cloned tokenizer for decoding
+            // Decode the full sequence to get complete output
             let output = tokenizer
-                .decode(&generated_ids, true)
+                .decode(&ids, true)
                 .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?;
 
             // Log generation metrics
@@ -270,14 +323,13 @@ impl Provider for LocalProvider {
             let encoding = tokenizer
                 .encode(prompt.as_str(), true)
                 .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
-            let _ids: Vec<i64> = encoding.get_ids().iter().map(|&u| u as i64).collect();
+            let _ids: Vec<u32> = encoding.get_ids().to_vec();
 
             // Get EOS token
             let _eos_id = guard
                 .model_loader
                 .eos_token_id()
                 .or_else(|| super::tokenizer_utils::get_eos_token_id(&tokenizer))
-                .map(|id| id as i64)
                 .unwrap_or(0);
 
             // Check if we have a model loaded

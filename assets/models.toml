@@ -2,6 +2,26 @@
 # This file defines the officially supported models with their metadata
 
 [[models]]
+name = "tinyllama-110m-f16"
+description = "TinyLlama-110M FP16 - smallest Candle-ready GGUF"
+hf_repo_id = "deniskirbaba/tinyllama-110M-F16-GGUF"
+hf_filename = "tinyllama-110m-f16.gguf"
+sha256 = "8c8432e3930635e4d5ad44a1532e2f60c77a811d7f86c991f3efc0ee50462ec3"
+size_gb = 0.27
+context_length = 2048
+license = "apache-2.0"
+
+[[models]]
+name = "phi-2-q4k"
+description = "Phi-2 quantized Q4_K_M - verified with Candle"
+hf_repo_id = "TheBloke/phi-2-GGUF"
+hf_filename = "phi-2.Q4_K_M.gguf"
+sha256 = "8c1076d2431c5fad4814ac37cbddbd66e53175f8f4459db095e510d90f70bd49"
+size_gb = 1.6
+context_length = 2048
+license = "mit"
+
+[[models]]
 name = "gemma3-1b-it-qat"
 description = "Official Google Gemma-3 1B IT QAT (Q4_0) - Self-contained GGUF"
 hf_repo_id = "google/gemma-3-1b-it-qat-q4_0-gguf"
@@ -28,5 +48,25 @@ hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
 hf_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
 sha256 = "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0"
 size_gb = 0.64
+context_length = 2048
+license = "apache-2.0"
+
+[[models]]
+name = "tinyllama-1b-chat-q2"
+description = "TinyLlama 1.1B Chat (Q2_K) - smallest quantization"
+hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+hf_filename = "tinyllama-1.1b-chat-v1.0.Q2_K.gguf"
+sha256 = "030a469a63576d59f601ef5608846b7718eaa884dd820e9aa7493efec1788afa"
+size_gb = 0.43
+context_length = 2048
+license = "apache-2.0"
+
+[[models]]
+name = "tinyllama-1b-chat-q3"
+description = "TinyLlama 1.1B Chat (Q3_K_M) - smaller quantization"
+hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+hf_filename = "tinyllama-1.1b-chat-v1.0.Q3_K_M.gguf"
+sha256 = "ec461c4d2b60896152bca3978aa49cd70edad7298715e4222e12af1eefea2125"
+size_gb = 0.54
 context_length = 2048
 license = "apache-2.0"

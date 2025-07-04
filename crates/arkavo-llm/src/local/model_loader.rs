@@ -10,10 +10,12 @@ use tokenizers::Tokenizer;
 use candle_transformers::models::llama;
 use candle_transformers::models::quantized_gemma3;
 use candle_transformers::models::quantized_llama;
+use candle_transformers::models::quantized_phi;
 
 pub enum Model {
     QuantizedGemma3(quantized_gemma3::ModelWeights),
     QuantizedLlama(quantized_llama::ModelWeights),
+    QuantizedPhi(quantized_phi::ModelWeights),
 }
 
 pub struct ModelLoader {
@@ -125,6 +127,16 @@ impl ModelLoader {
                     None
                 }
             })
+            .or_else(|| {
+                // Fallback: check for phi-specific metadata
+                if content.metadata.contains_key("phi.context_length") ||
+                   content.metadata.contains_key("phi2.context_length") ||
+                   self.model_name.to_lowercase().contains("phi") {
+                    Some("phi".to_string())
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| Error::Model("Missing architecture in GGUF metadata".to_string()))?;
 
         eprintln!("Detected GGUF architecture: {}", arch);
@@ -165,6 +177,15 @@ impl ModelLoader {
                     quantized_llama::ModelWeights::from_gguf(content, &mut file, &device)
                         .map_err(|e| Error::Model(format!("Failed to load Llama model: {e}")))?;
                 Model::QuantizedLlama(model)
+            }
+            "phi" | "phi2" => {
+                eprintln!("Loading Phi GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model =
+                    quantized_phi::ModelWeights::from_gguf(content, &mut file, &device)
+                        .map_err(|e| Error::Model(format!("Failed to load Phi model: {e}")))?;
+                Model::QuantizedPhi(model)
             }
             _ => return Err(Error::Model(format!("Unsupported architecture: {}", arch))),
         };
@@ -405,11 +426,6 @@ impl ModelLoader {
         use candle_core::quantized::gguf_file::Value;
 
         let bytes = match value {
-            // Handle Binary blob (most common for SentencePiece models)
-            Value::Binary(data) => {
-                tracing::debug!("Found tokenizer as Binary blob, {} bytes", data.len());
-                data.clone()
-            }
             // Handle Array of U8 values (less common)
             Value::Array(values) => {
                 let mut bytes = Vec::new();
@@ -507,5 +523,13 @@ impl ModelLoader {
 
     pub fn eos_token_id(&self) -> Option<u32> {
         self.eos_token_id
+    }
+
+    pub fn context_length(&self) -> usize {
+        // Get context length from config if available
+        self.config
+            .as_ref()
+            .map(|c| c.max_position_embeddings as usize)
+            .unwrap_or(2048) // Default to 2048 if not found
     }
 }
