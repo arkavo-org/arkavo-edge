@@ -274,7 +274,7 @@ jobs:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CXX_x86_64_unknown_linux_musl: musl-g++
           AR_x86_64_unknown_linux_musl: ar
-        run: cargo build --release --target x86_64-unknown-linux-musl -p arkavo
+        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features memory,local -p arkavo
 
       - name: Prepare release artifact
         run: |
