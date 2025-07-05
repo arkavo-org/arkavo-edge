@@ -1,6 +1,7 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use crate::repository_context::RepositoryContextManager;
+#[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use chrono;
@@ -27,6 +28,14 @@ macro_rules! debug_println {
     };
 }
 
+#[cfg(not(feature = "local"))]
+pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Chat command requires the 'local' feature to be enabled.");
+    eprintln!("Please rebuild with: cargo build --features local");
+    Err("Feature not enabled".into())
+}
+
+#[cfg(feature = "local")]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Terminal UI is now the default, use --no-tui to disable it
     let use_tui = !args.contains(&"--no-tui".to_string());
@@ -359,7 +368,7 @@ Repository details:
 
         // Clone necessary components for the TUI task
         let client = Arc::new(client);
-        let client_clone = Arc::clone(&client);
+        let client_clone: Arc<LlmClient> = Arc::clone(&client);
         let mut messages_clone = messages.clone();
 
         // Spawn LLM processing task
@@ -642,6 +651,7 @@ Repository details:
     Ok(())
 }
 
+#[cfg(feature = "local")]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
@@ -1207,6 +1217,7 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
+#[cfg(feature = "local")]
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
@@ -1322,6 +1333,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     }
 }
 
+#[cfg(feature = "local")]
 async fn prompt_for_remote_ollama(
     print_mode: bool,
     storage: Arc<MemoryStorage>,

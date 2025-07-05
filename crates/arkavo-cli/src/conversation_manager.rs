@@ -1,3 +1,4 @@
+#[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message};
 use arkavo_memory::storage::MemoryStorage;
 use chrono::{DateTime, Utc};
@@ -109,7 +110,8 @@ impl ConversationManager {
         Ok(None)
     }
 
-    pub async fn add_message(&self, message: &Message) -> anyhow::Result<()> {
+    #[cfg(feature = "local")]
+    pub async fn add_message(&self, message: &arkavo_llm::Message) -> anyhow::Result<()> {
         let session_id = self
             .current_session_id
             .ok_or_else(|| anyhow::anyhow!("No active conversation session"))?;
@@ -204,7 +206,7 @@ impl ConversationManager {
                 if let Ok(summary_msg) =
                     serde_json::from_str::<ConversationMessage>(&latest_summary.memory.content)
                 {
-                    context_messages.push(Message::assistant(&summary_msg.content));
+                    context_messages.push(arkavo_llm::Message::assistant(&summary_msg.content));
                 }
             }
         }
@@ -225,9 +227,9 @@ impl ConversationManager {
             }
 
             let message = match msg.role.as_str() {
-                "user" => Message::user(&msg.content),
-                "assistant" => Message::assistant(&msg.content),
-                "system" => Message::system(&msg.content),
+                "user" => arkavo_llm::Message::user(&msg.content),
+                "assistant" => arkavo_llm::Message::assistant(&msg.content),
+                "system" => arkavo_llm::Message::system(&msg.content),
                 _ => continue,
             };
 
@@ -239,6 +241,7 @@ impl ConversationManager {
         Ok(context_messages)
     }
 
+    #[cfg(feature = "local")]
     pub async fn create_summary(
         &self,
         client: &LlmClient,
@@ -263,10 +266,10 @@ impl ConversationManager {
         }
 
         let messages = vec![
-            Message::system(
+            arkavo_llm::Message::system(
                 "You are a helpful assistant that creates concise conversation summaries.",
             ),
-            Message::user(&summary_prompt),
+            arkavo_llm::Message::user(&summary_prompt),
         ];
 
         let summary = client.complete(messages).await?;
@@ -277,7 +280,7 @@ impl ConversationManager {
             id: Uuid::new_v4(),
             session_id,
             role: "system".to_string(),
-            content: format!("Previous conversation summary:\n{summary}"),
+            content: format!("Previous conversation summary:\n{}", summary),
             timestamp: Utc::now(),
             token_count: self.count_tokens(&summary),
             is_summary: true,
@@ -345,7 +348,8 @@ impl ConversationManager {
         self.token_encoder.encode_with_special_tokens(text).len()
     }
 
-    fn count_message_tokens(&self, messages: &[Message]) -> usize {
+    #[cfg(feature = "local")]
+    fn count_message_tokens(&self, messages: &[arkavo_llm::Message]) -> usize {
         messages
             .iter()
             .map(|msg| self.count_tokens(&msg.content))

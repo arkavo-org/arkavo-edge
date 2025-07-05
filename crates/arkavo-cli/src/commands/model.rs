@@ -93,7 +93,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             let _ = name; // Suppress unused warning
         }
 
-        ModelSubcommand::Download { name } => {
+        ModelSubcommand::Download { name: _ } => {
             // Check if 'local' feature is enabled
             #[cfg(not(feature = "local"))]
             {
