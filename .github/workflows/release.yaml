@@ -193,13 +193,19 @@ jobs:
           override: true
 
       - name: Decode and import signing certificate
+        timeout-minutes: 5
         run: |
+          echo "Creating and configuring keychain..."
           echo "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode > /tmp/certificate.p12
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import /tmp/certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          echo "Importing certificate..."
+          security import /tmp/certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          echo "Verifying certificate import..."
+          security find-identity -v -p codesigning build.keychain
 
       - name: Build
         uses: actions-rs/cargo@v1
@@ -212,8 +218,11 @@ jobs:
           strip target/aarch64-apple-darwin/release/arkavo
 
       - name: Codesign binary
+        timeout-minutes: 5
         run: |
-          codesign --force --keychain build.keychain --options=runtime --timestamp --sign "Developer ID Application: Arkavo LLC (M8GS7ZT95Y)" target/aarch64-apple-darwin/release/arkavo
+          echo "Starting codesign process..."
+          codesign --verbose --force --keychain build.keychain --options=runtime --timestamp --sign "Developer ID Application: Arkavo LLC (M8GS7ZT95Y)" target/aarch64-apple-darwin/release/arkavo
+          echo "Codesign completed successfully"
 
       - name: Create ZIP for notarization
         run: |
