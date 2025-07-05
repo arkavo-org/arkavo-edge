@@ -8,10 +8,11 @@ repository.workspace = true
 description.workspace = true
 
 [features]
-default = ["nl", "sandbox"]
+default = ["nl", "sandbox", "llm"]
 nl = []
 sandbox = []
-local = ["arkavo-llm/local"]
+llm = ["dep:arkavo-llm"]
+local = ["llm", "arkavo-llm?/local"]
 
 [dependencies]
 anyhow = "1.0"
@@ -29,7 +30,7 @@ thiserror = "2.0"
 tempfile = "3.15"
 lazy-regex = "3.3"
 flate2 = "1.0"
-arkavo-llm = { path = "../arkavo-llm" }
+arkavo-llm = { path = "../arkavo-llm", optional = true, default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-memory = { path = "../arkavo-memory" }
 tokio-stream = "0.1"

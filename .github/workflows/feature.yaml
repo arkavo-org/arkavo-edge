@@ -255,21 +255,27 @@ jobs:
         with:
           shared-key: "linux-musl"
 
-      - name: Install musl tools
+      - name: Install musl tools and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools musl-dev
+          # Set up C++ compiler for musl
+          sudo ln -s /usr/bin/g++ /usr/bin/x86_64-linux-musl-g++ || true
 
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features -p arkavo
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CXX_x86_64_unknown_linux_musl: musl-g++
+          AR_x86_64_unknown_linux_musl: ar
+        run: cargo build --release --target x86_64-unknown-linux-musl --features local -p arkavo
 
       - name: Prepare release artifact
         run: |
           mkdir -p release-package
           cp target/x86_64-unknown-linux-musl/release/arkavo release-package/
           chmod +x release-package/arkavo
-          # Note: musl builds should use static linking or ship without embeddings
-          # The no-default-features flag disables embeddings for musl compatibility
+          # Note: musl builds include local LLM feature for model support
+          # The binary is statically linked for maximum portability
 
       - name: Upload binary
         uses: actions/upload-artifact@v4

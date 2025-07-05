@@ -13,9 +13,11 @@ include = ["src/**/*", "models/**/*", "build.rs", "README.md"]
 
 
 [features]
-default = []
+default = ["vector-search"]
+# Enable vector search functionality
+vector-search = ["dep:hnsw_rs"]
 # Enable embedding support (requires ONNX Runtime)
-embeddings = ["fastembed"]
+embeddings = ["fastembed", "vector-search"]
 # Skip model downloads in build script (for CI environments without curl/wget)
 skip-model-download = []
 
@@ -30,7 +32,7 @@ sqlx = { version = "0.8.1", features = ["runtime-tokio-rustls", "sqlite"] }
 log = "0.4"
 thiserror = "1.0"
 anyhow = "1.0"
-hnsw_rs = "0.3"
+hnsw_rs = { version = "0.3", optional = true }
 arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = "0.1"
 bytemuck = "1.14"
