@@ -109,7 +109,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy --workspace --features local
+      - run: cargo clippy --workspace
 
   # Tests and builds can run in parallel
   test:
@@ -121,16 +121,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test"
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
+      
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
         run: |
           # Run tests for all workspace members except those that need embeddings
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --features local
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
-          cargo test -p arkavo-memory --features local --lib
-          cargo test -p arkavo-memory --features local --test mcp_integration_test
+          cargo test -p arkavo-memory --lib
+          cargo test -p arkavo-memory --test mcp_integration_test
           # Run arkavo-test without embeddings
-          cargo test -p arkavo-test --features local
+          cargo test -p arkavo-test
 
   test-coverage:
     name: Test with Coverage
@@ -196,7 +202,7 @@ jobs:
           done
 
           echo "Running tarpaulin on packages: $PACKAGE_ARGS"
-          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --features local --out Xml --timeout 120 --skip-clean --locked --jobs 2
+          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --out Xml --timeout 120 --skip-clean --locked --jobs 2
 
       - name: Check test coverage
         run: |
@@ -258,16 +264,17 @@ jobs:
       - name: Install musl tools and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools musl-dev
-          # Set up C++ compiler for musl
+          sudo apt-get install -y musl-tools musl-dev g++
+          # Set up C++ compiler for musl - create both symlinks for compatibility
           sudo ln -s /usr/bin/g++ /usr/bin/x86_64-linux-musl-g++ || true
+          sudo ln -s /usr/bin/g++ /usr/bin/musl-g++ || true
 
       - name: Build
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CXX_x86_64_unknown_linux_musl: musl-g++
           AR_x86_64_unknown_linux_musl: ar
-        run: cargo build --release --target x86_64-unknown-linux-musl --features local -p arkavo
+        run: cargo build --release --target x86_64-unknown-linux-musl -p arkavo
 
       - name: Prepare release artifact
         run: |
@@ -302,7 +309,7 @@ jobs:
           brew install idb-companion
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin --features local
+        run: cargo build --release --target aarch64-apple-darwin
 
       - name: Prepare release artifact with ONNX Runtime
         run: |
@@ -338,7 +345,7 @@ jobs:
         run: |
           cargo clean
           BUILD_START=$(date +%s)
-          cargo build --release --features local
+          cargo build --release
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
 
