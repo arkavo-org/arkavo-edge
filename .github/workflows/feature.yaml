@@ -109,7 +109,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy --workspace --no-default-features
+      - run: cargo clippy --workspace --features local
 
   # Tests and builds can run in parallel
   test:
@@ -125,12 +125,12 @@ jobs:
       - name: Run tests
         run: |
           # Run tests for all workspace members except those that need embeddings
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --features local
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
-          cargo test -p arkavo-memory --no-default-features --lib
-          cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
+          cargo test -p arkavo-memory --features local --lib
+          cargo test -p arkavo-memory --features local --test mcp_integration_test
           # Run arkavo-test without embeddings
-          cargo test -p arkavo-test --no-default-features
+          cargo test -p arkavo-test --features local
 
   test-coverage:
     name: Test with Coverage
@@ -196,7 +196,7 @@ jobs:
           done
 
           echo "Running tarpaulin on packages: $PACKAGE_ARGS"
-          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --no-default-features --out Xml --timeout 120 --skip-clean --locked --jobs 2
+          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --features local --out Xml --timeout 120 --skip-clean --locked --jobs 2
 
       - name: Check test coverage
         run: |
@@ -338,7 +338,7 @@ jobs:
         run: |
           cargo clean
           BUILD_START=$(date +%s)
-          cargo build --release --no-default-features
+          cargo build --release --features local
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
 
