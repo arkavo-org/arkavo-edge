@@ -61,8 +61,15 @@ pub struct TerminalContext {
 
 pub async fn run() -> Result<()> {
     // Create channels for LLM communication
+    #[cfg(feature = "llm")]
     let (ui_tx, ui_rx) = mpsc::channel::<LlmRequest>(100);
+    #[cfg(not(feature = "llm"))]
+    let (ui_tx, _ui_rx) = mpsc::channel::<LlmRequest>(100);
+
+    #[cfg(feature = "llm")]
     let (llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
+    #[cfg(not(feature = "llm"))]
+    let (_llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
 
     // Spawn LLM handler task with proper Ollama integration
     #[cfg(feature = "llm")]

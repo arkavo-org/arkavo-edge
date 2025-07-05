@@ -14,6 +14,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
+#[cfg(not(feature = "local"))]
+use std::io;
+#[cfg(feature = "local")]
 use std::io::{self, Write};
 use std::path::Path;
 #[cfg(feature = "local")]
@@ -1446,6 +1449,7 @@ async fn prompt_for_remote_ollama(
     }
 }
 
+#[cfg(feature = "local")]
 fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
     // The UI will handle its own initialization
