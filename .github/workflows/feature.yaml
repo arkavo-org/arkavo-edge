@@ -146,12 +146,15 @@ jobs:
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
         run: |
-          # Run tests for all workspace members except those that need embeddings
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test
+          # Run tests for all workspace members except those that need embeddings or local LLM
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
+          # Run arkavo-llm tests without local feature (API tests only)
+          cargo test -p arkavo-llm --lib
           # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
+          # Note: arkavo-llm integration tests excluded as they require local feature
 
 
   test-embeddings:
@@ -197,6 +200,7 @@ jobs:
     name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu

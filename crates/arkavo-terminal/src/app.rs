@@ -2206,10 +2206,12 @@ Scrolling (when in scroll mode):
                 }
 
                 // Test the connection
-                let test_client =
-                    arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
+                #[cfg(feature = "llm")]
+                {
+                    let test_client =
+                        arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
 
-                match test_client.list_models().await {
+                    match test_client.list_models().await {
                     Ok(models) => {
                         self.add_debug_log(
                             crate::ui::debug::LogLevel::Info,
@@ -2273,6 +2275,16 @@ Scrolling (when in scroll mode):
                             *testing = false;
                         }
                     }
+                }
+                }
+                
+                #[cfg(not(feature = "llm"))]
+                {
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Error,
+                        "[Config] LLM features disabled in this build".to_string(),
+                    );
+                    self.configuration_mode = ConfigurationMode::None;
                 }
             }
             ConfigurationMode::OpenAIKey { .. } => {
