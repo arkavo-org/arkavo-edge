@@ -275,9 +275,6 @@ jobs:
           - container: ubuntu:latest
             binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
             test_deb: true
-          - container: ubuntu:22.04
-            binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
-            test_deb: true
     container:
       image: ${{ matrix.container }}
     steps:

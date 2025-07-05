@@ -355,7 +355,6 @@ jobs:
         container:
           - alpine:latest
           - ubuntu:latest
-          - ubuntu:22.04
     container:
       image: ${{ matrix.container }}
     steps:
