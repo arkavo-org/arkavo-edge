@@ -13,8 +13,7 @@ build = "build.rs"
 
 [dependencies]
 # Turn off all git2 defaults (ssh, https, vendored-libgit2, etc.)
-# Note: We can't use the "https" feature as it forces OpenSSL
-# Instead, we'll handle HTTPS through the system git binary as a fallback
+# HTTPS is handled through the system git binary as a fallback
 git2 = { version = "0.20", default-features = false }
 thiserror = "1.0"
 tempfile = "3.0"

@@ -33,7 +33,7 @@ anyhow = "1.0"
 candle-core = { version = "0.9.1", optional = true }
 candle-nn = { version = "0.9.1", optional = true }
 candle-transformers = { version = "0.9.1", optional = true }
-hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
+hf-hub = { version = "0.4", optional = true, default-features = false, features = ["tokio", "rustls-tls"] }
 tokenizers = { version = "0.21", optional = true }
 bytemuck = { version = "1.20", optional = true }
 cfg-if = { version = "1.0", optional = true }
