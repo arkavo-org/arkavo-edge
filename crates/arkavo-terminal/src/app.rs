@@ -348,6 +348,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "llm")]
     pub async fn fetch_available_models(&mut self) {
         // Try to fetch models from discovered Ollama servers
         use arkavo_llm::ollama::OllamaClient;
@@ -557,6 +558,17 @@ impl App {
                 "[Models] No models found, showing configuration options".to_string(),
             );
         }
+    }
+
+    #[cfg(not(feature = "llm"))]
+    pub async fn fetch_available_models(&mut self) {
+        // When LLM feature is disabled, show only configuration message
+        self.available_models = vec!["LLM features disabled in this build".to_string()];
+        self.selected_model = 0;
+        self.add_debug_log(
+            crate::ui::debug::LogLevel::Warning,
+            "[Models] LLM features disabled in this build".to_string(),
+        );
     }
 
     async fn run_app<B: ratatui::backend::Backend>(
@@ -1020,7 +1032,15 @@ impl App {
                                             if let Some(server_url) =
                                                 self.extract_server_url(&self.input_buffer)
                                             {
+                                                #[cfg(feature = "llm")]
                                                 self.add_ollama_server(server_url).await;
+                                                #[cfg(not(feature = "llm"))]
+                                                {
+                                                    self.add_debug_log(
+                                                        crate::ui::debug::LogLevel::Error,
+                                                        "LLM features disabled in this build".to_string(),
+                                                    );
+                                                }
                                                 self.input_buffer.clear();
                                                 continue;
                                             }
@@ -1934,6 +1954,7 @@ Scrolling (when in scroll mode):
         None
     }
 
+    #[cfg(feature = "llm")]
     async fn add_ollama_server(&mut self, server_url: String) {
         use arkavo_llm::ollama::OllamaClient;
         use arkavo_memory::storage::MemoryStorage;

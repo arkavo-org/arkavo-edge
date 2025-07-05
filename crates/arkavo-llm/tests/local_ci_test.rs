@@ -13,6 +13,7 @@ use arkavo_llm::{Message, Provider, Role};
 /// TheBloke's TinyLlama GGUF includes embedded tokenizers, making it ideal for CI.
 /// Set CI_SKIP_LOCAL_TEST=1 to skip this test in CI (e.g., for musl builds)
 #[tokio::test]
+#[cfg_attr(not(feature = "local"), ignore = "requires local feature")]
 async fn ci_local_inference_test() -> anyhow::Result<()> {
     // Allow skipping in CI if needed
     if std::env::var("CI_SKIP_LOCAL_TEST").is_ok() {

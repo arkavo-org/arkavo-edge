@@ -64,6 +64,7 @@ pub async fn run() -> Result<()> {
     let (llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
 
     // Spawn LLM handler task with proper Ollama integration
+    #[cfg(feature = "llm")]
     tokio::spawn(async move {
         use arkavo_llm::Message;
         use arkavo_test::mcp::mcp_connection::McpConnection;
@@ -512,6 +513,7 @@ pub async fn run() -> Result<()> {
     run_with_channels(ui_tx, llm_rx).await
 }
 
+#[cfg(feature = "llm")]
 async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     use arkavo_llm::{LlmClient, Message};
     use arkavo_memory::storage::MemoryStorage;
@@ -566,6 +568,7 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     }
 }
 
+#[cfg(feature = "llm")]
 async fn prompt_for_ollama_config(
     storage: Arc<arkavo_memory::storage::MemoryStorage>,
 ) -> Result<arkavo_llm::LlmClient> {
