@@ -58,8 +58,8 @@ async fn test_manifest_loading() -> anyhow::Result<()> {
 
     // Check for specific models
     assert!(
-        manifest.find("gemma3n-e2b-it").is_some(),
-        "Should have Gemma 3n E2B model"
+        manifest.find("gemma3-1b-it-qat").is_some(),
+        "Should have Gemma 3 1B IT QAT model"
     );
     assert!(
         manifest.find("gemma3n-e4b-it").is_some(),
