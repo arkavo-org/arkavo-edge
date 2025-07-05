@@ -2212,72 +2212,72 @@ Scrolling (when in scroll mode):
                         arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
 
                     match test_client.list_models().await {
-                    Ok(models) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Info,
-                            format!(
-                                "[Config] Connected to {base_url}, found {} models",
-                                models.len()
-                            ),
-                        );
+                        Ok(models) => {
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Info,
+                                format!(
+                                    "[Config] Connected to {base_url}, found {} models",
+                                    models.len()
+                                ),
+                            );
 
-                        // Save the configuration
-                        if let Ok(storage) = MemoryStorage::new().await {
-                            let embedding_service =
-                                arkavo_memory::embeddings::EmbeddingService::new();
-                            let embedding =
-                                match embedding_service.generate_embedding(&base_url).await {
-                                    Ok(e) => e,
-                                    Err(_) => vec![0.0; 384],
+                            // Save the configuration
+                            if let Ok(storage) = MemoryStorage::new().await {
+                                let embedding_service =
+                                    arkavo_memory::embeddings::EmbeddingService::new();
+                                let embedding =
+                                    match embedding_service.generate_embedding(&base_url).await {
+                                        Ok(e) => e,
+                                        Err(_) => vec![0.0; 384],
+                                    };
+
+                                let memory = arkavo_memory::models::Memory {
+                                    id: uuid::Uuid::new_v4(),
+                                    content: base_url.clone(),
+                                    metadata: Some(serde_json::json!({
+                                        "type": "arkavo_ollama_server_config",
+                                        "timestamp": chrono::Utc::now().to_rfc3339()
+                                    })),
+                                    category: Some("config".to_string()),
+                                    embedding,
+                                    created_at: chrono::Utc::now(),
+                                    updated_at: chrono::Utc::now(),
                                 };
 
-                            let memory = arkavo_memory::models::Memory {
-                                id: uuid::Uuid::new_v4(),
-                                content: base_url.clone(),
-                                metadata: Some(serde_json::json!({
-                                    "type": "arkavo_ollama_server_config",
-                                    "timestamp": chrono::Utc::now().to_rfc3339()
-                                })),
-                                category: Some("config".to_string()),
-                                embedding,
-                                created_at: chrono::Utc::now(),
-                                updated_at: chrono::Utc::now(),
-                            };
+                                if let Err(e) = storage.store(memory).await {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Error,
+                                        format!("[Config] Failed to save configuration: {e}"),
+                                    );
+                                } else {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Info,
+                                        "[Config] Configuration saved successfully".to_string(),
+                                    );
+                                }
+                            }
 
-                            if let Err(e) = storage.store(memory).await {
-                                self.add_debug_log(
-                                    crate::ui::debug::LogLevel::Error,
-                                    format!("[Config] Failed to save configuration: {e}"),
-                                );
-                            } else {
-                                self.add_debug_log(
-                                    crate::ui::debug::LogLevel::Info,
-                                    "[Config] Configuration saved successfully".to_string(),
-                                );
+                            // Exit configuration mode
+                            self.configuration_mode = ConfigurationMode::None;
+
+                            // Refresh available models
+                            self.fetch_available_models().await;
+                        }
+                        Err(e) => {
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Error,
+                                format!("[Config] Failed to connect to {base_url}: {e}"),
+                            );
+                            // Reset testing state but stay in config mode
+                            if let ConfigurationMode::OllamaServer { testing, .. } =
+                                &mut self.configuration_mode
+                            {
+                                *testing = false;
                             }
                         }
-
-                        // Exit configuration mode
-                        self.configuration_mode = ConfigurationMode::None;
-
-                        // Refresh available models
-                        self.fetch_available_models().await;
-                    }
-                    Err(e) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Error,
-                            format!("[Config] Failed to connect to {base_url}: {e}"),
-                        );
-                        // Reset testing state but stay in config mode
-                        if let ConfigurationMode::OllamaServer { testing, .. } =
-                            &mut self.configuration_mode
-                        {
-                            *testing = false;
-                        }
                     }
                 }
-                }
-                
+
                 #[cfg(not(feature = "llm"))]
                 {
                     self.add_debug_log(
