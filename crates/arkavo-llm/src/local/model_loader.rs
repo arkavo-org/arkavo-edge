@@ -1,14 +1,21 @@
 use crate::{Error, Result};
+use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
-use candle_transformers::models::llama::{Config as LlamaConfig, Llama};
-use candle_transformers::models::quantized_llama::ModelWeights;
+use std::io::Seek;
 use std::path::Path;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+// Import the specific quantized models
+use candle_transformers::models::llama;
+use candle_transformers::models::quantized_gemma3;
+use candle_transformers::models::quantized_llama;
+use candle_transformers::models::quantized_phi;
+
 pub enum Model {
-    Llama(Llama),
-    Quantized(ModelWeights),
+    QuantizedGemma3(quantized_gemma3::ModelWeights),
+    QuantizedLlama(quantized_llama::ModelWeights),
+    QuantizedPhi(quantized_phi::ModelWeights),
 }
 
 pub struct ModelLoader {
@@ -16,7 +23,7 @@ pub struct ModelLoader {
     model_name: String,
     model_path: Option<String>,
     model: Option<Model>,
-    config: Option<LlamaConfig>,
+    config: Option<llama::Config>,
     tokenizer_path: Option<String>,
     tokenizer: Option<Arc<Tokenizer>>,
     eos_token_id: Option<u32>,
@@ -76,12 +83,10 @@ impl ModelLoader {
             return Err(Error::Config(format!("Model file not found: {path}")));
         }
 
-        tracing::info!(
+        eprintln!(
             "Loading model '{}' on device {:?}",
-            self.model_name,
-            self.device
+            self.model_name, self.device
         );
-        tracing::debug!("Model path: {}", path);
 
         // Check if it's a GGUF file
         if path.ends_with(".gguf") || path.ends_with(".GGUF") {
@@ -89,10 +94,8 @@ impl ModelLoader {
             match self.load_quantized_model(model_path) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to load as quantized model: {}. Trying standard load.",
-                        e
-                    );
+                    eprintln!("Failed to load as quantized model: {e}");
+                    return Err(e);
                 }
             }
         }
@@ -105,7 +108,6 @@ impl ModelLoader {
 
     fn load_quantized_model(&mut self, path: &Path) -> Result<()> {
         use candle_core::quantized::gguf_file;
-        use std::io::Seek;
 
         // Load GGUF file - open once and clone for reuse
         let mut file = std::fs::File::open(path)
@@ -113,6 +115,32 @@ impl ModelLoader {
 
         let content = gguf_file::Content::read(&mut file)
             .map_err(|e| Error::Model(format!("Failed to read GGUF file: {e}")))?;
+
+        // Extract architecture from metadata
+        let arch = content
+            .metadata
+            .get("general.architecture")
+            .and_then(|v| {
+                if let gguf_file::Value::String(s) = v {
+                    Some(s.to_string())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                // Fallback: check for phi-specific metadata
+                if content.metadata.contains_key("phi.context_length")
+                    || content.metadata.contains_key("phi2.context_length")
+                    || self.model_name.to_lowercase().contains("phi")
+                {
+                    Some("phi".to_string())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| Error::Model("Missing architecture in GGUF metadata".to_string()))?;
+
+        eprintln!("Detected GGUF architecture: {arch}");
 
         // Check if quantization is compatible with Metal
         let mut device = self.device.clone();
@@ -132,17 +160,40 @@ impl ModelLoader {
             tracing::debug!("Found EOS token ID in GGUF metadata: {}", eos_id);
         }
 
-        // Reset file position for weight loading
-        file.seek(std::io::SeekFrom::Start(0))
-            .map_err(|e| Error::Model(format!("Failed to seek in model file: {e}")))?;
+        // The unified, architecture-aware loading logic
+        let model = match arch.as_str() {
+            "gemma3" => {
+                eprintln!("Loading Gemma 3 GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model = quantized_gemma3::ModelWeights::from_gguf(content, &mut file, &device)
+                    .map_err(|e| Error::Model(format!("Failed to load Gemma3 model: {e}")))?;
+                Model::QuantizedGemma3(model)
+            }
+            "llama" => {
+                eprintln!("Loading Llama GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model =
+                    quantized_llama::ModelWeights::from_gguf(content, &mut file, &device)
+                        .map_err(|e| Error::Model(format!("Failed to load Llama model: {e}")))?;
+                Model::QuantizedLlama(model)
+            }
+            "phi" | "phi2" => {
+                eprintln!("Loading Phi GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model = quantized_phi::ModelWeights::from_gguf(content, &mut file, &device)
+                    .map_err(|e| Error::Model(format!("Failed to load Phi model: {e}")))?;
+                Model::QuantizedPhi(model)
+            }
+            _ => return Err(Error::Model(format!("Unsupported architecture: {arch}"))),
+        };
 
-        let weights = ModelWeights::from_gguf(content, &mut file, &device)
-            .map_err(|e| Error::Model(format!("Failed to create model weights from GGUF: {e}")))?;
-
-        self.model = Some(Model::Quantized(weights));
+        self.model = Some(model);
         self.device = device; // Update device if it changed
 
-        tracing::info!("Successfully loaded GGUF model");
+        eprintln!("Successfully loaded {arch} model");
         Ok(())
     }
 
@@ -224,7 +275,7 @@ impl ModelLoader {
             })
             .unwrap_or(10_000.0);
 
-        let config = LlamaConfig {
+        let config = llama::Config {
             hidden_size,
             intermediate_size: hidden_size * 4, // Standard ratio
             vocab_size,
@@ -277,54 +328,35 @@ impl ModelLoader {
         &mut self,
         content: &candle_core::quantized::gguf_file::Content,
     ) {
-        use candle_core::quantized::gguf_file::Value;
-
         let metadata = &content.metadata;
 
-        // Check if we have tokenizer model embedded in GGUF
-        // The tokenizer is often stored as an array of U8 values
+        // Try multiple approaches to get a tokenizer
+
+        // 1. Try embedded tokenizer model (check if it's actually binary data)
         if let Some(value) = metadata.get("tokenizer.ggml.model") {
+            // Check if it's actually binary data or just a string marker
             match value {
-                Value::Array(values) => {
-                    // Extract bytes from array of U8 values
-                    let mut bytes = Vec::new();
-                    for val in values {
-                        if let Value::U8(byte) = val {
-                            bytes.push(*byte);
-                        }
-                    }
-
-                    if !bytes.is_empty() {
-                        let temp_dir = std::env::temp_dir();
-                        let tokenizer_path = temp_dir.join(format!("{}.spm", self.model_name));
-
-                        match std::fs::write(&tokenizer_path, &bytes) {
-                            Ok(_) => {
-                                // Try to load the tokenizer
-                                match Tokenizer::from_file(&tokenizer_path) {
-                                    Ok(tokenizer) => {
-                                        self.tokenizer = Some(Arc::new(tokenizer));
-                                        self.tokenizer_path =
-                                            Some(tokenizer_path.to_string_lossy().into_owned());
-                                        tracing::info!("Successfully loaded tokenizer from GGUF");
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("Failed to load tokenizer from GGUF: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to write tokenizer to temp file: {}", e);
-                            }
-                        }
-                    }
+                gguf_file::Value::String(s) if s == "llama" => {
+                    // This is just a marker, not actual tokenizer data
+                    tracing::debug!("Found 'llama' marker instead of embedded tokenizer");
                 }
                 _ => {
-                    tracing::debug!("Tokenizer model in GGUF is not in expected array format");
+                    // Try to load as embedded tokenizer
+                    if self.try_embedded_tokenizer(value) {
+                        return;
+                    }
                 }
             }
-        } else if let Some(model_path) = &self.model_path {
-            // Fallback: look for tokenizer.model alongside the .gguf
+        }
+
+        // 2. For Gemma models, try to construct a simple tokenizer from metadata
+        // This is a temporary solution until we can bundle the actual tokenizer
+        if self.try_construct_tokenizer_from_metadata(content) {
+            return;
+        }
+
+        // 3. Fallback: look for tokenizer.model alongside the .gguf
+        if let Some(model_path) = &self.model_path {
             let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
             if tokenizer_path.exists() {
                 match Tokenizer::from_file(&tokenizer_path) {
@@ -332,15 +364,115 @@ impl ModelLoader {
                         self.tokenizer = Some(Arc::new(tokenizer));
                         self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
                         tracing::info!("Loaded tokenizer from file: tokenizer.model");
+                        return;
                     }
                     Err(e) => {
                         tracing::warn!("Failed to load tokenizer from file: {}", e);
                     }
                 }
-            } else {
-                tracing::debug!("No tokenizer.model found alongside GGUF file");
+            }
+
+            // 4. Try tokenizer.json for Gemma models
+            let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+            if tokenizer_json_path.exists() {
+                match Tokenizer::from_file(&tokenizer_json_path) {
+                    Ok(tokenizer) => {
+                        self.tokenizer = Some(Arc::new(tokenizer));
+                        self.tokenizer_path =
+                            Some(tokenizer_json_path.to_string_lossy().into_owned());
+                        tracing::info!("Loaded tokenizer from file: tokenizer.json");
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load tokenizer from JSON file: {}", e);
+                    }
+                }
             }
         }
+
+        tracing::error!(
+            "Could not create tokenizer for model {}. GGUF file may not contain embedded tokenizer. \
+            Please ensure tokenizer.model exists alongside the GGUF file.",
+            self.model_name
+        );
+    }
+
+    fn try_construct_tokenizer_from_metadata(
+        &self,
+        content: &candle_core::quantized::gguf_file::Content,
+    ) -> bool {
+        // For now, we'll create a simple tokenizer that can at least encode/decode basic text
+        // This is a temporary solution until we can bundle the actual Gemma tokenizer
+
+        // Check if we have the token list
+        if let Some(gguf_file::Value::Array(tokens)) = content.metadata.get("tokenizer.ggml.tokens")
+        {
+            // For now, just log that we found tokens but can't construct a full tokenizer
+            tracing::warn!(
+                "Found {} tokens in GGUF metadata, but cannot construct a full tokenizer without the SentencePiece model. \
+                Please download tokenizer.model separately.",
+                tokens.len()
+            );
+
+            // TODO: When we have the bundled tokenizer, we'll load it here
+            // let tokenizer_bytes = include_bytes!("../assets/gemma_tokenizer.model");
+            // let tokenizer = Tokenizer::from_bytes(tokenizer_bytes)?;
+        }
+
+        false
+    }
+
+    fn try_embedded_tokenizer(&mut self, value: &candle_core::quantized::gguf_file::Value) -> bool {
+        use candle_core::quantized::gguf_file::Value;
+
+        let bytes = match value {
+            // Handle Array of U8 values (less common)
+            Value::Array(values) => {
+                let mut bytes = Vec::new();
+                for val in values {
+                    if let Value::U8(byte) = val {
+                        bytes.push(*byte);
+                    }
+                }
+                if bytes.is_empty() {
+                    tracing::debug!("Array format tokenizer is empty");
+                    return false;
+                }
+                tracing::debug!("Found tokenizer as Array of U8, {} bytes", bytes.len());
+                bytes
+            }
+            _ => {
+                tracing::debug!("Embedded tokenizer not in expected Binary or Array format");
+                return false;
+            }
+        };
+
+        // Write to temporary file and load tokenizer
+        let temp_dir = std::env::temp_dir();
+        let tokenizer_path = temp_dir.join(format!(
+            "arkavo_tokenizer_{}_{}.spm",
+            self.model_name,
+            std::process::id()
+        ));
+
+        if std::fs::write(&tokenizer_path, &bytes).is_ok() {
+            match Tokenizer::from_file(&tokenizer_path) {
+                Ok(tokenizer) => {
+                    self.tokenizer = Some(Arc::new(tokenizer));
+                    self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
+                    tracing::info!("Successfully loaded embedded tokenizer from GGUF");
+
+                    // Clean up temp file
+                    let _ = std::fs::remove_file(&tokenizer_path);
+                    return true;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load tokenizer from temp file: {}", e);
+                    let _ = std::fs::remove_file(&tokenizer_path);
+                }
+            }
+        }
+        false
     }
 
     pub fn create_tensor(&self, data: &[f32], shape: &[usize]) -> Result<Tensor> {
@@ -356,7 +488,7 @@ impl ModelLoader {
         self.model.as_mut()
     }
 
-    pub fn get_config(&self) -> Option<&LlamaConfig> {
+    pub fn get_config(&self) -> Option<&llama::Config> {
         self.config.as_ref()
     }
 
@@ -391,5 +523,13 @@ impl ModelLoader {
 
     pub fn eos_token_id(&self) -> Option<u32> {
         self.eos_token_id
+    }
+
+    pub fn context_length(&self) -> usize {
+        // Get context length from config if available
+        self.config
+            .as_ref()
+            .map(|c| c.max_position_embeddings)
+            .unwrap_or(2048) // Default to 2048 if not found
     }
 }

@@ -1,13 +1,22 @@
+#[cfg(feature = "llm")]
 pub mod anthropic_provider;
 pub mod auth_manager;
 pub mod http_client;
+#[cfg(feature = "llm")]
 pub mod llm;
+#[cfg(feature = "llm")]
 pub mod llm_config;
+#[cfg(feature = "llm")]
 pub mod llm_discovery;
+#[cfg(feature = "llm")]
 pub mod model_registry;
+#[cfg(feature = "llm")]
 pub mod openai_provider;
+#[cfg(feature = "llm")]
 pub mod provider_error;
+#[cfg(feature = "llm")]
 pub mod provider_factory;
+#[cfg(feature = "llm")]
 pub mod provider_health;
 pub mod sink;
 pub mod source;
@@ -52,6 +61,7 @@ impl NodeRegistry {
         // Transforms
         self.register("json_transform", Box::new(transform::JsonTransform));
         self.register("filter_transform", Box::new(transform::FilterTransform));
+        #[cfg(feature = "llm")]
         self.register("llm_transform", Box::new(llm::LlmTransform::new()));
 
         // Sinks

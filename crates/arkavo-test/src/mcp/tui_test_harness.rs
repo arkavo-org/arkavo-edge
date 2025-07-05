@@ -350,7 +350,7 @@ impl TuiTestHarness {
         }
     }
 
-    async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
+    fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
         let sessions = self
             .sessions
             .lock()
@@ -373,7 +373,7 @@ impl TuiTestHarness {
         }
     }
 
-    async fn get_output(&self, session_id: &str, last_n_lines: usize) -> Result<Vec<String>> {
+    fn get_output(&self, session_id: &str, last_n_lines: usize) -> Result<Vec<String>> {
         let sessions = self
             .sessions
             .lock()
@@ -435,7 +435,7 @@ impl TuiTestHarness {
         Ok(false)
     }
 
-    async fn list_sessions(&self) -> Result<Vec<HashMap<String, String>>> {
+    fn list_sessions(&self) -> Result<Vec<HashMap<String, String>>> {
         let sessions = self
             .sessions
             .lock()
@@ -491,7 +491,7 @@ impl Tool for TuiTestHarness {
                 }))
             }
             HarnessAction::SendInput { session_id, input } => {
-                self.send_input(&session_id, &input).await?;
+                self.send_input(&session_id, &input)?;
                 Ok(json!({
                     "success": true,
                     "session_id": session_id,
@@ -502,7 +502,7 @@ impl Tool for TuiTestHarness {
                 session_id,
                 last_n_lines,
             } => {
-                let output = self.get_output(&session_id, last_n_lines).await?;
+                let output = self.get_output(&session_id, last_n_lines)?;
                 Ok(json!({
                     "success": true,
                     "session_id": session_id,
@@ -526,7 +526,7 @@ impl Tool for TuiTestHarness {
                 }))
             }
             HarnessAction::ListSessions => {
-                let sessions = self.list_sessions().await?;
+                let sessions = self.list_sessions()?;
                 Ok(json!({
                     "success": true,
                     "sessions": sessions,

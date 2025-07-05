@@ -348,6 +348,7 @@ impl App {
         }
     }
 
+    #[cfg(feature = "llm")]
     pub async fn fetch_available_models(&mut self) {
         // Try to fetch models from discovered Ollama servers
         use arkavo_llm::ollama::OllamaClient;
@@ -557,6 +558,17 @@ impl App {
                 "[Models] No models found, showing configuration options".to_string(),
             );
         }
+    }
+
+    #[cfg(not(feature = "llm"))]
+    pub async fn fetch_available_models(&mut self) {
+        // When LLM feature is disabled, show only configuration message
+        self.available_models = vec!["LLM features disabled in this build".to_string()];
+        self.selected_model = 0;
+        self.add_debug_log(
+            crate::ui::debug::LogLevel::Warning,
+            "[Models] LLM features disabled in this build".to_string(),
+        );
     }
 
     async fn run_app<B: ratatui::backend::Backend>(
@@ -1020,7 +1032,17 @@ impl App {
                                             if let Some(server_url) =
                                                 self.extract_server_url(&self.input_buffer)
                                             {
+                                                #[cfg(feature = "llm")]
                                                 self.add_ollama_server(server_url).await;
+                                                #[cfg(not(feature = "llm"))]
+                                                {
+                                                    let _ = server_url;
+                                                    self.add_debug_log(
+                                                        crate::ui::debug::LogLevel::Error,
+                                                        "LLM features disabled in this build"
+                                                            .to_string(),
+                                                    );
+                                                }
                                                 self.input_buffer.clear();
                                                 continue;
                                             }
@@ -1934,6 +1956,7 @@ Scrolling (when in scroll mode):
         None
     }
 
+    #[cfg(feature = "llm")]
     async fn add_ollama_server(&mut self, server_url: String) {
         use arkavo_llm::ollama::OllamaClient;
         use arkavo_memory::storage::MemoryStorage;
@@ -2158,8 +2181,6 @@ Scrolling (when in scroll mode):
     }
 
     async fn handle_configuration_submit(&mut self) {
-        use arkavo_memory::storage::MemoryStorage;
-
         // Clone the configuration mode to avoid borrow checker issues
         let config_mode = self.configuration_mode.clone();
 
@@ -2184,73 +2205,88 @@ Scrolling (when in scroll mode):
                 }
 
                 // Test the connection
-                let test_client =
-                    arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
+                #[cfg(feature = "llm")]
+                {
+                    use arkavo_memory::storage::MemoryStorage;
 
-                match test_client.list_models().await {
-                    Ok(models) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Info,
-                            format!(
-                                "[Config] Connected to {base_url}, found {} models",
-                                models.len()
-                            ),
-                        );
+                    let test_client =
+                        arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
 
-                        // Save the configuration
-                        if let Ok(storage) = MemoryStorage::new().await {
-                            let embedding_service =
-                                arkavo_memory::embeddings::EmbeddingService::new();
-                            let embedding =
-                                match embedding_service.generate_embedding(&base_url).await {
-                                    Ok(e) => e,
-                                    Err(_) => vec![0.0; 384],
+                    match test_client.list_models().await {
+                        Ok(models) => {
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Info,
+                                format!(
+                                    "[Config] Connected to {base_url}, found {} models",
+                                    models.len()
+                                ),
+                            );
+
+                            // Save the configuration
+                            if let Ok(storage) = MemoryStorage::new().await {
+                                let embedding_service =
+                                    arkavo_memory::embeddings::EmbeddingService::new();
+                                let embedding =
+                                    match embedding_service.generate_embedding(&base_url).await {
+                                        Ok(e) => e,
+                                        Err(_) => vec![0.0; 384],
+                                    };
+
+                                let memory = arkavo_memory::models::Memory {
+                                    id: uuid::Uuid::new_v4(),
+                                    content: base_url.clone(),
+                                    metadata: Some(serde_json::json!({
+                                        "type": "arkavo_ollama_server_config",
+                                        "timestamp": chrono::Utc::now().to_rfc3339()
+                                    })),
+                                    category: Some("config".to_string()),
+                                    embedding,
+                                    created_at: chrono::Utc::now(),
+                                    updated_at: chrono::Utc::now(),
                                 };
 
-                            let memory = arkavo_memory::models::Memory {
-                                id: uuid::Uuid::new_v4(),
-                                content: base_url.clone(),
-                                metadata: Some(serde_json::json!({
-                                    "type": "arkavo_ollama_server_config",
-                                    "timestamp": chrono::Utc::now().to_rfc3339()
-                                })),
-                                category: Some("config".to_string()),
-                                embedding,
-                                created_at: chrono::Utc::now(),
-                                updated_at: chrono::Utc::now(),
-                            };
+                                if let Err(e) = storage.store(memory).await {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Error,
+                                        format!("[Config] Failed to save configuration: {e}"),
+                                    );
+                                } else {
+                                    self.add_debug_log(
+                                        crate::ui::debug::LogLevel::Info,
+                                        "[Config] Configuration saved successfully".to_string(),
+                                    );
+                                }
+                            }
 
-                            if let Err(e) = storage.store(memory).await {
-                                self.add_debug_log(
-                                    crate::ui::debug::LogLevel::Error,
-                                    format!("[Config] Failed to save configuration: {e}"),
-                                );
-                            } else {
-                                self.add_debug_log(
-                                    crate::ui::debug::LogLevel::Info,
-                                    "[Config] Configuration saved successfully".to_string(),
-                                );
+                            // Exit configuration mode
+                            self.configuration_mode = ConfigurationMode::None;
+
+                            // Refresh available models
+                            self.fetch_available_models().await;
+                        }
+                        Err(e) => {
+                            self.add_debug_log(
+                                crate::ui::debug::LogLevel::Error,
+                                format!("[Config] Failed to connect to {base_url}: {e}"),
+                            );
+                            // Reset testing state but stay in config mode
+                            if let ConfigurationMode::OllamaServer { testing, .. } =
+                                &mut self.configuration_mode
+                            {
+                                *testing = false;
                             }
                         }
-
-                        // Exit configuration mode
-                        self.configuration_mode = ConfigurationMode::None;
-
-                        // Refresh available models
-                        self.fetch_available_models().await;
                     }
-                    Err(e) => {
-                        self.add_debug_log(
-                            crate::ui::debug::LogLevel::Error,
-                            format!("[Config] Failed to connect to {base_url}: {e}"),
-                        );
-                        // Reset testing state but stay in config mode
-                        if let ConfigurationMode::OllamaServer { testing, .. } =
-                            &mut self.configuration_mode
-                        {
-                            *testing = false;
-                        }
-                    }
+                }
+
+                #[cfg(not(feature = "llm"))]
+                {
+                    let _ = base_url; // Suppress unused warning
+                    self.add_debug_log(
+                        crate::ui::debug::LogLevel::Error,
+                        "[Config] LLM features disabled in this build".to_string(),
+                    );
+                    self.configuration_mode = ConfigurationMode::None;
                 }
             }
             ConfigurationMode::OpenAIKey { .. } => {

@@ -35,7 +35,7 @@ impl XCTestVerifier {
         };
 
         // Step 1: Check if bundle is installed
-        match Self::check_bundle_installed(device_id).await {
+        match Self::check_bundle_installed(device_id) {
             Ok(installed) => {
                 status.bundle_installed = installed;
                 if !installed {
@@ -77,7 +77,7 @@ impl XCTestVerifier {
     }
 
     /// Check if XCTest bundle is installed on device
-    async fn check_bundle_installed(device_id: &str) -> Result<bool> {
+    fn check_bundle_installed(device_id: &str) -> Result<bool> {
         let output = Command::new("xcrun")
             .args(["simctl", "listapps", device_id])
             .output()
