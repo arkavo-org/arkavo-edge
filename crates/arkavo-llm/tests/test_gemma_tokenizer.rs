@@ -1,6 +1,6 @@
 #![cfg(all(feature = "local", not(target_arch = "wasm32")))]
 
-use arkavo_llm::local::{LocalProvider, ModelDownloader, ModelManifest};
+use arkavo_llm::local::LocalProvider;
 use arkavo_llm::{Message, Provider, Role};
 use std::path::PathBuf;
 

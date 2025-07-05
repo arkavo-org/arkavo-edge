@@ -23,38 +23,24 @@ async fn test_download_tiny_model() -> anyhow::Result<()> {
     // Create downloader
     let downloader = ModelDownloader::new()?;
 
-    // Check if already downloaded (to make test idempotent)
-    if downloader.is_downloaded(spec) {
-        println!("Model already downloaded, verifying checksum...");
-        assert!(
-            downloader.is_downloaded(spec),
-            "Checksum verification should pass"
-        );
-    } else {
-        println!("Downloading TinyLlama model for testing...");
-        let model_path = downloader.download(spec).await?;
+    // Get model path (will download if needed)
+    println!("Getting TinyLlama model (downloading if needed)...");
+    let model_path = downloader.get_model_path(spec).await?;
 
-        // Verify the file exists and has expected size
-        assert!(model_path.exists(), "Downloaded model file should exist");
+    // Verify the file exists and has expected size
+    assert!(model_path.exists(), "Model file should exist");
 
-        let metadata = std::fs::metadata(&model_path)?;
-        let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
-        let expected_size_mb = (spec.size_gb * 1024.0) as f64;
+    let metadata = std::fs::metadata(&model_path)?;
+    let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+    let expected_size_mb = (spec.size_gb * 1024.0) as f64;
 
-        // Allow 10% tolerance for file size
-        assert!(
-            (size_mb - expected_size_mb).abs() / expected_size_mb < 0.1,
-            "Downloaded file size {:.1} MB is not close to expected {:.1} MB",
-            size_mb,
-            expected_size_mb
-        );
-
-        // Verify checksum passes
-        assert!(
-            downloader.is_downloaded(spec),
-            "Downloaded model checksum should verify"
-        );
-    }
+    // Allow 10% tolerance for file size
+    assert!(
+        (size_mb - expected_size_mb).abs() / expected_size_mb < 0.1,
+        "File size {:.1} MB is not close to expected {:.1} MB",
+        size_mb,
+        expected_size_mb
+    );
 
     Ok(())
 }

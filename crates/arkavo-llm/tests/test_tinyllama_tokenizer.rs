@@ -14,13 +14,7 @@ async fn test_tinyllama_has_embedded_tokenizer() -> anyhow::Result<()> {
 
     // Ensure model is downloaded
     let downloader = ModelDownloader::new()?;
-    let model_path = if downloader.is_downloaded(spec) {
-        eprintln!("Using cached TinyLlama model");
-        downloader.get_model_path(spec)
-    } else {
-        eprintln!("Downloading TinyLlama model...");
-        downloader.download(spec).await?
-    };
+    let model_path = downloader.get_model_path(spec).await?;
 
     // Create and initialize provider
     let provider = LocalProvider::new(

@@ -1,7 +1,5 @@
 #![cfg(feature = "local")]
 
-use std::path::PathBuf;
-
 #[test]
 fn test_tokenizer_temp_file_cleanup() {
     // This test verifies that temporary tokenizer files are cleaned up
@@ -11,7 +9,7 @@ fn test_tokenizer_temp_file_cleanup() {
     let test_model_name = format!("test_model_{}", std::process::id());
 
     // Create a pattern to match our temp files
-    let pattern = format!("arkavo_tokenizer_{}_*.spm", test_model_name);
+    let _pattern = format!("arkavo_tokenizer_{}_*.spm", test_model_name);
 
     // Clean up any existing files first
     if let Ok(entries) = std::fs::read_dir(&temp_dir) {
@@ -67,7 +65,7 @@ fn test_unique_tokenizer_filenames() {
     let pid = std::process::id();
 
     let expected_pattern = format!("arkavo_tokenizer_{}_{}.spm", model_name, pid);
-    let path = temp_dir.join(&expected_pattern);
+    let _path = temp_dir.join(&expected_pattern);
 
     // Verify the pattern includes process ID for uniqueness
     assert!(

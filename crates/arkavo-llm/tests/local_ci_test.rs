@@ -28,13 +28,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
 
     // Create downloader and ensure model is available
     let downloader = ModelDownloader::new()?;
-    let model_path = if downloader.is_downloaded(spec) {
-        eprintln!("Using cached TinyLlama model");
-        downloader.get_model_path(spec)
-    } else {
-        eprintln!("Downloading TinyLlama model for CI test...");
-        downloader.download(spec).await?
-    };
+    let model_path = downloader.get_model_path(spec).await?;
 
     // Verify model file exists
     assert!(

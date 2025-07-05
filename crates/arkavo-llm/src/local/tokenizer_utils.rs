@@ -56,8 +56,6 @@ pub fn get_bos_token_id(tokenizer: &Tokenizer) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_eos_token_fallback() {
         // This test would require a mock tokenizer
