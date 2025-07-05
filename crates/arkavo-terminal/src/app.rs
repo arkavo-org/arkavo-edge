@@ -1038,7 +1038,8 @@ impl App {
                                                 {
                                                     self.add_debug_log(
                                                         crate::ui::debug::LogLevel::Error,
-                                                        "LLM features disabled in this build".to_string(),
+                                                        "LLM features disabled in this build"
+                                                            .to_string(),
                                                     );
                                                 }
                                                 self.input_buffer.clear();
