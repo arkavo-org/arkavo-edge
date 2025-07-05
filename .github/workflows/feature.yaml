@@ -151,8 +151,7 @@ jobs:
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
-          # Run arkavo-test without embeddings
-          cargo test -p arkavo-test
+          # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
 
 
   test-embeddings:

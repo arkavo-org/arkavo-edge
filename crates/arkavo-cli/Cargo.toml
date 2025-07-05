@@ -16,16 +16,16 @@ default = ["memory", "mdns", "local"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 mdns = ["zeroconf"]
-local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-dataflow/llm"]
+local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-dataflow/llm", "arkavo-terminal/llm"]
 
 [dependencies]
-arkavo-terminal = { path = "../arkavo-terminal" }
+arkavo-terminal = { path = "../arkavo-terminal", default-features = false }
 arkavo-git = { path = "../arkavo-git" }
 arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
-arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
+arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm"] }
 arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
 gethostname = "0.5"
 zeroconf = { version = "0.14", optional = true }
