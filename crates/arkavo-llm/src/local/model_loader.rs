@@ -129,9 +129,10 @@ impl ModelLoader {
             })
             .or_else(|| {
                 // Fallback: check for phi-specific metadata
-                if content.metadata.contains_key("phi.context_length") ||
-                   content.metadata.contains_key("phi2.context_length") ||
-                   self.model_name.to_lowercase().contains("phi") {
+                if content.metadata.contains_key("phi.context_length")
+                    || content.metadata.contains_key("phi2.context_length")
+                    || self.model_name.to_lowercase().contains("phi")
+                {
                     Some("phi".to_string())
                 } else {
                     None
@@ -182,9 +183,8 @@ impl ModelLoader {
                 eprintln!("Loading Phi GGUF model...");
                 // Seek back to the beginning after reading metadata
                 file.seek(std::io::SeekFrom::Start(0))?;
-                let model =
-                    quantized_phi::ModelWeights::from_gguf(content, &mut file, &device)
-                        .map_err(|e| Error::Model(format!("Failed to load Phi model: {e}")))?;
+                let model = quantized_phi::ModelWeights::from_gguf(content, &mut file, &device)
+                    .map_err(|e| Error::Model(format!("Failed to load Phi model: {e}")))?;
                 Model::QuantizedPhi(model)
             }
             _ => return Err(Error::Model(format!("Unsupported architecture: {}", arch))),

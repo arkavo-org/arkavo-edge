@@ -312,7 +312,7 @@ Repository details:
     } else {
         Message::system(&system_prompt)
     };
-    
+
     let mut messages = if print_mode {
         // In print mode, just create a simple message list
         vec![system_message.clone()]
@@ -1219,8 +1219,15 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         // Load manifest and try models in priority order
         if let Ok(manifest) = ModelManifest::load() {
             // Priority order: Phi-2 first (works with Candle), then TinyLlama, then Gemma
-            let model_priorities = ["tinyllama-110m-f16", "phi-2-q4k", "tinyllama-1b-chat-q2", "tinyllama-1b-chat-q3", "tinyllama-1b-chat", "gemma3-1b-it-qat"];
-            
+            let model_priorities = [
+                "tinyllama-110m-f16",
+                "phi-2-q4k",
+                "tinyllama-1b-chat-q2",
+                "tinyllama-1b-chat-q3",
+                "tinyllama-1b-chat",
+                "gemma3-1b-it-qat",
+            ];
+
             for model_name in &model_priorities {
                 if let Some(spec) = manifest.find(model_name) {
                     // Create downloader to check cache

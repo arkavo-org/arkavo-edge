@@ -144,29 +144,28 @@ impl Provider for LocalProvider {
                 let guard = self.inner.lock().await;
                 guard.model_loader.context_length()
             };
-            
+
             // Calculate how many tokens we can generate
             let prompt_len = ids.len();
             let context_remaining = context_window.saturating_sub(prompt_len);
-            
+
             // Use full remaining context window (up to 2048 tokens)
             let max_tokens = 2048.min(context_remaining);
-            
+
             tracing::debug!(
                 "Context window: {}, prompt length: {}, max tokens to generate: {}",
                 context_window,
                 prompt_len,
                 max_tokens
             );
-            
+
             if max_tokens == 0 {
                 return Err(Error::Model(format!(
                     "Prompt too long: {} tokens exceeds context window of {}",
-                    prompt_len,
-                    context_window
+                    prompt_len, context_window
                 )));
             }
-            
+
             let start_len = ids.len();
 
             let start_time = std::time::Instant::now();
@@ -182,12 +181,12 @@ impl Provider for LocalProvider {
 
             // Process the prompt first (all tokens at once)
             let prompt_len = ids.len();
-            
+
             for index in 0..max_tokens {
                 // Lock for forward pass
                 let next = {
                     let mut guard = self.inner.lock().await;
-                    
+
                     // On first iteration (index=0), process the entire prompt
                     // On subsequent iterations, only process the last generated token
                     let (input_tokens, position) = if index == 0 {
@@ -195,7 +194,7 @@ impl Provider for LocalProvider {
                         (ids.as_slice(), 0)
                     } else {
                         // Subsequent passes: only the last token
-                        (&ids[ids.len()-1..ids.len()], prompt_len + index - 1)
+                        (&ids[ids.len() - 1..ids.len()], prompt_len + index - 1)
                     };
 
                     // Forward pass based on model architecture
@@ -216,13 +215,17 @@ impl Provider for LocalProvider {
                                 .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
                                 .unsqueeze(0)
                                 .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-                            
+
                             // Debug print input shape
-                            tracing::debug!("Llama input shape: {:?}, position: {}", input.shape(), position);
-                            
-                            model
-                                .forward(&input, position)
-                                .map_err(|e| Error::Model(format!("Llama forward pass failed: {e}")))?
+                            tracing::debug!(
+                                "Llama input shape: {:?}, position: {}",
+                                input.shape(),
+                                position
+                            );
+
+                            model.forward(&input, position).map_err(|e| {
+                                Error::Model(format!("Llama forward pass failed: {e}"))
+                            })?
                         }
                         Some(Model::QuantizedPhi(model)) => {
                             // QuantizedPhi expects 2D tensor with shape [1, seq_len]
@@ -230,10 +233,10 @@ impl Provider for LocalProvider {
                                 .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
                                 .unsqueeze(0)
                                 .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-                            
-                            model
-                                .forward(&input, position)
-                                .map_err(|e| Error::Model(format!("Phi forward pass failed: {e}")))?
+
+                            model.forward(&input, position).map_err(|e| {
+                                Error::Model(format!("Phi forward pass failed: {e}"))
+                            })?
                         }
                         None => {
                             return Err(Error::Model("Model not loaded".to_string()));
@@ -242,8 +245,9 @@ impl Provider for LocalProvider {
 
                     // Ensure logits are F32 for subsequent operations
                     if logits.dtype() != candle_core::DType::F32 {
-                        logits = logits.to_dtype(candle_core::DType::F32)
-                            .map_err(|e| Error::Model(format!("Failed to convert logits to F32: {e}")))?;
+                        logits = logits.to_dtype(candle_core::DType::F32).map_err(|e| {
+                            Error::Model(format!("Failed to convert logits to F32: {e}"))
+                        })?;
                     }
 
                     logits
@@ -256,7 +260,7 @@ impl Provider for LocalProvider {
                 };
 
                 ids.push(next);
-                
+
                 // Early stop on EOS token
                 if next == eos_token_id {
                     break;
