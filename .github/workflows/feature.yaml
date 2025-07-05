@@ -171,7 +171,8 @@ jobs:
             for FILE in $CHANGED_FILES; do
               if [[ $FILE == crates/* ]]; then
                 CRATE=$(echo $FILE | cut -d'/' -f2)
-                if [[ $CRATE != "arkavo-memory" && $CRATE != "arkavo-test" ]]; then
+                # Exclude crates that have issues with tarpaulin or need special handling
+                if [[ $CRATE != "arkavo-memory" && $CRATE != "arkavo-test" && $CRATE != "arkavo-llm" ]]; then
                   CHANGED_CRATES="$CHANGED_CRATES $CRATE"
                 fi
               fi
@@ -202,7 +203,15 @@ jobs:
           done
 
           echo "Running tarpaulin on packages: $PACKAGE_ARGS"
-          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --out Xml --timeout 120 --skip-clean --locked --jobs 2
+          
+          # For crates that include LLM features, run without default features to avoid pulp/tarpaulin issue
+          FEATURE_ARGS=""
+          if [[ "$PACKAGE_ARGS" == *"arkavo-cli"* ]] || [[ "$PACKAGE_ARGS" == *"arkavo"* ]]; then
+            # Run with memory feature only, excluding local (which pulls in candle/pulp)
+            FEATURE_ARGS="--no-default-features --features memory"
+          fi
+          
+          cargo tarpaulin --ignore-tests $PACKAGE_ARGS $FEATURE_ARGS --out Xml --timeout 120 --skip-clean --locked --jobs 2
 
       - name: Check test coverage
         run: |
