@@ -1,5 +1,11 @@
 name: Feature
 
+# Feature Strategy:
+# - Default features include: memory, mdns, local
+# - mdns is CORE functionality for agent discovery (requires avahi on Linux)
+# - musl builds exclude mdns due to static linking incompatibility
+# - coverage tests may exclude some features due to tarpaulin limitations
+
 on:
   pull_request:
     branches: [main]
@@ -11,6 +17,8 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
+  # System dependencies needed for mdns (core feature for agent discovery)
+  SYSTEM_DEPS_DEBIAN: "libavahi-client-dev libavahi-common-dev"
 
 jobs:
   # Version check from PR
@@ -113,7 +121,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       
       - run: cargo clippy --workspace -- -D warnings
 
@@ -131,7 +139,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
@@ -155,6 +163,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test-coverage"
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
 
       - name: Install cargo-tarpaulin
         run: |
@@ -211,9 +224,10 @@ jobs:
           echo "Running tarpaulin on packages: $PACKAGE_ARGS"
           
           # For crates that include LLM features, run without default features to avoid pulp/tarpaulin issue
+          # Note: This excludes mdns from coverage, but it's necessary due to tarpaulin limitations
           FEATURE_ARGS=""
           if [[ "$PACKAGE_ARGS" == *"arkavo-cli"* ]] || [[ "$PACKAGE_ARGS" == *"arkavo"* ]]; then
-            # Run with memory feature only, excluding local (which pulls in candle/pulp)
+            # Run with memory feature only, excluding local (which pulls in candle/pulp) and mdns
             FEATURE_ARGS="--no-default-features --features memory"
           fi
           
@@ -294,7 +308,10 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features memory,local -p arkavo
+        run: |
+          # Note: musl builds exclude mdns feature due to avahi incompatibility with static linking
+          # This is acceptable as musl builds are primarily for containerized/embedded environments
+          cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features memory,local -p arkavo
 
       - name: Prepare release artifact
         run: |
@@ -360,6 +377,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "perf"
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
 
       - name: Check build time
         run: |
