@@ -78,7 +78,7 @@ impl UrlDialogHandler {
         }
     }
 
-    async fn tap_open(&self, device_id: &str) -> Result<Value> {
+    fn tap_open(&self, device_id: &str) -> Result<Value> {
         let device = self
             .device_manager
             .get_device(device_id)

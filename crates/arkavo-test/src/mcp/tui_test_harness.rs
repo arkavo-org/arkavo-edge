@@ -350,7 +350,7 @@ impl TuiTestHarness {
         }
     }
 
-    async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
+    fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
         let sessions = self
             .sessions
             .lock()
@@ -373,7 +373,7 @@ impl TuiTestHarness {
         }
     }
 
-    async fn get_output(&self, session_id: &str, last_n_lines: usize) -> Result<Vec<String>> {
+    fn get_output(&self, session_id: &str, last_n_lines: usize) -> Result<Vec<String>> {
         let sessions = self
             .sessions
             .lock()
@@ -435,7 +435,7 @@ impl TuiTestHarness {
         Ok(false)
     }
 
-    async fn list_sessions(&self) -> Result<Vec<HashMap<String, String>>> {
+    fn list_sessions(&self) -> Result<Vec<HashMap<String, String>>> {
         let sessions = self
             .sessions
             .lock()
