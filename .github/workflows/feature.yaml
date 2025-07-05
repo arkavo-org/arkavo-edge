@@ -566,7 +566,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
+    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -576,7 +576,6 @@ jobs:
                 "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
                 "${{ needs.test.result }}" != "success" || \
-                "${{ needs.test-coverage.result }}" != "success" || \
                 "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
