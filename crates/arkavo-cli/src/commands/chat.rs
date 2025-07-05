@@ -1,20 +1,29 @@
+#[cfg(feature = "local")]
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
+#[cfg(feature = "local")]
 use crate::repository_context::RepositoryContextManager;
 #[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
+#[cfg(feature = "local")]
 use arkavo_memory::storage::MemoryStorage;
+#[cfg(feature = "local")]
 use chrono;
+#[cfg(feature = "local")]
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+#[cfg(feature = "local")]
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+#[cfg(feature = "local")]
 use tokio::runtime::Runtime;
+#[cfg(feature = "local")]
 use tokio_stream::StreamExt;
+#[cfg(feature = "local")]
 use uuid;
 
 // Global flag to control whether to show debug messages (kept for future use)
@@ -751,6 +760,7 @@ async fn process_message(
     Ok(full_response)
 }
 
+#[cfg(feature = "local")]
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],

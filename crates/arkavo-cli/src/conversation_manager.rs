@@ -150,10 +150,11 @@ impl ConversationManager {
         Ok(())
     }
 
+    #[cfg(feature = "local")]
     pub async fn get_context_messages(
         &self,
-        system_message: Option<Message>,
-    ) -> anyhow::Result<Vec<Message>> {
+        system_message: Option<arkavo_llm::Message>,
+    ) -> anyhow::Result<Vec<arkavo_llm::Message>> {
         let session_id = self
             .current_session_id
             .ok_or_else(|| anyhow::anyhow!("No active conversation session"))?;

@@ -1036,6 +1036,7 @@ impl App {
                                                 self.add_ollama_server(server_url).await;
                                                 #[cfg(not(feature = "llm"))]
                                                 {
+                                                    let _ = server_url;
                                                     self.add_debug_log(
                                                         crate::ui::debug::LogLevel::Error,
                                                         "LLM features disabled in this build"
@@ -2180,8 +2181,6 @@ Scrolling (when in scroll mode):
     }
 
     async fn handle_configuration_submit(&mut self) {
-        use arkavo_memory::storage::MemoryStorage;
-
         // Clone the configuration mode to avoid borrow checker issues
         let config_mode = self.configuration_mode.clone();
 
@@ -2208,6 +2207,8 @@ Scrolling (when in scroll mode):
                 // Test the connection
                 #[cfg(feature = "llm")]
                 {
+                    use arkavo_memory::storage::MemoryStorage;
+
                     let test_client =
                         arkavo_llm::ollama::OllamaClient::new(Some(base_url.clone()), None);
 
@@ -2280,6 +2281,7 @@ Scrolling (when in scroll mode):
 
                 #[cfg(not(feature = "llm"))]
                 {
+                    let _ = base_url; // Suppress unused warning
                     self.add_debug_log(
                         crate::ui::debug::LogLevel::Error,
                         "[Config] LLM features disabled in this build".to_string(),
