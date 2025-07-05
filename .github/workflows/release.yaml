@@ -288,6 +288,10 @@ jobs:
           else
             apt-get update
             apt-get install -y curl ca-certificates
+            # Install runtime dependencies for glibc build (mDNS support)
+            apt-get install -y --no-install-recommends \
+              libavahi-client3 \
+              libavahi-common3
           fi
 
       - name: Download and test tar.gz binary

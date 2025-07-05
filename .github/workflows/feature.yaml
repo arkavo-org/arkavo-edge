@@ -371,6 +371,14 @@ jobs:
         with:
           name: arkavo-x86_64-linux
 
+      - name: Install runtime dependencies for glibc build
+        if: contains(matrix.container, 'ubuntu')
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libavahi-client3 \
+            libavahi-common3
+
       - name: Test binary
         run: |
           chmod +x arkavo*
