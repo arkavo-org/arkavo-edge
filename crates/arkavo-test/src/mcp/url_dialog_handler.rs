@@ -154,7 +154,7 @@ impl Tool for UrlDialogHandler {
         let device_id = self.get_device_id(&params)?;
 
         match action {
-            "tap_open" => self.tap_open(&device_id).await,
+            "tap_open" => self.tap_open(&device_id),
 
             "tap_cancel" => {
                 // Cancel button is typically on the left side
@@ -204,7 +204,7 @@ impl Tool for UrlDialogHandler {
                 thread::sleep(Duration::from_secs(wait_timeout));
 
                 // Tap the Open button
-                self.tap_open(&device_id).await
+                self.tap_open(&device_id)
             }
 
             "detect" => {

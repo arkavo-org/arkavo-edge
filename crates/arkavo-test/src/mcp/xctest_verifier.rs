@@ -35,7 +35,7 @@ impl XCTestVerifier {
         };
 
         // Step 1: Check if bundle is installed
-        match Self::check_bundle_installed(device_id).await {
+        match Self::check_bundle_installed(device_id) {
             Ok(installed) => {
                 status.bundle_installed = installed;
                 if !installed {
