@@ -94,7 +94,7 @@ impl ModelLoader {
             match self.load_quantized_model(model_path) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    eprintln!("Failed to load as quantized model: {}", e);
+                    eprintln!("Failed to load as quantized model: {e}");
                     return Err(e);
                 }
             }
@@ -140,7 +140,7 @@ impl ModelLoader {
             })
             .ok_or_else(|| Error::Model("Missing architecture in GGUF metadata".to_string()))?;
 
-        eprintln!("Detected GGUF architecture: {}", arch);
+        eprintln!("Detected GGUF architecture: {arch}");
 
         // Check if quantization is compatible with Metal
         let mut device = self.device.clone();
@@ -187,13 +187,13 @@ impl ModelLoader {
                     .map_err(|e| Error::Model(format!("Failed to load Phi model: {e}")))?;
                 Model::QuantizedPhi(model)
             }
-            _ => return Err(Error::Model(format!("Unsupported architecture: {}", arch))),
+            _ => return Err(Error::Model(format!("Unsupported architecture: {arch}"))),
         };
 
         self.model = Some(model);
         self.device = device; // Update device if it changed
 
-        eprintln!("Successfully loaded {} model", arch);
+        eprintln!("Successfully loaded {arch} model");
         Ok(())
     }
 
@@ -398,7 +398,7 @@ impl ModelLoader {
     }
 
     fn try_construct_tokenizer_from_metadata(
-        &mut self,
+        &self,
         content: &candle_core::quantized::gguf_file::Content,
     ) -> bool {
         // For now, we'll create a simple tokenizer that can at least encode/decode basic text
@@ -455,7 +455,7 @@ impl ModelLoader {
             std::process::id()
         ));
 
-        if let Ok(()) = std::fs::write(&tokenizer_path, &bytes) {
+        if std::fs::write(&tokenizer_path, &bytes).is_ok() {
             match Tokenizer::from_file(&tokenizer_path) {
                 Ok(tokenizer) => {
                     self.tokenizer = Some(Arc::new(tokenizer));
@@ -529,7 +529,7 @@ impl ModelLoader {
         // Get context length from config if available
         self.config
             .as_ref()
-            .map(|c| c.max_position_embeddings as usize)
+            .map(|c| c.max_position_embeddings)
             .unwrap_or(2048) // Default to 2048 if not found
     }
 }

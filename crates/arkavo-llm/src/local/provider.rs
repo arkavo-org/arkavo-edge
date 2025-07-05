@@ -161,8 +161,7 @@ impl Provider for LocalProvider {
 
             if max_tokens == 0 {
                 return Err(Error::Model(format!(
-                    "Prompt too long: {} tokens exceeds context window of {}",
-                    prompt_len, context_window
+                    "Prompt too long: {prompt_len} tokens exceeds context window of {context_window}"
                 )));
             }
 
