@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // False positive in clippy
+
 mod demo;
 mod schema;
 

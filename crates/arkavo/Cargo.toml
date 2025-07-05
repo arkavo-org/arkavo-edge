@@ -12,10 +12,11 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["memory", "mdns"]
+default = ["memory", "mdns", "local"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]
+local = ["arkavo-cli/local"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

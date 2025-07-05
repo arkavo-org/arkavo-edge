@@ -1,19 +1,33 @@
+#[cfg(feature = "local")]
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
+#[cfg(feature = "local")]
 use crate::repository_context::RepositoryContextManager;
+#[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
+#[cfg(feature = "local")]
 use arkavo_memory::storage::MemoryStorage;
+#[cfg(feature = "local")]
 use chrono;
+#[cfg(feature = "local")]
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
+#[cfg(not(feature = "local"))]
+use std::io;
+#[cfg(feature = "local")]
 use std::io::{self, Write};
 use std::path::Path;
+#[cfg(feature = "local")]
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+#[cfg(feature = "local")]
 use tokio::runtime::Runtime;
+#[cfg(feature = "local")]
 use tokio_stream::StreamExt;
+#[cfg(feature = "local")]
+use uuid;
 
 // Global flag to control whether to show debug messages (kept for future use)
 #[allow(dead_code)]
@@ -26,6 +40,14 @@ macro_rules! debug_println {
     };
 }
 
+#[cfg(not(feature = "local"))]
+pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Chat command requires the 'local' feature to be enabled.");
+    eprintln!("Please rebuild with: cargo build --features local");
+    Err("Feature not enabled".into())
+}
+
+#[cfg(feature = "local")]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Terminal UI is now the default, use --no-tui to disable it
     let use_tui = !args.contains(&"--no-tui".to_string());
@@ -305,9 +327,20 @@ Repository details:
     };
 
     // Get conversation context with system message
-    let system_message = Message::system(&system_prompt);
-    let mut messages = runtime
-        .block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?;
+    let system_message = if print_mode {
+        // Use minimal system prompt for print mode to avoid token limit issues
+        Message::system("You are a helpful AI assistant.")
+    } else {
+        Message::system(&system_prompt)
+    };
+
+    let mut messages = if print_mode {
+        // In print mode, just create a simple message list
+        vec![system_message.clone()]
+    } else {
+        // In interactive mode, get full context from conversation manager
+        runtime.block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?
+    };
 
     // If prompt provided via command line, process it and exit
     if let Some(prompt_text) = prompt {
@@ -347,7 +380,7 @@ Repository details:
 
         // Clone necessary components for the TUI task
         let client = Arc::new(client);
-        let client_clone = Arc::clone(&client);
+        let client_clone: Arc<LlmClient> = Arc::clone(&client);
         let mut messages_clone = messages.clone();
 
         // Spawn LLM processing task
@@ -630,6 +663,7 @@ Repository details:
     Ok(())
 }
 
+#[cfg(feature = "local")]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
@@ -729,6 +763,7 @@ async fn process_message(
     Ok(full_response)
 }
 
+#[cfg(feature = "local")]
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
@@ -1195,47 +1230,109 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
+#[cfg(feature = "local")]
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    // Initialize memory storage to check for saved configuration
+    // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
 
-    // Try to find saved Ollama server configuration
-    let saved_config = storage
-        .search("arkavo_ollama_server_config", 10, Some("config"))
-        .await?;
+    // Check HuggingFace cache for default model
+    #[cfg(feature = "local")]
+    {
+        use arkavo_llm::local::{ModelDownloader, ModelManifest};
 
-    // Find a valid configuration (not cleared)
-    let valid_config = saved_config
-        .into_iter()
-        .find(|c| c.memory.content != "CLEARED" && c.memory.content.starts_with("http"));
+        // Load manifest and try models in priority order
+        if let Ok(manifest) = ModelManifest::load() {
+            // Priority order: Phi-2 first (works with Candle), then TinyLlama, then Gemma
+            let model_priorities = [
+                "tinyllama-110m-f16",
+                "phi-2-q4k",
+                "tinyllama-1b-chat-q2",
+                "tinyllama-1b-chat-q3",
+                "tinyllama-1b-chat",
+                "gemma3-1b-it-qat",
+            ];
 
-    if let Some(config) = valid_config {
-        // Use saved configuration
-        let server_url = &config.memory.content;
-        unsafe {
-            std::env::set_var("OLLAMA_BASE_URL", server_url);
-        }
-
-        // Try to connect with saved URL
-        if let Ok(client) = LlmClient::from_env() {
-            let test_message = vec![Message::user("ping")];
-            if client.complete(test_message).await.is_ok() {
-                if !print_mode {
-                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
+            for model_name in &model_priorities {
+                if let Some(spec) = manifest.find(model_name) {
+                    // Create downloader to check cache
+                    if let Ok(downloader) = ModelDownloader::new() {
+                        // This will return cached path if already downloaded
+                        match downloader.get_model_path(spec).await {
+                            Ok(model_path) => {
+                                eprintln!("Found model at: {}", model_path.display());
+                                match LlmClient::from_local_model(
+                                    &spec.name,
+                                    model_path.to_string_lossy().to_string(),
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        if !print_mode {
+                                            eprintln!("✓ Using local model: {}", spec.name);
+                                        }
+                                        return Ok(client);
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "Failed to initialize local model {}: {}",
+                                            spec.name, e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Model not in cache, try next model
+                                continue;
+                            }
+                        }
+                    }
                 }
-                return Ok(client);
             }
         }
-        // Saved config didn't work, fall through to prompt
     }
 
-    // Try default localhost first
+    // Check for previously selected provider
+    let saved_provider = storage
+        .search("llm_provider", 1, Some("llm_provider"))
+        .await?
+        .into_iter()
+        .find(|c| c.memory.content != "CLEARED");
+
+    if let Some(provider_config) = saved_provider {
+        if provider_config.memory.content.starts_with("local:") {
+            // Previously selected local model, but maybe not available now
+            // Fall through to try other options
+        } else if provider_config.memory.content.starts_with("http") {
+            // Ollama server
+            let server_url = &provider_config.memory.content;
+            unsafe {
+                std::env::set_var("OLLAMA_BASE_URL", server_url);
+            }
+
+            if let Ok(client) = LlmClient::from_env() {
+                let test_message = vec![Message::user("ping")];
+                if client.complete(test_message).await.is_ok() {
+                    if !print_mode {
+                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
+                    }
+                    return Ok(client);
+                }
+            }
+        }
+    }
+
+    // Try default localhost Ollama
     match LlmClient::from_env() {
         Ok(client) => {
             // Test if the client can connect by trying a minimal request
             let test_message = vec![Message::user("ping")];
             match client.complete(test_message).await {
-                Ok(_) => Ok(client),
+                Ok(_) => {
+                    if !print_mode {
+                        eprintln!("✓ Connected to Ollama at localhost:11434");
+                    }
+                    Ok(client)
+                }
                 Err(_) => {
                     // Connection failed, prompt for remote server
                     prompt_for_remote_ollama(print_mode, storage).await
@@ -1249,6 +1346,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     }
 }
 
+#[cfg(feature = "local")]
 async fn prompt_for_remote_ollama(
     print_mode: bool,
     storage: Arc<MemoryStorage>,
@@ -1351,6 +1449,7 @@ async fn prompt_for_remote_ollama(
     }
 }
 
+#[cfg(feature = "local")]
 fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
     // The UI will handle its own initialization

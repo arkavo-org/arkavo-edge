@@ -3,6 +3,9 @@ use crate::ollama::OllamaClient;
 use crate::{Error, Message, Provider, Result, StreamResponse};
 use tokio_stream::Stream;
 
+#[cfg(feature = "local")]
+use crate::local::LocalProvider;
+
 pub struct LlmClient {
     provider: Box<dyn Provider>,
 }
@@ -26,6 +29,22 @@ impl LlmClient {
         };
 
         Ok(Self::new(provider))
+    }
+
+    pub async fn from_local_model(model_name: &str, model_path: String) -> Result<Self> {
+        #[cfg(feature = "local")]
+        {
+            let provider = LocalProvider::new(model_name.to_string(), Some(model_path))?;
+            // Initialize the provider to load the model
+            provider.initialize().await?;
+            Ok(Self::new(Box::new(provider)))
+        }
+        #[cfg(not(feature = "local"))]
+        {
+            Err(Error::Config(
+                "Local models require the 'local' feature to be enabled".to_string(),
+            ))
+        }
     }
 
     pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {

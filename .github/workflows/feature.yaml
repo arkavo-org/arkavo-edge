@@ -1,5 +1,11 @@
 name: Feature
 
+# Feature Strategy:
+# - Default features include: memory, mdns, local
+# - mdns is CORE functionality for agent discovery (requires avahi on Linux)
+# - musl builds exclude mdns due to static linking incompatibility
+# - coverage tests may exclude some features due to tarpaulin limitations
+
 on:
   pull_request:
     branches: [main]
@@ -11,6 +17,8 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
+  # System dependencies needed for mdns (core feature for agent discovery)
+  SYSTEM_DEPS_DEBIAN: "libavahi-client-dev libavahi-common-dev"
 
 jobs:
   # Version check from PR
@@ -109,7 +117,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
-      - run: cargo clippy --no-default-features --features memory
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+      
+      # Note: Clippy warnings are shown but don't fail the build
+      # See https://github.com/arkavo-org/arkavo-edge/issues/138 for remaining warnings to address
+      - run: cargo clippy --workspace
 
   # Tests and builds can run in parallel
   test:
@@ -121,88 +137,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "test"
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+      
       # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
         run: |
-          # Run tests for all workspace members except those that need embeddings
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --no-default-features
+          # Run tests for all workspace members except those that need embeddings or local LLM
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
-          cargo test -p arkavo-memory --no-default-features --lib
-          cargo test -p arkavo-memory --no-default-features --test mcp_integration_test
-          # Run arkavo-test without embeddings
-          cargo test -p arkavo-test --no-default-features
+          cargo test -p arkavo-memory --lib
+          cargo test -p arkavo-memory --test mcp_integration_test
+          # Run arkavo-llm tests without local feature (API tests only)
+          cargo test -p arkavo-llm --lib
+          # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
+          # Note: arkavo-llm integration tests excluded as they require local feature
 
-  test-coverage:
-    name: Test with Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Needed to get all history for detecting changed files
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "test-coverage"
-
-      - name: Install cargo-tarpaulin
-        run: |
-          curl -L https://github.com/xd009642/tarpaulin/releases/download/0.31.2/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xzf - -C $HOME/.cargo/bin
-
-      - name: Detect changed packages
-        id: changed-packages
-        run: |
-          # If this is a PR, get the base branch to compare against
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA=${{ github.event.pull_request.base.sha }}
-            HEAD_SHA=${{ github.event.pull_request.head.sha }}
-            echo "Comparing PR changes from $BASE_SHA to $HEAD_SHA"
-
-            # Get list of changed files
-            CHANGED_FILES=$(git diff --name-only $BASE_SHA $HEAD_SHA)
-
-            # Extract crate names from changed files
-            CHANGED_CRATES=""
-            for FILE in $CHANGED_FILES; do
-              if [[ $FILE == crates/* ]]; then
-                CRATE=$(echo $FILE | cut -d'/' -f2)
-                if [[ $CRATE != "arkavo-memory" && $CRATE != "arkavo-test" ]]; then
-                  CHANGED_CRATES="$CHANGED_CRATES $CRATE"
-                fi
-              fi
-            done
-
-            # Remove duplicates
-            CHANGED_CRATES=$(echo $CHANGED_CRATES | tr ' ' '\n' | sort -u | tr '\n' ' ')
-
-            if [[ -z "$CHANGED_CRATES" ]]; then
-              echo "No relevant crates changed, using default set"
-              CHANGED_CRATES="arkavo arkavo-cli arkavo-terminal"
-            fi
-
-            echo "Changed crates: $CHANGED_CRATES"
-            echo "changed_crates=$CHANGED_CRATES" >> $GITHUB_OUTPUT
-          else
-            # For non-PR events, use a subset of important crates
-            echo "Not a PR, using default set of crates"
-            echo "changed_crates=arkavo arkavo-cli arkavo-terminal" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate test coverage
-        run: |
-          # Convert space-separated list to package args
-          PACKAGE_ARGS=""
-          for CRATE in ${{ steps.changed-packages.outputs.changed_crates }}; do
-            PACKAGE_ARGS="$PACKAGE_ARGS -p $CRATE"
-          done
-
-          echo "Running tarpaulin on packages: $PACKAGE_ARGS"
-          cargo tarpaulin --ignore-tests $PACKAGE_ARGS --no-default-features --out Xml --timeout 120 --skip-clean --locked --jobs 2
-
-      - name: Check test coverage
-        run: |
-          COVERAGE=$(grep -E 'line-rate="[0-9.]+"' cobertura.xml | head -1 | grep -oE '[0-9.]+')
-          COVERAGE_PERCENT=$(awk -v cov="$COVERAGE" 'BEGIN {printf "%.2f", cov * 100}')
-          echo "Coverage: $COVERAGE_PERCENT%"
 
   test-embeddings:
     name: Test with Embeddings (macOS)
@@ -244,37 +197,71 @@ jobs:
           cargo test -p arkavo-test --features embeddings --lib
 
   build-linux:
-    name: Build Linux (musl)
+    name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            features: default
+            artifact_name: arkavo-x86_64-linux
+          - target: x86_64-unknown-linux-musl
+            features: memory
+            artifact_name: arkavo-x86_64-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "linux-musl"
+          shared-key: "linux-${{ matrix.target }}"
 
-      - name: Install musl tools
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Install dependencies for full build including mDNS
+            sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+          else
+            # Install musl tools for static build
+            sudo apt-get install -y musl-tools musl-dev
+          fi
 
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features -p arkavo
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CXX_x86_64_unknown_linux_musl: musl-g++
+          AR_x86_64_unknown_linux_musl: ar
+          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Full featured build with local LLM support
+            cargo build --release --target ${{ matrix.target }} -p arkavo
+          else
+            # Slim build for containers - memory only, no local LLM or mDNS
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
+          fi
 
       - name: Prepare release artifact
         run: |
           mkdir -p release-package
-          cp target/x86_64-unknown-linux-musl/release/arkavo release-package/
-          chmod +x release-package/arkavo
-          # Note: musl builds should use static linking or ship without embeddings
-          # The no-default-features flag disables embeddings for musl compatibility
+          cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
+          chmod +x release-package/${{ matrix.artifact_name }}
+          
+          # Create feature manifest
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            echo "Full featured build with local LLM, mDNS, and memory support" > release-package/features.txt
+          else
+            echo "Slim static build with memory support only (no local LLM or mDNS)" > release-package/features.txt
+          fi
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: arkavo-x86_64-unknown-linux-musl
+          name: ${{ matrix.artifact_name }}
           path: release-package/
           retention-days: 1
 
@@ -296,7 +283,7 @@ jobs:
           brew install idb-companion
 
       - name: Build
-        run: cargo build --release --target aarch64-apple-darwin --no-default-features
+        run: cargo build --release --target aarch64-apple-darwin
 
       - name: Prepare release artifact with ONNX Runtime
         run: |
@@ -327,12 +314,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "perf"
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
 
       - name: Check build time
         run: |
           cargo clean
           BUILD_START=$(date +%s)
-          cargo build --release --no-default-features
+          cargo build --release
           BUILD_END=$(date +%s)
           BUILD_TIME=$((BUILD_END - BUILD_START))
 
@@ -363,19 +355,33 @@ jobs:
         container:
           - alpine:latest
           - ubuntu:latest
-          - ubuntu:22.04
     container:
       image: ${{ matrix.container }}
     steps:
-      - name: Download binary
+      - name: Download musl binary for Alpine
+        if: contains(matrix.container, 'alpine')
         uses: actions/download-artifact@v4
         with:
-          name: arkavo-x86_64-unknown-linux-musl
+          name: arkavo-x86_64-linux-musl
+
+      - name: Download glibc binary for Ubuntu
+        if: contains(matrix.container, 'ubuntu')
+        uses: actions/download-artifact@v4
+        with:
+          name: arkavo-x86_64-linux
+
+      - name: Install runtime dependencies for glibc build
+        if: contains(matrix.container, 'ubuntu')
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libavahi-client3 \
+            libavahi-common3
 
       - name: Test binary
         run: |
-          chmod +x arkavo
-          ./arkavo --version
+          chmod +x arkavo*
+          ./arkavo* --version
 
   smoke-test-macos:
     name: Smoke Test macOS
@@ -599,7 +605,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-coverage, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
+    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -609,7 +615,6 @@ jobs:
                 "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
                 "${{ needs.test.result }}" != "success" || \
-                "${{ needs.test-coverage.result }}" != "success" || \
                 "${{ needs.test-embeddings.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \

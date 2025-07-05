@@ -65,9 +65,15 @@ jobs:
 
             ### Binaries
 
-            - Linux (x64): arkavo-${{ steps.version.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
-            - Linux (x64, .deb): arkavo_${{ steps.version.outputs.version }}_amd64.deb
-            - macOS (ARM64): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
+            #### Linux
+            - **Full featured** (glibc, local LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
+            - **Static/slim** (musl, memory only): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
+            - **Debian package** (full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
+            
+            #### macOS
+            - **ARM64** (full featured): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
+            
+            Choose the musl build for containers/Alpine Linux. Choose the glibc build for desktop Linux with local LLM support.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -75,6 +81,18 @@ jobs:
     needs: release
     name: Build Linux (x86_64)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            features: default
+            artifact_suffix: x86_64-linux
+            needs_musl: false
+          - target: x86_64-unknown-linux-musl
+            features: memory
+            artifact_suffix: x86_64-linux-musl
+            needs_musl: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -83,42 +101,59 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: x86_64-unknown-linux-musl
+          target: ${{ matrix.target }}
           profile: minimal
           override: true
 
-      - name: Install musl tools
+      - name: Install dependencies for glibc build
+        if: matrix.needs_musl == false
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
+
+      - name: Install musl tools and dependencies
+        if: matrix.needs_musl == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target x86_64-unknown-linux-musl --no-default-features
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CXX_x86_64_unknown_linux_musl: musl-g++
+          AR_x86_64_unknown_linux_musl: ar
+          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cargo build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }}
+          fi
 
       - name: Prepare binary
         run: |
-          cd target/x86_64-unknown-linux-musl/release
+          cd target/${{ matrix.target }}/release
           strip arkavo
-          tar -czf arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz arkavo
-          shasum -a 256 arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz > arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
+          tar -czf arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz arkavo
+          shasum -a 256 arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz > arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz.sha256
 
       - name: Create .deb package
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           mkdir -p debian/DEBIAN
           mkdir -p debian/usr/bin
-          cp target/x86_64-unknown-linux-musl/release/arkavo debian/usr/bin/
+          cp target/${{ matrix.target }}/release/arkavo debian/usr/bin/
           cat > debian/DEBIAN/control << EOF
           Package: arkavo
           Version: ${{ needs.release.outputs.version }}
           Architecture: amd64
           Maintainer: Arkavo LLC <support@arkavo.com>
-          Description: Arkavo Edge - AI-agent development CLI tool
+          Description: Arkavo Edge - AI-agent development CLI tool (full featured)
            Arkavo Edge is an open-source agentic CLI tool that provides
            developer-centric capabilities for AI-agent development and
-           framework maintenance.
+           framework maintenance. This is the full featured build with
+           local LLM support, mDNS discovery, and memory features.
           Section: devel
           Priority: optional
           Homepage: https://github.com/arkavo/arkavo-edge
@@ -132,8 +167,8 @@ jobs:
         with:
           tag_name: ${{ needs.release.outputs.version }}
           files: |
-            target/x86_64-unknown-linux-musl/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
-            target/x86_64-unknown-linux-musl/release/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz.sha256
+            target/${{ matrix.target }}/release/arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz
+            target/${{ matrix.target }}/release/arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz.sha256
             arkavo_${{ needs.release.outputs.version }}_amd64.deb
             arkavo_${{ needs.release.outputs.version }}_amd64.deb.sha256
           fail_on_unmatched_files: false
@@ -170,7 +205,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target aarch64-apple-darwin --no-default-features
+          args: --release --target aarch64-apple-darwin
 
       - name: Strip binary
         run: |
@@ -233,25 +268,38 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        container:
-          - ubuntu:latest
-          - ubuntu:22.04
+        include:
+          - container: alpine:latest
+            binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux-musl.tar.gz
+            test_deb: false
+          - container: ubuntu:latest
+            binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
+            test_deb: true
     container:
       image: ${{ matrix.container }}
     steps:
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y curl ca-certificates
+          if [[ "${{ matrix.container }}" == alpine* ]]; then
+            apk add --no-cache curl ca-certificates
+          else
+            apt-get update
+            apt-get install -y curl ca-certificates
+            # Install runtime dependencies for glibc build (mDNS support)
+            apt-get install -y --no-install-recommends \
+              libavahi-client3 \
+              libavahi-common3
+          fi
 
       - name: Download and test tar.gz binary
         run: |
-          curl -L -o arkavo.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo-${{ needs.release.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+          curl -L -o arkavo.tar.gz https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/${{ matrix.binary }}
           tar -xzf arkavo.tar.gz
           chmod +x arkavo
           ./arkavo --version
 
       - name: Download and test .deb package
+        if: matrix.test_deb
         run: |
           curl -L -o arkavo.deb https://github.com/${{ github.repository }}/releases/download/${{ needs.release.outputs.version }}/arkavo_${{ needs.release.outputs.version }}_amd64.deb
           apt-get install -y ./arkavo.deb
