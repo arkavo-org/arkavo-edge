@@ -151,8 +151,8 @@ jobs:
           # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
-          # Run arkavo-llm tests without local feature (API tests only)
-          cargo test -p arkavo-llm --lib
+          # Run arkavo-llm tests with remote feature only (API tests only)
+          cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
           # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
           # Note: arkavo-llm integration tests excluded as they require local feature
 
@@ -196,6 +196,20 @@ jobs:
           # Test arkavo-test with embeddings enabled
           cargo test -p arkavo-test --features embeddings --lib
 
+  test-llm-local:
+    name: Test with Local LLM (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-llm-local"
+      - name: Run local LLM tests
+        run: |
+          # Test arkavo-llm with local feature
+          cargo test -p arkavo-llm --features llm-local
+
   build-linux:
     name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -207,7 +221,7 @@ jobs:
             features: default
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
-            features: memory
+            features: memory,llm-remote
             artifact_name: arkavo-x86_64-linux-musl
     steps:
       - uses: actions/checkout@v4
@@ -255,7 +269,7 @@ jobs:
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             echo "Full featured build with local LLM, mDNS, and memory support" > release-package/features.txt
           else
-            echo "Slim static build with memory support only (no local LLM or mDNS)" > release-package/features.txt
+            echo "Slim static build with memory and remote LLM support (no local LLM or mDNS)" > release-package/features.txt
           fi
 
       - name: Upload binary

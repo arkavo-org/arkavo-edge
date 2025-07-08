@@ -2,6 +2,7 @@ use super::anthropic_provider::{AnthropicConfig, AnthropicProvider};
 use super::auth_manager::AuthManager;
 use super::openai_provider::{OpenAIConfig, OpenAIProvider};
 use anyhow::Result;
+#[cfg(feature = "llm-remote")]
 use arkavo_llm::ollama::OllamaClient;
 use arkavo_llm::provider::Provider;
 use async_trait::async_trait;
@@ -13,24 +14,47 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderType {
+    #[cfg(feature = "llm-remote")]
     Ollama,
+    #[cfg(feature = "llm-remote")]
     OpenAI,
+    #[cfg(feature = "llm-remote")]
     Anthropic,
+    #[cfg(feature = "llm-remote")]
     Gemini,
+    #[cfg(feature = "llm-local")]
     Local,
     Custom(String),
 }
 
 impl ProviderType {
     pub fn from_name(name: &str) -> Self {
-        match name.to_lowercase().as_str() {
-            n if n.contains("ollama") => ProviderType::Ollama,
-            n if n.contains("openai") => ProviderType::OpenAI,
-            n if n.contains("anthropic") => ProviderType::Anthropic,
-            n if n.contains("gemini") => ProviderType::Gemini,
-            n if n.contains("local") => ProviderType::Local,
-            _ => ProviderType::Custom(name.to_string()),
+        let name_lower = name.to_lowercase();
+
+        #[cfg(feature = "llm-remote")]
+        {
+            if name_lower.contains("ollama") {
+                return ProviderType::Ollama;
+            }
+            if name_lower.contains("openai") {
+                return ProviderType::OpenAI;
+            }
+            if name_lower.contains("anthropic") {
+                return ProviderType::Anthropic;
+            }
+            if name_lower.contains("gemini") {
+                return ProviderType::Gemini;
+            }
         }
+
+        #[cfg(feature = "llm-local")]
+        {
+            if name_lower.contains("local") {
+                return ProviderType::Local;
+            }
+        }
+
+        ProviderType::Custom(name.to_string())
     }
 }
 
@@ -68,8 +92,10 @@ pub trait ProviderFactory: Send + Sync {
 }
 
 /// Factory for creating Ollama provider instances
+#[cfg(feature = "llm-remote")]
 pub struct OllamaProviderFactory;
 
+#[cfg(feature = "llm-remote")]
 #[async_trait]
 impl ProviderFactory for OllamaProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
@@ -116,9 +142,13 @@ impl ProviderFactoryRegistry {
         };
 
         // Register default factories
-        registry.register(Arc::new(OllamaProviderFactory));
-        registry.register(Arc::new(OpenAIProviderFactory));
-        registry.register(Arc::new(AnthropicProviderFactory));
+        #[cfg(feature = "llm-remote")]
+        {
+            registry.register(Arc::new(OllamaProviderFactory));
+            registry.register(Arc::new(OpenAIProviderFactory));
+            registry.register(Arc::new(AnthropicProviderFactory));
+        }
+        #[cfg(feature = "llm-local")]
         registry.register(Arc::new(LocalProviderFactory));
 
         registry
@@ -159,8 +189,10 @@ impl Default for ProviderFactoryRegistry {
 }
 
 /// Factory for creating OpenAI provider instances
+#[cfg(feature = "llm-remote")]
 pub struct OpenAIProviderFactory;
 
+#[cfg(feature = "llm-remote")]
 #[async_trait]
 impl ProviderFactory for OpenAIProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
@@ -249,8 +281,10 @@ impl ProviderFactory for OpenAIProviderFactory {
 }
 
 /// Factory for creating Anthropic provider instances
+#[cfg(feature = "llm-remote")]
 pub struct AnthropicProviderFactory;
 
+#[cfg(feature = "llm-remote")]
 #[async_trait]
 impl ProviderFactory for AnthropicProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
@@ -332,8 +366,10 @@ impl ProviderFactory for AnthropicProviderFactory {
 }
 
 /// Factory for creating Local provider instances
+#[cfg(feature = "llm-local")]
 pub struct LocalProviderFactory;
 
+#[cfg(feature = "llm-local")]
 #[async_trait]
 impl ProviderFactory for LocalProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
@@ -357,13 +393,10 @@ impl ProviderFactory for LocalProviderFactory {
         let provider = arkavo_llm::local::LocalProvider::new(model_name, model_path)?;
 
         // Initialize the provider (load model)
-        #[cfg(feature = "local")]
-        {
-            provider
-                .initialize()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {}", e))?;
-        }
+        provider
+            .initialize()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {}", e))?;
 
         Ok(Box::new(provider))
     }
@@ -394,23 +427,31 @@ mod tests {
 
     #[test]
     fn test_provider_type_from_name() {
-        assert_eq!(
-            ProviderType::from_name("local-ollama"),
-            ProviderType::Ollama
-        );
-        assert_eq!(
-            ProviderType::from_name("ollama-remote"),
-            ProviderType::Ollama
-        );
-        assert_eq!(ProviderType::from_name("openai"), ProviderType::OpenAI);
-        assert_eq!(ProviderType::from_name("local"), ProviderType::Local);
-        assert_eq!(ProviderType::from_name("local-gemma"), ProviderType::Local);
+        #[cfg(feature = "llm-remote")]
+        #[cfg(feature = "llm-remote")]
+        {
+            assert_eq!(
+                ProviderType::from_name("local-ollama"),
+                ProviderType::Ollama
+            );
+            assert_eq!(
+                ProviderType::from_name("ollama-remote"),
+                ProviderType::Ollama
+            );
+            assert_eq!(ProviderType::from_name("openai"), ProviderType::OpenAI);
+        }
+        #[cfg(feature = "llm-local")]
+        {
+            assert_eq!(ProviderType::from_name("local"), ProviderType::Local);
+            assert_eq!(ProviderType::from_name("local-gemma"), ProviderType::Local);
+        }
         assert_eq!(
             ProviderType::from_name("custom-llm"),
             ProviderType::Custom("custom-llm".to_string())
         );
     }
 
+    #[cfg(feature = "llm-remote")]
     #[tokio::test]
     async fn test_ollama_factory_validation() {
         let factory = OllamaProviderFactory;

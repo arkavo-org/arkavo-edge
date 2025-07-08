@@ -66,14 +66,14 @@ jobs:
             ### Binaries
 
             #### Linux
-            - **Full featured** (glibc, local LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
-            - **Static/slim** (musl, memory only): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
+            - **Full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
+            - **Static/slim** (musl, memory + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
             - **Debian package** (full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
             
             #### macOS
             - **ARM64** (full featured): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
             
-            Choose the musl build for containers/Alpine Linux. Choose the glibc build for desktop Linux with local LLM support.
+            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,7 +90,7 @@ jobs:
             artifact_suffix: x86_64-linux
             needs_musl: false
           - target: x86_64-unknown-linux-musl
-            features: memory
+            features: memory,llm-remote
             artifact_suffix: x86_64-linux-musl
             needs_musl: true
     steps:

@@ -12,7 +12,7 @@ pub mod vim;
 mod tests;
 
 use anyhow::Result;
-#[cfg(feature = "llm")]
+#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -61,18 +61,18 @@ pub struct TerminalContext {
 
 pub async fn run() -> Result<()> {
     // Create channels for LLM communication
-    #[cfg(feature = "llm")]
+    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
     let (ui_tx, ui_rx) = mpsc::channel::<LlmRequest>(100);
-    #[cfg(not(feature = "llm"))]
+    #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
     let (ui_tx, _ui_rx) = mpsc::channel::<LlmRequest>(100);
 
-    #[cfg(feature = "llm")]
+    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
     let (llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
-    #[cfg(not(feature = "llm"))]
+    #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
     let (_llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
 
     // Spawn LLM handler task with proper Ollama integration
-    #[cfg(feature = "llm")]
+    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
     {
         let mut ui_rx = ui_rx;
         let llm_tx = llm_tx.clone();
@@ -529,7 +529,7 @@ pub async fn run() -> Result<()> {
     run_with_channels(ui_tx, llm_rx).await
 }
 
-#[cfg(feature = "llm")]
+#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     use arkavo_llm::{LlmClient, Message};
     use arkavo_memory::storage::MemoryStorage;
@@ -584,7 +584,7 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     }
 }
 
-#[cfg(feature = "llm")]
+#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 async fn prompt_for_ollama_config(
     storage: Arc<arkavo_memory::storage::MemoryStorage>,
 ) -> Result<arkavo_llm::LlmClient> {
@@ -837,7 +837,7 @@ pub async fn run_with_string_channels(
     run_with_channels(new_ui_tx, new_llm_rx).await
 }
 
-#[cfg(feature = "llm")]
+#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 fn extract_tool_calls(response: &str) -> Vec<(String, String)> {
     let mut tool_calls = Vec::new();
 

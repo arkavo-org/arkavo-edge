@@ -2,29 +2,29 @@ pub mod provider;
 
 pub use provider::LocalProvider;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod config;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod download_manager;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod model_loader;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod tokenizer;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod tokenizer_utils;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod worker;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub mod streaming;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub use config::LocalConfig;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 pub use download_manager::{ModelDownloader, ModelManifest, ModelSpec};
