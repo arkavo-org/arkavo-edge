@@ -149,6 +149,7 @@ impl ModelLoader {
         }
 
         // Extract config from model metadata first
+        tracing::info!("Extracting config and tokenizer from GGUF metadata...");
         let eos_token_id = self.extract_config_from_gguf(&content);
         if let Some(eos_id) = eos_token_id {
             self.eos_token_id = Some(eos_id);
@@ -188,6 +189,14 @@ impl ModelLoader {
         self.model = Some(model);
 
         eprintln!("Successfully loaded {arch} model");
+        
+        // Now check if we have a tokenizer
+        if self.tokenizer.is_none() {
+            eprintln!("WARNING: Model loaded but tokenizer is still None!");
+        } else {
+            eprintln!("Tokenizer successfully loaded");
+        }
+        
         Ok(())
     }
 
@@ -196,10 +205,13 @@ impl ModelLoader {
         content: &candle_core::quantized::gguf_file::Content,
     ) -> Option<u32> {
         use candle_core::quantized::gguf_file::Value;
+        
+        eprintln!("DEBUG: extract_config_from_gguf called");
 
         let metadata = &content.metadata;
 
         // Extract tokenizer data if available
+        eprintln!("DEBUG: Calling extract_tokenizer_from_gguf...");
         self.extract_tokenizer_from_gguf(content);
 
         // Extract model parameters from metadata
@@ -323,6 +335,7 @@ impl ModelLoader {
         content: &candle_core::quantized::gguf_file::Content,
     ) {
         let metadata = &content.metadata;
+        eprintln!("DEBUG: extract_tokenizer_from_gguf - Attempting to extract tokenizer for model: {}", self.model_name);
 
         // Try multiple approaches to get a tokenizer
 
@@ -349,39 +362,74 @@ impl ModelLoader {
             return;
         }
 
-        // 3. Fallback: look for tokenizer.model alongside the .gguf
-        if let Some(model_path) = &self.model_path {
-            let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
-            if tokenizer_path.exists() {
-                match Tokenizer::from_file(&tokenizer_path) {
-                    Ok(tokenizer) => {
-                        self.tokenizer = Some(Arc::new(tokenizer));
-                        self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
-                        tracing::info!("Loaded tokenizer from file: tokenizer.model");
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to load tokenizer from file: {}", e);
+        // 3. For Gemma models, try to find tokenizer in HF cache
+        if self.model_name.starts_with("gemma") {
+            eprintln!("DEBUG: Looking for Gemma tokenizer in HF cache...");
+            // Look for tokenizer in HuggingFace cache directory
+            if let Some(home) = dirs::home_dir() {
+                let cache_base = home.join(".cache/huggingface/hub");
+                
+                // Map model names to their base repositories
+                let base_repos = match self.model_name.as_str() {
+                    "gemma3-1b-it-qat" => vec!["models--google--gemma-3-1b-it", "models--google--gemma-3-1b-it-qat-q4_0-gguf"],
+                    "gemma3n-e4b-it" => vec!["models--google--gemma-2b-it", "models--unsloth--gemma-3n-E4B-it-GGUF"],
+                    _ => vec!["models--google--gemma-2b-it"],
+                };
+                
+                // Try each potential repository
+                for repo_name in base_repos {
+                    let repo_path = cache_base.join(repo_name);
+                    tracing::debug!("Checking for tokenizer in: {:?}", repo_path);
+                    if repo_path.exists() {
+                        // Look in snapshots directory
+                        let snapshots_dir = repo_path.join("snapshots");
+                        if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+                            for entry in entries.flatten() {
+                                let snapshot_path = entry.path();
+                                let tokenizer_path = snapshot_path.join("tokenizer.model");
+                                tracing::debug!("Checking tokenizer path: {:?}", tokenizer_path);
+                                if tokenizer_path.exists() {
+                                    match Tokenizer::from_file(&tokenizer_path) {
+                                        Ok(tokenizer) => {
+                                            self.tokenizer = Some(Arc::new(tokenizer));
+                                            self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
+                                            tracing::info!("Loaded Gemma tokenizer from cache: {:?}", tokenizer_path);
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-
-            // 4. Try tokenizer.json for Gemma models
+        }
+        
+        // 4. Fallback: look for tokenizer files alongside the .gguf
+        if let Some(model_path) = &self.model_path {
+            // Try tokenizer.json first (JSON format that works with all models)
             let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+            eprintln!("DEBUG: Checking for tokenizer.json alongside GGUF at: {:?}", tokenizer_json_path);
             if tokenizer_json_path.exists() {
+                eprintln!("DEBUG: tokenizer.json exists! Attempting to load...");
                 match Tokenizer::from_file(&tokenizer_json_path) {
                     Ok(tokenizer) => {
                         self.tokenizer = Some(Arc::new(tokenizer));
-                        self.tokenizer_path =
-                            Some(tokenizer_json_path.to_string_lossy().into_owned());
-                        tracing::info!("Loaded tokenizer from file: tokenizer.json");
+                        self.tokenizer_path = Some(tokenizer_json_path.to_string_lossy().into_owned());
+                        eprintln!("DEBUG: Successfully loaded tokenizer from tokenizer.json");
                         return;
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to load tokenizer from JSON file: {}", e);
+                        eprintln!("ERROR: Failed to load tokenizer.json: {}", e);
                     }
                 }
             }
+            
+            // Note: tokenizer.model is a binary SentencePiece format that would need special handling
+            // For now, we only support tokenizer.json which is the JSON export
         }
 
         tracing::error!(
