@@ -142,15 +142,10 @@ impl ModelLoader {
 
         eprintln!("Detected GGUF architecture: {arch}");
 
-        // Check if quantization is compatible with Metal
-        let mut device = self.device.clone();
+        // Use the device as configured (Metal will be used on macOS if available)
+        let device = self.device.clone();
         if matches!(device, Device::Metal(_)) {
-            // GGUF models with quantization don't work well on Metal yet
-            tracing::warn!(
-                "GGUF quantized models are not yet fully optimized for Metal. \
-                 Using CPU for better compatibility."
-            );
-            device = Device::Cpu;
+            tracing::info!("Using Metal NPU acceleration for {} model inference", arch);
         }
 
         // Extract config from model metadata first
@@ -191,7 +186,6 @@ impl ModelLoader {
         };
 
         self.model = Some(model);
-        self.device = device; // Update device if it changed
 
         eprintln!("Successfully loaded {arch} model");
         Ok(())
