@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 [features]
 default = []
 llm-remote = []
-llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
+llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml", "dep:rand"]
 local = ["llm-local"]  # Alias for compatibility
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
@@ -43,6 +43,7 @@ sha2 = { version = "0.10", optional = true }
 indicatif = { version = "0.17", optional = true }
 dirs = { version = "5.0", optional = true }
 toml = { version = "0.8", optional = true }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

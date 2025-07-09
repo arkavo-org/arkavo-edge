@@ -26,7 +26,7 @@ pub struct ModelLoader {
     config: Option<llama::Config>,
     tokenizer_path: Option<String>,
     tokenizer: Option<Arc<Tokenizer>>,
-    eos_token_id: Option<u32>,
+    eos_token_ids: Vec<u32>,
 }
 
 impl ModelLoader {
@@ -42,7 +42,7 @@ impl ModelLoader {
             config: None,
             tokenizer_path: None,
             tokenizer: None,
-            eos_token_id: None,
+            eos_token_ids: Vec::new(),
         })
     }
 
@@ -152,7 +152,7 @@ impl ModelLoader {
         tracing::info!("Extracting config and tokenizer from GGUF metadata...");
         let eos_token_id = self.extract_config_from_gguf(&content);
         if let Some(eos_id) = eos_token_id {
-            self.eos_token_id = Some(eos_id);
+            self.eos_token_ids.push(eos_id);
             tracing::debug!("Found EOS token ID in GGUF metadata: {}", eos_id);
         }
 
@@ -391,7 +391,7 @@ impl ModelLoader {
                                 if tokenizer_path.exists() {
                                     match Tokenizer::from_file(&tokenizer_path) {
                                         Ok(tokenizer) => {
-                                            self.tokenizer = Some(Arc::new(tokenizer));
+                                            self.set_tokenizer_and_extract_eos(tokenizer);
                                             self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
                                             tracing::info!("Loaded Gemma tokenizer from cache: {:?}", tokenizer_path);
                                             return;
@@ -417,7 +417,7 @@ impl ModelLoader {
                 eprintln!("DEBUG: tokenizer.json exists! Attempting to load...");
                 match Tokenizer::from_file(&tokenizer_json_path) {
                     Ok(tokenizer) => {
-                        self.tokenizer = Some(Arc::new(tokenizer));
+                        self.set_tokenizer_and_extract_eos(tokenizer);
                         self.tokenizer_path = Some(tokenizer_json_path.to_string_lossy().into_owned());
                         eprintln!("DEBUG: Successfully loaded tokenizer from tokenizer.json");
                         return;
@@ -437,6 +437,17 @@ impl ModelLoader {
             Please ensure tokenizer.model exists alongside the GGUF file.",
             self.model_name
         );
+    }
+    
+    fn set_tokenizer_and_extract_eos(&mut self, tokenizer: Tokenizer) {
+        // Get EOS token IDs from tokenizer
+        let eos_ids = super::tokenizer_utils::get_eos_token_ids(&tokenizer);
+        if !eos_ids.is_empty() {
+            self.eos_token_ids = eos_ids;
+            eprintln!("DEBUG: Extracted EOS token IDs from tokenizer: {:?}", self.eos_token_ids);
+        }
+        
+        self.tokenizer = Some(Arc::new(tokenizer));
     }
 
     fn try_construct_tokenizer_from_metadata(
@@ -564,7 +575,11 @@ impl ModelLoader {
     }
 
     pub fn eos_token_id(&self) -> Option<u32> {
-        self.eos_token_id
+        self.eos_token_ids.first().copied()
+    }
+    
+    pub fn eos_token_ids(&self) -> &[u32] {
+        &self.eos_token_ids
     }
 
     pub fn context_length(&self) -> usize {

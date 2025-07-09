@@ -102,7 +102,7 @@ impl Provider for LocalProvider {
                 .join("\n");
 
             // First, get tokenizer and encode the prompt (clone tokenizer for safety)
-            let (mut ids, eos_token_id, tokenizer) = {
+            let (mut ids, eos_token_ids, tokenizer, _is_gemma) = {
                 let guard = self.inner.lock().await;
 
                 // Check if model is loaded
@@ -113,30 +113,30 @@ impl Provider for LocalProvider {
                 }
 
                 let tokenizer = guard.model_loader.tokenizer()?;
+                
+                // Check if this is a Gemma model and format prompt accordingly
+                let is_gemma = super::tokenizer_utils::is_gemma_tokenizer(&tokenizer);
+                let formatted_prompt = if is_gemma {
+                    let gemma_prompt = super::tokenizer_utils::format_gemma_prompt(&prompt, &tokenizer);
+                    eprintln!("DEBUG: Formatted Gemma prompt: {}", gemma_prompt);
+                    gemma_prompt
+                } else {
+                    prompt.clone()
+                };
+                
                 let encoding = tokenizer
-                    .encode(prompt.as_str(), true)
+                    .encode(formatted_prompt.as_str(), true)
                     .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
                 let ids: Vec<u32> = encoding.get_ids().to_vec();
 
-                // Get EOS token from metadata or tokenizer
-                let eos_id = guard
-                    .model_loader
-                    .eos_token_id()
-                    .or_else(|| {
-                        // Try to get from tokenizer's special tokens
-                        super::tokenizer_utils::get_eos_token_id(&tokenizer)
-                    })
-                    .unwrap_or_else(|| {
-                        // Final fallback
-                        let vocab_size = tokenizer.get_vocab_size(false);
-                        if vocab_size > 0 {
-                            (vocab_size - 1) as u32
-                        } else {
-                            0
-                        }
-                    });
+                // Get EOS tokens from model loader or tokenizer
+                let eos_ids = if guard.model_loader.eos_token_ids().is_empty() {
+                    super::tokenizer_utils::get_eos_token_ids(&tokenizer)
+                } else {
+                    guard.model_loader.eos_token_ids().to_vec()
+                };
 
-                (ids, eos_id, tokenizer)
+                (ids, eos_ids, tokenizer, is_gemma)
             };
 
             // Get context window from model metadata
@@ -249,26 +249,40 @@ impl Provider for LocalProvider {
                         })?;
                     }
 
-                    logits
+                    // Apply sampling with temperature and repetition penalty
+                    let logits_1d = logits
                         .squeeze(0)
-                        .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?
-                        .argmax(0)
-                        .map_err(|e| Error::Model(format!("Failed to argmax: {e}")))?
-                        .to_scalar::<u32>()
-                        .map_err(|e| Error::Model(format!("Failed to get scalar: {e}")))?
+                        .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?;
+                    
+                    // Use sampling parameters
+                    let sampling_params = super::sampling::SamplingParams::default();
+                    super::sampling::sample_next_token(
+                        &logits_1d,
+                        sampling_params.temperature,
+                        sampling_params.top_p,
+                        sampling_params.repetition_penalty,
+                        &ids[start_len..], // Only apply repetition penalty to generated tokens
+                    )?
                 };
 
                 ids.push(next);
+                
+                // Debug first few tokens
+                if index < 5 {
+                    eprintln!("DEBUG: Generated token {} at position {}", next, ids.len());
+                }
 
-                // Early stop on EOS token
-                if next == eos_token_id {
+                // Early stop on any EOS token
+                if eos_token_ids.contains(&next) {
+                    eprintln!("DEBUG: Hit EOS token {}", next);
                     break;
                 }
             }
 
-            // Decode the full sequence to get complete output
+            // Decode only the generated tokens (not the prompt)
+            let generated_ids = &ids[start_len..];
             let output = tokenizer
-                .decode(&ids, true)
+                .decode(generated_ids, true)
                 .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?;
 
             // Log generation metrics
