@@ -24,7 +24,10 @@ mod tests {
         #[cfg(feature = "llm-remote")]
         {
             let result = LlmClient::from_env();
-            assert!(result.is_ok(), "Client creation should succeed with zero config");
+            assert!(
+                result.is_ok(),
+                "Client creation should succeed with zero config"
+            );
 
             let client = result.unwrap();
             assert_eq!(client.provider_name(), "ollama");
@@ -35,7 +38,10 @@ mod tests {
         #[cfg(all(not(feature = "llm-remote"), feature = "llm-local"))]
         {
             let result = LlmClient::from_env();
-            assert!(result.is_err(), "Client creation should fail without llm-remote feature");
+            assert!(
+                result.is_err(),
+                "Client creation should fail without llm-remote feature"
+            );
         }
     }
 }
