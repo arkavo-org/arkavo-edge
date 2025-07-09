@@ -1242,15 +1242,15 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
 
         // Load manifest and try models in priority order
         if let Ok(manifest) = ModelManifest::load() {
-            // Priority order: Gemma 3n first (best quality), then smaller models as fallbacks
+            // Priority order: Gemma 3 1B first (best supported quality), then smaller models as fallbacks
             let model_priorities = [
-                "gemma3n-e4b-it",     // Gemma 3n E4B - highest quality, 4.2GB
-                "gemma3-1b-it-qat",   // Gemma 3 1B - smaller alternative, 0.93GB
+                "gemma3-1b-it-qat",   // Gemma 3 1B - primary model, 0.93GB
                 "tinyllama-110m-f16", // Smallest model for testing
                 "phi-2-q4k",          // Phi-2 as fallback
                 "tinyllama-1b-chat-q2",
                 "tinyllama-1b-chat-q3",
                 "tinyllama-1b-chat",
+                "gemma3n-e4b-it",     // Gemma 3n E4B - not yet supported by Candle
             ];
 
             for model_name in &model_priorities {
