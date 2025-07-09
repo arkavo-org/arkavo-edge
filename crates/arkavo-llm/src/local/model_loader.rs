@@ -149,7 +149,6 @@ impl ModelLoader {
         }
 
         // Extract config from model metadata first
-        tracing::info!("Extracting config and tokenizer from GGUF metadata...");
         let eos_token_id = self.extract_config_from_gguf(&content);
         if let Some(eos_id) = eos_token_id {
             self.eos_token_ids.push(eos_id);
@@ -189,14 +188,6 @@ impl ModelLoader {
         self.model = Some(model);
 
         eprintln!("Successfully loaded {arch} model");
-        
-        // Now check if we have a tokenizer
-        if self.tokenizer.is_none() {
-            eprintln!("WARNING: Model loaded but tokenizer is still None!");
-        } else {
-            eprintln!("Tokenizer successfully loaded");
-        }
-        
         Ok(())
     }
 
@@ -206,12 +197,10 @@ impl ModelLoader {
     ) -> Option<u32> {
         use candle_core::quantized::gguf_file::Value;
         
-        eprintln!("DEBUG: extract_config_from_gguf called");
 
         let metadata = &content.metadata;
 
         // Extract tokenizer data if available
-        eprintln!("DEBUG: Calling extract_tokenizer_from_gguf...");
         self.extract_tokenizer_from_gguf(content);
 
         // Extract model parameters from metadata
@@ -335,7 +324,6 @@ impl ModelLoader {
         content: &candle_core::quantized::gguf_file::Content,
     ) {
         let metadata = &content.metadata;
-        eprintln!("DEBUG: extract_tokenizer_from_gguf - Attempting to extract tokenizer for model: {}", self.model_name);
 
         // Try multiple approaches to get a tokenizer
 
@@ -364,8 +352,7 @@ impl ModelLoader {
 
         // 3. For Gemma models, try to find tokenizer in HF cache
         if self.model_name.starts_with("gemma") {
-            eprintln!("DEBUG: Looking for Gemma tokenizer in HF cache...");
-            // Look for tokenizer in HuggingFace cache directory
+                // Look for tokenizer in HuggingFace cache directory
             if let Some(home) = dirs::home_dir() {
                 let cache_base = home.join(".cache/huggingface/hub");
                 
@@ -412,14 +399,11 @@ impl ModelLoader {
         if let Some(model_path) = &self.model_path {
             // Try tokenizer.json first (JSON format that works with all models)
             let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
-            eprintln!("DEBUG: Checking for tokenizer.json alongside GGUF at: {:?}", tokenizer_json_path);
             if tokenizer_json_path.exists() {
-                eprintln!("DEBUG: tokenizer.json exists! Attempting to load...");
                 match Tokenizer::from_file(&tokenizer_json_path) {
                     Ok(tokenizer) => {
                         self.set_tokenizer_and_extract_eos(tokenizer);
                         self.tokenizer_path = Some(tokenizer_json_path.to_string_lossy().into_owned());
-                        eprintln!("DEBUG: Successfully loaded tokenizer from tokenizer.json");
                         return;
                     }
                     Err(e) => {
@@ -444,7 +428,6 @@ impl ModelLoader {
         let eos_ids = super::tokenizer_utils::get_eos_token_ids(&tokenizer);
         if !eos_ids.is_empty() {
             self.eos_token_ids = eos_ids;
-            eprintln!("DEBUG: Extracted EOS token IDs from tokenizer: {:?}", self.eos_token_ids);
         }
         
         self.tokenizer = Some(Arc::new(tokenizer));

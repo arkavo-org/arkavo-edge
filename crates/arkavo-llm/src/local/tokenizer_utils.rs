@@ -24,9 +24,11 @@ pub fn get_eos_token_ids(tokenizer: &Tokenizer) -> Vec<u32> {
         }
     }
     
-    // For Gemma models, also include legacy EOS token ID 1
-    if tokenizer.token_to_id("<end_of_turn>").is_some() {
-        eos_ids.push(1);
+    // For Gemma models, use ONLY token ID 1 as EOS
+    if tokenizer.token_to_id("<start_of_turn>").is_some() && 
+       tokenizer.token_to_id("<end_of_turn>").is_some() {
+        // This is a Gemma model - use only token 1
+        return vec![1];
     }
     
     // If no EOS tokens found, fall back to vocab_size - 1
@@ -77,7 +79,7 @@ pub fn get_bos_token_id(tokenizer: &Tokenizer) -> Option<u32> {
 /// Gemma uses the following format:
 /// <bos><start_of_turn>user
 /// {prompt}<end_of_turn>
-/// <start_of_turn>assistant
+/// <start_of_turn>model
 pub fn format_gemma_prompt(prompt: &str, tokenizer: &Tokenizer) -> String {
     let bos = if tokenizer.token_to_id("<bos>").is_some() {
         "<bos>"
@@ -86,7 +88,7 @@ pub fn format_gemma_prompt(prompt: &str, tokenizer: &Tokenizer) -> String {
     };
     
     format!(
-        "{}<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>assistant\n",
+        "{}<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
         bos, prompt
     )
 }

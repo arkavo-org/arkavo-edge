@@ -117,9 +117,7 @@ impl Provider for LocalProvider {
                 // Check if this is a Gemma model and format prompt accordingly
                 let is_gemma = super::tokenizer_utils::is_gemma_tokenizer(&tokenizer);
                 let formatted_prompt = if is_gemma {
-                    let gemma_prompt = super::tokenizer_utils::format_gemma_prompt(&prompt, &tokenizer);
-                    eprintln!("DEBUG: Formatted Gemma prompt: {}", gemma_prompt);
-                    gemma_prompt
+                    super::tokenizer_utils::format_gemma_prompt(&prompt, &tokenizer)
                 } else {
                     prompt.clone()
                 };
@@ -266,15 +264,9 @@ impl Provider for LocalProvider {
                 };
 
                 ids.push(next);
-                
-                // Debug first few tokens
-                if index < 5 {
-                    eprintln!("DEBUG: Generated token {} at position {}", next, ids.len());
-                }
 
                 // Early stop on any EOS token
                 if eos_token_ids.contains(&next) {
-                    eprintln!("DEBUG: Hit EOS token {}", next);
                     break;
                 }
             }
