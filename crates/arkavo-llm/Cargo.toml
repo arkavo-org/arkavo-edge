@@ -12,8 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["local"]
-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
+default = []
+llm-remote = []
+llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
+local = ["llm-local"]  # Alias for compatibility
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [dependencies]
