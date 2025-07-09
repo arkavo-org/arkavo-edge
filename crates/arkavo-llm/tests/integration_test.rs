@@ -19,11 +19,23 @@ mod tests {
 
     #[test]
     fn test_client_creation() {
-        // Test that client can be created without panicking
-        let result = LlmClient::from_env();
-        assert!(result.is_ok());
+        // When llm-remote feature is enabled, client should be created successfully
+        // even without environment variables (zero config)
+        #[cfg(feature = "llm-remote")]
+        {
+            let result = LlmClient::from_env();
+            assert!(result.is_ok(), "Client creation should succeed with zero config");
 
-        let client = result.unwrap();
-        assert_eq!(client.provider_name(), "ollama");
+            let client = result.unwrap();
+            assert_eq!(client.provider_name(), "ollama");
+        }
+
+        // When only llm-local feature is enabled, from_env() will fail
+        // because it defaults to ollama which requires llm-remote
+        #[cfg(all(not(feature = "llm-remote"), feature = "llm-local"))]
+        {
+            let result = LlmClient::from_env();
+            assert!(result.is_err(), "Client creation should fail without llm-remote feature");
+        }
     }
 }
