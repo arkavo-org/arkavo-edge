@@ -21,7 +21,7 @@ cargo build --release
 cargo run
 
 # Run chat with prompt (default, no embeddings)
-a
+cargo run -p arkavo -- chat --prompt Hi
 
 # Run with embeddings (requires ONNX Runtime)
 cargo run -p arkavo --features embeddings -- chat --prompt Hi
