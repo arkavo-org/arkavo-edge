@@ -2,22 +2,22 @@ use crate::{Error, Message, Provider, Result, StreamResponse};
 use async_trait::async_trait;
 use tokio_stream::Stream;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use super::model_loader::{Model, ModelLoader};
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use candle_core::Tensor;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use std::sync::Arc;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use tokio::sync::Mutex;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use super::worker::WorkerHandle;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 struct Inner {
     model_loader: ModelLoader,
     #[allow(dead_code)]
@@ -28,21 +28,21 @@ struct Inner {
 }
 
 pub struct LocalProvider {
-    #[cfg(feature = "local")]
+    #[cfg(feature = "llm-local")]
     inner: Arc<Mutex<Inner>>,
     model_name: String,
 }
 
 impl LocalProvider {
     pub fn new(model_name: String, model_path: Option<String>) -> Result<Self> {
-        #[cfg(not(feature = "local"))]
+        #[cfg(not(feature = "llm-local"))]
         {
             return Err(Error::Config(
-                "Local provider requires 'local' feature to be enabled".to_string(),
+                "Local provider requires 'llm-local' feature to be enabled".to_string(),
             ));
         }
 
-        #[cfg(feature = "local")]
+        #[cfg(feature = "llm-local")]
         {
             let model_loader = ModelLoader::new(&model_name, model_path.as_deref())?;
 
@@ -59,7 +59,7 @@ impl LocalProvider {
         }
     }
 
-    #[cfg(feature = "local")]
+    #[cfg(feature = "llm-local")]
     #[allow(clippy::missing_panics_doc)]
     #[allow(clippy::significant_drop_tightening)]
     pub async fn initialize(&self) -> Result<()> {
@@ -86,14 +86,14 @@ impl LocalProvider {
 impl Provider for LocalProvider {
     #[allow(clippy::significant_drop_tightening)]
     async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        #[cfg(not(feature = "local"))]
+        #[cfg(not(feature = "llm-local"))]
         {
             return Err(Error::Config(
-                "Local provider requires 'local' feature to be enabled".to_string(),
+                "Local provider requires 'llm-local' feature to be enabled".to_string(),
             ));
         }
 
-        #[cfg(feature = "local")]
+        #[cfg(feature = "llm-local")]
         {
             let prompt = messages
                 .iter()
@@ -297,14 +297,14 @@ impl Provider for LocalProvider {
         &self,
         _messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        #[cfg(not(feature = "local"))]
+        #[cfg(not(feature = "llm-local"))]
         {
             return Err(Error::Config(
-                "Local provider requires 'local' feature to be enabled".to_string(),
+                "Local provider requires 'llm-local' feature to be enabled".to_string(),
             ));
         }
 
-        #[cfg(feature = "local")]
+        #[cfg(feature = "llm-local")]
         {
             let prompt = _messages
                 .iter()

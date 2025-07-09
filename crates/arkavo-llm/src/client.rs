@@ -1,9 +1,10 @@
 use crate::chat::ChatRequest;
+#[cfg(feature = "llm-remote")]
 use crate::ollama::OllamaClient;
 use crate::{Error, Message, Provider, Result, StreamResponse};
 use tokio_stream::Stream;
 
-#[cfg(feature = "local")]
+#[cfg(feature = "llm-local")]
 use crate::local::LocalProvider;
 
 pub struct LlmClient {
@@ -21,28 +22,37 @@ impl LlmClient {
             .unwrap_or_else(|_| "ollama".to_string())
             .to_lowercase();
 
-        let provider: Box<dyn Provider> = match provider_name.as_str() {
-            "ollama" => Box::new(OllamaClient::from_env()?),
-            _ => {
-                return Err(Error::Config(format!("Unknown provider: {provider_name}")));
+        match provider_name.as_str() {
+            #[cfg(feature = "llm-remote")]
+            "ollama" => {
+                let provider = Box::new(OllamaClient::from_env()?);
+                Ok(Self::new(provider))
             }
-        };
+            _ => {
+                #[cfg(feature = "llm-remote")]
+                return Err(Error::Config(format!("Unknown provider: {provider_name}")));
 
-        Ok(Self::new(provider))
+                #[cfg(not(feature = "llm-remote"))]
+                return Err(Error::Config(
+                    "No LLM providers available. Build with 'llm-remote' or 'llm-local' feature enabled.".to_string()
+                ));
+            }
+        }
     }
 
     pub async fn from_local_model(model_name: &str, model_path: String) -> Result<Self> {
-        #[cfg(feature = "local")]
+        #[cfg(feature = "llm-local")]
         {
             let provider = LocalProvider::new(model_name.to_string(), Some(model_path))?;
             // Initialize the provider to load the model
             provider.initialize().await?;
             Ok(Self::new(Box::new(provider)))
         }
-        #[cfg(not(feature = "local"))]
+        #[cfg(not(feature = "llm-local"))]
         {
+            let _ = (model_name, model_path); // Suppress unused variable warnings
             Err(Error::Config(
-                "Local models require the 'local' feature to be enabled".to_string(),
+                "Local models require the 'llm-local' feature to be enabled".to_string(),
             ))
         }
     }

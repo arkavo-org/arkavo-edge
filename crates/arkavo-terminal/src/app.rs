@@ -348,7 +348,7 @@ impl App {
         }
     }
 
-    #[cfg(feature = "llm")]
+    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
     pub async fn fetch_available_models(&mut self) {
         // Try to fetch models from discovered Ollama servers
         use arkavo_llm::ollama::OllamaClient;
@@ -560,7 +560,7 @@ impl App {
         }
     }
 
-    #[cfg(not(feature = "llm"))]
+    #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
     pub async fn fetch_available_models(&mut self) {
         // When LLM feature is disabled, show only configuration message
         self.available_models = vec!["LLM features disabled in this build".to_string()];
@@ -1032,9 +1032,15 @@ impl App {
                                             if let Some(server_url) =
                                                 self.extract_server_url(&self.input_buffer)
                                             {
-                                                #[cfg(feature = "llm")]
+                                                #[cfg(any(
+                                                    feature = "llm-remote",
+                                                    feature = "llm-local"
+                                                ))]
                                                 self.add_ollama_server(server_url).await;
-                                                #[cfg(not(feature = "llm"))]
+                                                #[cfg(not(any(
+                                                    feature = "llm-remote",
+                                                    feature = "llm-local"
+                                                )))]
                                                 {
                                                     let _ = server_url;
                                                     self.add_debug_log(
@@ -1956,7 +1962,7 @@ Scrolling (when in scroll mode):
         None
     }
 
-    #[cfg(feature = "llm")]
+    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
     async fn add_ollama_server(&mut self, server_url: String) {
         use arkavo_llm::ollama::OllamaClient;
         use arkavo_memory::storage::MemoryStorage;
@@ -2205,7 +2211,7 @@ Scrolling (when in scroll mode):
                 }
 
                 // Test the connection
-                #[cfg(feature = "llm")]
+                #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
                 {
                     use arkavo_memory::storage::MemoryStorage;
 
@@ -2279,7 +2285,7 @@ Scrolling (when in scroll mode):
                     }
                 }
 
-                #[cfg(not(feature = "llm"))]
+                #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
                 {
                     let _ = base_url; // Suppress unused warning
                     self.add_debug_log(

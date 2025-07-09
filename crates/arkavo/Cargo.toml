@@ -17,6 +17,7 @@ memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]
 local = ["arkavo-cli/local"]
+llm-remote = ["arkavo-cli/llm-remote"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

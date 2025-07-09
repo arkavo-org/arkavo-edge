@@ -1,5 +1,5 @@
 #[cfg(feature = "local")]
-use arkavo_llm::{LlmClient, Message};
+use arkavo_llm::LlmClient;
 use arkavo_memory::storage::MemoryStorage;
 use chrono::{DateTime, Utc};
 use indicatif::{ProgressBar, ProgressStyle};

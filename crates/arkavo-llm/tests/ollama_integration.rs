@@ -1,3 +1,5 @@
+#![cfg(feature = "llm-remote")]
+
 use arkavo_llm::{LlmClient, Message};
 use serial_test::serial;
 use std::env;
