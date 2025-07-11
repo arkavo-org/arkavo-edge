@@ -107,22 +107,36 @@ fn test_no_system_prompt_simulation() {
     use std::env;
     use std::process::Command;
 
-    // Create a temporary PATH without xcodebuild
-    let _original_path = env::var("PATH").unwrap_or_default();
-    let temp_path = "/usr/bin:/bin"; // Minimal PATH without developer tools
-
-    // Test with restricted PATH
-    let output = Command::new("which")
+    // First, check where xcodebuild is actually located
+    let which_output = Command::new("which")
         .arg("xcodebuild")
-        .env("PATH", temp_path)
         .output()
         .expect("Failed to execute which");
+    
+    if which_output.status.success() {
+        let xcodebuild_path = String::from_utf8_lossy(&which_output.stdout).trim().to_string();
+        println!("xcodebuild found at: {}", xcodebuild_path);
+        
+        // Create a PATH that excludes the directory containing xcodebuild
+        // On GitHub Actions, xcodebuild is in /usr/bin, so we need a truly minimal PATH
+        let temp_path = "/bin:/sbin"; // Exclude /usr/bin where xcodebuild might be
+        
+        // Test with restricted PATH
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg("which xcodebuild")
+            .env("PATH", temp_path)
+            .output()
+            .expect("Failed to execute which");
 
-    // Should fail to find xcodebuild without triggering any prompts
-    assert!(
-        !output.status.success(),
-        "Should not find xcodebuild in restricted PATH"
-    );
-
-    // Restore original PATH is not needed as Command::env only affects the subprocess
+        // Should fail to find xcodebuild without triggering any prompts
+        assert!(
+            !output.status.success(),
+            "Should not find xcodebuild in restricted PATH. Found at: {}",
+            xcodebuild_path
+        );
+    } else {
+        // If xcodebuild is not available, that's fine - test passes
+        println!("xcodebuild not found on system - test passes by default");
+    }
 }
