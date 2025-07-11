@@ -639,18 +639,34 @@ jobs:
       - name: Test Issue #114 - xcodebuild should not trigger prompts
         if: matrix.issue == 114
         run: |
-          # Simulate environment without Xcode by restricting PATH
-          export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+          echo "Testing regression for issue #114..."
           
           # Build without default features to avoid embeddings
-          cargo build -p arkavo-test --no-default-features
+          echo "Building arkavo-test..."
+          cargo build -p arkavo-test --no-default-features || exit 1
           
           # Run the regression test
-          cargo test -p arkavo-test --no-default-features --test regression_issue_114 -- --nocapture
+          echo "Running regression test..."
+          cargo test -p arkavo-test --no-default-features --test regression_issue_114 -- --nocapture || {
+            echo "::error::Regression test failed"
+            exit 1
+          }
           
           # Test that discovery tools don't prompt
+          echo "Testing Swift discovery tool..."
           cd crates/arkavo-test
-          cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
+          
+          # Create a minimal PATH that excludes Xcode but includes Rust
+          CARGO_BIN="${HOME}/.cargo/bin"
+          if [ ! -d "$CARGO_BIN" ]; then
+            # GitHub Actions might have cargo in a different location
+            CARGO_BIN=$(dirname $(which cargo))
+          fi
+          
+          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
+          echo "Using PATH: $MINIMAL_PATH"
+          
+          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
           
           # Ensure no prompt-related output
           if grep -i "command line tools\|xcode-select" output.log; then
