@@ -26,8 +26,21 @@ impl XcodeVersion {
     }
 
     fn detect_uncached() -> Option<Self> {
-        // Try to run xcodebuild without triggering system prompts
-        let output = match Command::new("xcodebuild").arg("-version").output() {
+        // First check if xcodebuild exists in PATH to avoid triggering prompts
+        let which_output = Command::new("which").arg("xcodebuild").output().ok()?;
+
+        if !which_output.status.success() {
+            // xcodebuild not in PATH - return None without trying to execute it
+            return None;
+        }
+
+        // Now try to run xcodebuild with environment variables to prevent prompts
+        let output = match Command::new("xcodebuild")
+            .arg("-version")
+            .env("COMMAND_LINE_INSTALL", "0")
+            .env("GCC_VERSION", "")
+            .output()
+        {
             Ok(output) => output,
             Err(_) => {
                 // xcodebuild not found or not executable - return None without error

@@ -74,6 +74,10 @@ walkdir = "2.5"
 # JSON Schema validation
 jsonschema = "0.26"
 
+[[bin]]
+name = "test_swift_discovery"
+path = "src/bin/test_swift_discovery.rs"
+
 [build-dependencies]
 cc = "1.0"
 

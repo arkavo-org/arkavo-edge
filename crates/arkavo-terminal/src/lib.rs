@@ -98,39 +98,25 @@ pub async fn run() -> Result<()> {
             );
 
             // Initialize MCP connection and report status
-            let (mcp_client, mcp_status) =
-                if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
-                    (
-                        None,
-                        McpStatusUpdate {
-                            available: false,
-                            error_message: Some("MCP disabled by environment variable".to_string()),
-                            tool_count: 0,
-                        },
-                    )
-                } else {
-                    let result = McpConnection::new_in_process();
-
-                    match result {
-                        Ok(client) => {
-                            let tool_count = client.list_tools().len();
-                            let status = McpStatusUpdate {
-                                available: true,
-                                error_message: None,
-                                tool_count,
-                            };
-                            (Some(client), status)
-                        }
-                        Err(e) => {
-                            let status = McpStatusUpdate {
-                                available: false,
-                                error_message: Some(format!("MCP server not available: {e}")),
-                                tool_count: 0,
-                            };
-                            (None, status)
-                        }
-                    }
-                };
+            let (mcp_client, mcp_status) = match McpConnection::new_in_process() {
+                Ok(client) => {
+                    let tool_count = client.list_tools().len();
+                    let status = McpStatusUpdate {
+                        available: true,
+                        error_message: None,
+                        tool_count,
+                    };
+                    (Some(client), status)
+                }
+                Err(e) => {
+                    let status = McpStatusUpdate {
+                        available: false,
+                        error_message: Some(format!("MCP server not available: {e}")),
+                        tool_count: 0,
+                    };
+                    (None, status)
+                }
+            };
 
             // Send MCP status update through LLM channel
             let _ = llm_tx

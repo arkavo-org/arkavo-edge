@@ -2,7 +2,9 @@
 //!
 //! This utility discovers A2A agents on the local network using mDNS.
 //!
-//! Usage: cargo run --example mdns_browser --features mdns
+//! Usage:
+//!   cargo run --example mdns_browser --features mdns
+//!   cargo run --example mdns_browser --features mdns -- --register
 
 #![cfg(feature = "mdns")]
 
@@ -23,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting A2A mDNS Browser...");
 
+    // Check command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let register_self = args.contains(&"--register".to_string());
+
     // Create discovery service
     let discovery = DiscoveryService::new(DiscoveryConfig {
         method: DiscoveryMethod::Mdns,
@@ -32,9 +38,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start mDNS discovery
     discovery.start_mdns_discovery().await?;
     info!("Started mDNS discovery, listening for A2A agents...");
-
-    // Optional: Register ourselves as a discoverable agent
-    let register_self = std::env::var("REGISTER_SELF").unwrap_or_default() == "true";
     if register_self {
         let info = MdnsServiceInfo {
             agent_id: "mdns-browser".to_string(),
