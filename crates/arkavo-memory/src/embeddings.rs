@@ -95,14 +95,12 @@ impl EmbeddingService {
                 .await
                 .map_err(|e| {
                     MemoryError::ModelNotAvailable(format!(
-                        "Failed to spawn initialization task: {}",
-                        e
+                        "Failed to spawn initialization task: {e}"
                     ))
                 })?
                 .map_err(|e| {
                     MemoryError::ModelNotAvailable(format!(
-                        "Failed to initialize embedding model: {}",
-                        e
+                        "Failed to initialize embedding model: {e}"
                     ))
                 })?;
 
@@ -148,7 +146,7 @@ impl EmbeddingService {
                 // Generate embeddings
                 let documents = vec![text.as_str()];
                 let embeddings = model.embed(documents, None).map_err(|e| {
-                    MemoryError::Embedding(format!("Failed to generate embedding: {}", e))
+                    MemoryError::Embedding(format!("Failed to generate embedding: {e}"))
                 })?;
 
                 // Extract the first (and only) embedding
@@ -160,7 +158,7 @@ impl EmbeddingService {
                 Ok::<Vec<f32>, MemoryError>(embedding)
             })
             .await
-            .map_err(|e| MemoryError::Embedding(format!("Task join error: {}", e)))??;
+            .map_err(|e| MemoryError::Embedding(format!("Task join error: {e}")))??;
 
             Ok(embeddings)
         }
