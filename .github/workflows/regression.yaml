@@ -55,4 +55,5 @@ jobs:
 
       - name: Run tokenizer tests
         run: |
-          cargo test tokenizer_download_test --features llm-local -- --nocapture
+          cd crates/arkavo-llm
+          cargo test test_phi2_tokenizer_metadata --features llm-local -- --nocapture
