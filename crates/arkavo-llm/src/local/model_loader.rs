@@ -61,7 +61,7 @@ impl ModelLoader {
                         tracing::warn!("Metal device not available ({}), falling back to CPU", e);
                     }
                 }
-                
+
                 // Fallback to CPU
                 tracing::info!("Using CPU device");
                 Ok(Device::Cpu)
