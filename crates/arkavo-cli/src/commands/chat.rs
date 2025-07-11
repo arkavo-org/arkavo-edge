@@ -1118,63 +1118,6 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
 
-    // Check HuggingFace cache for default model
-    #[cfg(feature = "local")]
-    {
-        use arkavo_llm::local::{ModelDownloader, ModelManifest};
-
-        // Load manifest and try models in priority order
-        if let Ok(manifest) = ModelManifest::load() {
-            // Priority order: Gemma 3 1B first (best supported quality), then smaller models as fallbacks
-            let model_priorities = [
-                "gemma3-1b-it-qat",   // Gemma 3 1B - primary model, 0.93GB
-                "tinyllama-110m-f16", // Smallest model for testing
-                "phi-2-q4k",          // Phi-2 as fallback
-                "tinyllama-1b-chat-q2",
-                "tinyllama-1b-chat-q3",
-                "tinyllama-1b-chat",
-                "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
-            ];
-
-            for model_name in &model_priorities {
-                if let Some(spec) = manifest.find(model_name) {
-                    // Create downloader to check cache
-                    if let Ok(downloader) = ModelDownloader::new() {
-                        // This will return cached path if already downloaded
-                        match downloader.get_model_path(spec).await {
-                            Ok(model_path) => {
-                                eprintln!("Found model at: {}", model_path.display());
-                                match LlmClient::from_local_model(
-                                    &spec.name,
-                                    model_path.to_string_lossy().to_string(),
-                                )
-                                .await
-                                {
-                                    Ok(client) => {
-                                        if !print_mode {
-                                            eprintln!("✓ Using local model: {}", spec.name);
-                                        }
-                                        return Ok(client);
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "Failed to initialize local model {}: {}",
-                                            spec.name, e
-                                        );
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Model not in cache, try next model
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // Check for previously selected provider
     let saved_provider = storage
         .search("llm_provider", 1, Some("llm_provider"))
@@ -1182,11 +1125,9 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         .into_iter()
         .find(|c| c.memory.content != "CLEARED");
 
-    if let Some(provider_config) = saved_provider {
-        if provider_config.memory.content.starts_with("local:") {
-            // Previously selected local model, but maybe not available now
-            // Fall through to try other options
-        } else if provider_config.memory.content.starts_with("http") {
+    // First priority: Try saved Ollama server if configured
+    if let Some(provider_config) = &saved_provider {
+        if provider_config.memory.content.starts_with("http") {
             // Ollama server
             let server_url = &provider_config.memory.content;
             unsafe {
@@ -1205,7 +1146,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         }
     }
 
-    // Try default localhost Ollama
+    // Second priority: Try default localhost Ollama
     match LlmClient::from_env() {
         Ok(client) => {
             // Test if the client can connect by trying a minimal request
@@ -1215,19 +1156,106 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                     if !print_mode {
                         eprintln!("✓ Connected to Ollama at localhost:11434");
                     }
-                    Ok(client)
+                    return Ok(client);
                 }
-                Err(_) => {
-                    // Connection failed, prompt for remote server
-                    prompt_for_remote_ollama(print_mode, storage).await
+                Err(e) => {
+                    if !print_mode {
+                        eprintln!("Could not connect to Ollama at localhost:11434: {}", e);
+                    }
                 }
             }
         }
-        Err(_) => {
-            // Failed to initialize, likely no Ollama
-            prompt_for_remote_ollama(print_mode, storage).await
+        Err(e) => {
+            if !print_mode {
+                eprintln!("Ollama not available: {}", e);
+            }
         }
     }
+
+    // Third priority: Check if previously selected local model is still available
+    if let Some(provider_config) = &saved_provider {
+        if provider_config.memory.content.starts_with("local:") {
+            let model_name = provider_config
+                .memory
+                .content
+                .strip_prefix("local:")
+                .unwrap();
+            if !print_mode {
+                eprintln!("Checking for previously used local model: {}", model_name);
+            }
+        }
+    }
+
+    // Fourth priority: Try local models from HuggingFace cache
+    #[cfg(feature = "local")]
+    {
+        use arkavo_llm::local::{ModelDownloader, ModelManifest};
+
+        if !print_mode {
+            eprintln!("Checking for local models in HuggingFace cache...");
+        }
+
+        // Load manifest and try models in priority order
+        if let Ok(manifest) = ModelManifest::load() {
+            // Priority order: Phi-2 first (since it's the one mentioned in the issue)
+            let model_priorities = [
+                "phi-2-q4k",          // Phi-2 as primary
+                "tinyllama-110m-f16", // Smallest model for testing
+                "gemma3-1b-it-qat",   // Gemma 3 1B
+                "tinyllama-1b-chat-q2",
+                "tinyllama-1b-chat-q3",
+                "tinyllama-1b-chat",
+                "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
+            ];
+
+            for model_name in &model_priorities {
+                if let Some(spec) = manifest.find(model_name) {
+                    // Create downloader to check cache
+                    if let Ok(downloader) = ModelDownloader::new() {
+                        // This will return cached path if already downloaded
+                        match downloader.get_model_path(spec).await {
+                            Ok(model_path) => {
+                                if !print_mode {
+                                    eprintln!(
+                                        "Found cached model: {} at {}",
+                                        spec.name,
+                                        model_path.display()
+                                    );
+                                }
+                                match LlmClient::from_local_model(
+                                    &spec.name,
+                                    model_path.to_string_lossy().to_string(),
+                                )
+                                .await
+                                {
+                                    Ok(client) => {
+                                        if !print_mode {
+                                            eprintln!("✓ Using local model: {}", spec.name);
+                                        }
+                                        return Ok(client);
+                                    }
+                                    Err(e) => {
+                                        if !print_mode {
+                                            eprintln!(
+                                                "Failed to initialize local model {}: {}",
+                                                spec.name, e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Model not in cache, continue
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Last resort: Prompt for remote Ollama server
+    prompt_for_remote_ollama(print_mode, storage).await
 }
 
 #[cfg(feature = "local")]

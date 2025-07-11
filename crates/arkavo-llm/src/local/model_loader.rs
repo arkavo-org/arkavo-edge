@@ -49,20 +49,24 @@ impl ModelLoader {
 
     fn select_device() -> Result<Device> {
         cfg_if::cfg_if! {
-            if #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "metal"))] {
-                // Try Metal first, fall back to CPU
+            if #[cfg(all(target_os = "macos", target_arch = "aarch64"))] {
+                // On macOS ARM64, always try Metal first
+                #[cfg(feature = "metal")]
                 match Device::new_metal(0) {
                     Ok(device) => {
                         tracing::info!("Using Metal device for acceleration");
-                        Ok(device)
+                        return Ok(device);
                     }
-                    Err(_) => {
-                        tracing::warn!("Metal device not available, falling back to CPU");
-                        Ok(Device::Cpu)
+                    Err(e) => {
+                        tracing::warn!("Metal device not available ({}), falling back to CPU", e);
                     }
                 }
+                
+                // Fallback to CPU
+                tracing::info!("Using CPU device");
+                Ok(Device::Cpu)
             } else {
-                // Default to CPU for other platforms or when Metal feature is disabled
+                // Default to CPU for other platforms
                 tracing::info!("Using CPU device");
                 Ok(Device::Cpu)
             }
@@ -345,9 +349,14 @@ impl ModelLoader {
             return;
         }
 
+        // 5. Last resort: try to download tokenizer if we can identify the base model
+        if self.try_download_tokenizer() {
+            return;
+        }
+
         tracing::error!(
             "Could not create tokenizer for model {}. GGUF file may not contain embedded tokenizer. \
-            Please ensure tokenizer.model exists alongside the GGUF file.",
+            Consider adding base_repo_id to models.toml or placing tokenizer.json alongside the GGUF file.",
             self.model_name
         );
     }
@@ -431,19 +440,26 @@ impl ModelLoader {
 
     /// Try to load tokenizer files alongside the model file
     fn try_load_alongside_model(&mut self) -> bool {
-        let Some(model_path) = &self.model_path else {
-            return false;
+        let model_path = match &self.model_path {
+            Some(path) => path.clone(),
+            None => return false,
         };
 
         // Try tokenizer.json first (JSON format that works with all models)
-        let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+        let tokenizer_json_path = Path::new(&model_path).with_file_name("tokenizer.json");
         tracing::debug!("Looking for tokenizer at: {:?}", tokenizer_json_path);
 
         if self.try_load_tokenizer_file(&tokenizer_json_path) {
             return true;
         }
 
-        tracing::warn!("tokenizer.json not found at: {:?}", tokenizer_json_path);
+        // Also try tokenizer.model for SentencePiece tokenizers
+        let tokenizer_model_path = Path::new(&model_path).with_file_name("tokenizer.model");
+        if self.try_load_tokenizer_file(&tokenizer_model_path) {
+            return true;
+        }
+
+        tracing::debug!("No tokenizer files found alongside model");
         false
     }
 
@@ -616,5 +632,70 @@ impl ModelLoader {
             .as_ref()
             .map(|c| c.max_position_embeddings)
             .unwrap_or(2048) // Default to 2048 if not found
+    }
+
+    /// Try to download tokenizer for known models
+    fn try_download_tokenizer(&mut self) -> bool {
+        // Check if we can find model spec with base_repo_id
+        let manifest = match super::download_manager::ModelManifest::load() {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::debug!("Failed to load model manifest: {}", e);
+                return false;
+            }
+        };
+
+        let spec = match manifest.find(&self.model_name) {
+            Some(s) if s.base_repo_id.is_some() => s,
+            _ => {
+                tracing::debug!("No base_repo_id found for model {}", self.model_name);
+                return false;
+            }
+        };
+
+        let base_repo_id = spec.base_repo_id.as_ref().unwrap();
+        tracing::info!(
+            "Attempting to download tokenizer from base repository: {}",
+            base_repo_id
+        );
+
+        // Use tokio runtime to download tokenizer
+        let runtime = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!("Failed to create runtime for tokenizer download: {}", e);
+                return false;
+            }
+        };
+
+        #[allow(clippy::disallowed_methods)]
+        let result = runtime.block_on(async {
+            let downloader = match super::download_manager::ModelDownloader::new() {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!("Failed to create downloader: {}", e);
+                    return false;
+                }
+            };
+
+            if let Some(model_path) = &self.model_path {
+                let gguf_path = Path::new(model_path);
+                if let Err(e) = downloader
+                    .download_tokenizer(base_repo_id, gguf_path, spec.tokenizer_type.as_deref())
+                    .await
+                {
+                    tracing::error!("Failed to download tokenizer: {}", e);
+                    return false;
+                }
+            }
+            true
+        });
+
+        if result {
+            // Try loading the tokenizer again after download
+            self.try_load_alongside_model()
+        } else {
+            false
+        }
     }
 }

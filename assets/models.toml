@@ -20,6 +20,8 @@ sha256 = "8c1076d2431c5fad4814ac37cbddbd66e53175f8f4459db095e510d90f70bd49"
 size_gb = 1.6
 context_length = 2048
 license = "mit"
+base_repo_id = "microsoft/phi-2"
+tokenizer_type = "json"
 
 [[models]]
 name = "tinyllama-1b-chat"
