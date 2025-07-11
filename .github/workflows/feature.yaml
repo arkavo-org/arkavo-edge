@@ -616,10 +616,107 @@ jobs:
             fi
           done
 
+  # Regression tests - ensuring fixed bugs stay fixed
+  regression-tests:
+    name: Regression Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Issue #114: Test on macOS without Xcode
+          - os: macos-latest
+            test_name: "Issue #114 - No Xcode Prompts"
+            issue: 114
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "regression-tests"
+
+      # Issue #114: xcodebuild runtime dependency
+      - name: Test Issue #114 - xcodebuild should not trigger prompts
+        if: matrix.issue == 114
+        run: |
+          echo "Testing regression for issue #114..."
+          
+          # Build without default features to avoid embeddings
+          echo "Building arkavo-test..."
+          cargo build -p arkavo-test --no-default-features || exit 1
+          
+          # Run the regression test
+          echo "Running regression test..."
+          cargo test -p arkavo-test --no-default-features --test regression_issue_114 -- --nocapture || {
+            echo "::error::Regression test failed"
+            exit 1
+          }
+          
+          # Test that discovery tools don't prompt
+          echo "Testing Swift discovery tool..."
+          cd crates/arkavo-test
+          
+          # Create a minimal PATH that excludes Xcode but includes Rust
+          CARGO_BIN="${HOME}/.cargo/bin"
+          if [ ! -d "$CARGO_BIN" ]; then
+            # GitHub Actions might have cargo in a different location
+            CARGO_BIN=$(dirname $(which cargo))
+          fi
+          
+          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
+          echo "Using PATH: $MINIMAL_PATH"
+          
+          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
+          
+          # Ensure no prompt-related output
+          if grep -i "command line tools\|xcode-select" output.log; then
+            echo "::error::Regression failure: Found Xcode installation prompt"
+            exit 1
+          fi
+          
+          echo "✅ Issue #114 regression test passed"
+
+  # Zero-config and portability verification
+  zero-config-check:
+    name: Zero Configuration Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check for hardcoded paths
+        run: |
+          echo "Verifying no hardcoded paths..."
+          
+          PATTERNS=(
+            "/Applications/Xcode.app"
+            "/usr/local/bin"
+            "/opt/homebrew"
+            "$HOME/Library"
+            "~/.config"
+          )
+          
+          for pattern in "${PATTERNS[@]}"; do
+            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
+              echo "::error::Found hardcoded path: $pattern"
+              exit 1
+            fi
+          done
+          
+      - name: Check for required environment variables
+        run: |
+          echo "Verifying no required environment variables..."
+          
+          # Check for env::var calls that require configuration
+          # Exclude build.rs files and test files, and allow standard env vars
+          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR"; then
+            echo "::error::Found required environment variables"
+            exit 1
+          fi
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets]
+    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -634,7 +731,9 @@ jobs:
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.performance-check.result }}" != "success" || \
                 "${{ needs.validate-openrpc.result }}" != "success" || \
-                "${{ needs.validate-doc-snippets.result }}" != "success" ]]; then
+                "${{ needs.validate-doc-snippets.result }}" != "success" || \
+                "${{ needs.regression-tests.result }}" != "success" || \
+                "${{ needs.zero-config-check.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

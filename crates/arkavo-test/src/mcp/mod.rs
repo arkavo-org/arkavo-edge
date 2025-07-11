@@ -76,6 +76,7 @@ pub mod usage_guide;
 pub mod xcode_info_tool;
 pub mod xcode_unavailable_tool;
 pub mod xcode_version;
+pub mod xcodebuild_wrapper;
 pub mod xctest_app_runner;
 pub mod xctest_compiler;
 pub mod xctest_direct_runner;

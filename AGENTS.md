@@ -144,6 +144,7 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 
 - Faking success is worse than an honest failure
 - do not use conventional commits
+- **Bug fixes MUST have regression tests** - Every bug fix must include a test that would have caught the bug. Add tests to `.github/workflows/regression.yaml` or create issue-specific test files in `tests/` directories
 - A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
   - You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
   - This includes trying to invoke Homebrew or similar to install dependencies at runtime.

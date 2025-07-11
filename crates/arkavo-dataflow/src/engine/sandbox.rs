@@ -38,6 +38,19 @@ impl Sandbox {
         }
     }
 
+    /// Check if Node.js is available in the system PATH
+    fn check_node_available() -> Result<()> {
+        match Command::new("node").arg("--version").output() {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(_) => Err(anyhow::anyhow!(
+                "Node.js is installed but returned an error. Please check your Node.js installation."
+            )),
+            Err(_) => Err(anyhow::anyhow!(
+                "Node.js is not found in PATH. JavaScript transforms require Node.js to be installed."
+            )),
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub fn execute_transform(
         &self,
@@ -73,6 +86,9 @@ impl Sandbox {
         code: &str,
         input: serde_json::Value,
     ) -> Result<serde_json::Value> {
+        // Check if Node.js is available
+        Self::check_node_available()?;
+
         // Create a temporary file for the transform code
         let temp_dir = tempfile::tempdir()?;
         let script_path = temp_dir.path().join("transform.js");
@@ -130,6 +146,9 @@ impl Sandbox {
         code: &str,
         input: serde_json::Value,
     ) -> Result<serde_json::Value> {
+        // Check if Node.js is available
+        Self::check_node_available()?;
+
         // Create a temporary file for the transform code
         let temp_dir = tempfile::tempdir()?;
         let script_path = temp_dir.path().join("transform.js");
@@ -177,7 +196,7 @@ impl Sandbox {
         let mut profile = String::from(
             r#"(version 1)
 (deny default)
-(allow process-exec (literal "/usr/local/bin/node"))
+(allow process-exec)
 (allow file-read*)
 (allow file-write-data (regex #"^/private/tmp/.*"))
 (allow mach-lookup)
