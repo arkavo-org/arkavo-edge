@@ -427,7 +427,7 @@ impl ModelLoader {
                         return;
                     }
                     Err(e) => {
-                        eprintln!("ERROR: Failed to load tokenizer.json: {}", e);
+                        eprintln!("ERROR: Failed to load tokenizer.json: {e}");
                         tracing::error!(
                             "Failed to load tokenizer.json from {:?}: {}",
                             tokenizer_json_path,

@@ -29,7 +29,9 @@ pub fn sample_next_token(
     let vocab_size = logits.dims()[0];
 
     // Apply repetition penalty
-    let mut logits = if repetition_penalty != 1.0 && !previous_tokens.is_empty() {
+    let mut logits = if (repetition_penalty - 1.0).abs() > f64::EPSILON
+        && !previous_tokens.is_empty()
+    {
         let mut logits_vec = logits
             .to_vec1::<f32>()
             .map_err(|e| crate::Error::Model(format!("Failed to convert logits to vec: {e}")))?;
@@ -52,7 +54,7 @@ pub fn sample_next_token(
     };
 
     // Apply temperature
-    if temperature != 1.0 {
+    if (temperature - 1.0).abs() > f64::EPSILON {
         logits = (&logits / temperature)
             .map_err(|e| crate::Error::Model(format!("Failed to apply temperature: {e}")))?;
     }
@@ -62,7 +64,7 @@ pub fn sample_next_token(
         .map_err(|e| crate::Error::Model(format!("Failed to apply softmax: {e}")))?;
 
     // Apply top-p (nucleus) sampling
-    if top_p < 1.0 {
+    if top_p < 1.0 - f64::EPSILON {
         sample_top_p(&probs, top_p)
     } else {
         // Simple sampling from the distribution

@@ -88,10 +88,7 @@ pub fn format_gemma_prompt(prompt: &str, tokenizer: &Tokenizer) -> String {
         ""
     };
 
-    format!(
-        "{}<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
-        bos, prompt
-    )
+    format!("{bos}<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n")
 }
 
 /// Check if this is a Gemma model based on tokenizer

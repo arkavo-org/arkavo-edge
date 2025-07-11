@@ -165,7 +165,7 @@ impl ModelDownloader {
 
         let target_path = gguf_dir.join("tokenizer.json");
         if !target_path.exists() {
-            fs::copy(&tokenizer_path, &target_path).map_err(|e| Error::Io(e))?;
+            fs::copy(&tokenizer_path, &target_path).map_err(Error::Io)?;
             tracing::info!("Copied tokenizer.json to GGUF directory: {:?}", target_path);
         } else {
             tracing::info!("Tokenizer already exists at: {:?}", target_path);
@@ -175,7 +175,7 @@ impl ModelDownloader {
         if let Ok(config_path) = repo.get("tokenizer_config.json").await {
             let target_config = gguf_dir.join("tokenizer_config.json");
             if !target_config.exists() {
-                fs::copy(&config_path, &target_config).map_err(|e| Error::Io(e))?;
+                fs::copy(&config_path, &target_config).map_err(Error::Io)?;
                 tracing::info!("Copied tokenizer_config.json to GGUF directory");
             }
         }
