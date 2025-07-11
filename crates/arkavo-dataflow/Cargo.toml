@@ -16,29 +16,29 @@ llm-local = ["dep:arkavo-llm", "arkavo-llm?/llm-local"]
 local = ["llm-local"]
 
 [dependencies]
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.32", features = ["full"] }
-uuid = { version = "1.10", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+uuid = { workspace = true }
+chrono = { workspace = true }
 semver = { version = "1.0", features = ["serde"] }
-jsonschema = "0.19"
-async-trait = "0.1"
+jsonschema = { workspace = true }
+async-trait = { workspace = true }
 dashmap = "6.1"
-futures = "0.3"
-thiserror = "2.0"
-tempfile = "3.15"
+futures = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }
 lazy-regex = "3.3"
 flate2 = "1.0"
 arkavo-llm = { path = "../arkavo-llm", optional = true, default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-memory = { path = "../arkavo-memory" }
 tokio-stream = "0.1"
-tracing = "0.1"
-base64 = "0.22"
+tracing = { workspace = true }
+base64 = { workspace = true }
 url = "2.5"
-reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream"], default-features = false }
+reqwest = { workspace = true, features = ["stream"] }
 rand = "0.8"
 ring = "0.17"
 

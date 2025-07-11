@@ -192,8 +192,7 @@ pub fn validate_json_schema(json: &Value) -> Result<(), Vec<String>> {
     let schema =
         serde_json::from_str(BLUEPRINT_SCHEMA).expect("Blueprint schema should be valid JSON");
 
-    let compiled =
-        jsonschema::JSONSchema::compile(&schema).expect("Blueprint schema should compile");
+    let compiled = jsonschema::validator_for(&schema).expect("Blueprint schema should compile");
 
     let is_valid = compiled.is_valid(json);
 
