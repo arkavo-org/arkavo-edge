@@ -24,6 +24,9 @@ pub mod worker;
 pub mod streaming;
 
 #[cfg(feature = "llm-local")]
+pub mod sampling;
+
+#[cfg(feature = "llm-local")]
 pub use config::LocalConfig;
 
 #[cfg(feature = "llm-local")]

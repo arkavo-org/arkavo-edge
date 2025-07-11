@@ -1,6 +1,7 @@
 use crate::{Error, Result};
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
+use std::collections::HashMap;
 use std::io::Seek;
 use std::path::Path;
 use std::sync::Arc;
@@ -26,7 +27,7 @@ pub struct ModelLoader {
     config: Option<llama::Config>,
     tokenizer_path: Option<String>,
     tokenizer: Option<Arc<Tokenizer>>,
-    eos_token_id: Option<u32>,
+    eos_token_ids: Vec<u32>,
 }
 
 impl ModelLoader {
@@ -42,7 +43,7 @@ impl ModelLoader {
             config: None,
             tokenizer_path: None,
             tokenizer: None,
-            eos_token_id: None,
+            eos_token_ids: Vec::new(),
         })
     }
 
@@ -142,21 +143,16 @@ impl ModelLoader {
 
         eprintln!("Detected GGUF architecture: {arch}");
 
-        // Check if quantization is compatible with Metal
-        let mut device = self.device.clone();
+        // Use the device as configured (Metal will be used on macOS if available)
+        let device = self.device.clone();
         if matches!(device, Device::Metal(_)) {
-            // GGUF models with quantization don't work well on Metal yet
-            tracing::warn!(
-                "GGUF quantized models are not yet fully optimized for Metal. \
-                 Using CPU for better compatibility."
-            );
-            device = Device::Cpu;
+            tracing::info!("Using Metal NPU acceleration for {} model inference", arch);
         }
 
         // Extract config from model metadata first
         let eos_token_id = self.extract_config_from_gguf(&content);
         if let Some(eos_id) = eos_token_id {
-            self.eos_token_id = Some(eos_id);
+            self.eos_token_ids.push(eos_id);
             tracing::debug!("Found EOS token ID in GGUF metadata: {}", eos_id);
         }
 
@@ -191,7 +187,6 @@ impl ModelLoader {
         };
 
         self.model = Some(model);
-        self.device = device; // Update device if it changed
 
         eprintln!("Successfully loaded {arch} model");
         Ok(())
@@ -328,66 +323,26 @@ impl ModelLoader {
         &mut self,
         content: &candle_core::quantized::gguf_file::Content,
     ) {
-        let metadata = &content.metadata;
-
         // Try multiple approaches to get a tokenizer
 
-        // 1. Try embedded tokenizer model (check if it's actually binary data)
-        if let Some(value) = metadata.get("tokenizer.ggml.model") {
-            // Check if it's actually binary data or just a string marker
-            match value {
-                gguf_file::Value::String(s) if s == "llama" => {
-                    // This is just a marker, not actual tokenizer data
-                    tracing::debug!("Found 'llama' marker instead of embedded tokenizer");
-                }
-                _ => {
-                    // Try to load as embedded tokenizer
-                    if self.try_embedded_tokenizer(value) {
-                        return;
-                    }
-                }
-            }
+        // 1. Try embedded tokenizer model
+        if self.try_load_embedded_tokenizer(&content.metadata) {
+            return;
         }
 
         // 2. For Gemma models, try to construct a simple tokenizer from metadata
-        // This is a temporary solution until we can bundle the actual tokenizer
         if self.try_construct_tokenizer_from_metadata(content) {
             return;
         }
 
-        // 3. Fallback: look for tokenizer.model alongside the .gguf
-        if let Some(model_path) = &self.model_path {
-            let tokenizer_path = Path::new(model_path).with_file_name("tokenizer.model");
-            if tokenizer_path.exists() {
-                match Tokenizer::from_file(&tokenizer_path) {
-                    Ok(tokenizer) => {
-                        self.tokenizer = Some(Arc::new(tokenizer));
-                        self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
-                        tracing::info!("Loaded tokenizer from file: tokenizer.model");
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to load tokenizer from file: {}", e);
-                    }
-                }
-            }
+        // 3. For Gemma models, try to find tokenizer in HF cache
+        if self.model_name.starts_with("gemma") && self.try_load_from_hf_cache() {
+            return;
+        }
 
-            // 4. Try tokenizer.json for Gemma models
-            let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
-            if tokenizer_json_path.exists() {
-                match Tokenizer::from_file(&tokenizer_json_path) {
-                    Ok(tokenizer) => {
-                        self.tokenizer = Some(Arc::new(tokenizer));
-                        self.tokenizer_path =
-                            Some(tokenizer_json_path.to_string_lossy().into_owned());
-                        tracing::info!("Loaded tokenizer from file: tokenizer.json");
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to load tokenizer from JSON file: {}", e);
-                    }
-                }
-            }
+        // 4. Fallback: look for tokenizer files alongside the .gguf
+        if self.try_load_alongside_model() {
+            return;
         }
 
         tracing::error!(
@@ -395,6 +350,132 @@ impl ModelLoader {
             Please ensure tokenizer.model exists alongside the GGUF file.",
             self.model_name
         );
+    }
+
+    /// Try to load embedded tokenizer from GGUF metadata
+    fn try_load_embedded_tokenizer(
+        &mut self,
+        metadata: &HashMap<String, gguf_file::Value>,
+    ) -> bool {
+        if let Some(value) = metadata.get("tokenizer.ggml.model") {
+            // Check if it's actually binary data or just a string marker
+            match value {
+                gguf_file::Value::String(s) if s == "llama" => {
+                    // This is just a marker, not actual tokenizer data
+                    tracing::debug!("Found 'llama' marker instead of embedded tokenizer");
+                    false
+                }
+                _ => self.try_embedded_tokenizer(value),
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Try to load tokenizer from HuggingFace cache for Gemma models
+    fn try_load_from_hf_cache(&mut self) -> bool {
+        let Some(home) = dirs::home_dir() else {
+            return false;
+        };
+
+        let cache_base = home.join(".cache/huggingface/hub");
+        let base_repos = self.get_gemma_base_repos();
+
+        for repo_name in base_repos {
+            if self.try_load_from_repo(&cache_base, repo_name) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Get base repository names for Gemma models
+    fn get_gemma_base_repos(&self) -> Vec<&'static str> {
+        match self.model_name.as_str() {
+            "gemma3-1b-it-qat" => vec![
+                "models--google--gemma-3-1b-it",
+                "models--google--gemma-3-1b-it-qat-q4_0-gguf",
+            ],
+            "gemma3n-e4b-it" => vec![
+                "models--google--gemma-2b-it",
+                "models--unsloth--gemma-3n-E4B-it-GGUF",
+            ],
+            _ => vec!["models--google--gemma-2b-it"],
+        }
+    }
+
+    /// Try to load tokenizer from a specific HF repository cache
+    fn try_load_from_repo(&mut self, cache_base: &Path, repo_name: &str) -> bool {
+        let repo_path = cache_base.join(repo_name);
+        tracing::debug!("Checking for tokenizer in: {:?}", repo_path);
+
+        if !repo_path.exists() {
+            return false;
+        }
+
+        let snapshots_dir = repo_path.join("snapshots");
+        if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+            for entry in entries.flatten() {
+                let snapshot_path = entry.path();
+                let tokenizer_path = snapshot_path.join("tokenizer.model");
+
+                if self.try_load_tokenizer_file(&tokenizer_path) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Try to load tokenizer files alongside the model file
+    fn try_load_alongside_model(&mut self) -> bool {
+        let Some(model_path) = &self.model_path else {
+            return false;
+        };
+
+        // Try tokenizer.json first (JSON format that works with all models)
+        let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+        tracing::debug!("Looking for tokenizer at: {:?}", tokenizer_json_path);
+
+        if self.try_load_tokenizer_file(&tokenizer_json_path) {
+            return true;
+        }
+
+        tracing::warn!("tokenizer.json not found at: {:?}", tokenizer_json_path);
+        false
+    }
+
+    /// Try to load a tokenizer from a specific file path
+    fn try_load_tokenizer_file(&mut self, tokenizer_path: &Path) -> bool {
+        if !tokenizer_path.exists() {
+            return false;
+        }
+
+        tracing::debug!("Trying to load tokenizer from: {:?}", tokenizer_path);
+        match Tokenizer::from_file(tokenizer_path) {
+            Ok(tokenizer) => {
+                tracing::info!("Successfully loaded tokenizer from: {:?}", tokenizer_path);
+                self.set_tokenizer_and_extract_eos(tokenizer);
+                self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
+                true
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e);
+                false
+            }
+        }
+    }
+
+    fn set_tokenizer_and_extract_eos(&mut self, tokenizer: Tokenizer) {
+        // Get EOS token IDs from tokenizer
+        let eos_ids = super::tokenizer_utils::get_eos_token_ids(&tokenizer);
+        if !eos_ids.is_empty() {
+            self.eos_token_ids = eos_ids;
+        }
+
+        self.tokenizer = Some(Arc::new(tokenizer));
     }
 
     fn try_construct_tokenizer_from_metadata(
@@ -522,7 +603,11 @@ impl ModelLoader {
     }
 
     pub fn eos_token_id(&self) -> Option<u32> {
-        self.eos_token_id
+        self.eos_token_ids.first().copied()
+    }
+
+    pub fn eos_token_ids(&self) -> &[u32] {
+        &self.eos_token_ids
     }
 
     pub fn context_length(&self) -> usize {
