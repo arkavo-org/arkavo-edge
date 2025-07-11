@@ -1345,15 +1345,24 @@ impl TestExecutor {
             }
         }
 
-        let mut cmd = Command::new("xcodebuild");
+        // Check if xcodebuild is available first
+        if !super::xcodebuild_wrapper::XcodebuildWrapper::is_available() {
+            return Err(TestError::Execution(format!(
+                "xcodebuild not available. {}",
+                super::xcode_version::XcodeVersion::require_xcode_message()
+            )));
+        }
+
+        // Build command arguments as owned strings
+        let mut args = Vec::new();
 
         // Use workspace if available, otherwise project
         if let Some(workspace) = workspace_path {
-            cmd.arg("-workspace");
-            cmd.arg(workspace);
+            args.push("-workspace".to_string());
+            args.push(workspace.to_string_lossy().to_string());
         } else if let Some(project) = project_path {
-            cmd.arg("-project");
-            cmd.arg(project);
+            args.push("-project".to_string());
+            args.push(project.to_string_lossy().to_string());
         }
 
         // Determine scheme based on test name
@@ -1366,31 +1375,32 @@ impl TestExecutor {
         };
 
         if let Some(scheme_name) = scheme {
-            cmd.arg("-scheme");
-            cmd.arg(scheme_name);
+            args.push("-scheme".to_string());
+            args.push(scheme_name.to_string());
         }
 
         // Add test arguments
-        cmd.arg("test");
+        args.push("test".to_string());
 
         // If test_name looks like a scheme name, use it
         if test_name.contains('.') {
             // It's a specific test, use -only-testing
-            cmd.arg("-only-testing");
-            cmd.arg(test_name);
+            args.push("-only-testing".to_string());
+            args.push(test_name.to_string());
         } else {
-            cmd.arg("-scheme");
-            cmd.arg(test_name);
+            args.push("-scheme".to_string());
+            args.push(test_name.to_string());
         }
 
         // Add destination for simulator
-        cmd.arg("-destination");
-        cmd.arg("platform=iOS Simulator,name=iPhone 15");
+        args.push("-destination".to_string());
+        args.push("platform=iOS Simulator,name=iPhone 15".to_string());
 
-        // Run the test
-        let output = cmd
-            .current_dir(&self.working_dir)
-            .output()
+        // Convert Vec<String> to Vec<&str> for the wrapper
+        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        // Run the test using the wrapper
+        let output = super::xcodebuild_wrapper::XcodebuildWrapper::execute(&args_refs)
             .map_err(|e| TestError::Execution(format!("Failed to run xcodebuild test: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1837,15 +1847,15 @@ impl TestExecutor {
                     let path = entry.path();
                     if let Some(ext) = path.extension() {
                         if ext == "xcworkspace" || ext == "xcodeproj" {
-                            // Try to list test targets
-                            let scheme_output = Command::new("xcodebuild")
-                                .arg("-list")
-                                .arg("-workspace")
-                                .arg(path.to_string_lossy().to_string())
-                                .current_dir(&self.working_dir)
-                                .output();
+                            // Try to list test targets using the wrapper
+                            let scheme_output =
+                                super::xcodebuild_wrapper::XcodebuildWrapper::try_execute(&[
+                                    "-list",
+                                    "-workspace",
+                                    &path.to_string_lossy(),
+                                ]);
 
-                            if let Ok(output) = scheme_output {
+                            if let Some(output) = scheme_output {
                                 let stdout = String::from_utf8_lossy(&output.stdout);
                                 // Parse schemes that contain "Test"
                                 let mut in_schemes = false;
