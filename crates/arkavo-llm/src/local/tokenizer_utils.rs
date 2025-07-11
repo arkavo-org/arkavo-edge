@@ -6,7 +6,7 @@ use tokenizers::Tokenizer;
 /// For Gemma models, this includes both legacy ID 1 and <end_of_turn> (ID 106).
 pub fn get_eos_token_ids(tokenizer: &Tokenizer) -> Vec<u32> {
     let mut eos_ids = Vec::new();
-    
+
     // Common EOS token variations
     let eos_variants = [
         "</s>",
@@ -15,22 +15,23 @@ pub fn get_eos_token_ids(tokenizer: &Tokenizer) -> Vec<u32> {
         "<eos>",
         "[EOS]",
         "<|im_end|>",
-        "<end_of_turn>",  // Gemma specific
+        "<end_of_turn>", // Gemma specific
     ];
-    
+
     for variant in &eos_variants {
         if let Some(id) = tokenizer.token_to_id(variant) {
             eos_ids.push(id);
         }
     }
-    
+
     // For Gemma models, use ONLY token ID 1 as EOS
-    if tokenizer.token_to_id("<start_of_turn>").is_some() && 
-       tokenizer.token_to_id("<end_of_turn>").is_some() {
+    if tokenizer.token_to_id("<start_of_turn>").is_some()
+        && tokenizer.token_to_id("<end_of_turn>").is_some()
+    {
         // This is a Gemma model - use only token 1
         return vec![1];
     }
-    
+
     // If no EOS tokens found, fall back to vocab_size - 1
     if eos_ids.is_empty() {
         let vocab_size = tokenizer.get_vocab_size(false);
@@ -38,7 +39,7 @@ pub fn get_eos_token_ids(tokenizer: &Tokenizer) -> Vec<u32> {
             eos_ids.push((vocab_size - 1) as u32);
         }
     }
-    
+
     // Remove duplicates
     eos_ids.sort_unstable();
     eos_ids.dedup();
@@ -86,7 +87,7 @@ pub fn format_gemma_prompt(prompt: &str, tokenizer: &Tokenizer) -> String {
     } else {
         ""
     };
-    
+
     format!(
         "{}<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
         bos, prompt
@@ -96,8 +97,8 @@ pub fn format_gemma_prompt(prompt: &str, tokenizer: &Tokenizer) -> String {
 /// Check if this is a Gemma model based on tokenizer
 pub fn is_gemma_tokenizer(tokenizer: &Tokenizer) -> bool {
     // Check for Gemma-specific tokens
-    tokenizer.token_to_id("<start_of_turn>").is_some() &&
-    tokenizer.token_to_id("<end_of_turn>").is_some()
+    tokenizer.token_to_id("<start_of_turn>").is_some()
+        && tokenizer.token_to_id("<end_of_turn>").is_some()
 }
 
 #[cfg(test)]

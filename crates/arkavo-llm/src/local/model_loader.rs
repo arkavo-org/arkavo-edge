@@ -196,7 +196,6 @@ impl ModelLoader {
         content: &candle_core::quantized::gguf_file::Content,
     ) -> Option<u32> {
         use candle_core::quantized::gguf_file::Value;
-        
 
         let metadata = &content.metadata;
 
@@ -352,17 +351,23 @@ impl ModelLoader {
 
         // 3. For Gemma models, try to find tokenizer in HF cache
         if self.model_name.starts_with("gemma") {
-                // Look for tokenizer in HuggingFace cache directory
+            // Look for tokenizer in HuggingFace cache directory
             if let Some(home) = dirs::home_dir() {
                 let cache_base = home.join(".cache/huggingface/hub");
-                
+
                 // Map model names to their base repositories
                 let base_repos = match self.model_name.as_str() {
-                    "gemma3-1b-it-qat" => vec!["models--google--gemma-3-1b-it", "models--google--gemma-3-1b-it-qat-q4_0-gguf"],
-                    "gemma3n-e4b-it" => vec!["models--google--gemma-2b-it", "models--unsloth--gemma-3n-E4B-it-GGUF"],
+                    "gemma3-1b-it-qat" => vec![
+                        "models--google--gemma-3-1b-it",
+                        "models--google--gemma-3-1b-it-qat-q4_0-gguf",
+                    ],
+                    "gemma3n-e4b-it" => vec![
+                        "models--google--gemma-2b-it",
+                        "models--unsloth--gemma-3n-E4B-it-GGUF",
+                    ],
                     _ => vec!["models--google--gemma-2b-it"],
                 };
-                
+
                 // Try each potential repository
                 for repo_name in base_repos {
                     let repo_path = cache_base.join(repo_name);
@@ -379,12 +384,20 @@ impl ModelLoader {
                                     match Tokenizer::from_file(&tokenizer_path) {
                                         Ok(tokenizer) => {
                                             self.set_tokenizer_and_extract_eos(tokenizer);
-                                            self.tokenizer_path = Some(tokenizer_path.to_string_lossy().into_owned());
-                                            tracing::info!("Loaded Gemma tokenizer from cache: {:?}", tokenizer_path);
+                                            self.tokenizer_path =
+                                                Some(tokenizer_path.to_string_lossy().into_owned());
+                                            tracing::info!(
+                                                "Loaded Gemma tokenizer from cache: {:?}",
+                                                tokenizer_path
+                                            );
                                             return;
                                         }
                                         Err(e) => {
-                                            tracing::warn!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e);
+                                            tracing::warn!(
+                                                "Failed to load tokenizer from {:?}: {}",
+                                                tokenizer_path,
+                                                e
+                                            );
                                         }
                                     }
                                 }
@@ -394,24 +407,38 @@ impl ModelLoader {
                 }
             }
         }
-        
+
         // 4. Fallback: look for tokenizer files alongside the .gguf
         if let Some(model_path) = &self.model_path {
             // Try tokenizer.json first (JSON format that works with all models)
             let tokenizer_json_path = Path::new(model_path).with_file_name("tokenizer.json");
+            tracing::debug!("Looking for tokenizer at: {:?}", tokenizer_json_path);
             if tokenizer_json_path.exists() {
+                tracing::info!("Found tokenizer.json at: {:?}", tokenizer_json_path);
                 match Tokenizer::from_file(&tokenizer_json_path) {
                     Ok(tokenizer) => {
+                        tracing::info!(
+                            "Successfully loaded tokenizer from: {:?}",
+                            tokenizer_json_path
+                        );
                         self.set_tokenizer_and_extract_eos(tokenizer);
-                        self.tokenizer_path = Some(tokenizer_json_path.to_string_lossy().into_owned());
+                        self.tokenizer_path =
+                            Some(tokenizer_json_path.to_string_lossy().into_owned());
                         return;
                     }
                     Err(e) => {
                         eprintln!("ERROR: Failed to load tokenizer.json: {}", e);
+                        tracing::error!(
+                            "Failed to load tokenizer.json from {:?}: {}",
+                            tokenizer_json_path,
+                            e
+                        );
                     }
                 }
+            } else {
+                tracing::warn!("tokenizer.json not found at: {:?}", tokenizer_json_path);
             }
-            
+
             // Note: tokenizer.model is a binary SentencePiece format that would need special handling
             // For now, we only support tokenizer.json which is the JSON export
         }
@@ -422,14 +449,14 @@ impl ModelLoader {
             self.model_name
         );
     }
-    
+
     fn set_tokenizer_and_extract_eos(&mut self, tokenizer: Tokenizer) {
         // Get EOS token IDs from tokenizer
         let eos_ids = super::tokenizer_utils::get_eos_token_ids(&tokenizer);
         if !eos_ids.is_empty() {
             self.eos_token_ids = eos_ids;
         }
-        
+
         self.tokenizer = Some(Arc::new(tokenizer));
     }
 
@@ -560,7 +587,7 @@ impl ModelLoader {
     pub fn eos_token_id(&self) -> Option<u32> {
         self.eos_token_ids.first().copied()
     }
-    
+
     pub fn eos_token_ids(&self) -> &[u32] {
         &self.eos_token_ids
     }

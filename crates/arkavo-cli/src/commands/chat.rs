@@ -33,13 +33,6 @@ use uuid;
 #[allow(dead_code)]
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
 
-// Macro that does nothing - removes all DEBUG messages
-macro_rules! debug_println {
-    ($($arg:tt)*) => {
-        // Do nothing
-    };
-}
-
 #[cfg(not(feature = "local"))]
 pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Chat command requires the 'local' feature to be enabled.");
@@ -115,8 +108,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
-    // Initialize MCP client - attempt by default unless explicitly disabled
-    let mcp_client = if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
+    // Initialize MCP client - attempt by default unless explicitly disabled or in print mode
+    let mcp_client = if print_mode
+        || std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true"
+    {
         None
     } else {
         let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
@@ -460,7 +455,7 @@ Repository details:
         io::stdin().read_line(&mut input)?;
 
         let input = input.trim();
-        debug_println!("DEBUG: User input: '{}'", input);
+
         if input.is_empty() {
             continue;
         }
@@ -712,19 +707,8 @@ async fn process_message(
 
     // Check if the response contains @tool calls and execute them
     if let Some(mcp) = mcp_client {
-        debug_println!(
-            "DEBUG: Checking LLM response for tool calls. Response length: {}",
-            full_response.len()
-        );
-        debug_println!(
-            "DEBUG: First 200 chars of response: {}",
-            &full_response.chars().take(200).collect::<String>()
-        );
-
         let (response_text, tool_results) =
             handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-
-        debug_println!("DEBUG: Tool results count: {}", tool_results.len());
 
         // If we executed tools, display them nicely
         if !tool_results.is_empty() {
@@ -1005,48 +989,23 @@ fn handle_tool_calls_in_response(
     // First, remove markdown code blocks to find tools within them
     let cleaned_response = response.replace("```", "").replace('`', "");
 
-    debug_println!(
-        "DEBUG: Cleaned response first 200 chars: {}",
-        &cleaned_response.chars().take(200).collect::<String>()
-    );
-
     let remaining = &cleaned_response[..];
-    let mut found_tools = 0;
-
-    debug_println!("DEBUG: Starting tool detection in cleaned response");
 
     // Process only the first tool call to avoid interrupting the flow
     // This allows for multi-tasking by processing one tool at a time
     if let Some(at_pos) = remaining.find('@') {
         // Check if this is a tool call (followed by word characters)
         let after_at = &remaining[at_pos + 1..];
-        debug_println!(
-            "DEBUG: Found @ symbol at position {}, text after @: '{}'",
-            at_pos,
-            &after_at.chars().take(20).collect::<String>()
-        );
 
         if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
             let tool_name = &after_at[..space_or_brace];
-            debug_println!("DEBUG: Potential tool name: '{}'", tool_name);
 
             // Only process if tool_name is alphanumeric and not exactly "screenshot" (which is not allowed)
             if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 && tool_name != "screenshot"
             {
-                found_tools += 1;
-                debug_println!(
-                    "DEBUG: Valid tool found: '{}' (tool #{} in response)",
-                    tool_name,
-                    found_tools
-                );
-
                 let args_start = at_pos + 1 + space_or_brace;
                 let args_str = &remaining[args_start..].trim_start();
-                debug_println!(
-                    "DEBUG: Arguments start: '{}'",
-                    &args_str.chars().take(30).collect::<String>()
-                );
 
                 let (args, _consumed_len) = if args_str.starts_with('{') {
                     // Find matching closing brace
@@ -1068,119 +1027,48 @@ fn handle_tool_calls_in_response(
 
                     if end_pos > 0 {
                         let json_str = &args_str[..end_pos];
-                        debug_println!("DEBUG: Attempting to parse JSON arguments: '{}'", json_str);
+
                         match serde_json::from_str(json_str) {
-                            Ok(json) => {
-                                debug_println!("DEBUG: Successfully parsed JSON arguments");
-                                (json, end_pos)
-                            }
-                            Err(_e) => {
-                                debug_println!("DEBUG: Failed to parse JSON arguments: {}", _e);
-                                debug_println!("DEBUG: Falling back to using raw text as prompt");
-                                (json!({"prompt": json_str}), end_pos)
-                            }
+                            Ok(json) => (json, end_pos),
+                            Err(_e) => (json!({ "prompt": json_str }), end_pos),
                         }
                     } else {
-                        debug_println!(
-                            "DEBUG: No closing brace found, using entire string as prompt"
-                        );
-                        (json!({"prompt": args_str}), 0)
+                        (json!({ "prompt": args_str }), 0)
                     }
                 } else {
                     // Take until newline or end of string
                     let end_pos = args_str.find('\n').unwrap_or(args_str.len());
                     let arg_text = &args_str[..end_pos].trim();
-                    debug_println!("DEBUG: Using plain text as arguments: '{}'", arg_text);
-                    (json!({"prompt": arg_text}), end_pos)
+                    (json!({ "prompt": arg_text }), end_pos)
                 };
-
-                debug_println!(
-                    "DEBUG: About to execute tool {} with args: {:?}",
-                    tool_name,
-                    args
-                );
 
                 // Execute the tool
                 match mcp_client.call_tool(tool_name, args, llm_provider) {
                     Ok(tool_result) => {
-                        debug_println!("DEBUG: Tool {} returned: {:?}", tool_name, tool_result);
-
                         // Extract the actual result text from the MCP response
-                        debug_println!("DEBUG: Extracting result text from tool response");
                         let result_text = if let Some(result_obj) = tool_result.get("result") {
                             if let Some(text) = result_obj.as_str() {
-                                debug_println!("DEBUG: Found string result in 'result' field");
                                 text.to_string()
                             } else {
-                                debug_println!(
-                                    "DEBUG: 'result' field is not a string, converting to JSON"
-                                );
-                                serde_json::to_string_pretty(&result_obj).unwrap_or_else(|_e| {
-                                    debug_println!(
-                                        "DEBUG: Failed to convert result to JSON: {}",
-                                        _e
-                                    );
-                                    result_obj.to_string()
-                                })
+                                serde_json::to_string_pretty(&result_obj)
+                                    .unwrap_or_else(|_e| result_obj.to_string())
                             }
                         } else {
-                            debug_println!("DEBUG: No 'result' field found, using entire response");
-                            serde_json::to_string_pretty(&tool_result).unwrap_or_else(|_e| {
-                                debug_println!(
-                                    "DEBUG: Failed to convert entire response to JSON: {}",
-                                    _e
-                                );
-                                tool_result.to_string()
-                            })
+                            serde_json::to_string_pretty(&tool_result)
+                                .unwrap_or_else(|_e| tool_result.to_string())
                         };
 
-                        debug_println!("DEBUG: Extracted result text: {}", result_text);
                         tool_results.push((tool_name.to_string(), result_text));
                     }
                     Err(e) => {
-                        debug_println!("DEBUG: Tool {} failed with error: {}", tool_name, e);
                         tool_results.push((tool_name.to_string(), format!("Error: {e}")));
                     }
                 }
             } else {
-                debug_println!(
-                    "DEBUG: Tool name '{}' rejected - not alphanumeric",
-                    tool_name
-                );
             }
         } else {
-            debug_println!("DEBUG: No space or brace after @ symbol - not a valid tool call");
         }
     }
-
-    debug_println!(
-        "DEBUG: Found {} tools in response, executed {} tools",
-        found_tools,
-        tool_results.len()
-    );
-
-    if found_tools == 0 {
-        debug_println!("DEBUG: No tools were detected in the response");
-    } else if found_tools != tool_results.len() {
-        debug_println!(
-            "DEBUG: Warning - {} tools were detected but only {} were successfully executed",
-            found_tools,
-            tool_results.len()
-        );
-    }
-
-    // Print a summary of the entire pipeline
-    debug_println!("\nDEBUG: TOOL CALLING PIPELINE SUMMARY:");
-    debug_println!(
-        "DEBUG: 1. Cleaned response length: {} chars",
-        cleaned_response.len()
-    );
-    debug_println!("DEBUG: 2. Tools found in response: {}", found_tools);
-    debug_println!(
-        "DEBUG: 3. Tools successfully executed: {}",
-        tool_results.len()
-    );
-    debug_println!("DEBUG: 4. Final tool results count: {}", tool_results.len());
 
     // Return the original response text to avoid interrupting the flow
     Ok((original_response, tool_results))
@@ -1250,7 +1138,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 "tinyllama-1b-chat-q2",
                 "tinyllama-1b-chat-q3",
                 "tinyllama-1b-chat",
-                "gemma3n-e4b-it",     // Gemma 3n E4B - not yet supported by Candle
+                "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
             ];
 
             for model_name in &model_priorities {
