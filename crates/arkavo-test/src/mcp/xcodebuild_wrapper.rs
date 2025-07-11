@@ -42,6 +42,20 @@ impl XcodebuildWrapper {
             Ok(output) => {
                 // Check for common error patterns that might trigger prompts
                 let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                
+                // Check for plugin loading failures (as reported by user)
+                if stderr.contains("Failed to load code for plug-in") 
+                    || stderr.contains("required plugin failed to load")
+                    || stderr.contains("xcodebuild -runFirstLaunch")
+                    || stdout.contains("Failed to load code for plug-in")
+                    || stdout.contains("required plugin failed to load") {
+                    return Err(TestError::Mcp(format!(
+                        "Xcode Command Line Tools are not properly installed. {}",
+                        super::xcode_version::XcodeVersion::require_xcode_message()
+                    )));
+                }
+                
                 if stderr.contains("license") || stderr.contains("agreement") {
                     Err(TestError::Mcp(
                         "Xcode license agreement required. Please run 'sudo xcodebuild -license accept' manually.".to_string()

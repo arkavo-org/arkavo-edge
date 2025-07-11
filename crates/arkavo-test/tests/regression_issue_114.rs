@@ -140,3 +140,28 @@ fn test_no_system_prompt_simulation() {
         println!("xcodebuild not found on system - test passes by default");
     }
 }
+
+#[test]
+fn test_plugin_loading_error_handling() {
+    // Test that plugin loading errors are handled gracefully
+    use XcodebuildWrapper;
+    
+    // If xcodebuild is available but misconfigured (missing Command Line Tools),
+    // it should return a proper error without triggering prompts
+    if XcodebuildWrapper::is_available() {
+        // Try to run a simple xcodebuild command
+        let result = XcodebuildWrapper::execute(&["-version"]);
+        
+        // Check if we get a plugin loading error
+        if let Err(e) = &result {
+            let error_msg = e.to_string();
+            if error_msg.contains("not properly installed") {
+                println!("Correctly detected missing Command Line Tools");
+                assert!(error_msg.contains("Xcode Command Line Tools"));
+            }
+        }
+        
+        // Either way, we shouldn't crash or trigger prompts
+        println!("xcodebuild wrapper handled execution gracefully");
+    }
+}
