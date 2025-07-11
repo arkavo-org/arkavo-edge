@@ -29,6 +29,7 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
 arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
+arkavo-repo = { path = "../arkavo-repo" }
 gethostname = "0.5"
 zeroconf = { version = "0.14", optional = true }
 async-trait = { workspace = true }
@@ -44,11 +45,8 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-lru = "0.12"
-ignore = { workspace = true }
 indicatif = "0.17"
 tiktoken-rs = "0.6"
-sha2 = "0.10"
 
 # Automatically enable metal feature on macOS
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]

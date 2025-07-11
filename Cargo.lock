@@ -181,6 +181,7 @@ dependencies = [
  "arkavo-mcp",
  "arkavo-memory",
  "arkavo-protocol",
+ "arkavo-repo",
  "arkavo-terminal",
  "arkavo-test",
  "async-trait",
@@ -188,15 +189,12 @@ dependencies = [
  "clap",
  "futures",
  "gethostname",
- "ignore",
  "indicatif",
  "jsonschema",
  "log",
- "lru",
  "serde",
  "serde_json",
- "sha2",
- "tiktoken-rs",
+ "tiktoken-rs 0.6.0",
  "tokio",
  "tokio-stream",
  "uuid",
@@ -367,6 +365,21 @@ dependencies = [
 [[package]]
 name = "arkavo-repo"
 version = "0.21.8"
+dependencies = [
+ "anyhow",
+ "arkavo-git",
+ "arkavo-memory",
+ "chrono",
+ "ignore",
+ "indicatif",
+ "lru",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiktoken-rs 0.5.9",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "arkavo-terminal"
@@ -401,6 +414,7 @@ dependencies = [
  "arkavo-git",
  "arkavo-mcp",
  "arkavo-memory",
+ "arkavo-repo",
  "async-trait",
  "base64 0.22.1",
  "cc",
@@ -1675,6 +1689,16 @@ dependencies = [
  "rayon-core",
  "smallvec",
  "zune-inflate",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7493d4c459da9f84325ad297371a6b2b8a162800873a22e3b6b6512e61d18c05"
+dependencies = [
+ "bit-set 0.5.3",
+ "regex",
 ]
 
 [[package]]
@@ -3448,7 +3472,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.2",
 ]
 
 [[package]]
@@ -4623,7 +4647,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5072,7 +5096,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5085,7 +5109,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5167,7 +5191,7 @@ dependencies = [
  "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6053,7 +6077,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6125,6 +6149,21 @@ dependencies = [
  "flate2",
  "jpeg-decoder",
  "weezl",
+]
+
+[[package]]
+name = "tiktoken-rs"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c314e7ce51440f9e8f5a497394682a57b7c323d0f4d0a6b1b13c429056e0e234"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bstr",
+ "fancy-regex 0.12.0",
+ "lazy_static",
+ "parking_lot",
+ "rustc-hash 1.1.0",
 ]
 
 [[package]]
@@ -7030,7 +7069,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

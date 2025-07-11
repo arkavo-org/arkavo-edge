@@ -1,3 +1,5 @@
+pub mod repository_context;
+
 use std::path::Path;
 
 pub fn get_repo_info(path: &Path) -> Result<RepoInfo, Box<dyn std::error::Error>> {

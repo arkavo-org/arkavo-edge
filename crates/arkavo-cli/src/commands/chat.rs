@@ -2,7 +2,7 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 #[cfg(feature = "local")]
-use crate::repository_context::RepositoryContextManager;
+use arkavo_repo::repository_context::RepositoryContextManager;
 #[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 #[cfg(feature = "local")]
@@ -79,7 +79,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         runtime.block_on(ConversationManager::new(memory_storage.clone()))?;
 
     // Initialize repository context manager
-    let repo_context_manager = runtime.block_on(RepositoryContextManager::new(memory_storage))?;
+    let _repo_context_manager = runtime.block_on(RepositoryContextManager::new(memory_storage))?;
 
     // Initialize LLM client with fallback to prompt for remote server
     let client = runtime.block_on(initialize_llm_client(print_mode))?;
@@ -142,6 +142,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!();
     }
 
+    /*
     // Build enhanced repository context
     let progress = ProgressBar::new_spinner();
     progress.set_style(
@@ -168,6 +169,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     progress.finish_and_clear();
+    */
+
+    // Initialize with a minimal context and let the agent ask for more.
+    let repo_context_str = format!(
+        "Working directory: {}",
+        get_current_directory()
+    );
+    let repo_context = json!({
+        "working_directory": get_current_directory(),
+    });
 
     // Initialize conversation with system message including repository context
     let mcp_info = if mcp_client.is_some() {
@@ -288,13 +299,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 \
          GIT REPOSITORY ANALYSIS:\
-         When asked to perform a \"full analysis\", \"repository analysis\", or comprehensive Git analysis:\
-         1. MUST call @git_status {{}} to get working tree status\
-         2. MUST call @git_log {{\"limit\": 20}} to get recent commits\
-         3. MUST call @git_diff {{}} to get unstaged changes\
-         4. MUST call @git_diff {{\"staged\": true}} to get staged changes\
-         5. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
-         6. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
+         When asked to perform a \\\"full analysis\\\", \\\"repository analysis\\\", or comprehensive Git analysis:\
+         1. MUST call @build_repository_context {{}} to get the full repository context.\
+         2. MUST call @git_status {{}} to get working tree status\
+         3. MUST call @git_log {{\"limit\": 20}} to get recent commits\
+         4. MUST call @git_diff {{}} to get unstaged changes\
+         5. MUST call @git_diff {{\"staged\": true}} to get staged changes\
+         6. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
+         7. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
          \
          After collecting all responses:\
          - Generate a structured report with sections for each data type\
@@ -303,10 +315,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
          - Store the complete analysis in memory using @store_memory
 
 \
-         Repository context:
+         Initial repository context (minimal):
 {}
 
-Repository details:
+Full repository details (available via @build_repository_context):
 {}
 
 {}",

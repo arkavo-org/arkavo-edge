@@ -36,8 +36,7 @@ arkavo-memory = { path = "../arkavo-memory", default-features = false, optional 
 
 # MCP types
 arkavo-mcp = { path = "../arkavo-mcp" }
-
-# Git integration
+arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 
 # Gherkin parsing

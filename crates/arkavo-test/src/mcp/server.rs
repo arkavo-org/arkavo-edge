@@ -17,6 +17,7 @@ use super::ios_automation_guide::IosAutomationGuide;
 use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
+use super::repository_context_tool::RepositoryContextTool;
 use super::screenshot_analyzer::ScreenshotAnalyzer;
 use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
@@ -470,6 +471,17 @@ impl McpTestServer {
             Arc::new(super::git_tools::GitRemoteKit::new()),
         );
 
+        // Add Repository Context tool
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(async {
+            if let Ok(repo_context_tool) = RepositoryContextTool::new().await {
+                tools.insert(
+                    "build_repository_context".to_string(),
+                    Arc::new(repo_context_tool),
+                );
+            }
+        });
+
         // Add TUI testing tools
         tools.insert(
             "tui_keyboard".to_string(),
@@ -710,6 +722,7 @@ impl McpTestServer {
                 | "git_branch"
                 | "git_log"
                 | "git_remote"
+                | "build_repository_context"
                 | "tui_keyboard"
                 | "tui_screenshot"
                 | "tui_interaction"
