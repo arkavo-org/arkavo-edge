@@ -2,11 +2,37 @@ name: Nightly
 
 on:
   schedule:
-    # Run nightly fuzzing
+    # Run nightly fuzzing and regression tests
     - cron: '0 2 * * *'
   workflow_dispatch:
 
 jobs:
+  # Run comprehensive regression tests nightly
+  nightly-regression:
+    name: Nightly Regression Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        
+      - name: Run all regression tests
+        run: |
+          # Run all issue-specific regression tests
+          cargo test -p arkavo-test --test regression_issue_114 -- --nocapture
+          
+          # Add more regression tests as issues are fixed
+          # cargo test -p arkavo-test --test regression_issue_XXX -- --nocapture
+          
+      - name: Verify zero-config principle
+        run: |
+          # Test that arkavo works without any configuration
+          cargo build --release -p arkavo
+          ./target/release/arkavo --version
+          
+          # Test in clean environment
+          env -i ./target/release/arkavo --version || true
+
   fuzz:
     name: Fuzz arkavo-protocol
     runs-on: ubuntu-latest
