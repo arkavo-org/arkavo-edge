@@ -112,15 +112,17 @@ fn test_no_system_prompt_simulation() {
         .arg("xcodebuild")
         .output()
         .expect("Failed to execute which");
-    
+
     if which_output.status.success() {
-        let xcodebuild_path = String::from_utf8_lossy(&which_output.stdout).trim().to_string();
+        let xcodebuild_path = String::from_utf8_lossy(&which_output.stdout)
+            .trim()
+            .to_string();
         println!("xcodebuild found at: {}", xcodebuild_path);
-        
+
         // Create a PATH that excludes the directory containing xcodebuild
         // On GitHub Actions, xcodebuild is in /usr/bin, so we need a truly minimal PATH
         let temp_path = "/bin:/sbin"; // Exclude /usr/bin where xcodebuild might be
-        
+
         // Test with restricted PATH
         let output = Command::new("sh")
             .arg("-c")
@@ -145,13 +147,13 @@ fn test_no_system_prompt_simulation() {
 fn test_plugin_loading_error_handling() {
     // Test that plugin loading errors are handled gracefully
     use XcodebuildWrapper;
-    
+
     // If xcodebuild is available but misconfigured (missing Command Line Tools),
     // it should return a proper error without triggering prompts
     if XcodebuildWrapper::is_available() {
         // Try to run a simple xcodebuild command
         let result = XcodebuildWrapper::execute(&["-version"]);
-        
+
         // Check if we get a plugin loading error
         if let Err(e) = &result {
             let error_msg = e.to_string();
@@ -160,7 +162,7 @@ fn test_plugin_loading_error_handling() {
                 assert!(error_msg.contains("Xcode Command Line Tools"));
             }
         }
-        
+
         // Either way, we shouldn't crash or trigger prompts
         println!("xcodebuild wrapper handled execution gracefully");
     }
