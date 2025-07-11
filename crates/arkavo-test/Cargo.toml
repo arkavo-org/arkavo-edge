@@ -19,7 +19,7 @@ embeddings = ["memory", "arkavo-memory/embeddings"]
 
 [dependencies]
 # Async runtime
-tokio = { workspace = true, features = ["rt", "macros", "process", "fs"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs"] }
 
 # Error handling
 thiserror = { workspace = true }
