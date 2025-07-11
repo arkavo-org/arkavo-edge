@@ -6,7 +6,7 @@ use std::process::exit;
 
 fn main() {
     println!("Testing Swift test discovery without Xcode prompts...");
-    
+
     // This simulates what would happen when discover_swift_tests is called
     match test_swift_discovery() {
         Ok(count) => {
@@ -24,24 +24,19 @@ fn main() {
 
 fn test_swift_discovery() -> Result<usize, TestError> {
     use arkavo_test::mcp::xcodebuild_wrapper::XcodebuildWrapper;
-    
+
     // Check if xcodebuild is available
     if !XcodebuildWrapper::is_available() {
         return Err(TestError::Mcp(
-            "Xcode not available - Swift tests cannot be discovered".to_string()
+            "Xcode not available - Swift tests cannot be discovered".to_string(),
         ));
     }
-    
+
     // Try to list schemes (this would normally be done by discover_swift_tests)
-    let output = XcodebuildWrapper::try_execute(&[
-        "-list",
-        "-project", "dummy.xcodeproj"
-    ]);
-    
+    let output = XcodebuildWrapper::try_execute(&["-list", "-project", "dummy.xcodeproj"]);
+
     match output {
         Some(_) => Ok(0), // Found xcodebuild but probably no project
-        None => Err(TestError::Mcp(
-            "xcodebuild not available".to_string()
-        ))
+        None => Err(TestError::Mcp("xcodebuild not available".to_string())),
     }
 }
