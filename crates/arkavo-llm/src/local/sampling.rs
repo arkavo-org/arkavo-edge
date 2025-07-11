@@ -1,9 +1,19 @@
 use crate::Result;
 use candle_core::Tensor;
 
+/// Parameters for controlling text generation sampling behavior
+#[derive(Debug, Clone)]
 pub struct SamplingParams {
+    /// Temperature for sampling. Higher values (e.g., 1.0) make the output more random,
+    /// while lower values (e.g., 0.1) make it more deterministic. Range: (0.0, 2.0]
     pub temperature: f64,
+
+    /// Top-p (nucleus) sampling threshold. Only tokens with cumulative probability
+    /// up to this value are considered. Range: (0.0, 1.0]
     pub top_p: f64,
+
+    /// Repetition penalty to reduce token repetition. Values > 1.0 penalize repeated tokens.
+    /// Range: [1.0, 2.0]
     pub repetition_penalty: f64,
 }
 
@@ -18,6 +28,16 @@ impl Default for SamplingParams {
 }
 
 /// Apply temperature scaling and sampling to logits
+///
+/// # Arguments
+/// * `logits` - Raw model output logits (before softmax)
+/// * `temperature` - Temperature for sampling (higher = more random)
+/// * `top_p` - Nucleus sampling threshold (0.0 to 1.0)
+/// * `repetition_penalty` - Penalty for previously generated tokens
+/// * `previous_tokens` - List of previously generated token IDs
+///
+/// # Returns
+/// The sampled token ID
 pub fn sample_next_token(
     logits: &Tensor,
     temperature: f64,
@@ -128,4 +148,105 @@ fn sample_from_probs(probs: &Tensor) -> Result<u32> {
         .map_err(|e| crate::Error::Model(format!("Failed to create weighted distribution: {e}")))?;
 
     Ok(dist.sample(&mut rng) as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::{Device, Tensor};
+
+    #[test]
+    fn test_sampling_params_default() {
+        let params = SamplingParams::default();
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+        assert!((params.top_p - 0.9).abs() < f64::EPSILON);
+        assert!((params.repetition_penalty - 1.15).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_sample_from_probs() -> Result<()> {
+        let device = Device::Cpu;
+
+        // Create a simple probability distribution
+        let probs = Tensor::new(&[0.1f32, 0.2, 0.3, 0.4], &device)?;
+
+        // Sample multiple times to ensure it works
+        for _ in 0..10 {
+            let token_id = sample_from_probs(&probs)?;
+            assert!(token_id < 4, "Token ID should be within vocabulary size");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sample_top_p() -> Result<()> {
+        let device = Device::Cpu;
+
+        // Create a probability distribution where one token dominates
+        let probs = Tensor::new(&[0.8f32, 0.1, 0.05, 0.05], &device)?;
+
+        // With low top_p, should mostly sample the dominant token
+        let mut dominant_count = 0;
+        for _ in 0..100 {
+            let token_id = sample_top_p(&probs, 0.85)?;
+            if token_id == 0 {
+                dominant_count += 1;
+            }
+        }
+
+        // Should sample the dominant token most of the time
+        assert!(
+            dominant_count > 70,
+            "Should sample dominant token frequently with low top_p"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_repetition_penalty() -> Result<()> {
+        let device = Device::Cpu;
+        let vocab_size = 5;
+
+        // Create uniform logits
+        let logits = Tensor::new(&[1.0f32, 1.0, 1.0, 1.0, 1.0], &device)?;
+
+        // Apply sampling with repetition penalty
+        let previous_tokens = vec![0, 1]; // Tokens that should be penalized
+        let token_id = sample_next_token(&logits, 1.0, 1.0, 1.5, &previous_tokens)?;
+
+        // The selected token should be valid
+        assert!(
+            token_id < vocab_size as u32,
+            "Token ID should be within vocabulary"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_temperature_scaling() -> Result<()> {
+        let device = Device::Cpu;
+
+        // Create logits with clear preference
+        let logits = Tensor::new(&[5.0f32, 1.0, 1.0, 1.0], &device)?;
+
+        // Sample with low temperature (more deterministic)
+        let mut high_prob_count = 0;
+        for _ in 0..100 {
+            let token_id = sample_next_token(&logits, 0.1, 1.0, 1.0, &[])?;
+            if token_id == 0 {
+                high_prob_count += 1;
+            }
+        }
+
+        // With low temperature, should almost always pick the highest logit
+        assert!(
+            high_prob_count > 95,
+            "Low temperature should make sampling more deterministic"
+        );
+
+        Ok(())
+    }
 }
