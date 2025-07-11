@@ -659,37 +659,70 @@ impl ModelLoader {
             base_repo_id
         );
 
-        // Use tokio runtime to download tokenizer
-        let runtime = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!("Failed to create runtime for tokenizer download: {}", e);
-                return false;
-            }
-        };
+        // Check if we're already in a tokio runtime
+        let result = if tokio::runtime::Handle::try_current().is_ok() {
+            // We're in an async context, use spawn_blocking to avoid nested runtime
+            let base_repo_id = base_repo_id.to_string();
+            let model_path = self.model_path.clone();
+            let tokenizer_type = spec.tokenizer_type.clone();
+            
+            let handle = tokio::runtime::Handle::current();
+            let result = std::thread::spawn(move || {
+                handle.block_on(async move {
+                    let downloader = match super::download_manager::ModelDownloader::new() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::error!("Failed to create downloader: {}", e);
+                            return false;
+                        }
+                    };
 
-        #[allow(clippy::disallowed_methods)]
-        let result = runtime.block_on(async {
-            let downloader = match super::download_manager::ModelDownloader::new() {
-                Ok(d) => d,
+                    if let Some(model_path) = &model_path {
+                        let gguf_path = Path::new(model_path);
+                        if let Err(e) = downloader
+                            .download_tokenizer(&base_repo_id, gguf_path, tokenizer_type.as_deref())
+                            .await
+                        {
+                            tracing::error!("Failed to download tokenizer: {}", e);
+                            return false;
+                        }
+                    }
+                    true
+                })
+            }).join().unwrap_or(false);
+            result
+        } else {
+            // Not in async context, create a runtime
+            let runtime = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
                 Err(e) => {
-                    tracing::error!("Failed to create downloader: {}", e);
+                    tracing::error!("Failed to create runtime for tokenizer download: {}", e);
                     return false;
                 }
             };
 
-            if let Some(model_path) = &self.model_path {
-                let gguf_path = Path::new(model_path);
-                if let Err(e) = downloader
-                    .download_tokenizer(base_repo_id, gguf_path, spec.tokenizer_type.as_deref())
-                    .await
-                {
-                    tracing::error!("Failed to download tokenizer: {}", e);
-                    return false;
+            runtime.block_on(async {
+                let downloader = match super::download_manager::ModelDownloader::new() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::error!("Failed to create downloader: {}", e);
+                        return false;
+                    }
+                };
+
+                if let Some(model_path) = &self.model_path {
+                    let gguf_path = Path::new(model_path);
+                    if let Err(e) = downloader
+                        .download_tokenizer(base_repo_id, gguf_path, spec.tokenizer_type.as_deref())
+                        .await
+                    {
+                        tracing::error!("Failed to download tokenizer: {}", e);
+                        return false;
+                    }
                 }
-            }
-            true
-        });
+                true
+            })
+        };
 
         if result {
             // Try loading the tokenizer again after download
