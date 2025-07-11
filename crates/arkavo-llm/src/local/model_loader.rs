@@ -665,7 +665,7 @@ impl ModelLoader {
             let base_repo_id = base_repo_id.to_string();
             let model_path = self.model_path.clone();
             let tokenizer_type = spec.tokenizer_type.clone();
-            
+
             let handle = tokio::runtime::Handle::current();
             let result = std::thread::spawn(move || {
                 handle.block_on(async move {
@@ -689,7 +689,9 @@ impl ModelLoader {
                     }
                     true
                 })
-            }).join().unwrap_or(false);
+            })
+            .join()
+            .unwrap_or(false);
             result
         } else {
             // Not in async context, create a runtime
