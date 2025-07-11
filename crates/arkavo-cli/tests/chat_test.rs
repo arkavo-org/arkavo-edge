@@ -1,10 +1,12 @@
 #[test]
+#[ignore] // Ignore by default as it requires external services
 fn test_chat_command() {
     // Test that chat command can be called via the main run function
     let args = vec![
         "chat".to_string(),
         "--prompt".to_string(),
         "Hello".to_string(),
+        "--no-tui".to_string(),
     ];
 
     // This will fail if Ollama is not running, but that's expected
@@ -22,7 +24,8 @@ fn test_chat_command() {
                     || error_msg.contains("error")
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
-                    || error_msg.contains("print mode doesn't support interactive prompts"),
+                    || error_msg.contains("print mode doesn't support interactive prompts")
+                    || error_msg.contains("No Ollama server configured"),
                 "Unexpected error: {error_msg}"
             );
         }
@@ -30,12 +33,14 @@ fn test_chat_command() {
 }
 
 #[test]
+#[ignore] // Ignore by default as it requires external services
 fn test_git_analysis_prompt() {
     // Test that the system prompt includes Git analysis instructions
     let args = vec![
         "chat".to_string(),
         "--prompt".to_string(),
         "Perform a full repository analysis".to_string(),
+        "--no-tui".to_string(),
     ];
 
     // This test verifies that the chat command is structured to handle Git analysis
@@ -53,7 +58,8 @@ fn test_git_analysis_prompt() {
                     || error_msg.contains("error")
                     || error_msg.contains("HTTP")
                     || error_msg.contains("Ollama is not running locally")
-                    || error_msg.contains("print mode doesn't support interactive prompts"),
+                    || error_msg.contains("print mode doesn't support interactive prompts")
+                    || error_msg.contains("No Ollama server configured"),
                 "Unexpected error: {error_msg}"
             );
         }
