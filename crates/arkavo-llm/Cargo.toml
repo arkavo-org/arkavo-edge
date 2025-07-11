@@ -20,25 +20,25 @@ local = ["llm-local"]  # Alias for compatibility
 metal = ["candle-core?/metal", "candle-nn?/metal", "candle-transformers?/metal"]
 
 [dependencies]
-tokio = { version = "1.42", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
-futures = "0.3"
-thiserror = "2.0"
-tracing = "0.1"
-async-trait = "0.1"
+tokio = { workspace = true, features = ["rt", "macros", "sync"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
 tokio-stream = "0.1"
-base64 = "0.22"
-anyhow = "1.0"
+base64 = { workspace = true }
+anyhow = { workspace = true }
 
 # Local inference dependencies (optional)
 # Note: Metal support is handled via the metal feature, not here
-candle-core = { version = "0.9.1", optional = true, default-features = false }
-candle-nn = { version = "0.9.1", optional = true, default-features = false }
-candle-transformers = { version = "0.9.1", optional = true, default-features = false }
-hf-hub = { version = "0.4", optional = true, default-features = false, features = ["tokio", "rustls-tls"] }
-tokenizers = { version = "0.21", optional = true }
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
 bytemuck = { version = "1.20", optional = true }
 cfg-if = { version = "1.0", optional = true }
 sha2 = { version = "0.10", optional = true }
@@ -48,8 +48,8 @@ toml = { version = "0.8", optional = true }
 rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
-tempfile = "3.0"
+tempfile = { workspace = true }
 serial_test = "3"
-anyhow = "1.0"
+anyhow = { workspace = true }
 [lints]
 workspace = true

@@ -135,6 +135,14 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           strip arkavo
+          # Check binary size
+          SIZE=$(stat --format=%s arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
           tar -czf arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz arkavo
           shasum -a 256 arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz > arkavo-${{ needs.release.outputs.version }}-${{ matrix.artifact_suffix }}.tar.gz.sha256
 
@@ -216,6 +224,16 @@ jobs:
       - name: Strip binary
         run: |
           strip target/aarch64-apple-darwin/release/arkavo
+          
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
 
       - name: Codesign binary
         timeout-minutes: 5
