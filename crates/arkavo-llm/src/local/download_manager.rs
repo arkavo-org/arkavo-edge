@@ -108,6 +108,12 @@ impl ModelDownloader {
             ));
         }
 
+        // For Gemma models, download tokenizer files
+        if spec.name.starts_with("gemma") {
+            self.download_gemma_tokenizer(&spec.hf_repo_id, &hf_cache_path)
+                .await?;
+        }
+
         tracing::info!("Model {} successfully downloaded and verified", spec.name);
         Ok(hf_cache_path)
     }
@@ -120,5 +126,60 @@ impl ModelDownloader {
 
         let computed = format!("{:x}", hasher.finalize());
         Ok(computed == expected)
+    }
+
+    /// Download tokenizer files for Gemma models
+    async fn download_gemma_tokenizer(&self, gguf_repo_id: &str, gguf_path: &Path) -> Result<()> {
+        // Map GGUF repo to base model repo
+        let base_repo = match gguf_repo_id {
+            "google/gemma-3-1b-it-qat-q4_0-gguf" => "google/gemma-3-1b-it",
+            "unsloth/gemma-3n-E4B-it-GGUF" => "google/gemma-2b-it", // Gemma 3n uses Gemma 2 tokenizer
+            _ => {
+                tracing::warn!(
+                    "Unknown GGUF repo, skipping tokenizer download: {}",
+                    gguf_repo_id
+                );
+                return Ok(());
+            }
+        };
+
+        tracing::info!("Downloading tokenizer from base repository: {}", base_repo);
+
+        // Download tokenizer.json file (JSON format that tokenizers library expects)
+        let repo = self.api.model(base_repo.to_string());
+        let tokenizer_path = match repo.get("tokenizer.json").await {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to download tokenizer.json: {}. Make sure you're authenticated with 'huggingface-cli login' and have accepted the Gemma license.",
+                    e
+                );
+                return Ok(()); // Don't fail the whole download if tokenizer is missing
+            }
+        };
+
+        // Copy tokenizer to the same directory as the GGUF file
+        let gguf_dir = gguf_path
+            .parent()
+            .expect("GGUF file must have a parent directory");
+
+        let target_path = gguf_dir.join("tokenizer.json");
+        if !target_path.exists() {
+            fs::copy(&tokenizer_path, &target_path).map_err(Error::Io)?;
+            tracing::info!("Copied tokenizer.json to GGUF directory: {:?}", target_path);
+        } else {
+            tracing::info!("Tokenizer already exists at: {:?}", target_path);
+        }
+
+        // Optionally download tokenizer_config.json (small file, useful for configuration)
+        if let Ok(config_path) = repo.get("tokenizer_config.json").await {
+            let target_config = gguf_dir.join("tokenizer_config.json");
+            if !target_config.exists() {
+                fs::copy(&config_path, &target_config).map_err(Error::Io)?;
+                tracing::info!("Copied tokenizer_config.json to GGUF directory");
+            }
+        }
+
+        Ok(())
     }
 }

@@ -52,22 +52,23 @@ async fn test_manifest_loading() -> anyhow::Result<()> {
 
     // Verify we have at least the expected models
     assert!(
-        manifest.models.len() >= 3,
-        "Manifest should have at least 3 models"
+        manifest.models.len() >= 5,
+        "Manifest should have at least 5 models, got {}",
+        manifest.models.len()
     );
 
     // Check for specific models
     assert!(
-        manifest.find("gemma3-1b-it-qat").is_some(),
-        "Should have Gemma 3 1B IT QAT model"
+        manifest.find("tinyllama-110m-f16").is_some(),
+        "Should have TinyLlama 110M model"
     );
     assert!(
-        manifest.find("gemma3n-e4b-it").is_some(),
-        "Should have Gemma 3n E4B model"
+        manifest.find("phi-2-q4k").is_some(),
+        "Should have Phi-2 model"
     );
     assert!(
         manifest.find("tinyllama-1b-chat").is_some(),
-        "Should have TinyLlama model"
+        "Should have TinyLlama 1B Chat model"
     );
 
     // Verify all models have required fields

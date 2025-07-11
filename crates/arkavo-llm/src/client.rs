@@ -40,6 +40,7 @@ impl LlmClient {
         }
     }
 
+    #[cfg_attr(not(feature = "llm-local"), allow(clippy::unused_async))]
     pub async fn from_local_model(model_name: &str, model_path: String) -> Result<Self> {
         #[cfg(feature = "llm-local")]
         {

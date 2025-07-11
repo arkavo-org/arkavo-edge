@@ -22,26 +22,6 @@ context_length = 2048
 license = "mit"
 
 [[models]]
-name = "gemma3-1b-it-qat"
-description = "Official Google Gemma-3 1B IT QAT (Q4_0) - Self-contained GGUF"
-hf_repo_id = "google/gemma-3-1b-it-qat-q4_0-gguf"
-hf_filename = "gemma-3-1b-it-q4_0.gguf"
-sha256 = "95e5b8d891cd6a794f66c2a6fb59a41e9562b4660560b854274eceffb628b22a"
-size_gb = 0.93
-context_length = 8192
-license = "gemma"
-
-[[models]]
-name = "gemma3n-e4b-it"
-description = "Gemma 3n E4B Instruct (Q4_K_M) - 4.2GB"
-hf_repo_id = "unsloth/gemma-3n-E4B-it-GGUF"
-hf_filename = "gemma-3n-E4B-it-Q4_K_M.gguf"
-sha256 = "43b489bb77a81bda85180e7c490d40ad7f1d5c2ce654c9b05e15e104bd3c777e"
-size_gb = 4.23
-context_length = 8192
-license = "gemma"
-
-[[models]]
 name = "tinyllama-1b-chat"
 description = "TinyLlama 1.1B Chat (Q4_K_M) with embedded tokenizer - ideal for CI testing"
 hf_repo_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"

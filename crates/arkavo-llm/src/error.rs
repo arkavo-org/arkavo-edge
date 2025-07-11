@@ -30,6 +30,13 @@ pub enum Error {
     Model(String),
 }
 
+#[cfg(feature = "llm-local")]
+impl From<candle_core::Error> for Error {
+    fn from(err: candle_core::Error) -> Self {
+        Error::Model(format!("Candle error: {err}"))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
