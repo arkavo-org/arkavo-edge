@@ -707,7 +707,8 @@ jobs:
           echo "Verifying no required environment variables..."
           
           # Check for env::var calls that require configuration
-          if grep -r 'env::var("[A-Z_]*")\.expect\|\.unwrap()' crates/ --include="*.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP"; then
+          # Exclude build.rs files and test files, and allow standard env vars
+          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR"; then
             echo "::error::Found required environment variables"
             exit 1
           fi

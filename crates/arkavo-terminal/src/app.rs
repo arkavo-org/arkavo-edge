@@ -305,15 +305,7 @@ impl App {
     }
 
     pub fn initialize_mcp_connection(&mut self) {
-        // Initialize MCP client - attempt by default unless explicitly disabled
-        if std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true" {
-            self.add_debug_log(
-                crate::ui::debug::LogLevel::Info,
-                "[MCP] MCP disabled by environment variable".to_string(),
-            );
-            return;
-        }
-
+        // Initialize MCP client - attempt connection and handle failures gracefully
         let result = McpConnection::new_in_process();
 
         match result {

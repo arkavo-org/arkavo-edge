@@ -108,17 +108,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
-    // Initialize MCP client - attempt by default unless explicitly disabled or in print mode
-    let mcp_client = if print_mode
-        || std::env::var("ARKAVO_MCP_DISABLED").unwrap_or_default() == "true"
-    {
+    // Initialize MCP client - skip in print mode, otherwise attempt connection
+    let mcp_client = if print_mode {
         None
     } else {
-        let mcp_url = std::env::var("ARKAVO_MCP_URL").ok();
-        let result = match mcp_url {
-            Some(url) => McpConnection::new_external(Some(url)),
-            None => McpConnection::new_in_process(),
-        };
+        // Try in-process MCP first, which includes all local tools
+        let result = McpConnection::new_in_process();
 
         match result {
             Ok(client) => {
