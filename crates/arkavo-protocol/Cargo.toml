@@ -13,6 +13,7 @@ categories = ["network-programming", "api-bindings"]
 # Core async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 async-trait = { workspace = true }
+futures = { workspace = true }
 
 # JSON-RPC implementation
 jsonrpsee = { workspace = true }
@@ -44,6 +45,9 @@ chrono = { workspace = true }
 
 # MCP support
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+
+# LLM support for chat
+arkavo-llm = { path = "../arkavo-llm" }
 
 # Schema generation
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }

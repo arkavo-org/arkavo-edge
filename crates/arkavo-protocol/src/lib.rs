@@ -1,4 +1,5 @@
 pub mod a2a;
+pub mod chat_session;
 pub mod config;
 pub mod discovery;
 pub mod error;

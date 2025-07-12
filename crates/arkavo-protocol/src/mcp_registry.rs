@@ -45,20 +45,22 @@ impl McpRegistry {
 
     /// List all available tools from all connections
     pub async fn list_all_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
-        let connections = self.connections.read().await;
         let mut all_tools = Vec::new();
 
-        for (server_name, connection) in connections.iter() {
-            match connection.list_tools() {
-                Ok(tools) => {
-                    // Prefix tool names with server name to avoid conflicts
-                    for mut tool in tools {
-                        tool.name = format!("{}:{}", server_name, tool.name);
-                        all_tools.push(tool);
+        {
+            let connections = self.connections.read().await;
+            for (server_name, connection) in connections.iter() {
+                match connection.list_tools() {
+                    Ok(tools) => {
+                        // Prefix tool names with server name to avoid conflicts
+                        for mut tool in tools {
+                            tool.name = format!("{server_name}:{}", tool.name);
+                            all_tools.push(tool);
+                        }
                     }
-                }
-                Err(e) => {
-                    eprintln!("Failed to list tools from {}: {}", server_name, e);
+                    Err(e) => {
+                        eprintln!("Failed to list tools from {server_name}: {e}");
+                    }
                 }
             }
         }
@@ -87,18 +89,20 @@ impl McpRegistry {
         if let Some(connection) = connections.get(server_name) {
             connection.call_tool(actual_tool_name, arguments, llm_provider)
         } else {
-            Err(format!("MCP server '{}' not found", server_name).into())
+            Err(format!("MCP server '{server_name}' not found").into())
         }
     }
 
     /// Get list of connected servers and their status
     pub async fn get_server_status(&self) -> HashMap<String, String> {
-        let connections = self.connections.read().await;
         let mut status = HashMap::new();
 
-        for (name, _connection) in connections.iter() {
-            // TODO: Add actual connection health check
-            status.insert(name.clone(), "connected".to_string());
+        {
+            let connections = self.connections.read().await;
+            for (name, _connection) in connections.iter() {
+                // TODO: Add actual connection health check
+                status.insert(name.clone(), "connected".to_string());
+            }
         }
 
         status
@@ -106,8 +110,7 @@ impl McpRegistry {
 
     /// Disconnect and remove a server
     pub async fn disconnect(&self, server_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut connections = self.connections.write().await;
-        connections.remove(server_name);
+        self.connections.write().await.remove(server_name);
         Ok(())
     }
 
@@ -132,7 +135,7 @@ impl McpRegistry {
                 .collect();
             Ok(schemas)
         } else {
-            Err(format!("MCP server '{}' not found", server_name).into())
+            Err(format!("MCP server '{server_name}' not found").into())
         }
     }
 }

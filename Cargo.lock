@@ -165,16 +165,16 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
 name = "arkavo-agui"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
- "anyhow",
+ "arkavo-llm",
  "arkavo-protocol",
  "chrono",
  "futures",
@@ -184,9 +184,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tokio-stream",
- "tokio-test",
- "tracing",
  "uuid",
  "warp",
  "zeroconf",
@@ -194,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -225,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -256,11 +253,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.22.0"
+version = "0.23.0"
 
 [[package]]
 name = "arkavo-git"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -269,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -279,6 +276,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "cfg-if",
+ "chrono",
  "dirs 5.0.1",
  "futures",
  "hf-hub",
@@ -296,11 +294,12 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -309,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -319,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -337,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -357,15 +356,17 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
+ "arkavo-llm",
  "arkavo-mcp-core",
  "async-trait",
  "chrono",
  "clap",
  "crossbeam-queue",
  "dashmap 5.5.3",
+ "futures",
  "gethostname",
  "governor",
  "hyper 1.6.0",
@@ -386,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -405,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -431,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.22.0"
+version = "0.23.0"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -460,35 +461,13 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.22.0"
+version = "0.23.0"
 
 [[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
-
-[[package]]
-name = "async-stream"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
-dependencies = [
- "async-stream-impl",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-stream-impl"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
 
 [[package]]
 name = "async-trait"
@@ -6355,19 +6334,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2468baabc3311435b55dd935f702f42cd1b8abb7e754fb7dfb16bd36aa88f9f7"
-dependencies = [
- "async-stream",
- "bytes",
- "futures-core",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

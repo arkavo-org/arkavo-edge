@@ -410,6 +410,128 @@
             opacity: 1;
             visibility: visible;
         }
+        
+        /* Tabs */
+        .detail-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-primary);
+        }
+        
+        .tab-button {
+            flex: 1;
+            padding: 12px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .tab-button.active {
+            color: var(--info-color);
+            border-bottom-color: var(--info-color);
+        }
+        
+        .tab-content {
+            display: none;
+            height: 100%;
+            overflow-y: auto;
+        }
+        
+        /* Chat Styles */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 20px;
+        }
+        
+        .chat-info {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding-right: 10px;
+        }
+        
+        .chat-message {
+            margin-bottom: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+        }
+        
+        .chat-message.user {
+            background: var(--info-color);
+            color: white;
+            margin-left: 20%;
+        }
+        
+        .chat-message.assistant {
+            background: var(--bg-tertiary);
+            margin-right: 20%;
+        }
+        
+        .chat-message-role {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 4px;
+        }
+        
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .chat-input {
+            flex: 1;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 4px;
+            resize: none;
+            font-family: inherit;
+            font-size: 14px;
+            min-height: 50px;
+            max-height: 150px;
+        }
+        
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--info-color);
+        }
+        
+        .chat-send {
+            padding: 10px 20px;
+            background: var(--info-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.2s;
+        }
+        
+        .chat-send:hover {
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -435,17 +557,39 @@
                     <h2 id="detailAgentName">Agent Details</h2>
                     <button class="close-button" onclick="closeAgentDetails()">×</button>
                 </div>
+                <div class="detail-tabs">
+                    <button class="tab-button active" onclick="switchTab('overview')">Overview</button>
+                    <button class="tab-button" onclick="switchTab('capabilities')">Capabilities</button>
+                    <button class="tab-button" onclick="switchTab('chat')">Chat</button>
+                </div>
                 <div class="detail-content">
-                    <div class="detail-section">
-                        <div class="section-title">A2A Details</div>
-                        <div id="a2aDetails">
-                            <div class="loading-message">Loading...</div>
+                    <div class="tab-content" id="overviewTab" style="display: block;">
+                        <div class="detail-section">
+                            <div class="section-title">A2A Details</div>
+                            <div id="a2aDetails">
+                                <div class="loading-message">Loading...</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="detail-section">
-                        <div class="section-title">Features</div>
-                        <div id="featuresDetails">
-                            <div class="loading-message">Loading...</div>
+                    <div class="tab-content" id="capabilitiesTab" style="display: none;">
+                        <div class="detail-section">
+                            <div class="section-title">Features</div>
+                            <div id="featuresDetails">
+                                <div class="loading-message">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-content" id="chatTab" style="display: none;">
+                        <div class="chat-container">
+                            <div class="chat-info">
+                                You're now in a direct dialog with <span id="chatAgentName"></span>.<br>
+                                Type a message and watch the bot think in real time.
+                            </div>
+                            <div class="chat-messages" id="chatMessages"></div>
+                            <div class="chat-input-container">
+                                <textarea id="chatInput" class="chat-input" placeholder="Type your message..." onkeydown="handleChatKeydown(event)"></textarea>
+                                <button class="chat-send" onclick="sendChatMessage()">Send</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -833,6 +977,68 @@
         connectTelemetry();
         connectDiscovery();
         
+        // Connect main AG-UI WebSocket
+        let ws = null;
+        
+        function connectAgUiWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            ws.onopen = () => {
+                console.log('Connected to AG-UI WebSocket');
+            };
+            
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleAgUiMessage(msg);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('AG-UI WebSocket error:', error);
+            };
+            
+            ws.onclose = () => {
+                console.log('AG-UI WebSocket closed, reconnecting in 3s...');
+                setTimeout(connectAgUiWebSocket, 3000);
+            };
+        }
+        
+        function handleAgUiMessage(msg) {
+            switch(msg.type) {
+                case 'messageDelta':
+                    handleMessageDelta(msg);
+                    break;
+                case 'error':
+                    console.error('AG-UI Error:', msg.code, msg.message);
+                    break;
+                default:
+                    console.log('Unhandled AG-UI message:', msg);
+            }
+        }
+        
+        function handleMessageDelta(msg) {
+            const agentId = msg.agentId;
+            
+            // Find the last assistant message for this agent
+            if (chatState.messages[agentId]) {
+                const messages = chatState.messages[agentId];
+                const lastMessage = messages[messages.length - 1];
+                
+                if (lastMessage && lastMessage.role === 'assistant') {
+                    // Append delta to the message
+                    if (msg.delta.type === 'text') {
+                        lastMessage.content += msg.delta.text;
+                        
+                        // Re-render if this is the active chat
+                        if (chatState.activeAgentId === agentId) {
+                            renderChatMessages();
+                        }
+                    }
+                }
+            }
+        }
+        
+        connectAgUiWebSocket();
+        
         // Agent Details Panel
         let currentAgent = null;
         let agentCache = new Map();
@@ -857,15 +1063,173 @@
         }
         
         function closeAgentDetails() {
+            // Close chat if active
+            if (chatState.activeAgentId) {
+                closeChat();
+            }
+            
             document.getElementById('agentDetailPanel').classList.remove('open');
             document.getElementById('panelOverlay').classList.remove('visible');
             currentAgent = null;
+        }
+        
+        // Chat functionality
+        const chatState = {
+            activeAgentId: null,
+            messages: {},
+            buffers: {}
+        };
+        
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Show/hide tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.style.display = 'none';
+            });
+            document.getElementById(tabName + 'Tab').style.display = 'block';
+            
+            // Special handling for chat tab
+            if (tabName === 'chat' && currentAgent) {
+                openChat(currentAgent.id);
+            } else if (tabName !== 'chat' && chatState.activeAgentId) {
+                closeChat();
+            }
+        }
+        
+        function openChat(agentId) {
+            if (chatState.activeAgentId === agentId) return; // Already open
+            
+            // Close previous chat if any
+            if (chatState.activeAgentId) {
+                closeChat();
+            }
+            
+            chatState.activeAgentId = agentId;
+            
+            // Initialize chat state
+            if (!chatState.messages[agentId]) {
+                chatState.messages[agentId] = [];
+                chatState.buffers[agentId] = '';
+            }
+            
+            // Update UI
+            document.getElementById('chatAgentName').textContent = currentAgent.name;
+            renderChatMessages();
+            
+            // Send ChatOpen event
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chatOpen',
+                    agentId: agentId
+                }));
+            }
+        }
+        
+        function closeChat() {
+            if (!chatState.activeAgentId) return;
+            
+            // Send ChatClose event
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'chatClose',
+                    agentId: chatState.activeAgentId
+                }));
+            }
+            
+            chatState.activeAgentId = null;
+        }
+        
+        function handleChatKeydown(event) {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                sendChatMessage();
+            }
+        }
+        
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            
+            if (!text || !chatState.activeAgentId) return;
+            
+            // Add user message to chat
+            const userMessage = {
+                id: 'user-' + Date.now(),
+                role: 'user',
+                content: text
+            };
+            
+            chatState.messages[chatState.activeAgentId].push(userMessage);
+            renderChatMessages();
+            
+            // Clear input
+            input.value = '';
+            
+            // Send UserMessage event
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'userMessage',
+                    agentId: chatState.activeAgentId,
+                    content: text
+                }));
+            }
+            
+            // Create assistant message placeholder
+            const assistantMessage = {
+                id: 'assistant-' + Date.now(),
+                role: 'assistant',
+                content: ''
+            };
+            
+            chatState.messages[chatState.activeAgentId].push(assistantMessage);
+            renderChatMessages();
+        }
+        
+        function renderChatMessages() {
+            const container = document.getElementById('chatMessages');
+            const agentId = chatState.activeAgentId;
+            
+            if (!agentId || !chatState.messages[agentId]) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            container.innerHTML = chatState.messages[agentId].map(msg => `
+                <div class="chat-message ${msg.role}">
+                    <div class="chat-message-role">${msg.role}</div>
+                    <div class="chat-message-content">${escapeHtml(msg.content)}</div>
+                </div>
+            `).join('');
+            
+            // Scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         // ESC key handler
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeAgentDetails();
+            }
+        });
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (chatState.activeAgentId) {
+                closeChat();
+            }
+            if (ws) {
+                ws.close();
             }
         });
         

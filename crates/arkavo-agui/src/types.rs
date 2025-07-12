@@ -16,9 +16,19 @@ pub enum AgUiEvent {
         since_event_id: Option<String>,
     },
     UserMessage {
+        #[serde(rename = "agentId")]
+        agent_id: String,
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         attachments: Option<Vec<Attachment>>,
+    },
+    ChatOpen {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+    },
+    ChatClose {
+        #[serde(rename = "agentId")]
+        agent_id: String,
     },
     ToolResult {
         #[serde(rename = "toolCallId")]
@@ -43,6 +53,8 @@ pub enum AgUiEvent {
         event_id: String,
     },
     MessageDelta {
+        #[serde(rename = "agentId")]
+        agent_id: String,
         #[serde(rename = "messageId")]
         message_id: String,
         delta: MessageDeltaContent,
@@ -149,4 +161,46 @@ pub enum JsonPatch {
     Move { from: String, path: String },
     Copy { from: String, path: String },
     Test { path: String, value: Value },
+}
+
+/// Chat request payload for streaming chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatRequest {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Handle for managing active subscriptions
+#[derive(Debug)]
+pub struct SubscriptionHandle {
+    pub id: String,
+    pub cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl SubscriptionHandle {
+    pub fn new(id: String) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        (
+            Self {
+                id,
+                cancel_tx: Some(tx),
+            },
+            rx,
+        )
+    }
+
+    pub fn cancel(&mut self) {
+        if let Some(tx) = self.cancel_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl Drop for SubscriptionHandle {
+    fn drop(&mut self) {
+        self.cancel();
+    }
 }
