@@ -1,126 +1,68 @@
 # Long-Term Memory
 
-## Agent LLM Configuration and Streaming Chat Implementation
+This document outlines the core architectural principles and long-term vision for Arkavo Edge. It is a synthesis of the key design documents that guide the project's development.
 
-### Model URL Format (AGENTS.md)
-The expected format for model URLs in AGENTS.md is:
-```
-provider://host:port/model
-```
+## 1. Core System Architecture
 
-Currently only Ollama is supported:
-```
-ollama://10.0.0.101:11434/devstral:latest
-```
+### 1.1. Agent and Gateway Roles
+- The **AG-UI Gateway** is an orchestrator agent, responsible for managing and visualizing the agent mesh. It does not have its own LLM.
+- Each **headless agent** is an autonomous entity that manages its own LLM connection as defined in its `AGENTS.md` configuration.
 
-### Key Architecture Insights
+### 1.2. AI-Driven, Zero-Configuration Principle
+- The system is designed to be **zero-configuration**. Users should be able to run it without manual setup.
+- **AI-Driven Configuration**: Instead of static files, the system uses an AI-driven, interactive process. The agent discovers its environment and asks the user for guidance when necessary.
+- **Memory Storage**: All configurations (e.g., Ollama server URLs) are stored in the `arkavo-memory` crate, not in environment variables or config files, enabling dynamic, persistent configuration.
 
-1. **AG-UI Gateway vs Agent Roles**:
-   - AG-UI gateway is itself an AI agent that orchestrates other agents
-   - Each headless agent manages its own LLM connection based on AGENTS.md config
-   - Gateway should NOT have its own LLM - it forwards to agents
+### 1.3. Dependency Management: The Embedded Binary Approach
+- To ensure single-binary distribution and zero-dependency startup, third-party tools like `idb_companion` are embedded directly into the Arkavo executable at build time.
+- At runtime, the binary is extracted to a temporary directory and executed as needed. This makes the tool portable and easy to use.
 
-2. **Critical Environment Variable Fix**:
-   - Ollama client expects `OLLAMA_BASE_URL` not `OLLAMA_URL`
-   - This was causing "HTTP request failed: error sending request" errors
+## 2. Agent Communication & Dataflow
 
-3. **Bidirectional Chat Protocol Architecture** (✅ COMPLETED):
-   - **Full-duplex communication** via session-based RPC methods
-   - **Session Lifecycle**: chat_open → chat_send (multiple) → chat_stream (subscribe) → chat_close
-   - **Multi-UI Support**: Broadcast channels allow multiple UIs per session
-   - **Context Management**: Conversation history maintained per session
-   - **Resource Management**: Proper cleanup with Drop traits and abort signals
+### 2.1. A2A Protocol: Secure, Session-Based Communication
+- The Agent-to-Agent (A2A) protocol is a **full-duplex, session-based system** built on JSON-RPC for robust and stateful communication.
+- **Session Lifecycle**: Interactions follow a clear lifecycle (`chat_open`, `chat_send`, `chat_stream`, `chat_close`), allowing for stateful conversations.
+- **Security**: All communication is secured with **mTLS** by default, using `rustls` to avoid OpenSSL dependencies.
+- **Discovery**: Agents find each other automatically on the network using **mDNS** and **DNS-SRV**.
 
-4. **Error Propagation**:
-   - Errors from agent LLM connections now properly propagate to UI
-   - Users see actual error messages instead of generic failures
+### 2.2. Dataflow Blueprints: Declarative Agent Workflows
+- Complex agent workflows are defined using declarative **Dataflow Blueprints** (in JSON or YAML).
+- These blueprints define a pipeline of nodes (`source`, `transform`, `router`, `sink`) and the links between them.
+- This allows for the creation of sophisticated, multi-agent, multi-LLM processing pipelines (e.g., classification and routing, parallel analysis).
 
-5. **Resource Management**:
-   - Removed local LLM adapter from AG-UI gateway
-   - All LLM connections managed by individual agents
-   - Proper cleanup on agent disconnect with terminal delta notification
+## 3. LLM and Model Management
 
-### Implementation Status
-- ✅ StreamLlmModel abstraction with typed deltas
-- ✅ Agent-based LLM configuration from AGENTS.md
-- ✅ Error propagation to UI
-- ✅ Resource cleanup on agent crash
-- ✅ Ordered message delivery with sequence numbers
-- ✅ **Bidirectional chat protocol (COMPLETED)**
-  - chat_open/send/stream/close RPC methods
-  - Session-based communication with multi-UI broadcast
-  - Proper LLM context management per session
-- ⚠️  UI send path integration (partial - needs messages.ts wiring)
-- ⚠️  Back-pressure management (basic bounded channels only)
-- ⚠️  Structured error handling (strings only, no error types)
-- ❌ Session persistence across reconnects
-- ❌ Authentication layer (JWT tokens)
-- ❌ Observability (tracing spans, metrics)
+### 3.1. Multi-Provider LLM Router
+- The system is built around a **multi-provider LLM architecture** that supports multiple LLM providers (Ollama, OpenAI, Anthropic) simultaneously.
+- A central **LLM Router** dynamically selects the best provider/model for a given request based on capabilities (vision, function calling), cost, and availability.
+- The architecture is designed to be extensible, allowing new providers to be added with minimal friction.
 
-### Common Issues and Solutions
-1. **"Failed to start LLM stream: HTTP request failed"**
-   - Check Ollama is running at configured address
-   - Verify model exists: `curl http://host:port/api/tags`
-   - Ensure OLLAMA_BASE_URL is set correctly (not OLLAMA_URL)
+### 3.2. Local LLM Support
+- Arkavo Edge supports running language models locally using the Candle ML framework for privacy-first, offline-capable inference.
+- **Hardware Acceleration**: It automatically uses Metal Performance Shaders on macOS and CPU-based inference on other platforms.
+- **Model Download Manager**: A secure download manager acquires GGUF models from Hugging Face, performs SHA-256 verification, and ensures license compliance.
 
-2. **"Message sending through subscription not yet implemented"**
-   - ✅ **RESOLVED**: Implemented proper bidirectional protocol
-   - Now uses session-based chat_send RPC method
-   - No more "new subscription per message" workaround
+## 4. iOS Testing & Automation Architecture
 
-3. **Next Phase Priority Issues**
-   - **UI Integration**: Frontend can receive deltas but not send follow-up messages
-   - **Back-pressure**: No throttling on agent→gateway leg under load
-   - **Error UX**: UI cannot distinguish retryable vs fatal errors
-   - **Security**: No authentication/authorization layer
-   - **Observability**: Missing per-session tracing and metrics
+### 4.1. The XCTest Bridge: Reliable, High-Performance UI Automation
+- The primary mechanism for iOS UI automation is the **XCTest Bridge**. This replaces fragile, coordinate-based AppleScript automation.
+- **Architecture**: A Rust MCP server communicates with a Swift XCTest runner on the simulator via a high-performance **Unix Socket**.
+- **Benefits**: This approach requires no special accessibility permissions, works regardless of simulator window position, and allows for reliable, text-based element finding.
 
-## Bidirectional Chat Protocol - Implementation Summary
+### 4.2. The FFI Bridge: Deep State Inspection
+- For sub-50ms test execution and deep app inspection, Arkavo uses a Foreign Function Interface (FFI) bridge.
+- **Architecture**: The Rust test harness communicates with the iOS app through a C interface, allowing direct manipulation of app state without going through the UI.
+- **Capabilities**: This enables powerful features like creating and restoring full application state snapshots, direct function calls, and runtime object manipulation.
 
-### What Was Accomplished
+### 4.3. Zero-Touch Intelligent Testing
+- The long-term vision is for **zero-touch intelligent testing**.
+- **Runtime Injection**: Arkavo will use dynamic instrumentation (e.g., `DYLD_INSERT_LIBRARIES`) to inject a test harness into any application at runtime without modifying its source code.
+- **AI-Powered Analysis**: The injected harness, combined with AI analysis of the codebase, will allow Arkavo to discover bugs, generate property tests, and explore edge cases autonomously.
 
-The bidirectional chat protocol implementation successfully replaced the previous half-duplex workaround with a proper full-duplex communication system:
+## 5. Git Integration
 
-#### Core Protocol Changes
-- **New RPC Methods**: `chat_open`, `chat_send`, `chat_close`, `chat_stream`
-- **Session Management**: `ChatSessionManager` with proper lifecycle handling
-- **Message Types**: Enhanced `MessageDelta` with session_id and sequence fields
-- **Error Handling**: Structured error propagation through the protocol stack
-
-#### Key Technical Achievements
-1. **Session-Based Architecture**: Single session supports multiple user messages with streaming responses
-2. **Multi-UI Broadcast**: Multiple UIs can subscribe to the same session via broadcast channels
-3. **Context Preservation**: Conversation history maintained per session for better LLM responses
-4. **Resource Management**: Proper cleanup prevents memory leaks and zombie sessions
-5. **Ordered Delivery**: Sequence numbers ensure deterministic message ordering
-
-#### Files Modified
-- `crates/arkavo-protocol/src/server.rs` - RPC method implementations
-- `crates/arkavo-protocol/src/chat_session.rs` - Session management logic
-- `crates/arkavo-protocol/src/types.rs` - Protocol type definitions
-- `crates/arkavo-agui/src/agent_connection.rs` - Client-side session handling
-
-### Migration Impact
-
-**Before**: Each user message created a new subscription
-```rust
-// Old workaround - wasteful
-client.subscribe("chat_subscribe", message) // New subscription each time
-```
-
-**After**: Session-based communication
-```rust
-// New protocol - efficient
-let session = client.request("chat_open", {}).await;
-client.request("chat_send", [session.session_id, message]).await; // Reuse session
-```
-
-### Next Phase Roadmap
-
-The foundation is now solid for production hardening:
-
-1. **M1 (UX Complete)**: Wire UI send path, fix warnings, structured errors
-2. **M2 (Secure & Observable)**: JWT auth, tracing spans, metrics
-3. **M3 (Load-Ready)**: Back-pressure, persistence, integration tests
-
-See `github_issue_bidirectional_chat_next_phase.md` for detailed implementation plan.
+### 5.1. Secure and Safe by Default
+- The Git integration is built using `git2` but with `rustls` to avoid the OpenSSL dependency, ensuring portability.
+- **RepoGuard**: A transaction wrapper provides atomic commits with automatic rollback on failure, preventing repository corruption.
+- **Pre-commit Validation**: The system can be configured to run `cargo fmt`, `clippy`, and other checks before finalizing a commit.
+- **Path Sanitization**: All file paths are sanitized to prevent directory traversal attacks.

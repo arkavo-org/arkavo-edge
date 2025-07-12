@@ -316,7 +316,7 @@ impl AgentConnection {
             .send(TelemetryEvent::MessageRouted {
                 agent_id: self.agent_id.clone(),
                 session_id: session_id.to_string(),
-                message_type: format!("{}_response", method),
+                message_type: format!("{method}_response"),
                 direction: MessageDirection::Inbound,
                 timestamp: chrono::Utc::now(),
             })
@@ -383,7 +383,7 @@ impl AgentConnection {
         let session: ChatSession = client
             .request("chat_open", rpc_params![open_request])
             .await
-            .map_err(|e| format!("Failed to open chat session: {}", e))?;
+            .map_err(|e| format!("Failed to open chat session: {e}"))?;
 
         // Store the session ID
         self.chat_sessions
@@ -435,7 +435,7 @@ impl AgentConnection {
                                     .await;
                             }
                             Some(Err(e)) => {
-                                eprintln!("Subscription error: {}", e);
+                                eprintln!("Subscription error: {e}");
                                 break;
                             }
                             None => {
@@ -493,7 +493,7 @@ impl AgentConnection {
                         MessageDeltaContent::Error { code, message } => {
                             // Convert error to text for UI
                             crate::types::MessageDeltaContent::Text {
-                                text: format!("[Error {}] {}", code, message),
+                                text: format!("[Error {code}] {message}"),
                             }
                         }
                     },
@@ -566,7 +566,7 @@ impl AgentConnection {
         client
             .request::<String, _>("chat_send", rpc_params![session_id, user_message])
             .await
-            .map_err(|e| format!("Failed to send message: {}", e))?;
+            .map_err(|e| format!("Failed to send message: {e}"))?;
 
         Ok(())
     }

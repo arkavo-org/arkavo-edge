@@ -422,6 +422,11 @@
             }
             
             sendUserMessage(content) {
+                if (!this.currentAgentId) {
+                    console.error('No agent selected');
+                    return;
+                }
+                
                 // Add to UI immediately
                 const tempId = `user-${Date.now()}`;
                 this.messages.push({
@@ -431,9 +436,10 @@
                 });
                 this.renderMessages();
                 
-                // Send to agent
+                // Send to agent with the agent ID
                 this.send({
                     type: 'userMessage',
+                    agentId: this.currentAgentId,
                     content: content
                 });
             }

@@ -177,7 +177,7 @@ async fn handle_websocket(
         }
     });
 
-    println!("AG-UI: New WebSocket connection: {}", session_id);
+    println!("AG-UI: New WebSocket connection: {session_id}");
 
     // Handle incoming messages
     while let Some(result) = ws_stream.next().await {
@@ -196,14 +196,14 @@ async fn handle_websocket(
                             )
                             .await
                             {
-                                eprintln!("AG-UI: Error handling event: {}", e);
+                                eprintln!("AG-UI: Error handling event: {e}");
                             }
                         }
                         Err(e) => {
-                            eprintln!("AG-UI: Failed to parse event: {}", e);
+                            eprintln!("AG-UI: Failed to parse event: {e}");
                             let error = AgUiEvent::Error {
                                 code: "INVALID_EVENT".to_string(),
-                                message: format!("Failed to parse event: {}", e),
+                                message: format!("Failed to parse event: {e}"),
                             };
                             let _ = tx.send(error).await;
                         }
@@ -211,7 +211,7 @@ async fn handle_websocket(
                 }
             }
             Err(e) => {
-                eprintln!("AG-UI: WebSocket error: {}", e);
+                eprintln!("AG-UI: WebSocket error: {e}");
                 break;
             }
         }
@@ -228,7 +228,7 @@ async fn handle_websocket(
     // Cancel the forward task
     forward_task.abort();
 
-    println!("AG-UI: WebSocket connection closed: {}", session_id);
+    println!("AG-UI: WebSocket connection closed: {session_id}");
 }
 
 async fn handle_event(
@@ -245,10 +245,7 @@ async fn handle_event(
             agui_version,
             since_event_id: _,
         } => {
-            println!(
-                "AG-UI: Connect request for agent {} (version {})",
-                agent_id, agui_version
-            );
+            println!("AG-UI: Connect request for agent {agent_id} (version {agui_version})");
 
             // Find the agent
             let agents_list = agents.read().await;
@@ -293,7 +290,7 @@ async fn handle_event(
             } else {
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_FOUND".to_string(),
-                    message: format!("Agent {} not found", agent_id),
+                    message: format!("Agent {agent_id} not found"),
                 };
                 tx.send(error).await?;
             }
@@ -318,7 +315,7 @@ async fn handle_event(
                     Err(e) => {
                         let error = AgUiEvent::Error {
                             code: "SUBSCRIPTION_FAILED".to_string(),
-                            message: format!("Failed to subscribe to chat: {}", e),
+                            message: format!("Failed to subscribe to chat: {e}"),
                         };
                         tx.send(error).await?;
                     }
@@ -326,7 +323,7 @@ async fn handle_event(
             } else {
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_CONNECTED".to_string(),
-                    message: format!("Agent {} is not connected", agent_id),
+                    message: format!("Agent {agent_id} is not connected"),
                 };
                 tx.send(error).await?;
             }
@@ -338,7 +335,7 @@ async fn handle_event(
             if let Some(agent_conn) = agent_conns.get(&agent_id) {
                 // Unsubscribe from chat
                 if let Err(e) = agent_conn.unsubscribe_chat(&agent_id).await {
-                    eprintln!("Failed to unsubscribe from chat: {}", e);
+                    eprintln!("Failed to unsubscribe from chat: {e}");
                 }
             }
         }
@@ -356,7 +353,7 @@ async fn handle_event(
                     Err(e) => {
                         let error = AgUiEvent::Error {
                             code: "MESSAGE_SEND_FAILED".to_string(),
-                            message: format!("Failed to send message: {}", e),
+                            message: format!("Failed to send message: {e}"),
                         };
                         tx.send(error).await?;
                     }
@@ -367,14 +364,14 @@ async fn handle_event(
             } else {
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_CONNECTED".to_string(),
-                    message: format!("Agent {} is not connected", agent_id),
+                    message: format!("Agent {agent_id} is not connected"),
                 };
                 tx.send(error).await?;
             }
         }
 
         _ => {
-            println!("AG-UI: Received event: {:?}", event);
+            println!("AG-UI: Received event: {event:?}");
         }
     }
 
@@ -426,7 +423,7 @@ async fn handle_agent_proxy(
             "jsonrpc": "2.0",
             "error": {
                 "code": -32602,
-                "message": format!("Agent {} not found", agent_id)
+                "message": format!("Agent {agent_id} not found")
             },
             "id": body.get("id").cloned()
         });
@@ -439,7 +436,7 @@ async fn forward_to_agent(
     body: serde_json::Value,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
-    let url = format!("http://{}", endpoint);
+    let url = format!("http://{endpoint}");
 
     let response = client
         .post(&url)
@@ -586,7 +583,7 @@ async fn run_mdns_discovery(
                                 .await
                                 .insert(id_string.clone(), agent_conn);
 
-                            println!("AG-UI: Created persistent connection to agent {}", id);
+                            println!("AG-UI: Created persistent connection to agent {id}");
                         }
                     }
 

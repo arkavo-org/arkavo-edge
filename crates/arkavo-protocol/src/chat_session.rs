@@ -1,3 +1,4 @@
+use crate::error::{A2aError, Result};
 use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
@@ -87,16 +88,21 @@ impl ChatSessionManager {
     }
 
     /// Send a message to a session
-    pub async fn send_message(&self, session_id: &str, message: UserMessage) -> Result<(), String> {
+    pub async fn send_message(&self, session_id: &str, message: UserMessage) -> Result<()> {
         let sessions = self.sessions.read().await;
         if let Some(session_state) = sessions.get(session_id) {
+            // Check if we have an LLM adapter to process messages
+            if self.llm_adapter.is_none() {
+                return Err(A2aError::NoLlmAdapter);
+            }
+
             session_state
                 .message_tx
                 .send(message)
                 .await
-                .map_err(|_| "Failed to send message to session".to_string())
+                .map_err(|_| A2aError::MessageSendFailed("Channel closed".to_string()))
         } else {
-            Err("Session not found".to_string())
+            Err(A2aError::SessionNotFound(session_id.to_string()))
         }
     }
 
@@ -126,13 +132,13 @@ impl ChatSessionManager {
     }
 
     /// Close a session
-    pub async fn close_session(&self, session_id: &str) -> Result<(), String> {
+    pub async fn close_session(&self, session_id: &str) -> Result<()> {
         let mut sessions = self.sessions.write().await;
         if sessions.remove(session_id).is_some() {
             // The abort signal will be sent when _abort_tx is dropped
             Ok(())
         } else {
-            Err("Session not found".to_string())
+            Err(A2aError::SessionNotFound(session_id.to_string()))
         }
     }
 
@@ -301,14 +307,18 @@ mod tests {
         let session = manager.create_session().await;
         let session_id = session.session_id.clone();
 
-        // Send a message
+        // Send a message without LLM adapter should fail
         let message = UserMessage {
             content: "Hello".to_string(),
             attachments: None,
             metadata: None,
         };
 
-        assert!(manager.send_message(&session_id, message).await.is_ok());
+        let result = manager.send_message(&session_id, message).await;
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, crate::error::A2aError::NoLlmAdapter));
+        }
 
         // Close session
         assert!(manager.close_session(&session_id).await.is_ok());
@@ -319,6 +329,10 @@ mod tests {
             attachments: None,
             metadata: None,
         };
-        assert!(manager.send_message(&session_id, message2).await.is_err());
+        let result2 = manager.send_message(&session_id, message2).await;
+        assert!(result2.is_err());
+        if let Err(e) = result2 {
+            assert!(matches!(e, crate::error::A2aError::SessionNotFound(_)));
+        }
     }
 }

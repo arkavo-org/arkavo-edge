@@ -185,9 +185,6 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        // Get agent metadata
-        let metadata = self.agent_metadata.read().await;
-
         // Get MCP tools and server status
         let mcp_tools = match self.mcp_registry.list_all_tools().await {
             Ok(tools) => tools.into_iter().map(|t| t.name).collect::<Vec<String>>(),
@@ -197,17 +194,27 @@ impl A2aRpcServer for A2aRpcImpl {
         let mcp_servers = self.mcp_registry.get_server_status().await;
 
         // Build metadata with MCP information
+        let (name, purpose, model, endpoint) = {
+            let metadata = self.agent_metadata.read().await;
+            (
+                metadata.name.clone(),
+                metadata.purpose.clone(),
+                metadata.model.clone(),
+                metadata.endpoint.clone(),
+            )
+        };
+
         let metadata_json = serde_json::json!({
-            "name": metadata.name,
-            "purpose": metadata.purpose,
-            "model": metadata.model,
+            "name": name,
+            "purpose": purpose,
+            "model": model,
             "mcp_tools": mcp_tools,
             "mcp_servers": mcp_servers,
         });
 
         let agent = DiscoveredAgent {
             agent_id: uuid::Uuid::new_v4(), // Generate a unique ID for the agent
-            endpoint: metadata.endpoint.clone(),
+            endpoint,
             promises: Some(vec![]), // TODO: Populate with actual promise types
             metadata: Some(metadata_json),
         };
@@ -267,7 +274,7 @@ impl A2aRpcServer for A2aRpcImpl {
         for (server_name, status) in mcp_servers {
             disclosures.push(FeatureDisclosure {
                 feature_type: FeatureType::McpServer,
-                id: format!("{} ({})", server_name, status),
+                id: format!("{server_name} ({status})"),
                 roles: None,
             });
         }
@@ -275,27 +282,24 @@ impl A2aRpcServer for A2aRpcImpl {
         // Filter based on query if provided
         if let Some(query) = query {
             if let Some(queries) = query.queries {
-                disclosures = disclosures
-                    .into_iter()
-                    .filter(|disclosure| {
-                        queries.iter().any(|q| {
-                            if q.feature_type as i32 != disclosure.feature_type as i32 {
-                                return false;
-                            }
-                            if let Some(pattern) = &q.match_pattern {
-                                // Simple wildcard matching
-                                if pattern.contains('*') {
-                                    let prefix = pattern.trim_end_matches('*');
-                                    disclosure.id.starts_with(prefix)
-                                } else {
-                                    disclosure.id == *pattern
-                                }
+                disclosures.retain(|disclosure| {
+                    queries.iter().any(|q| {
+                        if q.feature_type as i32 != disclosure.feature_type as i32 {
+                            return false;
+                        }
+                        if let Some(pattern) = &q.match_pattern {
+                            // Simple wildcard matching
+                            if pattern.contains('*') {
+                                let prefix = pattern.trim_end_matches('*');
+                                disclosure.id.starts_with(prefix)
                             } else {
-                                true
+                                disclosure.id == *pattern
                             }
-                        })
+                        } else {
+                            true
+                        }
                     })
-                    .collect();
+                });
             }
         }
 
@@ -364,9 +368,9 @@ impl A2aRpcServer for A2aRpcImpl {
             Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
-                    -32002,
+                    e.to_json_rpc_code(),
                     "Failed to send message",
-                    Some(e),
+                    Some(e.to_string()),
                 ))
             }
         }
@@ -384,9 +388,9 @@ impl A2aRpcServer for A2aRpcImpl {
             Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
-                    -32002,
+                    e.to_json_rpc_code(),
                     "Failed to close session",
-                    Some(e),
+                    Some(e.to_string()),
                 ))
             }
         }

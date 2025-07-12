@@ -30,6 +30,12 @@ pub struct StreamOrdering {
     pending_deltas: Arc<RwLock<HashMap<String, Vec<OrderedMessageDelta>>>>,
 }
 
+impl Default for StreamOrdering {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StreamOrdering {
     pub fn new() -> Self {
         Self {
@@ -109,6 +115,12 @@ pub struct HopLatency {
     pub hop_name: String,
     pub duration_ms: u64,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+impl Default for LatencyTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LatencyTracker {
