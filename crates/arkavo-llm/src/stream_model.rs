@@ -130,29 +130,29 @@ where
     use futures::StreamExt;
 
     let mut sequence = 0u64;
-    let stream = source.map(move |result| match result {
-        Ok(text) => {
-            let delta = StreamDelta {
+    let stream = source.map(move |result| {
+        let current_sequence = sequence;
+        sequence += 1;
+        match result {
+            Ok(text) => Ok(StreamDelta {
                 stream_id: stream_id.clone(),
-                sequence,
+                sequence: current_sequence,
                 delta: DeltaType::Text { content: text },
                 trace_id: trace_id.clone(),
                 timestamp: chrono::Utc::now(),
-            };
-            sequence += 1;
-            Ok(delta)
-        }
-        Err(e) => Ok(StreamDelta {
-            stream_id: stream_id.clone(),
-            sequence,
-            delta: DeltaType::Error(StreamError {
-                code: "STREAM_ERROR".to_string(),
-                message: e.to_string(),
-                retryable: false,
             }),
-            trace_id: trace_id.clone(),
-            timestamp: chrono::Utc::now(),
-        }),
+            Err(e) => Ok(StreamDelta {
+                stream_id: stream_id.clone(),
+                sequence: current_sequence,
+                delta: DeltaType::Error(StreamError {
+                    code: "STREAM_ERROR".to_string(),
+                    message: e.to_string(),
+                    retryable: false,
+                }),
+                trace_id: trace_id.clone(),
+                timestamp: chrono::Utc::now(),
+            }),
+        }
     });
 
     Box::pin(stream)
@@ -168,7 +168,7 @@ mod tests {
         let chunks = vec![
             Ok("Hello".to_string()),
             Ok(" world".to_string()),
-            Err(Error::Network("Connection lost".to_string())),
+            Err(crate::Error::Stream("Connection lost".to_string())),
         ];
 
         let source = tokio_stream::iter(chunks);
@@ -198,7 +198,7 @@ mod tests {
 
         // Error delta
         let delta3 = delta_stream.next().await.unwrap().unwrap();
-        assert_eq!(delta3.sequence, 1); // Sequence continues from last successful
+        assert_eq!(delta3.sequence, 2); // Sequence increments for each item
         match delta3.delta {
             DeltaType::Error(err) => {
                 assert_eq!(err.code, "STREAM_ERROR");

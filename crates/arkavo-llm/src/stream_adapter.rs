@@ -192,7 +192,7 @@ impl StreamLlmModel for LlmClientAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Message, Role};
+    use crate::LlmClient;
 
     #[tokio::test]
     async fn test_adapter_creation() {
