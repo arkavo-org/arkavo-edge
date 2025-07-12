@@ -72,6 +72,9 @@ pub enum TelemetryEvent {
         patch_count: usize,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
+    MetricsSnapshot {
+        snapshot: arkavo_observability::metrics_snapshot::MetricsSnapshot,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
