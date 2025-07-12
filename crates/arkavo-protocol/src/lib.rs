@@ -7,6 +7,7 @@ pub mod http;
 pub mod mcp;
 pub mod mcp_registry;
 pub mod metrics;
+pub mod metrics_subscription;
 pub mod openrpc;
 pub mod rate_limit;
 pub mod security;
@@ -15,12 +16,15 @@ pub mod transport;
 pub mod types;
 pub mod websocket;
 
-pub use config::{A2aConfig, A2aConfigBuilder, ConfigManager};
+pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
 pub use mcp_registry::{McpConnectionTrait, McpRegistry};
 pub use metrics::{MetricsCollector, RpcTimer};
+pub use metrics_subscription::{
+    MetricsApi, MetricsServiceConfig, MetricsSubscriptionServer, MetricsSubscriptionService,
+};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
     IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
