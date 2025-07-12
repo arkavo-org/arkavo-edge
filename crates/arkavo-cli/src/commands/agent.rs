@@ -438,13 +438,11 @@ fn broadcast_agent_mdns_sync(
         println!("Service name: arkavo-agent-{}", config.name);
         println!("Service type: _a2a._tcp");
         println!("Port: {port}");
-        println!("Check with: dns-sd -B _a2a._tcp local.");
 
         // The service automatically unregisters when it goes out of scope.
         // We need to keep it alive.
         loop {
             thread::sleep(Duration::from_secs(30));
-            println!("mDNS service still broadcasting...");
             // Keep reference to prevent dropping
             let _ = &service;
         }

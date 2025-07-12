@@ -7,8 +7,8 @@ use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
 use crate::types::PromiseStatus;
 use crate::types::{
-    AgentDiscoverFilter, DiscoveredAgent, PromiseCapability, PromiseDeclareResponse,
-    PromiseResponse,
+    AgentDiscoverFilter, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType, PromiseCapability, PromiseDeclareResponse, PromiseResponse,
 };
 use async_trait::async_trait;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
@@ -40,6 +40,15 @@ pub trait A2aRpc {
         &self,
         filter: Option<AgentDiscoverFilter>,
     ) -> RpcResult<Vec<DiscoveredAgent>>;
+
+    #[method(name = "discover_features_query")]
+    async fn discover_features_query(
+        &self,
+        query: Option<DiscoverFeaturesQuery>,
+    ) -> RpcResult<DiscoverFeaturesDisclose>;
+
+    #[method(name = "discover_features_disclose")]
+    async fn discover_features_disclose(&self) -> RpcResult<DiscoverFeaturesDisclose>;
 
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
@@ -176,6 +185,98 @@ impl A2aRpcServer for A2aRpcImpl {
 
         timer.success();
         Ok(vec![agent])
+    }
+
+    async fn discover_features_query(
+        &self,
+        query: Option<DiscoverFeaturesQuery>,
+    ) -> RpcResult<DiscoverFeaturesDisclose> {
+        let timer = RpcTimer::new("discover_features_query".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Build disclosures based on query
+        let mut disclosures = Vec::new();
+
+        // Add base protocol support
+        disclosures.push(FeatureDisclosure {
+            feature_type: FeatureType::Protocol,
+            id: "https://didcomm.org/discover-features/2.0".to_string(),
+            roles: Some(vec!["requester".to_string(), "responder".to_string()]),
+        });
+
+        // Add A2A protocol support
+        disclosures.push(FeatureDisclosure {
+            feature_type: FeatureType::Protocol,
+            id: "https://arkavo.org/a2a/1.0".to_string(),
+            roles: Some(vec!["agent".to_string()]),
+        });
+
+        // Add MCP tools if available
+        match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => {
+                for tool in tools {
+                    disclosures.push(FeatureDisclosure {
+                        feature_type: FeatureType::McpTool,
+                        id: tool.name,
+                        roles: None,
+                    });
+                }
+            }
+            Err(_) => {
+                // Ignore errors, just don't include tools
+            }
+        }
+
+        // Add MCP servers
+        let mcp_servers = self.mcp_registry.get_server_status().await;
+        for (server_name, status) in mcp_servers {
+            disclosures.push(FeatureDisclosure {
+                feature_type: FeatureType::McpServer,
+                id: format!("{} ({})", server_name, status),
+                roles: None,
+            });
+        }
+
+        // Filter based on query if provided
+        if let Some(query) = query {
+            if let Some(queries) = query.queries {
+                disclosures = disclosures
+                    .into_iter()
+                    .filter(|disclosure| {
+                        queries.iter().any(|q| {
+                            if q.feature_type as i32 != disclosure.feature_type as i32 {
+                                return false;
+                            }
+                            if let Some(pattern) = &q.match_pattern {
+                                // Simple wildcard matching
+                                if pattern.contains('*') {
+                                    let prefix = pattern.trim_end_matches('*');
+                                    disclosure.id.starts_with(prefix)
+                                } else {
+                                    disclosure.id == *pattern
+                                }
+                            } else {
+                                true
+                            }
+                        })
+                    })
+                    .collect();
+            }
+        }
+
+        timer.success();
+        Ok(DiscoverFeaturesDisclose { disclosures })
+    }
+
+    async fn discover_features_disclose(&self) -> RpcResult<DiscoverFeaturesDisclose> {
+        // Proactive disclosure - return all features without filtering
+        self.discover_features_query(None).await
     }
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {

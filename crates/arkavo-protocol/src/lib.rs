@@ -27,6 +27,9 @@ pub use rate_limit::{
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
+pub use types::{
+    DiscoverFeaturesDisclose, DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
+};
 pub use websocket::WebSocketTransport;
 
 pub struct Client;
