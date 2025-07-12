@@ -598,8 +598,28 @@
         
         <div class="telemetry-panel">
             <div class="telemetry-header">
-                <span>Live Telemetry</span>
+                <span>Live Telemetry & Metrics</span>
                 <button onclick="clearTelemetry()" style="padding: 4px 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer;">Clear</button>
+            </div>
+            <div class="metrics-summary" id="metricsSummary" style="padding: 12px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color); display: none;">
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 12px;">
+                    <div>
+                        <span style="color: var(--text-secondary);">Messages/sec:</span>
+                        <span id="metricsMessagesPerSec" style="font-weight: 500; font-family: monospace;">0</span>
+                    </div>
+                    <div>
+                        <span style="color: var(--text-secondary);">Error Rate:</span>
+                        <span id="metricsErrorRate" style="font-weight: 500; font-family: monospace;">0%</span>
+                    </div>
+                    <div>
+                        <span style="color: var(--text-secondary);">P95 Latency:</span>
+                        <span id="metricsP95Latency" style="font-weight: 500; font-family: monospace;">0ms</span>
+                    </div>
+                    <div>
+                        <span style="color: var(--text-secondary);">Active Sessions:</span>
+                        <span id="metricsActiveSessions" style="font-weight: 500; font-family: monospace;">0</span>
+                    </div>
+                </div>
             </div>
             <div class="telemetry-stream" id="telemetryStream"></div>
             <div class="metrics-bar">
@@ -876,6 +896,12 @@
                 case 'stateChanged':
                     content = `State updated for ${event.agent_id} (${event.patch_count} changes)`;
                     break;
+                case 'metricsSnapshot':
+                    // Update metrics display
+                    if (event.snapshot) {
+                        updateMetricsDisplay(event.snapshot);
+                    }
+                    return; // Don't add to telemetry stream
             }
             
             eventEl.innerHTML = `
@@ -972,6 +998,25 @@
                 lastMessageTime = now;
             }
         }, 250);
+        
+        // Function to update metrics display
+        function updateMetricsDisplay(snapshot) {
+            // Show metrics summary if hidden
+            const metricsSummary = document.getElementById('metricsSummary');
+            if (metricsSummary.style.display === 'none') {
+                metricsSummary.style.display = 'block';
+            }
+            
+            // Update metrics values
+            document.getElementById('metricsMessagesPerSec').textContent = snapshot.messages_per_second.toFixed(1);
+            document.getElementById('metricsErrorRate').textContent = (snapshot.error_rate * 100).toFixed(1) + '%';
+            document.getElementById('metricsP95Latency').textContent = snapshot.p95_latency_ms.toFixed(1) + 'ms';
+            document.getElementById('metricsActiveSessions').textContent = snapshot.active_sessions;
+            
+            // Update bottom metrics bar
+            document.getElementById('msgPerSec').textContent = snapshot.messages_per_second.toFixed(1);
+            document.getElementById('activeSessions').textContent = snapshot.active_sessions;
+        }
         
         // Initialize connections
         connectTelemetry();

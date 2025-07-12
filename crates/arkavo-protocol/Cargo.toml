@@ -49,6 +49,9 @@ arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 # LLM support for chat
 arkavo-llm = { path = "../arkavo-llm" }
 
+# Observability
+arkavo-observability = { path = "../arkavo-observability" }
+
 # Schema generation
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 
@@ -72,10 +75,13 @@ metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 [dev-dependencies]
 # For integration tests
 jsonrpsee = { version = "0.24", features = ["server", "macros"] }
+# For examples
+tracing-subscriber = { workspace = true }
 
 [[example]]
 name = "mdns_browser"
 required-features = ["mdns", "demo"]
+
 
 [[bin]]
 name = "export-schema"

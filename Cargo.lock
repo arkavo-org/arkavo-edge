@@ -165,16 +165,19 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
 name = "arkavo-agui"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
+ "anyhow",
+ "arkavo-dataflow",
  "arkavo-llm",
+ "arkavo-observability",
  "arkavo-protocol",
  "chrono",
  "futures",
@@ -191,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -222,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -253,11 +256,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.23.1"
+version = "0.23.2"
 
 [[package]]
 name = "arkavo-git"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "git2",
  "tempfile",
@@ -266,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -299,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -308,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -318,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -336,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -355,12 +358,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-observability"
+version = "0.23.2"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-protocol"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
  "arkavo-mcp-core",
+ "arkavo-observability",
  "async-trait",
  "chrono",
  "clap",
@@ -387,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -406,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -432,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.23.1"
+version = "0.23.2"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -461,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.23.1"
+version = "0.23.2"
 
 [[package]]
 name = "arrayvec"

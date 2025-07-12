@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::error;
 
 /// Tool information structure matching MCP protocol
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -59,7 +60,7 @@ impl McpRegistry {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to list tools from {server_name}: {e}");
+                        error!(server = %server_name, error = %e, "Failed to list tools from MCP server");
                     }
                 }
             }

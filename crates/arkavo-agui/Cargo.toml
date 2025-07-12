@@ -25,6 +25,9 @@ reqwest = { workspace = true }
 # Protocol dependencies
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-observability = { path = "../arkavo-observability" }
+arkavo-dataflow = { path = "../arkavo-dataflow" }
+anyhow = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
 # UUID for event IDs

@@ -3,7 +3,27 @@ use crate::rate_limit::RateLimitConfig;
 use crate::security::SecurityConfig;
 use crate::transport::TransportConfig;
 use anyhow::Result;
-use tracing::info;
+use arkavo_observability::config::SecureConfigProvider;
+use tracing::{info, instrument, warn};
+
+#[derive(Debug, Clone)]
+pub struct BufferConfig {
+    pub chat_delta_buffer_size: usize,
+    pub metrics_broadcast_buffer_size: usize,
+    pub telemetry_channel_buffer_size: usize,
+    pub agui_broadcast_buffer_size: usize,
+}
+
+impl Default for BufferConfig {
+    fn default() -> Self {
+        Self {
+            chat_delta_buffer_size: 32,
+            metrics_broadcast_buffer_size: 100,
+            telemetry_channel_buffer_size: 1000,
+            agui_broadcast_buffer_size: 32,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct A2aConfig {
@@ -12,6 +32,7 @@ pub struct A2aConfig {
     pub security: SecurityConfig,
     pub discovery: DiscoveryConfig,
     pub server: ServerConfig,
+    pub buffers: BufferConfig,
 }
 
 impl Default for A2aConfig {
@@ -22,6 +43,7 @@ impl Default for A2aConfig {
             security: SecurityConfig::default(),
             discovery: DiscoveryConfig::default(),
             server: ServerConfig::default(),
+            buffers: BufferConfig::default(),
         }
     }
 }
@@ -70,39 +92,111 @@ impl A2aConfig {
         Ok(())
     }
 
-    pub fn from_environment() -> Self {
+    /// Load configuration from secure config provider instead of direct environment access
+    #[instrument(skip(config_provider))]
+    pub fn from_secure_config(config_provider: &SecureConfigProvider) -> Result<Self> {
         let mut config = Self::default();
 
-        if let Ok(agent_id) = std::env::var("A2A_AGENT_ID") {
+        // Load agent ID with validation
+        if let Some(agent_id) = config_provider.get_config("A2A_AGENT_ID")? {
             config.agent_id = agent_id;
         }
 
-        if let Ok(timeout) = std::env::var("A2A_TIMEOUT_MS") {
-            if let Ok(timeout_ms) = timeout.parse::<u64>() {
-                config.transport.timeout_ms = timeout_ms;
+        // Load timeout with validation and parsing
+        if let Some(timeout_str) = config_provider.get_config("A2A_TIMEOUT_MS")? {
+            match timeout_str.parse::<u64>() {
+                Ok(timeout_ms) => {
+                    config.transport.timeout_ms = timeout_ms;
+                    info!(timeout_ms = timeout_ms, "Transport timeout configured");
+                }
+                Err(e) => {
+                    warn!(timeout_str = %timeout_str, error = %e, "Invalid timeout value, using default");
+                }
             }
         }
 
-        if let Ok(port) = std::env::var("A2A_SERVER_PORT") {
-            if let Ok(port_num) = port.parse::<u16>() {
-                config.server.port = port_num;
-                config.server.enabled = true;
+        // Load server port with validation
+        if let Some(port_str) = config_provider.get_config("A2A_SERVER_PORT")? {
+            match port_str.parse::<u16>() {
+                Ok(port_num) => {
+                    config.server.port = port_num;
+                    config.server.enabled = true;
+                    info!(port = port_num, "Server port configured and enabled");
+                }
+                Err(e) => {
+                    warn!(port_str = %port_str, error = %e, "Invalid port value, using default");
+                }
             }
         }
 
-        if let Ok(discovery_method) = std::env::var("A2A_DISCOVERY_METHOD") {
+        // Load discovery method with validation
+        if let Some(discovery_method) = config_provider.get_config("A2A_DISCOVERY_METHOD")? {
             config.discovery.method = match discovery_method.to_lowercase().as_str() {
                 "static" => DiscoveryMethod::Static,
                 "dns" => DiscoveryMethod::Dns,
-                _ => DiscoveryMethod::Static,
+                _ => {
+                    warn!(method = %discovery_method, "Unknown discovery method, using static");
+                    DiscoveryMethod::Static
+                }
             };
+            info!(method = %discovery_method, "Discovery method configured");
+        }
+
+        // Load buffer sizes with validation
+        if let Some(size_str) = config_provider.get_config("A2A_CHAT_DELTA_BUFFER_SIZE")? {
+            if let Ok(size) = size_str.parse::<usize>() {
+                config.buffers.chat_delta_buffer_size = size;
+                info!(size = size, "Chat delta buffer size configured");
+            }
+        }
+
+        if let Some(size_str) = config_provider.get_config("A2A_METRICS_BROADCAST_BUFFER_SIZE")? {
+            if let Ok(size) = size_str.parse::<usize>() {
+                config.buffers.metrics_broadcast_buffer_size = size;
+                info!(size = size, "Metrics broadcast buffer size configured");
+            }
+        }
+
+        if let Some(size_str) = config_provider.get_config("A2A_TELEMETRY_CHANNEL_BUFFER_SIZE")? {
+            if let Ok(size) = size_str.parse::<usize>() {
+                config.buffers.telemetry_channel_buffer_size = size;
+                info!(size = size, "Telemetry channel buffer size configured");
+            }
+        }
+
+        if let Some(size_str) = config_provider.get_config("A2A_AGUI_BROADCAST_BUFFER_SIZE")? {
+            if let Ok(size) = size_str.parse::<usize>() {
+                config.buffers.agui_broadcast_buffer_size = size;
+                info!(size = size, "AG-UI broadcast buffer size configured");
+            }
         }
 
         info!(
-            "Loaded A2A configuration from environment for agent: {}",
-            config.agent_id
+            agent_id = %config.agent_id,
+            server_enabled = config.server.enabled,
+            "A2A configuration loaded from secure config provider"
         );
-        config
+
+        Ok(config)
+    }
+
+    /// DEPRECATED: Legacy environment loading method - use from_secure_config instead
+    #[deprecated(note = "Use from_secure_config instead for better security")]
+    pub fn from_environment() -> Self {
+        warn!(
+            "Using deprecated from_environment method - consider migrating to from_secure_config"
+        );
+
+        // Create a temporary secure config provider with env fallback enabled
+        let config_provider = SecureConfigProvider::new().with_env_fallback(true);
+
+        match Self::from_secure_config(&config_provider) {
+            Ok(config) => config,
+            Err(e) => {
+                warn!(error = %e, "Failed to load config via secure provider, using defaults");
+                Self::default()
+            }
+        }
     }
 }
 
@@ -155,6 +249,26 @@ impl A2aConfigBuilder {
         self
     }
 
+    pub fn chat_delta_buffer_size(mut self, size: usize) -> Self {
+        self.config.buffers.chat_delta_buffer_size = size;
+        self
+    }
+
+    pub fn metrics_broadcast_buffer_size(mut self, size: usize) -> Self {
+        self.config.buffers.metrics_broadcast_buffer_size = size;
+        self
+    }
+
+    pub fn telemetry_channel_buffer_size(mut self, size: usize) -> Self {
+        self.config.buffers.telemetry_channel_buffer_size = size;
+        self
+    }
+
+    pub fn agui_broadcast_buffer_size(mut self, size: usize) -> Self {
+        self.config.buffers.agui_broadcast_buffer_size = size;
+        self
+    }
+
     pub fn build(self) -> Result<A2aConfig> {
         self.config.validate()?;
         Ok(self.config)
@@ -170,14 +284,36 @@ fn generate_agent_id() -> String {
 
 pub struct ConfigManager {
     config: A2aConfig,
+    secure_provider: Option<SecureConfigProvider>,
 }
 
 impl ConfigManager {
     pub fn new(config: A2aConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            secure_provider: None,
+        }
     }
 
+    /// Create config manager with secure config provider
+    pub fn with_secure_provider(mut self, provider: SecureConfigProvider) -> Self {
+        self.secure_provider = Some(provider);
+        self
+    }
+
+    /// Create from secure config provider
+    pub fn from_secure_config(provider: SecureConfigProvider) -> Result<Self> {
+        let config = A2aConfig::from_secure_config(&provider)?;
+        Ok(Self {
+            config,
+            secure_provider: Some(provider),
+        })
+    }
+
+    /// DEPRECATED: Use from_secure_config instead
+    #[deprecated(note = "Use from_secure_config instead for better security")]
     pub fn from_environment() -> Self {
+        #[allow(deprecated)]
         Self::new(A2aConfig::from_environment())
     }
 
@@ -194,8 +330,27 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// Reload configuration from secure provider
+    pub fn reload_from_secure_config(&mut self) -> Result<()> {
+        if let Some(provider) = &self.secure_provider {
+            self.config = A2aConfig::from_secure_config(provider)?;
+            info!("Reloaded configuration from secure config provider");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "No secure config provider available for reload"
+            ))
+        }
+    }
+
+    /// DEPRECATED: Use reload_from_secure_config instead
+    #[deprecated(note = "Use reload_from_secure_config instead for better security")]
     pub fn reload_from_environment(&mut self) {
-        self.config = A2aConfig::from_environment();
+        warn!("Using deprecated reload_from_environment method");
+        #[allow(deprecated)]
+        {
+            self.config = A2aConfig::from_environment();
+        }
         info!("Reloaded configuration from environment");
     }
 }
@@ -263,5 +418,62 @@ mod tests {
         assert_eq!(manager.get().agent_id, original_id);
         assert!(manager.get().server.enabled);
         assert_eq!(manager.get().server.port, 10000);
+    }
+
+    #[test]
+    fn test_secure_config_integration() {
+        use arkavo_observability::config::{ConfigValidator, SecureConfigProvider};
+
+        let mut provider = SecureConfigProvider::new();
+
+        // Set up secure configuration values
+        provider
+            .set_config(
+                "A2A_AGENT_ID",
+                "secure-test-agent",
+                ConfigValidator::required(),
+            )
+            .unwrap();
+
+        provider
+            .set_config(
+                "A2A_SERVER_PORT",
+                "9999",
+                ConfigValidator::default().with_pattern(r"^\d+$"),
+            )
+            .unwrap();
+
+        provider
+            .set_config(
+                "A2A_DISCOVERY_METHOD",
+                "dns",
+                ConfigValidator::default().with_pattern(r"^(static|dns)$"),
+            )
+            .unwrap();
+
+        // Load config from secure provider
+        let config = A2aConfig::from_secure_config(&provider).unwrap();
+
+        assert_eq!(config.agent_id, "secure-test-agent");
+        assert_eq!(config.server.port, 9999);
+        assert!(config.server.enabled);
+        assert!(matches!(config.discovery.method, DiscoveryMethod::Dns));
+    }
+
+    #[test]
+    fn test_secure_config_manager() {
+        use arkavo_observability::config::{ConfigValidator, SecureConfigProvider};
+
+        let mut provider = SecureConfigProvider::new();
+        provider
+            .set_config(
+                "A2A_AGENT_ID",
+                "manager-test-agent",
+                ConfigValidator::required(),
+            )
+            .unwrap();
+
+        let manager = ConfigManager::from_secure_config(provider).unwrap();
+        assert_eq!(manager.get().agent_id, "manager-test-agent");
     }
 }
