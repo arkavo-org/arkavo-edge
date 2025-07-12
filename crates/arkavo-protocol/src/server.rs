@@ -7,14 +7,21 @@ use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
 use crate::types::PromiseStatus;
 use crate::types::{
-    AgentDiscoverFilter, ChatRequest, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
-    DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta, MessageDeltaContent,
-    PromiseCapability, PromiseDeclareResponse, PromiseResponse,
+    AgentDiscoverFilter, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
+    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta,
+    MessageDeltaContent, PromiseCapability, PromiseDeclareResponse, PromiseResponse,
+    UserMessage,
 };
+use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
+use futures::StreamExt;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::types::ErrorObjectOwned;
-use jsonrpsee::{core::{RpcResult, SubscriptionResult}, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage};
+use jsonrpsee::{
+    PendingSubscriptionSink, SubscriptionMessage,
+    core::{RpcResult, SubscriptionResult},
+    proc_macros::rpc,
+};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
@@ -54,6 +61,23 @@ pub trait A2aRpc {
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
 
+    /// Open a new chat session
+    #[method(name = "chat_open")]
+    async fn chat_open(&self, request: ChatOpenRequest) -> RpcResult<ChatSession>;
+
+    /// Send a message within an existing chat session
+    #[method(name = "chat_send")]
+    async fn chat_send(&self, session_id: String, message: UserMessage) -> RpcResult<()>;
+
+    /// Close a chat session
+    #[method(name = "chat_close")]
+    async fn chat_close(&self, session_id: String) -> RpcResult<()>;
+
+    /// Subscribe to message deltas for a session
+    #[subscription(name = "chat_stream", unsubscribe = "chat_stream_unsubscribe", item = MessageDelta)]
+    async fn chat_stream(&self, session_id: String) -> SubscriptionResult;
+
+    /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
     async fn chat_subscribe(&self, request: ChatRequest) -> SubscriptionResult;
 }
@@ -63,9 +87,11 @@ pub struct A2aRpcImpl {
     metrics: Arc<MetricsCollector>,
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    llm_adapter: Option<Arc<LlmClientAdapter>>,
+    chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct AgentMetadata {
     name: String,
     purpose: String,
@@ -303,10 +329,119 @@ impl A2aRpcServer for A2aRpcImpl {
         }
     }
 
+    async fn chat_open(&self, _request: ChatOpenRequest) -> RpcResult<ChatSession> {
+        let timer = RpcTimer::new("chat_open".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Create a new chat session
+        let session = self.chat_sessions.create_session().await;
+
+        timer.success();
+        Ok(session)
+    }
+
+    async fn chat_send(&self, session_id: String, message: UserMessage) -> RpcResult<()> {
+        let timer = RpcTimer::new("chat_send".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Send message to the session
+        match self.chat_sessions.send_message(&session_id, message).await {
+            Ok(()) => {
+                timer.success();
+                Ok(())
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32002,
+                    "Failed to send message",
+                    Some(e),
+                ))
+            }
+        }
+    }
+
+    async fn chat_close(&self, session_id: String) -> RpcResult<()> {
+        let timer = RpcTimer::new("chat_close".to_string(), self.metrics.clone());
+
+        // Close the session
+        match self.chat_sessions.close_session(&session_id).await {
+            Ok(()) => {
+                timer.success();
+                Ok(())
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32002,
+                    "Failed to close session",
+                    Some(e),
+                ))
+            }
+        }
+    }
+
+    async fn chat_stream(
+        &self,
+        sink: PendingSubscriptionSink,
+        session_id: String,
+    ) -> SubscriptionResult {
+        let timer = RpcTimer::new("chat_stream".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        let sink = match sink.accept().await {
+            Ok(sink) => sink,
+            Err(_) => {
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        // Get delta stream for this session
+        if let Some(mut delta_rx) = self.chat_sessions.get_delta_stream(&session_id).await {
+            // Spawn a task to forward deltas to the subscription
+            tokio::spawn(async move {
+                while let Some(delta) = delta_rx.recv().await {
+                    if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                        if sink.send(msg).await.is_err() {
+                            break; // Client disconnected
+                        }
+                    }
+                }
+            });
+
+            timer.success();
+            Ok(())
+        } else {
+            timer.error();
+            // Session not found - subscription will be closed
+            Ok(())
+        }
+    }
+
     async fn chat_subscribe(
         &self,
         sink: PendingSubscriptionSink,
-        _request: ChatRequest,
+        request: ChatRequest,
     ) -> SubscriptionResult {
         let timer = RpcTimer::new("chat_subscribe".to_string(), self.metrics.clone());
 
@@ -328,52 +463,116 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Generate a unique message ID for this conversation
         let message_id = uuid::Uuid::new_v4().to_string();
+        let trace_id = uuid::Uuid::new_v4().to_string();
+
+        // Clone LLM adapter if available
+        let llm_adapter = self.llm_adapter.clone();
+        let agent_metadata = self.agent_metadata.read().await.clone();
 
         // Spawn a task to handle the streaming response
         tokio::spawn(async move {
-            // For stub implementation, send a few demo messages
-            #[cfg(feature = "stub_handlers")]
-            {
-                let messages = vec![
-                    "Hello! I'm processing your request.",
-                    "\n\nThis is a streaming response demonstration.",
-                    "\n\nEach part arrives as a separate delta.",
-                ];
+            if let Some(adapter) = llm_adapter {
+                // Create chat request
+                let chat_request = arkavo_llm::ChatRequest::new(request.message);
 
-                for (i, text) in messages.iter().enumerate() {
-                    let delta = MessageDelta {
-                        message_id: message_id.clone(),
-                        delta: MessageDeltaContent::Text {
-                            text: text.to_string(),
-                        },
-                        timestamp: chrono::Utc::now(),
-                    };
+                // Start streaming from LLM
+                match adapter.stream_chat(chat_request, trace_id).await {
+                    Ok((_stream_id, mut delta_stream)) => {
+                        while let Some(delta_result) = delta_stream.next().await {
+                            match delta_result {
+                                Ok(stream_delta) => {
+                                    // Convert StreamDelta to MessageDelta
+                                    let message_delta = match stream_delta.delta {
+                                        DeltaType::Text { content } => MessageDelta {
+                                            session_id: request
+                                                .session_id
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            message_id: message_id.clone(),
+                                            sequence: 0,
+                                            delta: MessageDeltaContent::Text { text: content },
+                                            timestamp: stream_delta.timestamp,
+                                        },
+                                        DeltaType::ToolCall {
+                                            id,
+                                            name,
+                                            arguments,
+                                        } => MessageDelta {
+                                            session_id: request
+                                                .session_id
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            message_id: message_id.clone(),
+                                            sequence: 0,
+                                            delta: MessageDeltaContent::ToolCall {
+                                                tool_call_id: id,
+                                                delta: serde_json::to_string(&serde_json::json!({
+                                                    "name": name,
+                                                    "arguments": arguments
+                                                }))
+                                                .unwrap_or_default(),
+                                            },
+                                            timestamp: stream_delta.timestamp,
+                                        },
+                                        DeltaType::Error(err) => {
+                                            eprintln!(
+                                                "Stream error: {} - {}",
+                                                err.code, err.message
+                                            );
+                                            continue;
+                                        }
+                                        DeltaType::StreamEnd { reason: _ } => {
+                                            break;
+                                        }
+                                    };
 
-                    // Send the delta using the subscription sink
-                    if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
-                        if sink.send(msg).await.is_err() {
-                            break; // Client disconnected
+                                    // Send the delta using the subscription sink
+                                    if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
+                                    {
+                                        if sink.send(msg).await.is_err() {
+                                            break; // Client disconnected
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Delta stream error: {e}");
+                                    break;
+                                }
+                            }
                         }
                     }
+                    Err(e) => {
+                        eprintln!("Failed to start LLM stream: {e}");
+                        let error_delta = MessageDelta {
+                            session_id: request.session_id.clone().unwrap_or_default(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Text {
+                                text: format!("Error: Failed to start LLM stream - {e}"),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
 
-                    // Small delay between messages for demo effect
-                    if i < messages.len() - 1 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+                            let _ = sink.send(msg).await;
+                        }
                     }
                 }
-            }
-
-            #[cfg(not(feature = "stub_handlers"))]
-            {
-                // In production, this would connect to the actual LLM
+            } else {
+                // No LLM configured - send error message
                 let error_delta = MessageDelta {
+                    session_id: request.session_id.clone().unwrap_or_default(),
                     message_id: message_id.clone(),
+                    sequence: 0,
                     delta: MessageDeltaContent::Text {
-                        text: "Chat streaming not yet implemented in production mode.".to_string(),
+                        text: format!(
+                            "Error: No LLM configured for agent '{}'. Model: '{}'",
+                            agent_metadata.name, agent_metadata.model
+                        ),
                     },
                     timestamp: chrono::Utc::now(),
                 };
-                
+
                 if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
                     let _ = sink.send(msg).await;
                 }
@@ -389,6 +588,7 @@ pub struct A2aServer {
     config: ServerConfig,
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
 }
 
 impl A2aServer {
@@ -397,6 +597,7 @@ impl A2aServer {
             config,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -406,10 +607,58 @@ impl A2aServer {
 
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
         let mut metadata = self.agent_metadata.write().await;
-        metadata.name = name;
+        metadata.name.clone_from(&name);
         metadata.purpose = purpose;
-        metadata.model = model;
+        metadata.model.clone_from(&model);
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
+        drop(metadata); // Release lock before creating LLM adapter
+
+        // Create LLM adapter from model URL
+        if let Ok(adapter) = self.create_llm_adapter(&model) {
+            *self.llm_adapter.write().await = Some(adapter);
+            info!(
+                "Created LLM adapter for agent '{}' with model: {}",
+                name, model
+            );
+        } else {
+            eprintln!("Failed to create LLM adapter for model: {model}");
+        }
+    }
+
+    fn create_llm_adapter(&self, model_url: &str) -> Result<Arc<LlmClientAdapter>> {
+        // Parse the model URL to extract provider and configuration
+        // Format: provider://host:port/model
+        if let Some((provider, rest)) = model_url.split_once("://") {
+            match provider {
+                "ollama" => {
+                    // Set environment variables for Ollama client
+                    if let Some((host_port, model_name)) = rest.rsplit_once('/') {
+                        unsafe {
+                            std::env::set_var("LLM_PROVIDER", "ollama");
+                            std::env::set_var("OLLAMA_BASE_URL", format!("http://{host_port}"));
+                            std::env::set_var("OLLAMA_MODEL", model_name);
+                        }
+
+                        // Create LLM client from environment
+                        let client = LlmClient::from_env().map_err(|e| {
+                            A2aError::InvalidRequest(format!("Failed to create LLM client: {e}"))
+                        })?;
+                        Ok(Arc::new(LlmClientAdapter::new(client)))
+                    } else {
+                        Err(A2aError::InvalidRequest(format!(
+                            "Invalid Ollama URL format: {model_url}"
+                        )))
+                    }
+                }
+                _ => Err(A2aError::InvalidRequest(format!(
+                    "Unsupported LLM provider: {provider}"
+                ))),
+            }
+        } else {
+            Err(A2aError::InvalidRequest(format!(
+                "Invalid model URL format: {model_url}"
+            )))
+        }
     }
 
     pub async fn start(&self) -> Result<ServerHandle> {
@@ -427,11 +676,17 @@ impl A2aServer {
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(true)); // TODO: Make configurable
+        let llm_adapter = self.llm_adapter.read().await.clone();
+        let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::new(
+            llm_adapter.clone(),
+        ));
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
             mcp_registry: self.mcp_registry.clone(),
             agent_metadata: self.agent_metadata.clone(),
+            llm_adapter,
+            chat_sessions,
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -464,6 +719,8 @@ mod tests {
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: None,
+            chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance
             .promise_request(
@@ -500,6 +757,8 @@ mod tests {
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: None,
+            chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance
             .promise_declare(
@@ -539,6 +798,8 @@ mod tests {
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: None,
+            chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -570,6 +831,8 @@ mod tests {
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: None,
+            chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -598,6 +861,8 @@ mod tests {
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+            llm_adapter: None,
+            chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
 
         // First request should succeed

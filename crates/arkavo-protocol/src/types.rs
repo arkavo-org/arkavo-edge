@@ -194,16 +194,95 @@ fn example_promise_type() -> &'static str {
     "data_access"
 }
 
-/// Chat request for streaming conversation
+/// Request to open a new chat session
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChatOpenRequest {
+    /// Optional initial context for the conversation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+
+    /// Optional metadata about the chat session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Response from opening a chat session
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChatSession {
+    /// Unique session ID for this chat
+    pub session_id: String,
+
+    /// Agent capabilities for this session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ChatCapabilities>,
+
+    /// Timestamp when session was created
+    pub created_at: DateTime<Utc>,
+}
+
+/// Capabilities of the chat session
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChatCapabilities {
+    /// Maximum context length
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_context_length: Option<u32>,
+
+    /// Supported message types
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_message_types: Option<Vec<String>>,
+
+    /// Whether file attachments are supported
+    #[serde(default)]
+    pub supports_attachments: bool,
+
+    /// Whether tool calls are supported
+    #[serde(default)]
+    pub supports_tools: bool,
+}
+
+/// User message to send within a chat session
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UserMessage {
+    /// The user's message text
+    pub content: String,
+
+    /// Optional attachments
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<Attachment>>,
+
+    /// Optional message metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Attachment for messages
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Attachment {
+    /// MIME type of the attachment
+    pub mime_type: String,
+
+    /// Base64-encoded content or URL
+    pub content: String,
+
+    /// Whether content is a URL (true) or base64 data (false)
+    #[serde(default)]
+    pub is_url: bool,
+
+    /// Optional filename
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+/// Legacy chat request (to be deprecated)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChatRequest {
     /// The user's message
     pub message: String,
-    
+
     /// Optional context for the conversation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Value>,
-    
+
     /// Optional session ID for multi-turn conversations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -212,12 +291,18 @@ pub struct ChatRequest {
 /// Message delta for streaming responses
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MessageDelta {
+    /// Session ID this delta belongs to
+    pub session_id: String,
+
     /// The message ID this delta belongs to
     pub message_id: String,
-    
+
+    /// Sequence number for ordering
+    pub sequence: u64,
+
     /// The delta content
     pub delta: MessageDeltaContent,
-    
+
     /// Timestamp of the delta
     pub timestamp: DateTime<Utc>,
 }
@@ -238,4 +323,32 @@ pub enum MessageDeltaContent {
         /// Delta content for the tool call
         delta: String,
     },
+    /// Stream ended
+    StreamEnd {
+        /// Reason for ending
+        reason: StreamEndReason,
+    },
+    /// Error occurred
+    Error {
+        /// Error code
+        code: String,
+        /// Error message
+        message: String,
+    },
+}
+
+/// Reason for stream ending
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamEndReason {
+    /// Completed normally
+    Complete,
+    /// Reached max tokens
+    MaxTokens,
+    /// User requested abort
+    UserAbort,
+    /// Error occurred
+    Error,
+    /// Session closed
+    SessionClosed,
 }

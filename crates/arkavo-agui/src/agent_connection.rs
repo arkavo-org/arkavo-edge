@@ -1,11 +1,14 @@
+use crate::streaming::{LatencyTracker, OrderedMessageDelta, StreamOrdering};
 use crate::types::{ChatRequest, SubscriptionHandle};
-use arkavo_protocol::types::{MessageDelta, MessageDeltaContent};
+use arkavo_protocol::types::{
+    ChatOpenRequest, ChatSession, MessageDelta, MessageDeltaContent, UserMessage,
+};
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, broadcast};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::{Duration, sleep};
 
 /// Represents a persistent connection to an AI agent
@@ -17,7 +20,10 @@ pub struct AgentConnection {
     status: Arc<RwLock<ConnectionStatus>>,
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
     active_subscriptions: Arc<RwLock<HashMap<String, SubscriptionHandle>>>,
-    chat_broadcasts: Arc<RwLock<HashMap<String, broadcast::Sender<MessageDelta>>>>,
+    chat_sessions: Arc<RwLock<HashMap<String, String>>>, // agent_id -> session_id
+    chat_broadcasts: Arc<RwLock<HashMap<String, broadcast::Sender<OrderedMessageDelta>>>>,
+    _stream_ordering: Arc<StreamOrdering>,
+    _latency_tracker: Arc<LatencyTracker>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,7 +94,10 @@ impl AgentConnection {
             status: Arc::new(RwLock::new(ConnectionStatus::Connecting)),
             telemetry_tx,
             active_subscriptions: Arc::new(RwLock::new(HashMap::new())),
+            chat_sessions: Arc::new(RwLock::new(HashMap::new())),
             chat_broadcasts: Arc::new(RwLock::new(HashMap::new())),
+            _stream_ordering: Arc::new(StreamOrdering::new()),
+            _latency_tracker: Arc::new(LatencyTracker::new()),
         }
     }
 
@@ -188,25 +197,85 @@ impl AgentConnection {
     }
 
     async fn wait_for_disconnection(&self) {
-        // In a real implementation, this would monitor the connection health
-        // For now, we'll just wait indefinitely
+        // Monitor connection health with exponential backoff
+        let mut check_interval = Duration::from_secs(5);
+        let max_interval = Duration::from_secs(30);
+        let mut consecutive_failures = 0;
+        const MAX_FAILURES: u32 = 3;
+
         loop {
-            sleep(Duration::from_secs(30)).await;
+            sleep(check_interval).await;
 
             // Check if client is still healthy
-            if let Some(client) = &*self.client.read().await {
+            let is_healthy = if let Some(client) = &*self.client.read().await {
                 // Try a simple ping or method call to check connection
                 match client
                     .request::<Value, _>("rpc.discover", rpc_params![])
                     .await
                 {
-                    Ok(_) => continue, // Still connected
-                    Err(_) => break,   // Connection lost
+                    Ok(_) => {
+                        consecutive_failures = 0;
+                        check_interval = Duration::from_secs(5); // Reset to fast check
+                        true
+                    }
+                    Err(e) => {
+                        consecutive_failures += 1;
+                        eprintln!(
+                            "Agent {} health check failed ({}): {}",
+                            self.agent_id, consecutive_failures, e
+                        );
+                        false
+                    }
                 }
             } else {
+                // No client
+                false
+            };
+
+            if !is_healthy && consecutive_failures >= MAX_FAILURES {
+                // Connection definitively lost
+                eprintln!(
+                    "Agent {} connection lost after {} failures",
+                    self.agent_id, consecutive_failures
+                );
+
+                // Send terminal deltas to all active chat broadcasts
+                self.notify_connection_lost().await;
                 break;
             }
+
+            // Exponential backoff for next check
+            if !is_healthy {
+                check_interval = std::cmp::min(check_interval * 2, max_interval);
+            }
         }
+    }
+
+    async fn notify_connection_lost(&self) {
+        let broadcasts = self.chat_broadcasts.read().await;
+
+        for (agent_id, broadcast_tx) in broadcasts.iter() {
+            // Create a terminal delta indicating connection lost
+            let terminal_delta = OrderedMessageDelta {
+                delta: MessageDelta {
+                    session_id: String::new(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::Text {
+                        text: "\n\n[Connection to agent lost]".to_string(),
+                    },
+                    timestamp: chrono::Utc::now(),
+                },
+                sequence: u64::MAX, // Special sequence for terminal messages
+                trace_id: uuid::Uuid::new_v4().to_string(),
+                agent_id: agent_id.clone(),
+            };
+
+            // Send to all subscribers
+            let _ = broadcast_tx.send(terminal_delta);
+        }
+
+        // No local LLM streams to abort - all handled by agent's protocol server
     }
 
     pub async fn get_status(&self) -> ConnectionStatus {
@@ -269,7 +338,7 @@ impl AgentConnection {
         if agent_id != self.agent_id {
             return Err("Agent ID mismatch".into());
         }
-        
+
         // Create or get broadcast channel for this agent
         let broadcast_tx = {
             let mut broadcasts = self.chat_broadcasts.write().await;
@@ -299,18 +368,35 @@ impl AgentConnection {
         let sub_id_for_task = sub_id.clone();
 
         // Create chat request with session ID
-        let request = ChatRequest {
+        let _request = ChatRequest {
             message: String::new(), // Initial subscription
             context: None,
             session_id: Some(sub_id.clone()),
         };
-        
-        // Start the subscription to the agent
+
+        // Open a new chat session
+        let open_request = ChatOpenRequest {
+            context: None,
+            metadata: None,
+        };
+
+        let session: ChatSession = client
+            .request("chat_open", rpc_params![open_request])
+            .await
+            .map_err(|e| format!("Failed to open chat session: {}", e))?;
+
+        // Store the session ID
+        self.chat_sessions
+            .write()
+            .await
+            .insert(agent_id.clone(), session.session_id.clone());
+
+        // Start the subscription to the agent's session
         let mut subscription = client
             .subscribe::<MessageDelta, _>(
-                "chat_subscribe",
-                rpc_params![request],
-                "chat_unsubscribe",
+                "chat_stream",
+                rpc_params![session.session_id.clone()],
+                "chat_stream_unsubscribe",
             )
             .await?;
 
@@ -324,8 +410,18 @@ impl AgentConnection {
                     delta_result = subscription.next() => {
                         match delta_result {
                             Some(Ok(delta)) => {
+                                // Convert to ordered delta with sequence tracking
+                                // Note: Protocol server doesn't provide sequence numbers yet,
+                                // so we'll use timestamp-based ordering for now
+                                let ordered_delta = OrderedMessageDelta {
+                                    delta,
+                                    sequence: 0, // TODO: Get from protocol server
+                                    trace_id: uuid::Uuid::new_v4().to_string(),
+                                    agent_id: agent_id_for_task.clone(),
+                                };
+
                                 // Broadcast to all UIs watching this session
-                                let _ = broadcast_tx.send(delta);
+                                let _ = broadcast_tx.send(ordered_delta);
 
                                 // Send telemetry
                                 let _ = telemetry_tx
@@ -359,7 +455,7 @@ impl AgentConnection {
 
             // Cleanup
             active_subs.write().await.remove(&sub_id_for_task);
-            
+
             // Remove broadcast channel if no more subscribers
             let mut broadcasts = chat_broadcasts.write().await;
             if let Some(tx) = broadcasts.get(&agent_id_for_task) {
@@ -373,18 +469,31 @@ impl AgentConnection {
         let ui_tx_clone = ui_tx.clone();
         let agent_id_for_forward = agent_id.clone();
         tokio::spawn(async move {
-            while let Ok(delta) = broadcast_rx.recv().await {
+            while let Ok(ordered_delta) = broadcast_rx.recv().await {
                 let event = crate::types::AgUiEvent::MessageDelta {
                     agent_id: agent_id_for_forward.clone(),
-                    message_id: delta.message_id,
-                    delta: match delta.delta {
+                    message_id: ordered_delta.delta.message_id,
+                    delta: match ordered_delta.delta.delta {
                         MessageDeltaContent::Text { text } => {
                             crate::types::MessageDeltaContent::Text { text }
                         }
-                        MessageDeltaContent::ToolCall { tool_call_id, delta } => {
-                            crate::types::MessageDeltaContent::ToolCall {
-                                tool_call_id,
-                                delta,
+                        MessageDeltaContent::ToolCall {
+                            tool_call_id,
+                            delta,
+                        } => crate::types::MessageDeltaContent::ToolCall {
+                            tool_call_id,
+                            delta,
+                        },
+                        MessageDeltaContent::StreamEnd { .. } => {
+                            // Convert stream end to text for UI
+                            crate::types::MessageDeltaContent::Text {
+                                text: "[Stream ended]".to_string(),
+                            }
+                        }
+                        MessageDeltaContent::Error { code, message } => {
+                            // Convert error to text for UI
+                            crate::types::MessageDeltaContent::Text {
+                                text: format!("[Error {}] {}", code, message),
                             }
                         }
                     },
@@ -403,7 +512,7 @@ impl AgentConnection {
             let mut subs = self.active_subscriptions.write().await;
             subs.insert(sub_id.clone(), sub_handle);
         }
-        
+
         // Return a new handle with just the ID for the caller
         Ok(SubscriptionHandle {
             id: sub_id,
@@ -421,53 +530,71 @@ impl AgentConnection {
         if agent_id != self.agent_id {
             return Err("Agent ID mismatch".into());
         }
-        
-        // Get the broadcast channel for this agent
-        let broadcast_tx = {
+
+        // Get the broadcast channel for this agent (not used in new protocol but kept for consistency)
+        let _broadcast_tx = {
             let broadcasts = self.chat_broadcasts.read().await;
             broadcasts
                 .get(agent_id)
                 .ok_or("No active chat subscription for this agent")?
                 .clone()
         };
-        
-        // For now, we'll create a simple echo response
-        // In a real implementation, this would send to the agent
-        let message_id = uuid::Uuid::new_v4().to_string();
-        let delta = MessageDelta {
-            message_id,
-            delta: MessageDeltaContent::Text {
-                text: format!("Echo: {}", text),
-            },
-            timestamp: chrono::Utc::now(),
+
+        let _message_id = uuid::Uuid::new_v4().to_string();
+        let _trace_id = uuid::Uuid::new_v4().to_string();
+
+        // Get the session ID for this agent
+        let session_id = {
+            let sessions = self.chat_sessions.read().await;
+            sessions
+                .get(agent_id)
+                .cloned()
+                .ok_or("No active chat session for this agent")?
         };
-        
-        // Broadcast to all UIs
-        let _ = broadcast_tx.send(delta);
-        
+
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        // Create user message
+        let user_message = UserMessage {
+            content: text,
+            attachments: None,
+            metadata: None,
+        };
+
+        // Send the message to the session
+        client
+            .request::<String, _>("chat_send", rpc_params![session_id, user_message])
+            .await
+            .map_err(|e| format!("Failed to send message: {}", e))?;
+
         Ok(())
     }
-    
+
     /// Unsubscribe from chat for a specific agent
-    pub async fn unsubscribe_chat(&self, agent_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn unsubscribe_chat(
+        &self,
+        agent_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Remove the broadcast channel
         self.chat_broadcasts.write().await.remove(agent_id);
-        
-        // Cancel any active subscriptions for this agent
-        // (In a real implementation, we'd track subscription IDs per agent)
-        
+
+        // No local LLM streams to cancel - all handled by agent's protocol server
+
         Ok(())
     }
-    
+
     /// Cancel all active subscriptions
     pub async fn cancel_all_subscriptions(&self) {
         let mut subs = self.active_subscriptions.write().await;
         for (_, mut handle) in subs.drain() {
             handle.cancel();
         }
-        
+
         // Clear all broadcast channels
         self.chat_broadcasts.write().await.clear();
+
+        // No local LLM streams to abort - all handled by agent's protocol server
     }
 }
 
@@ -476,13 +603,13 @@ impl Drop for AgentConnection {
         // Cancel all subscriptions when the connection is dropped
         let subs = self.active_subscriptions.clone();
         let broadcasts = self.chat_broadcasts.clone();
-        
+
         tokio::spawn(async move {
             let mut subs_guard = subs.write().await;
             for (_, mut handle) in subs_guard.drain() {
                 handle.cancel();
             }
-            
+
             broadcasts.write().await.clear();
         });
     }

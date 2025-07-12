@@ -26,7 +26,7 @@ impl ConnectionHandler {
         self.event_counter += 1;
         format!("{}-{}", self.session_id, self.event_counter)
     }
-    
+
     /// Clean up resources when connection is closed
     pub async fn cleanup(&mut self) {
         // Clear messages and state

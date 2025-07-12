@@ -31,6 +31,8 @@ async-trait = { workspace = true }
 tokio-stream = "0.1"
 base64 = { workspace = true }
 anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
 
 # Local inference dependencies (optional)
 # Note: Metal support is handled via the metal feature, not here

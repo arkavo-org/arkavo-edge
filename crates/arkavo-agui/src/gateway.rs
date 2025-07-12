@@ -75,13 +75,11 @@ impl AgUiGateway {
             .and(warp::any().map(move || connections.clone()))
             .and(warp::any().map(move || agents_for_ws.clone()))
             .and(warp::any().map(move || agent_connections_for_ws.clone()))
-            .map(
-                |ws: warp::ws::Ws, connections, agents, agent_connections| {
-                    ws.on_upgrade(move |socket| {
-                        handle_websocket(socket, connections, agents, agent_connections)
-                    })
-                },
-            );
+            .map(|ws: warp::ws::Ws, connections, agents, agent_connections| {
+                ws.on_upgrade(move |socket| {
+                    handle_websocket(socket, connections, agents, agent_connections)
+                })
+            });
 
         // SSE endpoint for legacy agent discovery (to be deprecated)
         let agents_for_sse = discovered_agents.clone();
@@ -161,15 +159,15 @@ async fn handle_websocket(
 
     let (ws_sink, mut ws_stream) = ws.split();
     let session_id = uuid::Uuid::new_v4().to_string();
-    
+
     // Create bounded channel for back-pressure handling
     let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
-    
+
     // Spawn task to forward messages from channel to WebSocket
     let forward_task = tokio::spawn(async move {
         use futures::SinkExt;
         let mut ws_tx = ws_sink;
-        
+
         while let Some(event) = rx.recv().await {
             if let Ok(json) = serde_json::to_string(&event) {
                 if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
@@ -188,9 +186,15 @@ async fn handle_websocket(
                 if let Ok(text) = msg.to_str() {
                     match serde_json::from_str::<AgUiEvent>(text) {
                         Ok(event) => {
-                            if let Err(e) =
-                                handle_event(event, &session_id, &connections, &agents, &agent_connections, &tx)
-                                    .await
+                            if let Err(e) = handle_event(
+                                event,
+                                &session_id,
+                                &connections,
+                                &agents,
+                                &agent_connections,
+                                &tx,
+                            )
+                            .await
                             {
                                 eprintln!("AG-UI: Error handling event: {}", e);
                             }
@@ -220,10 +224,10 @@ async fn handle_websocket(
             sub.cancel();
         }
     }
-    
+
     // Cancel the forward task
     forward_task.abort();
-    
+
     println!("AG-UI: WebSocket connection closed: {}", session_id);
 }
 
@@ -235,7 +239,6 @@ async fn handle_event(
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-
     match event {
         AgUiEvent::Connect {
             agent_id,
@@ -261,7 +264,7 @@ async fn handle_event(
                     _agent_id: Some(agent_id.clone()),
                     subscriptions: Vec::new(),
                 };
-                
+
                 connections
                     .write()
                     .await
@@ -301,10 +304,10 @@ async fn handle_event(
             let agent_conns = agent_connections.read().await;
             if let Some(agent_conn) = agent_conns.get(&agent_id) {
                 // Subscribe to chat for this agent
-                match agent_conn.subscribe_to_chat(
-                    agent_id.clone(),
-                    tx.clone(),
-                ).await {
+                match agent_conn
+                    .subscribe_to_chat(agent_id.clone(), tx.clone())
+                    .await
+                {
                     Ok(sub_handle) => {
                         // Store subscription handle
                         let mut conn_guard = connections.write().await;
@@ -328,7 +331,7 @@ async fn handle_event(
                 tx.send(error).await?;
             }
         }
-        
+
         AgUiEvent::ChatClose { agent_id } => {
             // Get the agent connection
             let agent_conns = agent_connections.read().await;
@@ -339,7 +342,7 @@ async fn handle_event(
                 }
             }
         }
-        
+
         AgUiEvent::UserMessage {
             agent_id,
             content,
