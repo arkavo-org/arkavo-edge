@@ -23,7 +23,7 @@ futures = { workspace = true }
 # Web server and WebSocket
 warp = { workspace = true, features = ["websocket"] }
 tokio-stream = "0.1"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { workspace = true }
 
 # Protocol dependencies
 arkavo-protocol = { path = "../arkavo-protocol" }
