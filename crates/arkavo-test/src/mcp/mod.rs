@@ -49,6 +49,8 @@ pub mod ios_tools;
 pub mod log_stream_tools;
 pub mod mcp_connection;
 pub mod passkey_dialog_handler;
+#[cfg(feature = "memory")]
+pub mod repository_context_tool;
 pub mod schema;
 pub mod screenshot_analyzer;
 pub mod server;

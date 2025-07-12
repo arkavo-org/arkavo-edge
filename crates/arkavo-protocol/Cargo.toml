@@ -42,6 +42,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+# MCP support
+arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+
 # Schema generation
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 

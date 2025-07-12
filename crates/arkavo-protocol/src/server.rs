@@ -1,13 +1,14 @@
 use crate::config::ServerConfig;
 use crate::error::{A2aError, Result};
+use crate::mcp_registry::McpRegistry;
 use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
 use crate::types::PromiseStatus;
 use crate::types::{
-    AgentDiscoverFilter, DiscoveredAgent, PromiseCapability, PromiseDeclareResponse,
-    PromiseResponse,
+    AgentDiscoverFilter, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType, PromiseCapability, PromiseDeclareResponse, PromiseResponse,
 };
 use async_trait::async_trait;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
@@ -40,6 +41,15 @@ pub trait A2aRpc {
         filter: Option<AgentDiscoverFilter>,
     ) -> RpcResult<Vec<DiscoveredAgent>>;
 
+    #[method(name = "discover_features_query")]
+    async fn discover_features_query(
+        &self,
+        query: Option<DiscoverFeaturesQuery>,
+    ) -> RpcResult<DiscoverFeaturesDisclose>;
+
+    #[method(name = "discover_features_disclose")]
+    async fn discover_features_disclose(&self) -> RpcResult<DiscoverFeaturesDisclose>;
+
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
 }
@@ -47,6 +57,16 @@ pub trait A2aRpc {
 pub struct A2aRpcImpl {
     rate_limiter: Arc<RateLimiter>,
     metrics: Arc<MetricsCollector>,
+    mcp_registry: Arc<McpRegistry>,
+    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+}
+
+#[derive(Default)]
+struct AgentMetadata {
+    name: String,
+    purpose: String,
+    model: String,
+    endpoint: String,
 }
 
 #[async_trait]
@@ -136,21 +156,127 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            timer.success();
-            Ok(vec![])
+        // Get agent metadata
+        let metadata = self.agent_metadata.read().await;
+
+        // Get MCP tools and server status
+        let mcp_tools = match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => tools.into_iter().map(|t| t.name).collect::<Vec<String>>(),
+            Err(_) => Vec::new(),
+        };
+
+        let mcp_servers = self.mcp_registry.get_server_status().await;
+
+        // Build metadata with MCP information
+        let metadata_json = serde_json::json!({
+            "name": metadata.name,
+            "purpose": metadata.purpose,
+            "model": metadata.model,
+            "mcp_tools": mcp_tools,
+            "mcp_servers": mcp_servers,
+        });
+
+        let agent = DiscoveredAgent {
+            agent_id: uuid::Uuid::new_v4(), // Generate a unique ID for the agent
+            endpoint: metadata.endpoint.clone(),
+            promises: Some(vec![]), // TODO: Populate with actual promise types
+            metadata: Some(metadata_json),
+        };
+
+        timer.success();
+        Ok(vec![agent])
+    }
+
+    async fn discover_features_query(
+        &self,
+        query: Option<DiscoverFeaturesQuery>,
+    ) -> RpcResult<DiscoverFeaturesDisclose> {
+        let timer = RpcTimer::new("discover_features_query".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
         }
 
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            timer.error();
-            Err(ErrorObjectOwned::owned(
-                -32601,
-                "Method not yet implemented",
-                Some("agent_discover is not yet implemented".to_string()),
-            ))
+        // Build disclosures based on query
+        let mut disclosures = Vec::new();
+
+        // Add base protocol support
+        disclosures.push(FeatureDisclosure {
+            feature_type: FeatureType::Protocol,
+            id: "https://didcomm.org/discover-features/2.0".to_string(),
+            roles: Some(vec!["requester".to_string(), "responder".to_string()]),
+        });
+
+        // Add A2A protocol support
+        disclosures.push(FeatureDisclosure {
+            feature_type: FeatureType::Protocol,
+            id: "https://arkavo.org/a2a/1.0".to_string(),
+            roles: Some(vec!["agent".to_string()]),
+        });
+
+        // Add MCP tools if available
+        match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => {
+                for tool in tools {
+                    disclosures.push(FeatureDisclosure {
+                        feature_type: FeatureType::McpTool,
+                        id: tool.name,
+                        roles: None,
+                    });
+                }
+            }
+            Err(_) => {
+                // Ignore errors, just don't include tools
+            }
         }
+
+        // Add MCP servers
+        let mcp_servers = self.mcp_registry.get_server_status().await;
+        for (server_name, status) in mcp_servers {
+            disclosures.push(FeatureDisclosure {
+                feature_type: FeatureType::McpServer,
+                id: format!("{} ({})", server_name, status),
+                roles: None,
+            });
+        }
+
+        // Filter based on query if provided
+        if let Some(query) = query {
+            if let Some(queries) = query.queries {
+                disclosures = disclosures
+                    .into_iter()
+                    .filter(|disclosure| {
+                        queries.iter().any(|q| {
+                            if q.feature_type as i32 != disclosure.feature_type as i32 {
+                                return false;
+                            }
+                            if let Some(pattern) = &q.match_pattern {
+                                // Simple wildcard matching
+                                if pattern.contains('*') {
+                                    let prefix = pattern.trim_end_matches('*');
+                                    disclosure.id.starts_with(prefix)
+                                } else {
+                                    disclosure.id == *pattern
+                                }
+                            } else {
+                                true
+                            }
+                        })
+                    })
+                    .collect();
+            }
+        }
+
+        timer.success();
+        Ok(DiscoverFeaturesDisclose { disclosures })
+    }
+
+    async fn discover_features_disclose(&self) -> RpcResult<DiscoverFeaturesDisclose> {
+        // Proactive disclosure - return all features without filtering
+        self.discover_features_query(None).await
     }
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {
@@ -176,11 +302,29 @@ impl A2aRpcServer for A2aRpcImpl {
 
 pub struct A2aServer {
     config: ServerConfig,
+    mcp_registry: Arc<McpRegistry>,
+    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
 }
 
 impl A2aServer {
     pub fn new(config: ServerConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+        }
+    }
+
+    pub fn mcp_registry(&self) -> Arc<McpRegistry> {
+        self.mcp_registry.clone()
+    }
+
+    pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
+        let mut metadata = self.agent_metadata.write().await;
+        metadata.name = name;
+        metadata.purpose = purpose;
+        metadata.model = model;
+        metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
     }
 
     pub async fn start(&self) -> Result<ServerHandle> {
@@ -201,6 +345,8 @@ impl A2aServer {
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: self.mcp_registry.clone(),
+            agent_metadata: self.agent_metadata.clone(),
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -231,6 +377,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .promise_request(
@@ -265,6 +413,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .promise_declare(
@@ -302,6 +452,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -331,6 +483,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -339,19 +493,12 @@ mod tests {
             }))
             .await;
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            let result = result.unwrap();
-            assert!(result.is_empty());
-        }
-
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert_eq!(err.code(), -32601);
-            assert!(err.message().contains("not yet implemented"));
-        }
+        // agent_discover now returns actual data regardless of stub_handlers feature
+        let result = result.unwrap();
+        assert_eq!(result.len(), 1);
+        let agent = &result[0];
+        assert!(agent.agent_id.to_string().len() > 0);
+        assert!(agent.metadata.is_some());
     }
 
     #[tokio::test]
@@ -364,15 +511,13 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
 
         // First request should succeed
         let result1 = impl_instance.agent_discover(None).await;
-
-        #[cfg(feature = "stub_handlers")]
         assert!(result1.is_ok());
-        #[cfg(not(feature = "stub_handlers"))]
-        assert_eq!(result1.unwrap_err().code(), -32601);
 
         // Second request should be rate limited
         let result2 = impl_instance.agent_discover(None).await;

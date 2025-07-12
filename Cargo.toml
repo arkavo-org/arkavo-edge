@@ -15,13 +15,14 @@ members = [
     "crates/arkavo-mcp-core",
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-dataflow",
+    "crates/arkavo-agui",
     "tools/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.21.8"
+version = "0.22.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"

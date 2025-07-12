@@ -10,6 +10,8 @@ pub mod state_store;
 #[cfg(test)]
 mod state_store_test;
 
+#[cfg(feature = "memory")]
+use arkavo_memory::error::MemoryError;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -32,6 +34,10 @@ pub enum TestError {
 
     #[error("Reporting error: {0}")]
     Reporting(String),
+
+    #[cfg(feature = "memory")]
+    #[error("Memory error: {0}")]
+    Memory(#[from] MemoryError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
