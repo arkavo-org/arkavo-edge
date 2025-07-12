@@ -104,7 +104,6 @@ fn test_environment_variables_set_correctly() {
 #[test]
 fn test_no_system_prompt_simulation() {
     // This test simulates the condition where xcodebuild is not in PATH
-    use std::env;
     use std::process::Command;
 
     // First, check where xcodebuild is actually located
