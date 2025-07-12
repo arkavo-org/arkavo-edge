@@ -43,7 +43,11 @@ impl ChatSessionManager {
     }
 
     /// Create a new chat session manager with custom TTL
-    pub fn with_config(llm_adapter: Option<Arc<LlmClientAdapter>>, ttl_seconds: u64, buffer_config: BufferConfig) -> Self {
+    pub fn with_config(
+        llm_adapter: Option<Arc<LlmClientAdapter>>,
+        ttl_seconds: u64,
+        buffer_config: BufferConfig,
+    ) -> Self {
         let session_metrics = Arc::new(RwLock::new(HashMap::new()));
         let metrics_collector = MetricsCollector::new();
         let task_tracker = ObservableTaskTracker::new("chat-session-manager");
