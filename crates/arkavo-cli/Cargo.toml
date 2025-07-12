@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 default = ["memory", "mdns", "local"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
-mdns = ["zeroconf"]
+mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm?/metal"]
 llm-remote = ["dep:arkavo-llm", "arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
@@ -28,9 +28,9 @@ arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
-arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
+arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
-arkavo-agui = { path = "../arkavo-agui" }
+arkavo-agui = { path = "../arkavo-agui", default-features = false }
 gethostname = "0.5"
 zeroconf = { version = "0.14", optional = true }
 async-trait = { workspace = true }
