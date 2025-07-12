@@ -150,8 +150,18 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     }
 
     // Start the A2A server with the agent configuration
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async { agent::start_agent_server(agent_config).await })
+    // Check if we're already in a runtime context
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            // Already in a runtime, use the existing handle
+            handle.block_on(async { agent::start_agent_server(agent_config).await })
+        }
+        Err(_) => {
+            // Not in a runtime, create one
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { agent::start_agent_server(agent_config).await })
+        }
+    }
 }
 
 // Agent configuration parsing
@@ -309,7 +319,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 }
 
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::mcp_spawner::McpProcessManager;
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
+
+    // Create process manager for MCP servers
+    let process_manager = McpProcessManager::new();
 
     // Parse listen address
     let parts: Vec<&str> = config.listen.split(':').collect();
@@ -344,11 +358,50 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
         // Create appropriate MCP connection based on config
         if let Some(command) = &mcp_config.command {
-            // TODO: Launch command-based MCP server
-            eprintln!(
-                "Command-based MCP servers not yet implemented: {} with args {:?}",
-                command, mcp_config.args
-            );
+            // Create MCP client using the existing sync approach
+            use crate::mcp_client::McpClient;
+            use crate::mcp_integration::McpConnection;
+
+            match McpClient::new_with_command(command, &mcp_config.args) {
+                Ok(client) => {
+                    // Register the spawned process with the process manager for cleanup
+                    // Note: McpClient handles its own process lifecycle, but we track it for coordinated shutdown
+                    let pid = if let Ok(process) = client.process.lock() {
+                        let pid = process.child.id();
+                        process_manager.register_process(mcp_config.name.clone(), pid);
+                        pid
+                    } else {
+                        0
+                    };
+
+                    // Telemetry: MCP server started
+                    println!(
+                        "[INFO] mcp.server.started name={} command={} pid={} args={:?}",
+                        mcp_config.name, command, pid, mcp_config.args
+                    );
+
+                    let connection = McpConnection::External(client);
+                    let wrapped = McpConnectionWrapper::new(connection);
+                    mcp_registry
+                        .register(mcp_config.name.clone(), Box::new(wrapped))
+                        .await;
+                    println!(
+                        "Started command-based MCP server: {} ({})",
+                        mcp_config.name, command
+                    );
+                }
+                Err(e) => {
+                    // Telemetry: MCP server failed to start
+                    println!(
+                        "[ERROR] mcp.server.start_failed name={} command={} error=\"{}\"",
+                        mcp_config.name, command, e
+                    );
+                    eprintln!(
+                        "Failed to initialize MCP client for {}: {}",
+                        mcp_config.name, e
+                    );
+                }
+            }
         } else if let Some(url) = &mcp_config.url {
             // Create external MCP connection
             use crate::mcp_integration::McpConnection;
@@ -398,8 +451,16 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Keep the server running
     tokio::signal::ctrl_c().await?;
+
+    println!("Shutting down agent server...");
+
+    // Stop the A2A server
     handle.stop()?;
 
+    // Shutdown all MCP processes
+    process_manager.shutdown_all()?;
+
+    println!("Agent server stopped.");
     Ok(())
 }
 

@@ -126,6 +126,15 @@ jobs:
       # Note: Clippy warnings are shown but don't fail the build
       # See https://github.com/arkavo-org/arkavo-edge/issues/138 for remaining warnings to address
       - run: cargo clippy --workspace
+      
+      - name: Check for TODO placeholders
+        run: |
+          echo "Checking for TODO placeholders that might indicate unfinished code..."
+          if grep -Rn --exclude-dir={target,.git,node_modules} -E "TODO:.*(implement|remove|fix|placeholder|not yet implemented)" .; then
+            echo "::error::Found TODO placeholders that indicate unfinished code. Please complete the implementation before merging."
+            exit 1
+          fi
+          echo "No problematic TODO placeholders found."
 
   # Tests and builds can run in parallel
   test:

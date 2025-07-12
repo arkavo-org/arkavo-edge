@@ -1,7 +1,9 @@
 pub mod commands;
 pub mod conversation_manager;
+pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
+pub mod mcp_spawner;
 pub mod memory_integration;
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -19,8 +21,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "ui" => commands::ui::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
         "model" => {
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async {
+            // Check if we're already in a runtime context
+            let run_async = async {
                 use clap::Parser;
 
                 #[derive(Parser)]
@@ -38,11 +40,18 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 commands::model::run(&cli.command)
                     .await
                     .map_err(std::convert::Into::into)
-            })
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
         }
         "dataflow" | "flow" => {
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async {
+            let run_async = async {
                 use clap::Parser;
 
                 #[derive(Parser)]
@@ -60,11 +69,29 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 commands::dataflow::handle_dataflow_command(cli.command)
                     .await
                     .map_err(std::convert::Into::into)
-            })
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
         }
         "serve" | "mcp" => {
-            let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { commands::mcp::run().await })
+            // Check if we're already in a runtime context
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    // Already in a runtime, use the existing handle
+                    handle.block_on(async { commands::mcp::run().await })
+                }
+                Err(_) => {
+                    // Not in a runtime, create one
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(async { commands::mcp::run().await })
+                }
+            }
         }
         "help" => {
             print_usage();
