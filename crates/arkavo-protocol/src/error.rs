@@ -55,6 +55,25 @@ pub enum A2aError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    // Chat session specific errors
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
+
+    #[error("Session already exists: {0}")]
+    SessionAlreadyExists(String),
+
+    #[error("Session closed: {0}")]
+    SessionClosed(String),
+
+    #[error("Message send failed: {0}")]
+    MessageSendFailed(String),
+
+    #[error("LLM error: {0}")]
+    LlmError(String),
+
+    #[error("No LLM adapter available")]
+    NoLlmAdapter,
 }
 
 impl A2aError {
@@ -78,6 +97,14 @@ impl A2aError {
             Self::Cancelled => crate::transport::error_codes::SERVER_ERROR_START - 3,
             Self::RateLimitExceeded => crate::transport::error_codes::SERVER_ERROR_START - 4,
             Self::Internal(_) => crate::transport::error_codes::INTERNAL_ERROR,
+
+            // Chat session specific error codes
+            Self::SessionNotFound(_) => crate::transport::error_codes::SERVER_ERROR_START - 5,
+            Self::SessionAlreadyExists(_) => crate::transport::error_codes::SERVER_ERROR_START - 6,
+            Self::SessionClosed(_) => crate::transport::error_codes::SERVER_ERROR_START - 7,
+            Self::MessageSendFailed(_) => crate::transport::error_codes::SERVER_ERROR_START - 8,
+            Self::LlmError(_) => crate::transport::error_codes::SERVER_ERROR_START - 9,
+            Self::NoLlmAdapter => crate::transport::error_codes::SERVER_ERROR_START - 10,
         }
     }
 }
@@ -98,6 +125,16 @@ mod tests {
 
         let err = A2aError::Internal("Something went wrong".to_string());
         assert_eq!(err.to_json_rpc_code(), -32603);
+
+        // Chat session specific errors
+        let err = A2aError::SessionNotFound("session123".to_string());
+        assert_eq!(err.to_json_rpc_code(), -32000 - 5); // -32005
+
+        let err = A2aError::MessageSendFailed("Channel closed".to_string());
+        assert_eq!(err.to_json_rpc_code(), -32000 - 8); // -32008
+
+        let err = A2aError::NoLlmAdapter;
+        assert_eq!(err.to_json_rpc_code(), -32000 - 10); // -32010
     }
 
     #[test]
@@ -107,5 +144,11 @@ mod tests {
 
         let err = A2aError::Timeout(30000);
         assert_eq!(err.to_string(), "Request timeout after 30000ms");
+
+        let err = A2aError::SessionNotFound("abc123".to_string());
+        assert_eq!(err.to_string(), "Session not found: abc123");
+
+        let err = A2aError::LlmError("Model not loaded".to_string());
+        assert_eq!(err.to_string(), "LLM error: Model not loaded");
     }
 }

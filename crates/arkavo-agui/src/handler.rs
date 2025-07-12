@@ -2,7 +2,7 @@ use crate::types::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Handles the connection between a WebSocket client and an agent
+/// Handles the connection state for a WebSocket client
 pub struct ConnectionHandler {
     pub session_id: String,
     pub agent_info: Value,
@@ -27,23 +27,10 @@ impl ConnectionHandler {
         format!("{}-{}", self.session_id, self.event_counter)
     }
 
-    pub async fn forward_to_agent(
-        &self,
-        event: AgUiEvent,
-    ) -> Result<AgUiEvent, Box<dyn std::error::Error>> {
-        // TODO: Implement actual forwarding to agent via JSON-RPC
-        // For now, return a mock response
-        match event {
-            AgUiEvent::UserMessage { content, .. } => Ok(AgUiEvent::MessageDelta {
-                message_id: uuid::Uuid::new_v4().to_string(),
-                delta: MessageDeltaContent::Text {
-                    text: format!("Echo: {}", content),
-                },
-            }),
-            _ => Ok(AgUiEvent::Error {
-                code: "NOT_IMPLEMENTED".to_string(),
-                message: "Agent forwarding not yet implemented".to_string(),
-            }),
-        }
+    /// Clean up resources when connection is closed
+    pub async fn cleanup(&mut self) {
+        // Clear messages and state
+        self.messages.clear();
+        self.state.clear();
     }
 }

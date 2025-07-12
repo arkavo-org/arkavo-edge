@@ -13,20 +13,18 @@ mdns = ["dep:zeroconf"]
 
 [dependencies]
 # Core dependencies
-anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
 futures = { workspace = true }
 
 # Web server and WebSocket
 warp = { workspace = true, features = ["websocket"] }
-tokio-stream = "0.1"
 reqwest = { workspace = true }
 
 # Protocol dependencies
 arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-llm = { path = "../arkavo-llm" }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
 # UUID for event IDs
@@ -38,4 +36,4 @@ rand = "0.8"
 zeroconf = { version = "0.14", optional = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
+uuid = { workspace = true }
