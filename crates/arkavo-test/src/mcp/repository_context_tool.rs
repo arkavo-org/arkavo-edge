@@ -1,10 +1,10 @@
 use crate::mcp::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
+use arkavo_memory::storage::MemoryStorage;
+use arkavo_repo::repository_context::RepositoryContextManager;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use arkavo_repo::repository_context::RepositoryContextManager;
-use arkavo_memory::storage::MemoryStorage;
 
 pub struct RepositoryContextTool {
     schema: ToolSchema,
@@ -13,8 +13,14 @@ pub struct RepositoryContextTool {
 
 impl RepositoryContextTool {
     pub async fn new() -> Result<Self> {
-        let memory_storage = Arc::new(MemoryStorage::new().await.map_err(|e| TestError::Mcp(e.to_string()))?);
-        let context_manager = RepositoryContextManager::new(memory_storage).await.map_err(|e| TestError::Mcp(e.to_string()))?;
+        let memory_storage = Arc::new(
+            MemoryStorage::new()
+                .await
+                .map_err(|e| TestError::Mcp(e.to_string()))?,
+        );
+        let context_manager = RepositoryContextManager::new(memory_storage)
+            .await
+            .map_err(|e| TestError::Mcp(e.to_string()))?;
         Ok(Self {
             schema: ToolSchema {
                 name: "build_repository_context".to_string(),
@@ -32,7 +38,11 @@ impl RepositoryContextTool {
 #[async_trait]
 impl Tool for RepositoryContextTool {
     async fn execute(&self, _params: Value) -> Result<Value> {
-        let context = self.context_manager.build_context().await.map_err(|e| TestError::Mcp(e.to_string()))?;
+        let context = self
+            .context_manager
+            .build_context()
+            .await
+            .map_err(|e| TestError::Mcp(e.to_string()))?;
         Ok(serde_json::to_value(context)?)
     }
 

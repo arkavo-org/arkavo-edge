@@ -1,9 +1,9 @@
+use arkavo_mcp_core::ToolSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use arkavo_mcp_core::ToolSchema;
-use serde_json::Value;
-use serde::{Deserialize, Serialize};
 
 /// Tool information structure matching MCP protocol
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -83,7 +83,7 @@ impl McpRegistry {
         let actual_tool_name = parts[1];
 
         let connections = self.connections.read().await;
-        
+
         if let Some(connection) = connections.get(server_name) {
             connection.call_tool(actual_tool_name, arguments, llm_provider)
         } else {
@@ -112,20 +112,24 @@ impl McpRegistry {
     }
 
     /// Get tool schemas for a specific server
-    pub async fn get_tool_schemas(&self, server_name: &str) -> Result<Vec<ToolSchema>, Box<dyn std::error::Error>> {
+    pub async fn get_tool_schemas(
+        &self,
+        server_name: &str,
+    ) -> Result<Vec<ToolSchema>, Box<dyn std::error::Error>> {
         let connections = self.connections.read().await;
-        
+
         if let Some(connection) = connections.get(server_name) {
             // For now, we'll convert Tools to ToolSchemas
             // In a real implementation, MCP should provide schemas directly
             let tools = connection.list_tools()?;
-            let schemas: Vec<ToolSchema> = tools.into_iter().map(|tool| {
-                ToolSchema {
+            let schemas: Vec<ToolSchema> = tools
+                .into_iter()
+                .map(|tool| ToolSchema {
                     name: tool.name,
                     description: tool.description,
                     parameters: tool.input_schema.unwrap_or_default(),
-                }
-            }).collect();
+                })
+                .collect();
             Ok(schemas)
         } else {
             Err(format!("MCP server '{}' not found", server_name).into())

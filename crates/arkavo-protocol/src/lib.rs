@@ -18,7 +18,7 @@ pub use config::{A2aConfig, A2aConfigBuilder, ConfigManager};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
-pub use mcp_registry::{McpRegistry, McpConnectionTrait};
+pub use mcp_registry::{McpConnectionTrait, McpRegistry};
 pub use metrics::{MetricsCollector, RpcTimer};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{

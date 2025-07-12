@@ -2,11 +2,11 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 #[cfg(feature = "local")]
-use arkavo_repo::repository_context::RepositoryContextManager;
-#[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 #[cfg(feature = "local")]
 use arkavo_memory::storage::MemoryStorage;
+#[cfg(feature = "local")]
+use arkavo_repo::repository_context::RepositoryContextManager;
 #[cfg(feature = "local")]
 use chrono;
 #[cfg(feature = "local")]
@@ -172,10 +172,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     */
 
     // Initialize with a minimal context and let the agent ask for more.
-    let repo_context_str = format!(
-        "Working directory: {}",
-        get_current_directory()
-    );
+    let repo_context_str = format!("Working directory: {}", get_current_directory());
     let repo_context = json!({
         "working_directory": get_current_directory(),
     });

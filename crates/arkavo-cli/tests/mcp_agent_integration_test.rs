@@ -96,7 +96,10 @@ mcp_servers:
         assert_eq!(agent.mcp_servers[1].args.len(), 0);
 
         // Test URL only
-        assert_eq!(agent.mcp_servers[2].url, Some("https://example.com/mcp".to_string()));
+        assert_eq!(
+            agent.mcp_servers[2].url,
+            Some("https://example.com/mcp".to_string())
+        );
     }
 
     #[test]

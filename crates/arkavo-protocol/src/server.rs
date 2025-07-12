@@ -1,7 +1,7 @@
 use crate::config::ServerConfig;
 use crate::error::{A2aError, Result};
-use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::mcp_registry::McpRegistry;
+use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
@@ -149,15 +149,15 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Get agent metadata
         let metadata = self.agent_metadata.read().await;
-        
+
         // Get MCP tools and server status
         let mcp_tools = match self.mcp_registry.list_all_tools().await {
             Ok(tools) => tools.into_iter().map(|t| t.name).collect::<Vec<String>>(),
             Err(_) => Vec::new(),
         };
-        
+
         let mcp_servers = self.mcp_registry.get_server_status().await;
-        
+
         // Build metadata with MCP information
         let metadata_json = serde_json::json!({
             "name": metadata.name,
@@ -207,17 +207,17 @@ pub struct A2aServer {
 
 impl A2aServer {
     pub fn new(config: ServerConfig) -> Self {
-        Self { 
+        Self {
             config,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         }
     }
-    
+
     pub fn mcp_registry(&self) -> Arc<McpRegistry> {
         self.mcp_registry.clone()
     }
-    
+
     pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
         let mut metadata = self.agent_metadata.write().await;
         metadata.name = name;

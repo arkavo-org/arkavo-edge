@@ -61,8 +61,8 @@ pub struct ProviderInfo {
     pub url: Option<String>,
     pub status: ProviderStatus,
     pub models: Vec<String>,
-    pub mcp_tools: Vec<String>,  // List of available MCP tools
-    pub mcp_servers: HashMap<String, String>,  // MCP server name -> status
+    pub mcp_tools: Vec<String>, // List of available MCP tools
+    pub mcp_servers: HashMap<String, String>, // MCP server name -> status
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -327,13 +327,17 @@ impl App {
                 // List available tools
                 let tools = client.list_tools();
                 self.mcp_tools.clone_from(&tools);
-                
+
                 // Update MCP provider info
-                if let Some(mcp_provider) = self.providers.iter_mut().find(|p| p.provider_type == ProviderType::Claude) {
+                if let Some(mcp_provider) = self
+                    .providers
+                    .iter_mut()
+                    .find(|p| p.provider_type == ProviderType::Claude)
+                {
                     mcp_provider.status = ProviderStatus::Connected;
                     mcp_provider.mcp_tools = tools.clone();
                 }
-                
+
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
                     format!("[MCP] Connected with {} tools available", tools.len()),
@@ -1510,7 +1514,7 @@ impl App {
                     ]));
                 }
             }
-            
+
             // Show MCP servers if available
             if !provider.mcp_servers.is_empty() {
                 lines.push(Line::from(vec![

@@ -1,7 +1,7 @@
-use std::fs;
-use std::path::Path;
 use arkavo_protocol::McpConnectionTrait;
 use serde_json::Value;
+use std::fs;
+use std::path::Path;
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
@@ -136,7 +136,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     println!("Model: {}", agent_config.model);
     println!("Listen: {}", agent_config.listen);
     println!("mDNS enabled: {}", agent_config.mdns_enabled);
-    
+
     if !agent_config.mcp_servers.is_empty() {
         println!("MCP servers:");
         for server in &agent_config.mcp_servers {
@@ -191,12 +191,12 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     agent.mcp_servers.push(server);
                 }
             }
-            
+
             // Save previous agent if exists
             if let Some(agent) = current_agent.take() {
                 agents.push(agent);
             }
-            
+
             // Reset MCP section flag
             in_mcp_section = false;
 
@@ -232,7 +232,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     agent.mcp_servers.push(server);
                 }
             }
-            
+
             // Start new MCP server
             current_mcp_server = Some(McpServerConfig {
                 name: trimmed[7..].trim().to_string(),
@@ -252,7 +252,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     // Parse array format: ["arg1", "arg2"]
                     let args_str = trimmed[5..].trim();
                     if args_str.starts_with('[') && args_str.ends_with(']') {
-                        let args_content = &args_str[1..args_str.len()-1];
+                        let args_content = &args_str[1..args_str.len() - 1];
                         server.args = args_content
                             .split(',')
                             .map(|s| s.trim().trim_matches('"').to_string())
@@ -261,7 +261,10 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     }
                 } else if trimmed.starts_with("url:") {
                     server.url = Some(trimmed[4..].trim().to_string());
-                } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
+                } else if !trimmed.is_empty()
+                    && !trimmed.starts_with(' ')
+                    && !trimmed.starts_with('-')
+                {
                     // End of MCP section
                     in_mcp_section = false;
                     if let Some(server) = current_mcp_server.take() {
@@ -324,23 +327,28 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     };
 
     let server = A2aServer::new(server_config);
-    
+
     // Set agent metadata
-    server.set_agent_metadata(
-        config.name.clone(),
-        config.purpose.clone(),
-        config.model.clone(),
-    ).await;
-    
+    server
+        .set_agent_metadata(
+            config.name.clone(),
+            config.purpose.clone(),
+            config.model.clone(),
+        )
+        .await;
+
     // Initialize MCP connections
     let mcp_registry = server.mcp_registry();
     for mcp_config in &config.mcp_servers {
         println!("Initializing MCP server: {}", mcp_config.name);
-        
+
         // Create appropriate MCP connection based on config
         if let Some(command) = &mcp_config.command {
             // TODO: Launch command-based MCP server
-            eprintln!("Command-based MCP servers not yet implemented: {} with args {:?}", command, mcp_config.args);
+            eprintln!(
+                "Command-based MCP servers not yet implemented: {} with args {:?}",
+                command, mcp_config.args
+            );
         } else if let Some(url) = &mcp_config.url {
             // Create external MCP connection
             use crate::mcp_integration::McpConnection;
@@ -348,8 +356,13 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                 Ok(connection) => {
                     // We need to wrap the connection to implement the trait
                     let wrapped = McpConnectionWrapper::new(connection);
-                    mcp_registry.register(mcp_config.name.clone(), Box::new(wrapped)).await;
-                    println!("Connected to external MCP server: {} at {}", mcp_config.name, url);
+                    mcp_registry
+                        .register(mcp_config.name.clone(), Box::new(wrapped))
+                        .await;
+                    println!(
+                        "Connected to external MCP server: {} at {}",
+                        mcp_config.name, url
+                    );
                 }
                 Err(e) => {
                     eprintln!("Failed to connect to MCP server {}: {}", mcp_config.name, e);
@@ -357,7 +370,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             }
         }
     }
-    
+
     let handle = server.start().await?;
 
     // Give the server a moment to fully initialize
@@ -460,14 +473,19 @@ impl McpConnectionWrapper {
 }
 
 impl McpConnectionTrait for McpConnectionWrapper {
-    fn list_tools(&self) -> Result<Vec<arkavo_protocol::mcp_registry::Tool>, Box<dyn std::error::Error>> {
+    fn list_tools(
+        &self,
+    ) -> Result<Vec<arkavo_protocol::mcp_registry::Tool>, Box<dyn std::error::Error>> {
         // Convert from cli Tool to protocol Tool
         let cli_tools = self.inner.list_tools()?;
-        let protocol_tools = cli_tools.into_iter().map(|t| arkavo_protocol::mcp_registry::Tool {
-            name: t.name,
-            description: t.description,
-            input_schema: Some(t.input_schema),
-        }).collect();
+        let protocol_tools = cli_tools
+            .into_iter()
+            .map(|t| arkavo_protocol::mcp_registry::Tool {
+                name: t.name,
+                description: t.description,
+                input_schema: Some(t.input_schema),
+            })
+            .collect();
         Ok(protocol_tools)
     }
 
