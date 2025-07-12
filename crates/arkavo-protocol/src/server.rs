@@ -1,6 +1,7 @@
 use crate::config::ServerConfig;
 use crate::error::{A2aError, Result};
 use crate::metrics::{MetricsCollector, RpcTimer};
+use crate::mcp_registry::McpRegistry;
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
@@ -47,6 +48,16 @@ pub trait A2aRpc {
 pub struct A2aRpcImpl {
     rate_limiter: Arc<RateLimiter>,
     metrics: Arc<MetricsCollector>,
+    mcp_registry: Arc<McpRegistry>,
+    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+}
+
+#[derive(Default)]
+struct AgentMetadata {
+    name: String,
+    purpose: String,
+    model: String,
+    endpoint: String,
 }
 
 #[async_trait]
@@ -136,21 +147,35 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            timer.success();
-            Ok(vec![])
-        }
+        // Get agent metadata
+        let metadata = self.agent_metadata.read().await;
+        
+        // Get MCP tools and server status
+        let mcp_tools = match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => tools.into_iter().map(|t| t.name).collect::<Vec<String>>(),
+            Err(_) => Vec::new(),
+        };
+        
+        let mcp_servers = self.mcp_registry.get_server_status().await;
+        
+        // Build metadata with MCP information
+        let metadata_json = serde_json::json!({
+            "name": metadata.name,
+            "purpose": metadata.purpose,
+            "model": metadata.model,
+            "mcp_tools": mcp_tools,
+            "mcp_servers": mcp_servers,
+        });
 
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            timer.error();
-            Err(ErrorObjectOwned::owned(
-                -32601,
-                "Method not yet implemented",
-                Some("agent_discover is not yet implemented".to_string()),
-            ))
-        }
+        let agent = DiscoveredAgent {
+            agent_id: uuid::Uuid::new_v4(), // Generate a unique ID for the agent
+            endpoint: metadata.endpoint.clone(),
+            promises: Some(vec![]), // TODO: Populate with actual promise types
+            metadata: Some(metadata_json),
+        };
+
+        timer.success();
+        Ok(vec![agent])
     }
 
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value> {
@@ -176,11 +201,29 @@ impl A2aRpcServer for A2aRpcImpl {
 
 pub struct A2aServer {
     config: ServerConfig,
+    mcp_registry: Arc<McpRegistry>,
+    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
 }
 
 impl A2aServer {
     pub fn new(config: ServerConfig) -> Self {
-        Self { config }
+        Self { 
+            config,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
+        }
+    }
+    
+    pub fn mcp_registry(&self) -> Arc<McpRegistry> {
+        self.mcp_registry.clone()
+    }
+    
+    pub async fn set_agent_metadata(&self, name: String, purpose: String, model: String) {
+        let mut metadata = self.agent_metadata.write().await;
+        metadata.name = name;
+        metadata.purpose = purpose;
+        metadata.model = model;
+        metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
     }
 
     pub async fn start(&self) -> Result<ServerHandle> {
@@ -201,6 +244,8 @@ impl A2aServer {
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: self.mcp_registry.clone(),
+            agent_metadata: self.agent_metadata.clone(),
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -231,6 +276,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .promise_request(
@@ -265,6 +312,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .promise_declare(
@@ -302,6 +351,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -331,6 +382,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -364,6 +417,8 @@ mod tests {
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
+            mcp_registry: Arc::new(McpRegistry::new()),
+            agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
         };
 
         // First request should succeed

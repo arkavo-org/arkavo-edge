@@ -339,6 +339,7 @@ name = "arkavo-protocol"
 version = "0.21.8"
 dependencies = [
  "anyhow",
+ "arkavo-mcp-core",
  "async-trait",
  "chrono",
  "clap",

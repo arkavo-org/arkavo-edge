@@ -4,6 +4,7 @@ pub mod discovery;
 pub mod error;
 pub mod http;
 pub mod mcp;
+pub mod mcp_registry;
 pub mod metrics;
 pub mod openrpc;
 pub mod rate_limit;
@@ -17,6 +18,7 @@ pub use config::{A2aConfig, A2aConfigBuilder, ConfigManager};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
+pub use mcp_registry::{McpRegistry, McpConnectionTrait};
 pub use metrics::{MetricsCollector, RpcTimer};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{

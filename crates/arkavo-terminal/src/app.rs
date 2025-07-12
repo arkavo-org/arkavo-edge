@@ -61,6 +61,8 @@ pub struct ProviderInfo {
     pub url: Option<String>,
     pub status: ProviderStatus,
     pub models: Vec<String>,
+    pub mcp_tools: Vec<String>,  // List of available MCP tools
+    pub mcp_servers: HashMap<String, String>,  // MCP server name -> status
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +163,8 @@ impl App {
                     url: Some("https://api.openai.com".to_string()),
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
                 ProviderInfo {
                     name: "Anthropic".to_string(),
@@ -168,6 +172,8 @@ impl App {
                     url: Some("https://api.anthropic.com".to_string()),
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
                 ProviderInfo {
                     name: "MCP Tools".to_string(),
@@ -175,6 +181,8 @@ impl App {
                     url: None,
                     status: ProviderStatus::Disconnected,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
             ],
             mcp_client: None,
@@ -230,6 +238,8 @@ impl App {
                     url: Some("https://api.openai.com".to_string()),
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
                 ProviderInfo {
                     name: "Anthropic".to_string(),
@@ -237,6 +247,8 @@ impl App {
                     url: Some("https://api.anthropic.com".to_string()),
                     status: ProviderStatus::NotConfigured,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
                 ProviderInfo {
                     name: "MCP Tools".to_string(),
@@ -244,6 +256,8 @@ impl App {
                     url: None,
                     status: ProviderStatus::Disconnected,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 },
             ],
             mcp_client: None,
@@ -313,16 +327,18 @@ impl App {
                 // List available tools
                 let tools = client.list_tools();
                 self.mcp_tools.clone_from(&tools);
+                
+                // Update MCP provider info
+                if let Some(mcp_provider) = self.providers.iter_mut().find(|p| p.provider_type == ProviderType::Claude) {
+                    mcp_provider.status = ProviderStatus::Connected;
+                    mcp_provider.mcp_tools = tools.clone();
+                }
+                
                 self.add_debug_log(
                     crate::ui::debug::LogLevel::Info,
                     format!("[MCP] Connected with {} tools available", tools.len()),
                 );
 
-                // Update MCP provider info
-                if let Some(provider) = self.providers.iter_mut().find(|p| p.name == "MCP Tools") {
-                    provider.status = ProviderStatus::Connected;
-                    provider.models.clone_from(&tools);
-                }
                 self.mcp_client = Some(client);
             }
             Err(e) => {
@@ -410,6 +426,8 @@ impl App {
                     url: Some("http://localhost:11434".to_string()),
                     status: ProviderStatus::Connected,
                     models: provider_models,
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 });
 
                 self.add_debug_log(
@@ -425,6 +443,8 @@ impl App {
                     url: Some("http://localhost:11434".to_string()),
                     status: ProviderStatus::Disconnected,
                     models: vec![],
+                    mcp_tools: vec![],
+                    mcp_servers: HashMap::new(),
                 });
 
                 self.add_debug_log(
@@ -487,6 +507,8 @@ impl App {
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Connected,
                             models: provider_models,
+                            mcp_tools: vec![],
+                            mcp_servers: HashMap::new(),
                         });
 
                         self.add_debug_log(
@@ -508,6 +530,8 @@ impl App {
                             url: Some(server_url.clone()),
                             status: ProviderStatus::Error(e.to_string()),
                             models: vec![],
+                            mcp_tools: vec![],
+                            mcp_servers: HashMap::new(),
                         });
 
                         self.add_debug_log(
@@ -1457,7 +1481,7 @@ impl App {
                 Span::raw(" "),
                 Span::styled(
                     if provider.status == ProviderStatus::Connected {
-                        format!("({} tools available)", self.mcp_tools.len())
+                        format!("({} tools available)", provider.mcp_tools.len())
                     } else {
                         "(not connected)".to_string()
                     },
@@ -1466,23 +1490,39 @@ impl App {
             ]));
 
             // Show first few tools if connected
-            if provider.status == ProviderStatus::Connected && !self.mcp_tools.is_empty() {
-                let tools_to_show = self.mcp_tools.iter().take(3);
+            if provider.status == ProviderStatus::Connected && !provider.mcp_tools.is_empty() {
+                let tools_to_show = provider.mcp_tools.iter().take(3);
                 for tool in tools_to_show {
                     lines.push(Line::from(vec![
                         Span::raw("    • "),
                         Span::styled(tool, Style::default().fg(Color::Blue)),
                     ]));
                 }
-                if self.mcp_tools.len() > 3 {
+                if provider.mcp_tools.len() > 3 {
                     lines.push(Line::from(vec![
                         Span::raw("    "),
                         Span::styled(
-                            format!("... and {} more", self.mcp_tools.len() - 3),
+                            format!("... and {} more", provider.mcp_tools.len() - 3),
                             Style::default()
                                 .fg(Color::DarkGray)
                                 .add_modifier(Modifier::ITALIC),
                         ),
+                    ]));
+                }
+            }
+            
+            // Show MCP servers if available
+            if !provider.mcp_servers.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled("MCP Servers:", Style::default().fg(Color::Yellow)),
+                ]));
+                for (server_name, status) in &provider.mcp_servers {
+                    lines.push(Line::from(vec![
+                        Span::raw("      • "),
+                        Span::styled(server_name, Style::default().fg(Color::Blue)),
+                        Span::raw(": "),
+                        Span::styled(status, Style::default().fg(Color::Green)),
                     ]));
                 }
             }
