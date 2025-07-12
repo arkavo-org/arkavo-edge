@@ -29,6 +29,7 @@ async fn test_streaming_chat_lifecycle() {
         // Send deltas
         for (i, text) in expected_deltas_clone.iter().enumerate() {
             let delta = AgUiEvent::MessageDelta {
+                agent_id: "test-agent".to_string(),
                 message_id: message_id.clone(),
                 delta: MessageDeltaContent::Text {
                     text: text.to_string(),
@@ -95,6 +96,7 @@ async fn test_back_pressure_handling() {
 
     // Fill the channel
     let delta1 = AgUiEvent::MessageDelta {
+        agent_id: "test-agent".to_string(),
         message_id: "msg1".to_string(),
         delta: MessageDeltaContent::Text {
             text: "Delta 1".to_string(),
@@ -102,6 +104,7 @@ async fn test_back_pressure_handling() {
     };
 
     let delta2 = AgUiEvent::MessageDelta {
+        agent_id: "test-agent".to_string(),
         message_id: "msg1".to_string(),
         delta: MessageDeltaContent::Text {
             text: "Delta 2".to_string(),
@@ -114,6 +117,7 @@ async fn test_back_pressure_handling() {
 
     // This should fail with try_send (demonstrating back-pressure)
     let delta3 = AgUiEvent::MessageDelta {
+        agent_id: "test-agent".to_string(),
         message_id: "msg1".to_string(),
         delta: MessageDeltaContent::Text {
             text: "Delta 3".to_string(),
@@ -127,6 +131,7 @@ async fn test_back_pressure_handling() {
 
     // Now sending should work again
     let delta4 = AgUiEvent::MessageDelta {
+        agent_id: "test-agent".to_string(),
         message_id: "msg1".to_string(),
         delta: MessageDeltaContent::Text {
             text: "Delta 4".to_string(),

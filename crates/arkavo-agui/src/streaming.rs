@@ -214,6 +214,7 @@ pub fn from_ordered_delta(ordered: OrderedMessageDelta) -> MessageDelta {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_protocol::types::MessageDeltaContent;
 
     #[tokio::test]
     async fn test_stream_ordering() {
@@ -223,7 +224,9 @@ mod tests {
         // Create deltas out of order
         let delta1 = OrderedMessageDelta {
             delta: MessageDelta {
+                session_id: "session1".to_string(),
                 message_id: message_id.clone(),
+                sequence: 0,
                 delta: MessageDeltaContent::Text {
                     text: "First".to_string(),
                 },
@@ -236,7 +239,9 @@ mod tests {
 
         let delta2 = OrderedMessageDelta {
             delta: MessageDelta {
+                session_id: "session1".to_string(),
                 message_id: message_id.clone(),
+                sequence: 1,
                 delta: MessageDeltaContent::Text {
                     text: "Second".to_string(),
                 },
@@ -249,7 +254,9 @@ mod tests {
 
         let delta3 = OrderedMessageDelta {
             delta: MessageDelta {
+                session_id: "session1".to_string(),
                 message_id: message_id.clone(),
+                sequence: 2,
                 delta: MessageDeltaContent::Text {
                     text: "Third".to_string(),
                 },
