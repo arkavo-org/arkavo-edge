@@ -1,8 +1,11 @@
-use jsonrpsee::core::client::ClientT;
+use crate::types::{ChatRequest, SubscriptionHandle};
+use arkavo_protocol::types::{MessageDelta, MessageDeltaContent};
+use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, broadcast};
 use tokio::time::{Duration, sleep};
 
 /// Represents a persistent connection to an AI agent
@@ -13,6 +16,8 @@ pub struct AgentConnection {
     client: Arc<RwLock<Option<WsClient>>>,
     status: Arc<RwLock<ConnectionStatus>>,
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
+    active_subscriptions: Arc<RwLock<HashMap<String, SubscriptionHandle>>>,
+    chat_broadcasts: Arc<RwLock<HashMap<String, broadcast::Sender<MessageDelta>>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +87,8 @@ impl AgentConnection {
             client: Arc::new(RwLock::new(None)),
             status: Arc::new(RwLock::new(ConnectionStatus::Connecting)),
             telemetry_tx,
+            active_subscriptions: Arc::new(RwLock::new(HashMap::new())),
+            chat_broadcasts: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -247,6 +254,237 @@ impl AgentConnection {
             .await;
 
         Ok(result)
+    }
+
+    /// Subscribe to chat streaming for a given agent
+    pub async fn subscribe_to_chat(
+        &self,
+        agent_id: String,
+        ui_tx: mpsc::Sender<crate::types::AgUiEvent>, // Bounded channel
+    ) -> Result<SubscriptionHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected")?;
+
+        // Ensure we're connecting to the right agent
+        if agent_id != self.agent_id {
+            return Err("Agent ID mismatch".into());
+        }
+        
+        // Create or get broadcast channel for this agent
+        let broadcast_tx = {
+            let mut broadcasts = self.chat_broadcasts.write().await;
+            broadcasts
+                .entry(agent_id.clone())
+                .or_insert_with(|| {
+                    let (tx, _) = broadcast::channel(32); // Buffer size for late joiners
+                    tx
+                })
+                .clone()
+        };
+
+        // Subscribe to this broadcast for this UI connection
+        let mut broadcast_rx = broadcast_tx.subscribe();
+
+        // Create subscription handle
+        let sub_id = uuid::Uuid::new_v4().to_string();
+        let (sub_handle, cancel_rx) = SubscriptionHandle::new(sub_id.clone());
+
+        // We'll store the subscription handle after setting up the task
+
+        // Clone necessary data for the subscription task
+        let agent_id_for_task = agent_id.clone();
+        let telemetry_tx = self.telemetry_tx.clone();
+        let active_subs = self.active_subscriptions.clone();
+        let chat_broadcasts = self.chat_broadcasts.clone();
+        let sub_id_for_task = sub_id.clone();
+
+        // Create chat request with session ID
+        let request = ChatRequest {
+            message: String::new(), // Initial subscription
+            context: None,
+            session_id: Some(sub_id.clone()),
+        };
+        
+        // Start the subscription to the agent
+        let mut subscription = client
+            .subscribe::<MessageDelta, _>(
+                "chat_subscribe",
+                rpc_params![request],
+                "chat_unsubscribe",
+            )
+            .await?;
+
+        // Spawn task to handle streaming
+        tokio::spawn(async move {
+            let mut cancel_rx = cancel_rx;
+
+            loop {
+                tokio::select! {
+                    // Handle incoming deltas from agent
+                    delta_result = subscription.next() => {
+                        match delta_result {
+                            Some(Ok(delta)) => {
+                                // Broadcast to all UIs watching this session
+                                let _ = broadcast_tx.send(delta);
+
+                                // Send telemetry
+                                let _ = telemetry_tx
+                                    .send(TelemetryEvent::MessageRouted {
+                                        agent_id: agent_id_for_task.clone(),
+                                        session_id: sub_id_for_task.clone(),
+                                        message_type: "message_delta".to_string(),
+                                        direction: MessageDirection::Inbound,
+                                        timestamp: chrono::Utc::now(),
+                                    })
+                                    .await;
+                            }
+                            Some(Err(e)) => {
+                                eprintln!("Subscription error: {}", e);
+                                break;
+                            }
+                            None => {
+                                // Subscription ended
+                                break;
+                            }
+                        }
+                    }
+                    // Handle cancellation
+                    _ = &mut cancel_rx => {
+                        // Unsubscribe from agent
+                        let _ = subscription.unsubscribe().await;
+                        break;
+                    }
+                }
+            }
+
+            // Cleanup
+            active_subs.write().await.remove(&sub_id_for_task);
+            
+            // Remove broadcast channel if no more subscribers
+            let mut broadcasts = chat_broadcasts.write().await;
+            if let Some(tx) = broadcasts.get(&agent_id_for_task) {
+                if tx.receiver_count() == 0 {
+                    broadcasts.remove(&agent_id_for_task);
+                }
+            }
+        });
+
+        // Spawn task to forward broadcasts to this specific UI
+        let ui_tx_clone = ui_tx.clone();
+        let agent_id_for_forward = agent_id.clone();
+        tokio::spawn(async move {
+            while let Ok(delta) = broadcast_rx.recv().await {
+                let event = crate::types::AgUiEvent::MessageDelta {
+                    agent_id: agent_id_for_forward.clone(),
+                    message_id: delta.message_id,
+                    delta: match delta.delta {
+                        MessageDeltaContent::Text { text } => {
+                            crate::types::MessageDeltaContent::Text { text }
+                        }
+                        MessageDeltaContent::ToolCall { tool_call_id, delta } => {
+                            crate::types::MessageDeltaContent::ToolCall {
+                                tool_call_id,
+                                delta,
+                            }
+                        }
+                    },
+                };
+
+                // Use try_send for back-pressure handling
+                if ui_tx_clone.try_send(event).is_err() {
+                    // Channel full or disconnected
+                    break;
+                }
+            }
+        });
+
+        // Store the subscription handle and return it
+        {
+            let mut subs = self.active_subscriptions.write().await;
+            subs.insert(sub_id.clone(), sub_handle);
+        }
+        
+        // Return a new handle with just the ID for the caller
+        Ok(SubscriptionHandle {
+            id: sub_id,
+            cancel_tx: None,
+        })
+    }
+
+    /// Send a user message within an existing chat subscription
+    pub async fn send_user_message(
+        &self,
+        agent_id: &str,
+        text: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Ensure we're sending to the right agent
+        if agent_id != self.agent_id {
+            return Err("Agent ID mismatch".into());
+        }
+        
+        // Get the broadcast channel for this agent
+        let broadcast_tx = {
+            let broadcasts = self.chat_broadcasts.read().await;
+            broadcasts
+                .get(agent_id)
+                .ok_or("No active chat subscription for this agent")?
+                .clone()
+        };
+        
+        // For now, we'll create a simple echo response
+        // In a real implementation, this would send to the agent
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let delta = MessageDelta {
+            message_id,
+            delta: MessageDeltaContent::Text {
+                text: format!("Echo: {}", text),
+            },
+            timestamp: chrono::Utc::now(),
+        };
+        
+        // Broadcast to all UIs
+        let _ = broadcast_tx.send(delta);
+        
+        Ok(())
+    }
+    
+    /// Unsubscribe from chat for a specific agent
+    pub async fn unsubscribe_chat(&self, agent_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Remove the broadcast channel
+        self.chat_broadcasts.write().await.remove(agent_id);
+        
+        // Cancel any active subscriptions for this agent
+        // (In a real implementation, we'd track subscription IDs per agent)
+        
+        Ok(())
+    }
+    
+    /// Cancel all active subscriptions
+    pub async fn cancel_all_subscriptions(&self) {
+        let mut subs = self.active_subscriptions.write().await;
+        for (_, mut handle) in subs.drain() {
+            handle.cancel();
+        }
+        
+        // Clear all broadcast channels
+        self.chat_broadcasts.write().await.clear();
+    }
+}
+
+impl Drop for AgentConnection {
+    fn drop(&mut self) {
+        // Cancel all subscriptions when the connection is dropped
+        let subs = self.active_subscriptions.clone();
+        let broadcasts = self.chat_broadcasts.clone();
+        
+        tokio::spawn(async move {
+            let mut subs_guard = subs.write().await;
+            for (_, mut handle) in subs_guard.drain() {
+                handle.cancel();
+            }
+            
+            broadcasts.write().await.clear();
+        });
     }
 }
 

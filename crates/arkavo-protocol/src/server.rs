@@ -7,13 +7,14 @@ use crate::rate_limit::RateLimiter;
 #[cfg(feature = "stub_handlers")]
 use crate::types::PromiseStatus;
 use crate::types::{
-    AgentDiscoverFilter, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
-    FeatureDisclosure, FeatureType, PromiseCapability, PromiseDeclareResponse, PromiseResponse,
+    AgentDiscoverFilter, ChatRequest, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
+    DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta, MessageDeltaContent,
+    PromiseCapability, PromiseDeclareResponse, PromiseResponse,
 };
 use async_trait::async_trait;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::types::ErrorObjectOwned;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::{RpcResult, SubscriptionResult}, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
@@ -52,6 +53,9 @@ pub trait A2aRpc {
 
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
+
+    #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
+    async fn chat_subscribe(&self, request: ChatRequest) -> SubscriptionResult;
 }
 
 pub struct A2aRpcImpl {
@@ -297,6 +301,87 @@ impl A2aRpcServer for A2aRpcImpl {
                 ))
             }
         }
+    }
+
+    async fn chat_subscribe(
+        &self,
+        sink: PendingSubscriptionSink,
+        _request: ChatRequest,
+    ) -> SubscriptionResult {
+        let timer = RpcTimer::new("chat_subscribe".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        let sink = match sink.accept().await {
+            Ok(sink) => sink,
+            Err(_) => {
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        // Generate a unique message ID for this conversation
+        let message_id = uuid::Uuid::new_v4().to_string();
+
+        // Spawn a task to handle the streaming response
+        tokio::spawn(async move {
+            // For stub implementation, send a few demo messages
+            #[cfg(feature = "stub_handlers")]
+            {
+                let messages = vec![
+                    "Hello! I'm processing your request.",
+                    "\n\nThis is a streaming response demonstration.",
+                    "\n\nEach part arrives as a separate delta.",
+                ];
+
+                for (i, text) in messages.iter().enumerate() {
+                    let delta = MessageDelta {
+                        message_id: message_id.clone(),
+                        delta: MessageDeltaContent::Text {
+                            text: text.to_string(),
+                        },
+                        timestamp: chrono::Utc::now(),
+                    };
+
+                    // Send the delta using the subscription sink
+                    if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                        if sink.send(msg).await.is_err() {
+                            break; // Client disconnected
+                        }
+                    }
+
+                    // Small delay between messages for demo effect
+                    if i < messages.len() - 1 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "stub_handlers"))]
+            {
+                // In production, this would connect to the actual LLM
+                let error_delta = MessageDelta {
+                    message_id: message_id.clone(),
+                    delta: MessageDeltaContent::Text {
+                        text: "Chat streaming not yet implemented in production mode.".to_string(),
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+                
+                if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+                    let _ = sink.send(msg).await;
+                }
+            }
+        });
+
+        timer.success();
+        Ok(())
     }
 }
 

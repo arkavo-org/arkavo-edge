@@ -1,5 +1,4 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
-use crate::handler::ConnectionHandler;
 use crate::types::*;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -7,10 +6,17 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use warp::Filter;
 
+/// Connection information for active WebSocket clients
+struct ConnectionInfo {
+    _ws_tx: mpsc::Sender<AgUiEvent>,
+    _agent_id: Option<String>,
+    subscriptions: Vec<SubscriptionHandle>,
+}
+
 pub struct AgUiGateway {
     port: u16,
     discovered_agents: Arc<RwLock<Vec<serde_json::Value>>>,
-    connections: Arc<RwLock<HashMap<String, ConnectionHandler>>>,
+    connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
@@ -62,14 +68,20 @@ impl AgUiGateway {
         // WebSocket endpoint for AG-UI protocol
         let connections = self.connections.clone();
         let agents_for_ws = discovered_agents.clone();
+        let agent_connections_for_ws = self.agent_connections.clone();
 
         let websocket = warp::path("ws")
             .and(warp::ws())
             .and(warp::any().map(move || connections.clone()))
             .and(warp::any().map(move || agents_for_ws.clone()))
-            .map(|ws: warp::ws::Ws, connections, agents| {
-                ws.on_upgrade(move |socket| handle_websocket(socket, connections, agents))
-            });
+            .and(warp::any().map(move || agent_connections_for_ws.clone()))
+            .map(
+                |ws: warp::ws::Ws, connections, agents, agent_connections| {
+                    ws.on_upgrade(move |socket| {
+                        handle_websocket(socket, connections, agents, agent_connections)
+                    })
+                },
+            );
 
         // SSE endpoint for legacy agent discovery (to be deprecated)
         let agents_for_sse = discovered_agents.clone();
@@ -141,25 +153,43 @@ impl AgUiGateway {
 
 async fn handle_websocket(
     ws: warp::ws::WebSocket,
-    connections: Arc<RwLock<HashMap<String, ConnectionHandler>>>,
+    connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
+    agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
 ) {
-    use futures::{SinkExt, StreamExt};
+    use futures::StreamExt;
 
-    let (mut ws_tx, mut ws_rx) = ws.split();
+    let (ws_sink, mut ws_stream) = ws.split();
     let session_id = uuid::Uuid::new_v4().to_string();
+    
+    // Create bounded channel for back-pressure handling
+    let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
+    
+    // Spawn task to forward messages from channel to WebSocket
+    let forward_task = tokio::spawn(async move {
+        use futures::SinkExt;
+        let mut ws_tx = ws_sink;
+        
+        while let Some(event) = rx.recv().await {
+            if let Ok(json) = serde_json::to_string(&event) {
+                if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
+                    break; // WebSocket closed
+                }
+            }
+        }
+    });
 
     println!("AG-UI: New WebSocket connection: {}", session_id);
 
     // Handle incoming messages
-    while let Some(result) = ws_rx.next().await {
+    while let Some(result) = ws_stream.next().await {
         match result {
             Ok(msg) => {
                 if let Ok(text) = msg.to_str() {
                     match serde_json::from_str::<AgUiEvent>(text) {
                         Ok(event) => {
                             if let Err(e) =
-                                handle_event(event, &session_id, &connections, &agents, &mut ws_tx)
+                                handle_event(event, &session_id, &connections, &agents, &agent_connections, &tx)
                                     .await
                             {
                                 eprintln!("AG-UI: Error handling event: {}", e);
@@ -171,11 +201,7 @@ async fn handle_websocket(
                                 code: "INVALID_EVENT".to_string(),
                                 message: format!("Failed to parse event: {}", e),
                             };
-                            let _ = ws_tx
-                                .send(warp::ws::Message::text(
-                                    serde_json::to_string(&error).unwrap(),
-                                ))
-                                .await;
+                            let _ = tx.send(error).await;
                         }
                     }
                 }
@@ -187,19 +213,28 @@ async fn handle_websocket(
         }
     }
 
-    // Clean up connection
-    connections.write().await.remove(&session_id);
+    // Clean up connection and subscriptions
+    if let Some(mut conn_info) = connections.write().await.remove(&session_id) {
+        // Cancel all subscriptions
+        for mut sub in conn_info.subscriptions.drain(..) {
+            sub.cancel();
+        }
+    }
+    
+    // Cancel the forward task
+    forward_task.abort();
+    
     println!("AG-UI: WebSocket connection closed: {}", session_id);
 }
 
 async fn handle_event(
     event: AgUiEvent,
     session_id: &str,
-    connections: &Arc<RwLock<HashMap<String, ConnectionHandler>>>,
+    connections: &Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
-    ws_tx: &mut futures::stream::SplitSink<warp::ws::WebSocket, warp::ws::Message>,
+    agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use futures::SinkExt;
 
     match event {
         AgUiEvent::Connect {
@@ -219,13 +254,18 @@ async fn handle_event(
                 .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&agent_id))
                 .cloned();
 
-            if let Some(agent_info) = agent {
-                // Create connection handler
-                let handler = ConnectionHandler::new(session_id.to_string(), agent_info);
+            if let Some(_agent_info) = agent {
+                // Store connection info
+                let conn_info = ConnectionInfo {
+                    _ws_tx: tx.clone(),
+                    _agent_id: Some(agent_id.clone()),
+                    subscriptions: Vec::new(),
+                };
+                
                 connections
                     .write()
                     .await
-                    .insert(session_id.to_string(), handler);
+                    .insert(session_id.to_string(), conn_info);
 
                 // Send initial snapshots
                 let state_snapshot = AgUiEvent::StateSnapshot {
@@ -238,47 +278,95 @@ async fn handle_event(
                     event_id: uuid::Uuid::new_v4().to_string(),
                 };
 
-                ws_tx
-                    .send(warp::ws::Message::text(serde_json::to_string(
-                        &state_snapshot,
-                    )?))
-                    .await?;
-
-                ws_tx
-                    .send(warp::ws::Message::text(serde_json::to_string(
-                        &messages_snapshot,
-                    )?))
-                    .await?;
+                tx.send(state_snapshot).await?;
+                tx.send(messages_snapshot).await?;
 
                 // Send lifecycle start
                 let lifecycle_start = AgUiEvent::LifecycleStart {
                     session_id: session_id.to_string(),
                 };
 
-                ws_tx
-                    .send(warp::ws::Message::text(serde_json::to_string(
-                        &lifecycle_start,
-                    )?))
-                    .await?;
+                tx.send(lifecycle_start).await?;
             } else {
                 let error = AgUiEvent::Error {
                     code: "AGENT_NOT_FOUND".to_string(),
                     message: format!("Agent {} not found", agent_id),
                 };
-                ws_tx
-                    .send(warp::ws::Message::text(serde_json::to_string(&error)?))
-                    .await?;
+                tx.send(error).await?;
             }
         }
 
+        AgUiEvent::ChatOpen { agent_id } => {
+            // Get the agent connection
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                // Subscribe to chat for this agent
+                match agent_conn.subscribe_to_chat(
+                    agent_id.clone(),
+                    tx.clone(),
+                ).await {
+                    Ok(sub_handle) => {
+                        // Store subscription handle
+                        let mut conn_guard = connections.write().await;
+                        if let Some(conn_info) = conn_guard.get_mut(session_id) {
+                            conn_info.subscriptions.push(sub_handle);
+                        }
+                    }
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "SUBSCRIPTION_FAILED".to_string(),
+                            message: format!("Failed to subscribe to chat: {}", e),
+                        };
+                        tx.send(error).await?;
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {} is not connected", agent_id),
+                };
+                tx.send(error).await?;
+            }
+        }
+        
+        AgUiEvent::ChatClose { agent_id } => {
+            // Get the agent connection
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                // Unsubscribe from chat
+                if let Err(e) = agent_conn.unsubscribe_chat(&agent_id).await {
+                    eprintln!("Failed to unsubscribe from chat: {}", e);
+                }
+            }
+        }
+        
         AgUiEvent::UserMessage {
+            agent_id,
             content,
             attachments: _,
         } => {
-            // Forward to agent via connection handler
-            if let Some(_handler) = connections.read().await.get(session_id) {
-                // TODO: Implement agent communication
-                println!("AG-UI: User message: {}", content);
+            // Get the agent connection
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                // Send the user message
+                match agent_conn.send_user_message(&agent_id, content).await {
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "MESSAGE_SEND_FAILED".to_string(),
+                            message: format!("Failed to send message: {}", e),
+                        };
+                        tx.send(error).await?;
+                    }
+                    Ok(_) => {
+                        // Message sent successfully
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {} is not connected", agent_id),
+                };
+                tx.send(error).await?;
             }
         }
 

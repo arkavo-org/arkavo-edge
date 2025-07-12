@@ -193,3 +193,49 @@ fn example_agent_id() -> &'static str {
 fn example_promise_type() -> &'static str {
     "data_access"
 }
+
+/// Chat request for streaming conversation
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChatRequest {
+    /// The user's message
+    pub message: String,
+    
+    /// Optional context for the conversation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+    
+    /// Optional session ID for multi-turn conversations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Message delta for streaming responses
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MessageDelta {
+    /// The message ID this delta belongs to
+    pub message_id: String,
+    
+    /// The delta content
+    pub delta: MessageDeltaContent,
+    
+    /// Timestamp of the delta
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Content of a message delta
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum MessageDeltaContent {
+    /// Text content delta
+    Text {
+        /// The text to append
+        text: String,
+    },
+    /// Tool call delta
+    ToolCall {
+        /// Tool call ID
+        tool_call_id: String,
+        /// Delta content for the tool call
+        delta: String,
+    },
+}
