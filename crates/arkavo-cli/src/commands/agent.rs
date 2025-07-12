@@ -1,3 +1,5 @@
+use arkavo_protocol::McpConnectionTrait;
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
@@ -56,6 +58,18 @@ purpose: Describe what this agent does
 model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
 
+# MCP servers provide additional tools and capabilities to the agent
+# Uncomment and configure the following to add MCP servers:
+# mcp_servers:
+#   - name: filesystem
+#     command: mcp-filesystem
+#     args: ["--allow-write"]
+#   - name: git
+#     command: mcp-git
+#     args: []
+#   - name: external
+#     url: http://localhost:8080
+
 # mDNS discovery is enabled by default for zero-config networking
 # To disable mDNS, uncomment the following:
 # discovery:
@@ -70,6 +84,10 @@ listen:  0.0.0.0:8342
 # purpose: Review code for quality and suggest improvements
 # model:   openai://gpt-4
 # listen:  0.0.0.0:8343
+# mcp_servers:
+#   - name: git
+#     command: mcp-git
+#     args: ["--read-only"]
 #
 # ## test-runner
 # purpose: Run tests and report results
@@ -119,6 +137,18 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     println!("Listen: {}", agent_config.listen);
     println!("mDNS enabled: {}", agent_config.mdns_enabled);
 
+    if !agent_config.mcp_servers.is_empty() {
+        println!("MCP servers:");
+        for server in &agent_config.mcp_servers {
+            println!("  - {}: ", server.name);
+            if let Some(cmd) = &server.command {
+                println!("    command: {} {:?}", cmd, server.args);
+            } else if let Some(url) = &server.url {
+                println!("    url: {}", url);
+            }
+        }
+    }
+
     // Start the A2A server with the agent configuration
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async { agent::start_agent_server(agent_config).await })
@@ -132,22 +162,43 @@ pub struct AgentConfig {
     pub model: String,
     pub listen: String,
     pub mdns_enabled: bool,
+    pub mcp_servers: Vec<McpServerConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub url: Option<String>,
 }
 
 pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error>> {
     let mut agents = Vec::new();
     let mut current_agent: Option<AgentConfig> = None;
     let mut in_agent_section = false;
+    let mut in_mcp_section = false;
+    let mut current_mcp_server: Option<McpServerConfig> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
         // Check for agent section header
         if trimmed.starts_with("## ") {
+            // Save any pending MCP server before switching agents
+            if let Some(server) = current_mcp_server.take() {
+                if let Some(agent) = current_agent.as_mut() {
+                    agent.mcp_servers.push(server);
+                }
+            }
+
             // Save previous agent if exists
             if let Some(agent) = current_agent.take() {
                 agents.push(agent);
             }
+
+            // Reset MCP section flag
+            in_mcp_section = false;
 
             let name = trimmed[3..].trim().to_string();
             current_agent = Some(AgentConfig {
@@ -156,6 +207,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 model: String::new(),
                 listen: String::new(),
                 mdns_enabled: true, // Default to true for zero-config
+                mcp_servers: Vec::new(),
             });
             in_agent_section = true;
             continue;
@@ -166,18 +218,85 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             continue;
         }
 
-        // Parse agent properties
-        if let Some(agent) = current_agent.as_mut() {
-            if trimmed.starts_with("purpose:") {
-                agent.purpose = trimmed[8..].trim().to_string();
-            } else if trimmed.starts_with("model:") {
-                agent.model = trimmed[6..].trim().to_string();
-            } else if trimmed.starts_with("listen:") {
-                agent.listen = trimmed[7..].trim().to_string();
-            } else if trimmed.starts_with("mdns:") {
-                // Only disable if explicitly set to false
-                agent.mdns_enabled = !trimmed.contains("false");
+        // Check for mcp_servers section
+        if trimmed == "mcp_servers:" {
+            in_mcp_section = true;
+            continue;
+        }
+
+        // Handle MCP server entries
+        if in_mcp_section && trimmed.starts_with("- name:") {
+            // Save previous MCP server if exists
+            if let Some(server) = current_mcp_server.take() {
+                if let Some(agent) = current_agent.as_mut() {
+                    agent.mcp_servers.push(server);
+                }
             }
+
+            // Start new MCP server
+            current_mcp_server = Some(McpServerConfig {
+                name: trimmed[7..].trim().to_string(),
+                command: None,
+                args: Vec::new(),
+                url: None,
+            });
+            continue;
+        }
+
+        // Parse MCP server properties
+        if in_mcp_section && current_mcp_server.is_some() {
+            if let Some(server) = current_mcp_server.as_mut() {
+                if trimmed.starts_with("command:") {
+                    server.command = Some(trimmed[8..].trim().to_string());
+                } else if trimmed.starts_with("args:") {
+                    // Parse array format: ["arg1", "arg2"]
+                    let args_str = trimmed[5..].trim();
+                    if args_str.starts_with('[') && args_str.ends_with(']') {
+                        let args_content = &args_str[1..args_str.len() - 1];
+                        server.args = args_content
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    }
+                } else if trimmed.starts_with("url:") {
+                    server.url = Some(trimmed[4..].trim().to_string());
+                } else if !trimmed.is_empty()
+                    && !trimmed.starts_with(' ')
+                    && !trimmed.starts_with('-')
+                {
+                    // End of MCP section
+                    in_mcp_section = false;
+                    if let Some(server) = current_mcp_server.take() {
+                        if let Some(agent) = current_agent.as_mut() {
+                            agent.mcp_servers.push(server);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Parse agent properties (when not in MCP section)
+        if !in_mcp_section {
+            if let Some(agent) = current_agent.as_mut() {
+                if trimmed.starts_with("purpose:") {
+                    agent.purpose = trimmed[8..].trim().to_string();
+                } else if trimmed.starts_with("model:") {
+                    agent.model = trimmed[6..].trim().to_string();
+                } else if trimmed.starts_with("listen:") {
+                    agent.listen = trimmed[7..].trim().to_string();
+                } else if trimmed.starts_with("mdns:") {
+                    // Only disable if explicitly set to false
+                    agent.mdns_enabled = !trimmed.contains("false");
+                }
+            }
+        }
+    }
+
+    // Save any pending MCP server
+    if let Some(server) = current_mcp_server {
+        if let Some(agent) = current_agent.as_mut() {
+            agent.mcp_servers.push(server);
         }
     }
 
@@ -208,6 +327,50 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     };
 
     let server = A2aServer::new(server_config);
+
+    // Set agent metadata
+    server
+        .set_agent_metadata(
+            config.name.clone(),
+            config.purpose.clone(),
+            config.model.clone(),
+        )
+        .await;
+
+    // Initialize MCP connections
+    let mcp_registry = server.mcp_registry();
+    for mcp_config in &config.mcp_servers {
+        println!("Initializing MCP server: {}", mcp_config.name);
+
+        // Create appropriate MCP connection based on config
+        if let Some(command) = &mcp_config.command {
+            // TODO: Launch command-based MCP server
+            eprintln!(
+                "Command-based MCP servers not yet implemented: {} with args {:?}",
+                command, mcp_config.args
+            );
+        } else if let Some(url) = &mcp_config.url {
+            // Create external MCP connection
+            use crate::mcp_integration::McpConnection;
+            match McpConnection::new_external(Some(url.clone())) {
+                Ok(connection) => {
+                    // We need to wrap the connection to implement the trait
+                    let wrapped = McpConnectionWrapper::new(connection);
+                    mcp_registry
+                        .register(mcp_config.name.clone(), Box::new(wrapped))
+                        .await;
+                    println!(
+                        "Connected to external MCP server: {} at {}",
+                        mcp_config.name, url
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Failed to connect to MCP server {}: {}", mcp_config.name, e);
+                }
+            }
+        }
+    }
+
     let handle = server.start().await?;
 
     // Give the server a moment to fully initialize
@@ -275,13 +438,11 @@ fn broadcast_agent_mdns_sync(
         println!("Service name: arkavo-agent-{}", config.name);
         println!("Service type: _a2a._tcp");
         println!("Port: {port}");
-        println!("Check with: dns-sd -B _a2a._tcp local.");
 
         // The service automatically unregisters when it goes out of scope.
         // We need to keep it alive.
         loop {
             thread::sleep(Duration::from_secs(30));
-            println!("mDNS service still broadcasting...");
             // Keep reference to prevent dropping
             let _ = &service;
         }
@@ -295,5 +456,43 @@ fn broadcast_agent_mdns_sync(
         loop {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+    }
+}
+
+// Wrapper to implement McpConnectionTrait for arkavo-cli's McpConnection
+struct McpConnectionWrapper {
+    inner: crate::mcp_integration::McpConnection,
+}
+
+impl McpConnectionWrapper {
+    fn new(connection: crate::mcp_integration::McpConnection) -> Self {
+        Self { inner: connection }
+    }
+}
+
+impl McpConnectionTrait for McpConnectionWrapper {
+    fn list_tools(
+        &self,
+    ) -> Result<Vec<arkavo_protocol::mcp_registry::Tool>, Box<dyn std::error::Error>> {
+        // Convert from cli Tool to protocol Tool
+        let cli_tools = self.inner.list_tools()?;
+        let protocol_tools = cli_tools
+            .into_iter()
+            .map(|t| arkavo_protocol::mcp_registry::Tool {
+                name: t.name,
+                description: t.description,
+                input_schema: Some(t.input_schema),
+            })
+            .collect();
+        Ok(protocol_tools)
+    }
+
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: Value,
+        llm_provider: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.inner.call_tool(tool_name, arguments, llm_provider)
     }
 }

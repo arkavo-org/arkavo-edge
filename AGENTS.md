@@ -84,11 +84,10 @@ Arkavo Edge consists of several core components:
 
 The project will support the following main commands:
 
+- `arkavo ui`: User-interface for agent orchestration
+- `arkavo agent run`: Start an agent
 - `arkavo chat`: Conversational agent with repository context and streaming diff previews (interactive command - should not be used for testing)
-- `arkavo plan`: Generates a change plan (tasks and affected files) before code edits (use this command for testing builds)
-- `arkavo apply`: Executes plan, writes files, commits with a descriptive message
-- `arkavo test`: Runs project tests, streaming failures back to the agent loop
-- `arkavo vault`: Import/export notes to Edge Vault
+
 
 ## Quality Standards
 

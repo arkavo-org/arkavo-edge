@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 default = ["memory", "mdns", "local"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
-mdns = ["zeroconf"]
+mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm?/metal"]
 llm-remote = ["dep:arkavo-llm", "arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
@@ -28,14 +28,14 @@ arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
-arkavo-protocol = { path = "../arkavo-protocol", features = ["mdns"] }
+arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-repo = { path = "../arkavo-repo" }
+arkavo-agui = { path = "../arkavo-agui", default-features = false }
 gethostname = "0.5"
 zeroconf = { version = "0.14", optional = true }
 async-trait = { workspace = true }
 log = "0.4"
 anyhow = { workspace = true }
-warp = { workspace = true }
-futures = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
 tokio-stream = "0.1"
@@ -44,11 +44,8 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-lru = "0.12"
-ignore = { workspace = true }
 indicatif = "0.17"
 tiktoken-rs = "0.6"
-sha2 = "0.10"
 
 # Automatically enable metal feature on macOS
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]

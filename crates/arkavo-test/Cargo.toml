@@ -32,12 +32,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Memory integration
-arkavo-memory = { path = "../arkavo-memory", default-features = false, optional = true }
+arkavo-memory = { path = "../arkavo-memory", features = ["vector-search"], optional = true }
 
 # MCP types
 arkavo-mcp = { path = "../arkavo-mcp" }
-
-# Git integration
+arkavo-repo = { path = "../arkavo-repo" }
 arkavo-git = { path = "../arkavo-git" }
 
 # Gherkin parsing

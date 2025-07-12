@@ -267,6 +267,11 @@
             <h2 id="modal-agent-name"></h2>
             <p id="modal-agent-purpose" class="purpose"></p>
             
+            <div id="modal-features" style="margin: 15px 0; padding: 10px; background: var(--bg-primary); border-radius: 4px; display: none;">
+                <h4 style="margin-bottom: 10px;">Agent Features</h4>
+                <div id="modal-features-content"></div>
+            </div>
+            
             <div class="method-select">
                 <label for="method">Select method:</label>
                 <select id="method" onchange="updateParams()">
@@ -277,6 +282,8 @@
             <div class="params-form" id="params-form"></div>
             
             <button class="button" onclick="sendRequest()">Send Request</button>
+            
+            <button class="button" style="margin-left: 10px; background: var(--success-color);" onclick="testDiscoverFeatures()">Test Discover Features</button>
             
             <div id="response-container"></div>
         </div>
@@ -341,11 +348,66 @@
                     <div class="details">
                         <div><strong>Model:</strong> ${agent.model}</div>
                         <div><strong>Endpoint:</strong> ${agent.endpoint}</div>
+                        <div id="features-${agent.id}"></div>
                     </div>
                 `;
                 
                 grid.appendChild(card);
+                
+                // Fetch discover features for each agent
+                fetchDiscoverFeatures(agent);
             });
+        }
+        
+        async function fetchDiscoverFeatures(agent) {
+            try {
+                const response = await fetch(`http://${agent.endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'agent_discover',
+                        params: {},
+                        id: Date.now()
+                    })
+                });
+                
+                const data = await response.json();
+                const featuresDiv = document.getElementById(`features-${agent.id}`);
+                
+                if (data.result && data.result.length > 0 && data.result[0].metadata) {
+                    const features = data.result[0].metadata;
+                    let featuresHtml = '';
+                    
+                    // Check for MCP tools
+                    if (features.mcp_tools && Array.isArray(features.mcp_tools) && features.mcp_tools.length > 0) {
+                        featuresHtml += `<div style="margin-top: 8px; color: var(--info-color);"><strong>MCP Tools:</strong> ${features.mcp_tools.length} available</div>`;
+                        
+                        // Show first few tool names
+                        const toolsToShow = features.mcp_tools.slice(0, 3);
+                        const toolNames = toolsToShow.join(', ');
+                        const moreTools = features.mcp_tools.length > 3 ? ` +${features.mcp_tools.length - 3} more` : '';
+                        featuresHtml += `<div style="font-size: 11px; color: var(--text-muted); margin-left: 10px;">${toolNames}${moreTools}</div>`;
+                    }
+                    
+                    // Check for MCP servers
+                    if (features.mcp_servers && typeof features.mcp_servers === 'object' && Object.keys(features.mcp_servers).length > 0) {
+                        const serverCount = Object.keys(features.mcp_servers).length;
+                        featuresHtml += `<div style="margin-top: 8px; color: var(--success-color);"><strong>MCP Servers:</strong> ${serverCount} connected</div>`;
+                        
+                        // Show server names and statuses
+                        const serverHtml = Object.entries(features.mcp_servers).map(([name, status]) => 
+                            `${name}: ${status}`
+                        ).slice(0, 2).join(', ');
+                        const moreServers = serverCount > 2 ? ` +${serverCount - 2} more` : '';
+                        featuresHtml += `<div style="font-size: 11px; color: var(--text-muted); margin-left: 10px;">${serverHtml}${moreServers}</div>`;
+                    }
+                    
+                    featuresDiv.innerHTML = featuresHtml;
+                }
+            } catch (error) {
+                console.error('Failed to fetch discover features:', error);
+            }
         }
         
         async function openAgent(agent) {
@@ -353,6 +415,60 @@
             document.getElementById('modal-agent-name').textContent = agent.name;
             document.getElementById('modal-agent-purpose').textContent = agent.purpose;
             document.getElementById('agent-modal').style.display = 'block';
+            
+            // Fetch agent discover features for modal
+            try {
+                const discoverResponse = await fetch(`http://${agent.endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'agent_discover',
+                        params: {},
+                        id: Date.now()
+                    })
+                });
+                
+                const discoverData = await discoverResponse.json();
+                if (discoverData.result && discoverData.result.length > 0 && discoverData.result[0].metadata) {
+                    const features = discoverData.result[0].metadata;
+                    const modalFeatures = document.getElementById('modal-features');
+                    const modalFeaturesContent = document.getElementById('modal-features-content');
+                    
+                    let featuresHtml = '';
+                    
+                    // Show MCP tools in detail
+                    if (features.mcp_tools && Array.isArray(features.mcp_tools) && features.mcp_tools.length > 0) {
+                        featuresHtml += '<div style="margin-bottom: 15px;">';
+                        featuresHtml += `<h5>MCP Tools (${features.mcp_tools.length})</h5>`;
+                        featuresHtml += '<ul style="margin: 5px 0; padding-left: 20px;">';
+                        features.mcp_tools.forEach(tool => {
+                            featuresHtml += `<li>${tool}</li>`;
+                        });
+                        featuresHtml += '</ul></div>';
+                    }
+                    
+                    // Show MCP servers in detail
+                    if (features.mcp_servers && typeof features.mcp_servers === 'object' && Object.keys(features.mcp_servers).length > 0) {
+                        featuresHtml += '<div>';
+                        featuresHtml += `<h5>MCP Servers</h5>`;
+                        featuresHtml += '<ul style="margin: 5px 0; padding-left: 20px;">';
+                        Object.entries(features.mcp_servers).forEach(([name, status]) => {
+                            featuresHtml += `<li><strong>${name}:</strong> ${status}</li>`;
+                        });
+                        featuresHtml += '</ul></div>';
+                    }
+                    
+                    if (featuresHtml) {
+                        modalFeaturesContent.innerHTML = featuresHtml;
+                        modalFeatures.style.display = 'block';
+                    } else {
+                        modalFeatures.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch discover features for modal:', error);
+            }
             
             // Fetch available methods
             try {
@@ -481,6 +597,90 @@
         function closeModal() {
             document.getElementById('agent-modal').style.display = 'none';
             document.getElementById('response-container').innerHTML = '';
+        }
+        
+        async function testDiscoverFeatures() {
+            if (!currentAgent) return;
+            
+            const responseContainer = document.getElementById('response-container');
+            responseContainer.innerHTML = '<div class="response">Testing DIDComm Discover Features...</div>';
+            
+            try {
+                // Test discover_features_disclose (proactive disclosure)
+                const discloseResponse = await fetch(`http://${currentAgent.endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'discover_features_disclose',
+                        params: {},
+                        id: Date.now()
+                    })
+                });
+                
+                const discloseData = await discloseResponse.json();
+                
+                // Test discover_features_query with filter
+                const queryResponse = await fetch(`http://${currentAgent.endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'discover_features_query',
+                        params: {
+                            queries: [
+                                { 'feature-type': 'protocol', match: 'https://didcomm.org/*' },
+                                { 'feature-type': 'mcp-tool' }
+                            ]
+                        },
+                        id: Date.now() + 1
+                    })
+                });
+                
+                const queryData = await queryResponse.json();
+                
+                let html = '<div class="response"><h4>DIDComm Discover Features Test Results</h4>';
+                
+                // Show proactive disclosure results
+                html += '<h5>Proactive Disclosure (discover_features_disclose)</h5>';
+                if (discloseData.result && discloseData.result.disclosures) {
+                    html += `<p>Total features: ${discloseData.result.disclosures.length}</p>`;
+                    html += '<ul style="max-height: 200px; overflow-y: auto;">';
+                    discloseData.result.disclosures.forEach(feature => {
+                        html += `<li><strong>${feature['feature-type']}:</strong> ${feature.id}`;
+                        if (feature.roles) {
+                            html += ` (roles: ${feature.roles.join(', ')})`;
+                        }
+                        html += '</li>';
+                    });
+                    html += '</ul>';
+                } else if (discloseData.error) {
+                    html += `<p class="error">Error: ${JSON.stringify(discloseData.error)}</p>`;
+                }
+                
+                // Show query results
+                html += '<h5>Filtered Query (protocols and MCP tools)</h5>';
+                if (queryData.result && queryData.result.disclosures) {
+                    html += `<p>Filtered features: ${queryData.result.disclosures.length}</p>`;
+                    html += '<ul style="max-height: 200px; overflow-y: auto;">';
+                    queryData.result.disclosures.forEach(feature => {
+                        html += `<li><strong>${feature['feature-type']}:</strong> ${feature.id}`;
+                        if (feature.roles) {
+                            html += ` (roles: ${feature.roles.join(', ')})`;
+                        }
+                        html += '</li>';
+                    });
+                    html += '</ul>';
+                } else if (queryData.error) {
+                    html += `<p class="error">Error: ${JSON.stringify(queryData.error)}</p>`;
+                }
+                
+                html += '</div>';
+                responseContainer.innerHTML = html;
+                
+            } catch (error) {
+                responseContainer.innerHTML = `<div class="response error">Request failed: ${error.message}</div>`;
+            }
         }
         
     </script>

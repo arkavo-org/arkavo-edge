@@ -127,6 +127,64 @@ pub struct DiscoveredAgent {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// DIDComm Discover Features Query (RFC 0031/0557)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DiscoverFeaturesQuery {
+    /// Feature types to query (protocols, goal-codes, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<FeatureQuery>>,
+}
+
+/// Individual feature query
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FeatureQuery {
+    /// Feature type to query
+    #[serde(rename = "feature-type")]
+    pub feature_type: FeatureType,
+
+    /// Optional match pattern (supports wildcards)
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    pub match_pattern: Option<String>,
+}
+
+/// DIDComm Discover Features Disclosure (RFC 0031/0557)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DiscoverFeaturesDisclose {
+    /// List of supported features
+    pub disclosures: Vec<FeatureDisclosure>,
+}
+
+/// Individual feature disclosure
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FeatureDisclosure {
+    /// Feature type
+    #[serde(rename = "feature-type")]
+    pub feature_type: FeatureType,
+
+    /// Feature identifier (protocol ID, goal code, etc.)
+    pub id: String,
+
+    /// Supported roles for this feature (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Vec<String>>,
+}
+
+/// Types of features that can be discovered
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum FeatureType {
+    /// DIDComm protocol support
+    Protocol,
+    /// Goal codes the agent can fulfill
+    GoalCode,
+    /// Governance frameworks
+    Gov,
+    /// MCP tools (custom extension)
+    McpTool,
+    /// MCP servers (custom extension)
+    McpServer,
+}
+
 // Helper function for examples
 fn example_agent_id() -> &'static str {
     "550e8400-e29b-41d4-a716-446655440000"

@@ -165,48 +165,67 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
-name = "arkavo-cli"
-version = "0.21.8"
+name = "arkavo-agui"
+version = "0.22.0"
 dependencies = [
  "anyhow",
- "arkavo-dataflow",
- "arkavo-git",
- "arkavo-llm",
- "arkavo-mcp",
- "arkavo-memory",
  "arkavo-protocol",
- "arkavo-terminal",
- "arkavo-test",
- "async-trait",
  "chrono",
- "clap",
  "futures",
- "gethostname",
- "ignore",
- "indicatif",
- "jsonschema",
- "log",
- "lru",
+ "jsonrpsee",
+ "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_json",
- "sha2",
- "tiktoken-rs",
  "tokio",
  "tokio-stream",
+ "tokio-test",
+ "tracing",
  "uuid",
  "warp",
  "zeroconf",
 ]
 
 [[package]]
+name = "arkavo-cli"
+version = "0.22.0"
+dependencies = [
+ "anyhow",
+ "arkavo-agui",
+ "arkavo-dataflow",
+ "arkavo-git",
+ "arkavo-llm",
+ "arkavo-mcp",
+ "arkavo-memory",
+ "arkavo-protocol",
+ "arkavo-repo",
+ "arkavo-terminal",
+ "arkavo-test",
+ "async-trait",
+ "chrono",
+ "clap",
+ "gethostname",
+ "indicatif",
+ "jsonschema",
+ "log",
+ "serde",
+ "serde_json",
+ "tiktoken-rs 0.6.0",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+ "zeroconf",
+]
+
+[[package]]
 name = "arkavo-dataflow"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -237,11 +256,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.21.8"
+version = "0.22.0"
 
 [[package]]
 name = "arkavo-git"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -250,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -281,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -290,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -300,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -318,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -338,9 +357,10 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
+ "arkavo-mcp-core",
  "async-trait",
  "chrono",
  "clap",
@@ -366,11 +386,26 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.21.8"
+version = "0.22.0"
+dependencies = [
+ "anyhow",
+ "arkavo-git",
+ "arkavo-memory",
+ "chrono",
+ "ignore",
+ "indicatif",
+ "lru",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiktoken-rs 0.5.9",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -396,11 +431,12 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.21.8"
+version = "0.22.0"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
  "arkavo-memory",
+ "arkavo-repo",
  "async-trait",
  "base64 0.22.1",
  "cc",
@@ -424,13 +460,35 @@ dependencies = [
 
 [[package]]
 name = "arkavo-vault"
-version = "0.21.8"
+version = "0.22.0"
 
 [[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
 
 [[package]]
 name = "async-trait"
@@ -1675,6 +1733,16 @@ dependencies = [
  "rayon-core",
  "smallvec",
  "zune-inflate",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7493d4c459da9f84325ad297371a6b2b8a162800873a22e3b6b6512e61d18c05"
+dependencies = [
+ "bit-set 0.5.3",
+ "regex",
 ]
 
 [[package]]
@@ -3448,7 +3516,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.2",
 ]
 
 [[package]]
@@ -4623,7 +4691,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5072,7 +5140,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5085,7 +5153,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5167,7 +5235,7 @@ dependencies = [
  "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6053,7 +6121,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6125,6 +6193,21 @@ dependencies = [
  "flate2",
  "jpeg-decoder",
  "weezl",
+]
+
+[[package]]
+name = "tiktoken-rs"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c314e7ce51440f9e8f5a497394682a57b7c323d0f4d0a6b1b13c429056e0e234"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bstr",
+ "fancy-regex 0.12.0",
+ "lazy_static",
+ "parking_lot",
+ "rustc-hash 1.1.0",
 ]
 
 [[package]]
@@ -6272,6 +6355,19 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "tokio-test"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2468baabc3311435b55dd935f702f42cd1b8abb7e754fb7dfb16bd36aa88f9f7"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-core",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7030,7 +7126,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
