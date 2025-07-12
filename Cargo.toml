@@ -15,6 +15,7 @@ members = [
     "crates/arkavo-mcp-core",
     "crates/arkavo-mcp-runtime",
     "crates/arkavo-dataflow",
+    "crates/arkavo-agui",
     "tools/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]

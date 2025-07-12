@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maestro</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #2a2a2a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --border-color: #333333;
+            --success-color: #2ecc71;
+            --error-color: #e74c3c;
+            --warning-color: #f39c12;
+            --info-color: #3498db;
+            --flow-color: #5dade2;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header h1 {
+            font-size: 20px;
+            font-weight: 500;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error-color);
+        }
+        
+        .status-indicator.connected {
+            background: var(--success-color);
+        }
+        
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        /* Left Panel - Agent List */
+        .agent-panel {
+            width: 300px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+        }
+        
+        .agent-panel-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 500;
+        }
+        
+        .agent-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .agent-item:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        .agent-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .agent-endpoint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+        
+        .agent-status {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error-color);
+        }
+        
+        .agent-status.connected {
+            background: var(--success-color);
+            animation: pulse 2s infinite;
+        }
+        
+        .agent-status.reconnecting {
+            background: var(--warning-color);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        /* Center - Flow Visualization */
+        .flow-container {
+            flex: 1;
+            background: var(--bg-primary);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #flowCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Right Panel - Telemetry Stream */
+        .telemetry-panel {
+            width: 350px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .telemetry-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .telemetry-stream {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        
+        .telemetry-event {
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            font-size: 12px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .telemetry-event.agent-connected {
+            border-left: 3px solid var(--success-color);
+        }
+        
+        .telemetry-event.agent-disconnected {
+            border-left: 3px solid var(--error-color);
+        }
+        
+        .telemetry-event.message-routed {
+            border-left: 3px solid var(--flow-color);
+        }
+        
+        .telemetry-event.tool-call {
+            border-left: 3px solid var(--warning-color);
+        }
+        
+        .telemetry-timestamp {
+            color: var(--text-secondary);
+            font-size: 10px;
+        }
+        
+        /* Metrics */
+        .metrics-bar {
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+        }
+        
+        .metric {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .metric-label {
+            color: var(--text-secondary);
+        }
+        
+        .metric-value {
+            font-weight: 500;
+            font-family: monospace;
+        }
+        
+        /* Agent Detail Panel */
+        .agent-detail-panel {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 35%;
+            max-width: 500px;
+            height: 100%;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            overflow-y: auto;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .agent-detail-panel.open {
+            transform: translateX(0);
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .detail-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-tertiary);
+        }
+        
+        .detail-header h2 {
+            font-size: 18px;
+            font-weight: 500;
+        }
+        
+        .close-button {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .close-button:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .detail-section {
+            margin-bottom: 32px;
+        }
+        
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+        }
+        
+        .detail-row {
+            display: flex;
+            margin-bottom: 12px;
+            align-items: flex-start;
+        }
+        
+        .detail-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            min-width: 140px;
+            flex-shrink: 0;
+        }
+        
+        .detail-value {
+            font-size: 13px;
+            color: var(--text-primary);
+            font-family: monospace;
+            word-break: break-all;
+            flex: 1;
+        }
+        
+        .detail-list {
+            font-size: 13px;
+            color: var(--text-primary);
+            font-family: monospace;
+            padding-left: 140px;
+        }
+        
+        .detail-list-item {
+            margin-bottom: 4px;
+        }
+        
+        .feature-item {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+        
+        .feature-type-badge {
+            display: inline-block;
+            background: var(--info-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        
+        .feature-id {
+            font-size: 12px;
+            color: var(--text-primary);
+            font-family: monospace;
+            word-break: break-all;
+        }
+        
+        .loading-message {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        
+        .error-message {
+            font-size: 13px;
+            color: var(--error-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .panel-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            z-index: 9;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        
+        .panel-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Maestro</h1>
+        <div class="connection-status">
+            <span class="status-indicator" id="gatewayStatus"></span>
+            <span id="gatewayStatusText">Disconnected</span>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <div class="agent-panel">
+            <div class="agent-panel-header">Discovered Agents</div>
+            <div id="agentList"></div>
+        </div>
+        
+        <div class="flow-container">
+            <canvas id="flowCanvas"></canvas>
+            <div class="panel-overlay" id="panelOverlay" onclick="closeAgentDetails()"></div>
+            <div class="agent-detail-panel" id="agentDetailPanel">
+                <div class="detail-header">
+                    <h2 id="detailAgentName">Agent Details</h2>
+                    <button class="close-button" onclick="closeAgentDetails()">×</button>
+                </div>
+                <div class="detail-content">
+                    <div class="detail-section">
+                        <div class="section-title">A2A Details</div>
+                        <div id="a2aDetails">
+                            <div class="loading-message">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="section-title">Features</div>
+                        <div id="featuresDetails">
+                            <div class="loading-message">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="telemetry-panel">
+            <div class="telemetry-header">
+                <span>Live Telemetry</span>
+                <button onclick="clearTelemetry()" style="padding: 4px 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer;">Clear</button>
+            </div>
+            <div class="telemetry-stream" id="telemetryStream"></div>
+            <div class="metrics-bar">
+                <div class="metric">
+                    <span class="metric-label">Messages/sec:</span>
+                    <span class="metric-value" id="msgPerSec">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Active Sessions:</span>
+                    <span class="metric-value" id="activeSessions">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Agents:</span>
+                    <span class="metric-value" id="totalAgents">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Flow visualization
+        class FlowVisualization {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.nodes = new Map(); // agent_id -> node
+                this.flows = []; // active message flows
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+                this.animate();
+            }
+            
+            resize() {
+                this.canvas.width = this.canvas.offsetWidth;
+                this.canvas.height = this.canvas.offsetHeight;
+            }
+            
+            addAgent(agent) {
+                const x = 100 + (this.nodes.size % 3) * 200;
+                const y = 100 + Math.floor(this.nodes.size / 3) * 150;
+                
+                this.nodes.set(agent.id, {
+                    id: agent.id,
+                    name: agent.name,
+                    x: x,
+                    y: y,
+                    status: 'connecting',
+                    radius: 30,
+                    sessions: 0
+                });
+            }
+            
+            updateAgentStatus(agentId, status) {
+                const node = this.nodes.get(agentId);
+                if (node) {
+                    node.status = status;
+                }
+            }
+            
+            addFlow(fromId, toId, type) {
+                const from = fromId === 'gateway' ? { x: this.canvas.width / 2, y: 50 } : this.nodes.get(fromId);
+                const to = toId === 'gateway' ? { x: this.canvas.width / 2, y: 50 } : this.nodes.get(toId);
+                
+                if (from && to) {
+                    this.flows.push({
+                        from: { x: from.x, y: from.y },
+                        to: { x: to.x, y: to.y },
+                        progress: 0,
+                        type: type,
+                        speed: 0.02
+                    });
+                }
+            }
+            
+            animate() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw gateway
+                this.drawGateway();
+                
+                // Draw connections
+                this.nodes.forEach(node => {
+                    this.drawConnection({ x: this.canvas.width / 2, y: 50 }, node);
+                });
+                
+                // Draw agents
+                this.nodes.forEach(node => {
+                    this.drawAgent(node);
+                });
+                
+                // Draw and update flows
+                this.flows = this.flows.filter(flow => {
+                    flow.progress += flow.speed;
+                    if (flow.progress <= 1) {
+                        this.drawFlow(flow);
+                        return true;
+                    }
+                    return false;
+                });
+                
+                requestAnimationFrame(() => this.animate());
+            }
+            
+            drawGateway() {
+                const x = this.canvas.width / 2;
+                const y = 50;
+                
+                this.ctx.save();
+                this.ctx.fillStyle = '#3498db';
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 25, 0, Math.PI * 2);
+                this.ctx.fill();
+                
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = '12px sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText('Gateway', x, y);
+                this.ctx.restore();
+            }
+            
+            drawAgent(node) {
+                this.ctx.save();
+                
+                // Status color
+                let color = '#e74c3c'; // disconnected
+                if (node.status === 'connected') color = '#2ecc71';
+                else if (node.status === 'reconnecting') color = '#f39c12';
+                
+                // Draw circle
+                this.ctx.fillStyle = color;
+                this.ctx.globalAlpha = 0.8;
+                this.ctx.beginPath();
+                this.ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+                this.ctx.fill();
+                
+                // Draw name
+                this.ctx.globalAlpha = 1;
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = '12px sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText(node.name, node.x, node.y - 5);
+                
+                // Draw session count
+                if (node.sessions > 0) {
+                    this.ctx.font = '10px sans-serif';
+                    this.ctx.fillText(`${node.sessions} sessions`, node.x, node.y + 10);
+                }
+                
+                this.ctx.restore();
+            }
+            
+            drawConnection(from, to) {
+                this.ctx.save();
+                this.ctx.strokeStyle = '#333';
+                this.ctx.lineWidth = 1;
+                this.ctx.setLineDash([5, 5]);
+                this.ctx.beginPath();
+                this.ctx.moveTo(from.x, from.y);
+                this.ctx.lineTo(to.x, to.y);
+                this.ctx.stroke();
+                this.ctx.restore();
+            }
+            
+            drawFlow(flow) {
+                const x = flow.from.x + (flow.to.x - flow.from.x) * flow.progress;
+                const y = flow.from.y + (flow.to.y - flow.from.y) * flow.progress;
+                
+                this.ctx.save();
+                this.ctx.fillStyle = '#5dade2';
+                this.ctx.globalAlpha = 1 - flow.progress * 0.5;
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 5, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.restore();
+            }
+        }
+        
+        // Initialize
+        const flowViz = new FlowVisualization(document.getElementById('flowCanvas'));
+        let telemetryWs = null;
+        let discoverySource = null;
+        let messageCount = 0;
+        let lastMessageTime = Date.now();
+        
+        // Connect to telemetry WebSocket
+        function connectTelemetry() {
+            telemetryWs = new WebSocket(`ws://${window.location.host}/telemetry`);
+            
+            telemetryWs.onopen = () => {
+                console.log('Connected to telemetry stream');
+                updateGatewayStatus(true);
+            };
+            
+            telemetryWs.onmessage = (event) => {
+                const telemetry = JSON.parse(event.data);
+                handleTelemetryEvent(telemetry);
+            };
+            
+            telemetryWs.onerror = (error) => {
+                console.error('Telemetry WebSocket error:', error);
+            };
+            
+            telemetryWs.onclose = () => {
+                console.log('Telemetry WebSocket closed');
+                updateGatewayStatus(false);
+                // Reconnect after 2 seconds
+                setTimeout(connectTelemetry, 2000);
+            };
+        }
+        
+        // Handle telemetry events
+        function handleTelemetryEvent(event) {
+            // Update metrics
+            messageCount++;
+            
+            // Add to stream
+            addTelemetryToStream(event);
+            
+            // Update visualization
+            switch (event.type) {
+                case 'agentConnected':
+                    flowViz.updateAgentStatus(event.agent_id, 'connected');
+                    updateAgentListStatus(event.agent_id, 'connected');
+                    handleAgentReconnect(event.agent_id);
+                    break;
+                    
+                case 'agentDisconnected':
+                    flowViz.updateAgentStatus(event.agent_id, 'disconnected');
+                    updateAgentListStatus(event.agent_id, 'disconnected');
+                    break;
+                    
+                case 'agentReconnecting':
+                    flowViz.updateAgentStatus(event.agent_id, 'reconnecting');
+                    updateAgentListStatus(event.agent_id, 'reconnecting');
+                    break;
+                    
+                case 'messageRouted':
+                    if (event.direction === 'outbound') {
+                        flowViz.addFlow('gateway', event.agent_id, event.message_type);
+                    } else {
+                        flowViz.addFlow(event.agent_id, 'gateway', event.message_type);
+                    }
+                    break;
+            }
+        }
+        
+        // Add telemetry event to stream
+        function addTelemetryToStream(event) {
+            const stream = document.getElementById('telemetryStream');
+            const eventEl = document.createElement('div');
+            eventEl.className = `telemetry-event ${event.type.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+            
+            const timestamp = new Date(event.timestamp).toLocaleTimeString();
+            let content = '';
+            
+            switch (event.type) {
+                case 'agentConnected':
+                    content = `Agent ${event.agent_id} connected`;
+                    break;
+                case 'agentDisconnected':
+                    content = `Agent ${event.agent_id} disconnected: ${event.reason}`;
+                    break;
+                case 'agentReconnecting':
+                    content = `Agent ${event.agent_id} reconnecting (attempt ${event.attempt})`;
+                    break;
+                case 'messageRouted':
+                    content = `${event.direction === 'outbound' ? '→' : '←'} ${event.message_type} ${event.direction === 'outbound' ? 'to' : 'from'} ${event.agent_id}`;
+                    break;
+                case 'toolCallExecuted':
+                    content = `Tool ${event.tool_name} executed by ${event.agent_id}`;
+                    break;
+                case 'stateChanged':
+                    content = `State updated for ${event.agent_id} (${event.patch_count} changes)`;
+                    break;
+            }
+            
+            eventEl.innerHTML = `
+                <div>${content}</div>
+                <div class="telemetry-timestamp">${timestamp}</div>
+            `;
+            
+            stream.insertBefore(eventEl, stream.firstChild);
+            
+            // Limit to 100 events
+            while (stream.children.length > 100) {
+                stream.removeChild(stream.lastChild);
+            }
+        }
+        
+        // Clear telemetry stream
+        function clearTelemetry() {
+            document.getElementById('telemetryStream').innerHTML = '';
+        }
+        
+        // Update gateway status
+        function updateGatewayStatus(connected) {
+            const indicator = document.getElementById('gatewayStatus');
+            const text = document.getElementById('gatewayStatusText');
+            
+            if (connected) {
+                indicator.classList.add('connected');
+                text.textContent = 'Connected';
+            } else {
+                indicator.classList.remove('connected');
+                text.textContent = 'Disconnected';
+            }
+        }
+        
+        // Discover agents via SSE
+        function connectDiscovery() {
+            discoverySource = new EventSource('/events');
+            
+            discoverySource.addEventListener('discovery', function(event) {
+                const data = JSON.parse(event.data);
+                updateAgentList(data.agents);
+            });
+            
+            discoverySource.onerror = (error) => {
+                console.error('Discovery SSE error:', error);
+            };
+        }
+        
+        // Update agent list
+        function updateAgentList(agents) {
+            const listEl = document.getElementById('agentList');
+            listEl.innerHTML = '';
+            
+            agents.forEach(agent => {
+                // Add to visualization if new
+                if (!flowViz.nodes.has(agent.id)) {
+                    flowViz.addAgent(agent);
+                }
+                
+                // Add to list
+                const itemEl = document.createElement('div');
+                itemEl.className = 'agent-item';
+                itemEl.innerHTML = `
+                    <div class="agent-name">${agent.name}</div>
+                    <div class="agent-endpoint">${agent.endpoint}</div>
+                    <span class="agent-status" id="status-${agent.id}"></span>
+                `;
+                itemEl.onclick = () => showAgentDetails(agent);
+                listEl.appendChild(itemEl);
+            });
+            
+            document.getElementById('totalAgents').textContent = agents.length;
+        }
+        
+        // Update agent status in list
+        function updateAgentListStatus(agentId, status) {
+            const statusEl = document.getElementById(`status-${agentId}`);
+            if (statusEl) {
+                statusEl.className = `agent-status ${status}`;
+            }
+        }
+        
+        // Update metrics
+        setInterval(() => {
+            const now = Date.now();
+            const elapsed = (now - lastMessageTime) / 1000;
+            const msgPerSec = elapsed > 0 ? (messageCount / elapsed).toFixed(1) : 0;
+            
+            document.getElementById('msgPerSec').textContent = msgPerSec;
+            
+            // Reset counter
+            if (elapsed > 1) {
+                messageCount = 0;
+                lastMessageTime = now;
+            }
+        }, 250);
+        
+        // Initialize connections
+        connectTelemetry();
+        connectDiscovery();
+        
+        // Agent Details Panel
+        let currentAgent = null;
+        let agentCache = new Map();
+        
+        function showAgentDetails(agent) {
+            currentAgent = agent;
+            document.getElementById('detailAgentName').textContent = agent.name;
+            document.getElementById('agentDetailPanel').classList.add('open');
+            document.getElementById('panelOverlay').classList.add('visible');
+            
+            // Check cache first
+            const cacheKey = agent.id;
+            if (agentCache.has(cacheKey)) {
+                const cached = agentCache.get(cacheKey);
+                displayA2ADetails(cached.a2a);
+                displayFeatures(cached.features);
+            } else {
+                // Fetch fresh data
+                fetchA2ADetails(agent);
+                fetchAgentFeatures(agent);
+            }
+        }
+        
+        function closeAgentDetails() {
+            document.getElementById('agentDetailPanel').classList.remove('open');
+            document.getElementById('panelOverlay').classList.remove('visible');
+            currentAgent = null;
+        }
+        
+        // ESC key handler
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeAgentDetails();
+            }
+        });
+        
+        async function fetchA2ADetails(agent) {
+            const detailsEl = document.getElementById('a2aDetails');
+            detailsEl.innerHTML = '<div class="loading-message">Loading A2A details...</div>';
+            
+            try {
+                // For now, use the discovery data we have
+                // In a real implementation, we'd fetch from agent_info or rpc.discover
+                const a2aData = {
+                    did: agent.did || `did:example:${agent.id}`,
+                    serviceEndpoint: `http://${agent.endpoint}`,
+                    routingKeys: [],
+                    acceptedProtocols: [
+                        'https://didcomm.org/discover-features/2.0',
+                        'https://github.com/anthropics/a2a/0.1'
+                    ],
+                    agentVersion: agent.model || 'Unknown',
+                    lastSeen: new Date().toISOString()
+                };
+                
+                // Cache the data
+                if (!agentCache.has(agent.id)) {
+                    agentCache.set(agent.id, {});
+                }
+                agentCache.get(agent.id).a2a = a2aData;
+                
+                displayA2ADetails(a2aData);
+            } catch (error) {
+                detailsEl.innerHTML = `<div class="error-message">Failed to load A2A details: ${error.message}</div>`;
+            }
+        }
+        
+        function displayA2ADetails(data) {
+            const detailsEl = document.getElementById('a2aDetails');
+            
+            let html = '';
+            
+            // DID
+            html += `<div class="detail-row">
+                <div class="detail-label">DID:</div>
+                <div class="detail-value">${data.did || 'Not available'}</div>
+            </div>`;
+            
+            // Service Endpoint
+            html += `<div class="detail-row">
+                <div class="detail-label">Service Endpoint:</div>
+                <div class="detail-value">${data.serviceEndpoint || 'Not available'}</div>
+            </div>`;
+            
+            // Routing Keys
+            html += `<div class="detail-row">
+                <div class="detail-label">Routing Keys:</div>
+                <div class="detail-value">${data.routingKeys && data.routingKeys.length > 0 ? '' : 'None'}</div>
+            </div>`;
+            if (data.routingKeys && data.routingKeys.length > 0) {
+                html += '<div class="detail-list">';
+                data.routingKeys.forEach(key => {
+                    html += `<div class="detail-list-item">${key}</div>`;
+                });
+                html += '</div>';
+            }
+            
+            // Accepted Protocols
+            html += `<div class="detail-row">
+                <div class="detail-label">Accepted Protocols:</div>
+                <div class="detail-value"></div>
+            </div>`;
+            if (data.acceptedProtocols && data.acceptedProtocols.length > 0) {
+                html += '<div class="detail-list">';
+                data.acceptedProtocols.forEach(protocol => {
+                    html += `<div class="detail-list-item">${protocol}</div>`;
+                });
+                html += '</div>';
+            }
+            
+            // Agent Version
+            html += `<div class="detail-row">
+                <div class="detail-label">Agent Version/Lib:</div>
+                <div class="detail-value">${data.agentVersion || 'Not available'}</div>
+            </div>`;
+            
+            // Last Seen
+            html += `<div class="detail-row">
+                <div class="detail-label">Last Seen:</div>
+                <div class="detail-value">${data.lastSeen ? new Date(data.lastSeen).toLocaleString() : 'Unknown'}</div>
+            </div>`;
+            
+            detailsEl.innerHTML = html;
+        }
+        
+        async function fetchAgentFeatures(agent) {
+            const featuresEl = document.getElementById('featuresDetails');
+            featuresEl.innerHTML = '<div class="loading-message">Loading features...</div>';
+            
+            try {
+                const response = await fetch(`/agent/${agent.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'discover_features_query',
+                        params: {},
+                        id: Date.now()
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.result && data.result.disclosures) {
+                    // Cache the data
+                    if (!agentCache.has(agent.id)) {
+                        agentCache.set(agent.id, {});
+                    }
+                    agentCache.get(agent.id).features = data.result.disclosures;
+                    
+                    displayFeatures(data.result.disclosures);
+                } else if (data.error) {
+                    throw new Error(data.error.message);
+                }
+            } catch (error) {
+                console.error('Failed to fetch features for agent', agent.id, error);
+                featuresEl.innerHTML = `<div class="error-message">⚠️ Feature list unavailable</div>`;
+            }
+        }
+        
+        function displayFeatures(disclosures) {
+            const featuresEl = document.getElementById('featuresDetails');
+            
+            if (!disclosures || disclosures.length === 0) {
+                featuresEl.innerHTML = '<div class="loading-message">No additional capabilities advertised.</div>';
+                return;
+            }
+            
+            let html = '';
+            disclosures.forEach(feature => {
+                html += `<div class="feature-item">
+                    <div class="feature-type-badge">${feature['feature-type'] || feature.feature_type}</div>
+                    <div class="feature-id">${feature.id}</div>
+                </div>`;
+            });
+            
+            featuresEl.innerHTML = html;
+        }
+        
+        // Clear cache when agent reconnects
+        function handleAgentReconnect(agentId) {
+            agentCache.delete(agentId);
+        }
+    </script>
+</body>
+</html>

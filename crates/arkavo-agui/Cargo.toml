@@ -1,0 +1,41 @@
+[package]
+name = "arkavo-agui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AG-UI protocol implementation and web gateway for Arkavo Edge"
+
+[features]
+default = ["mdns"]
+mdns = ["dep:zeroconf"]
+
+[dependencies]
+# Core dependencies
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+# Web server and WebSocket
+warp = { workspace = true, features = ["websocket"] }
+tokio-stream = "0.1"
+reqwest = { version = "0.11", features = ["json"] }
+
+# Protocol dependencies
+arkavo-protocol = { path = "../arkavo-protocol" }
+jsonrpsee = { workspace = true, features = ["ws-client"] }
+
+# UUID for event IDs
+uuid = { workspace = true }
+chrono = { workspace = true }
+rand = "0.8"
+
+# mDNS discovery
+zeroconf = { version = "0.14", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
