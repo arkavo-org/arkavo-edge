@@ -1,5 +1,7 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
+use crate::dataflow_handler::DataflowHandler;
 use crate::types::*;
+use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -20,6 +22,7 @@ pub struct AgUiGateway {
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
+    dataflow_handler: Arc<DataflowHandler>,
 }
 
 impl AgUiGateway {
@@ -32,6 +35,7 @@ impl AgUiGateway {
             agent_connections: Arc::new(RwLock::new(HashMap::new())),
             telemetry_tx,
             telemetry_rx: Some(telemetry_rx),
+            dataflow_handler: Arc::new(DataflowHandler::new()),
         }
     }
 
@@ -53,6 +57,30 @@ impl AgUiGateway {
             {
                 Ok(_) => println!("AG-UI: mDNS discovery completed"),
                 Err(e) => eprintln!("AG-UI: mDNS discovery error: {e}"),
+            }
+        });
+
+        // Start metrics sampler task
+        let telemetry_tx_for_metrics = self.telemetry_tx.clone();
+        tokio::spawn(async move {
+            println!("AG-UI: Starting metrics sampler...");
+            let config = MetricsSamplerConfig::default();
+            let mut sampler = MetricsSampler::new_with_name(config, "arkavo-agui".to_string());
+
+            // Create a mock metrics collector for now
+            // In production, this would be integrated with actual metrics
+            let metrics_collector = arkavo_observability::metrics::MetricsCollector::new();
+
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+
+                let snapshot = sampler.sample_metrics(&metrics_collector);
+
+                // Send metrics through telemetry channel
+                let _ = telemetry_tx_for_metrics
+                    .send(TelemetryEvent::MetricsSnapshot { snapshot })
+                    .await;
             }
         });
 
@@ -94,9 +122,7 @@ impl AgUiGateway {
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                     let agents_list = agents.read().await.clone();
-                    let response = serde_json::json!({
-                        "agents": agents_list
-                    });
+                    let response = serde_json::json!({ "agents": agents_list });
 
                     let event = Event::default()
                         .event("discovery")
@@ -115,6 +141,27 @@ impl AgUiGateway {
             .and(warp::body::json())
             .and(warp::any().map(move || agents_for_proxy.clone()))
             .and_then(handle_agent_proxy);
+
+        // Dataflow API endpoint
+        let dataflow_handler = self.dataflow_handler.clone();
+        let dataflow_api =
+            warp::path("api")
+                .and(warp::path("dataflow"))
+                .and(warp::path::tail())
+                .and(warp::body::json())
+                .and(warp::any().map(move || dataflow_handler.clone()))
+                .and_then(
+                    |path: warp::path::Tail,
+                     body: serde_json::Value,
+                     handler: Arc<DataflowHandler>| async move {
+                        let path_vec = path
+                            .as_str()
+                            .split('/')
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>();
+                        handler.handle_request(path_vec, body).await
+                    },
+                );
 
         // Telemetry WebSocket endpoint
         let telemetry_rx = self
@@ -136,11 +183,16 @@ impl AgUiGateway {
             .or(websocket)
             .or(agent_events)
             .or(agent_proxy)
+            .or(dataflow_api)
             .or(telemetry_ws);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
         println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
         println!("WebSocket endpoint: ws://127.0.0.1:{}/ws", self.port);
+        println!(
+            "Dataflow API endpoint: http://127.0.0.1:{}/api/dataflow",
+            self.port
+        );
         println!("Open http://127.0.0.1:{} in your web browser", self.port);
 
         warp::serve(routes).run(addr).await;
