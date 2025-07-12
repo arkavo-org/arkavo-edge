@@ -493,19 +493,12 @@ mod tests {
             }))
             .await;
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            let result = result.unwrap();
-            assert!(result.is_empty());
-        }
-
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert_eq!(err.code(), -32601);
-            assert!(err.message().contains("not yet implemented"));
-        }
+        // agent_discover now returns actual data regardless of stub_handlers feature
+        let result = result.unwrap();
+        assert_eq!(result.len(), 1);
+        let agent = &result[0];
+        assert!(agent.agent_id.to_string().len() > 0);
+        assert!(agent.metadata.is_some());
     }
 
     #[tokio::test]
@@ -524,11 +517,7 @@ mod tests {
 
         // First request should succeed
         let result1 = impl_instance.agent_discover(None).await;
-
-        #[cfg(feature = "stub_handlers")]
         assert!(result1.is_ok());
-        #[cfg(not(feature = "stub_handlers"))]
-        assert_eq!(result1.unwrap_err().code(), -32601);
 
         // Second request should be rate limited
         let result2 = impl_instance.agent_discover(None).await;
