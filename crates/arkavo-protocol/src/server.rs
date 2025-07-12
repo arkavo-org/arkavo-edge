@@ -1,4 +1,4 @@
-use crate::config::ServerConfig;
+use crate::config::{BufferConfig, ServerConfig};
 use crate::error::{A2aError, Result};
 use crate::mcp_registry::McpRegistry;
 use crate::metrics::{MetricsCollector, RpcTimer};
@@ -23,7 +23,7 @@ use jsonrpsee::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info};
 
 #[rpc(server)]
 pub trait A2aRpc {
@@ -518,9 +518,10 @@ impl A2aRpcServer for A2aRpcImpl {
                                             timestamp: stream_delta.timestamp,
                                         },
                                         DeltaType::Error(err) => {
-                                            eprintln!(
-                                                "Stream error: {} - {}",
-                                                err.code, err.message
+                                            error!(
+                                                code = err.code,
+                                                message = err.message,
+                                                "Stream error during chat delta processing"
                                             );
                                             continue;
                                         }
@@ -538,14 +539,14 @@ impl A2aRpcServer for A2aRpcImpl {
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Delta stream error: {e}");
+                                    error!(error = %e, "Delta stream error");
                                     break;
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to start LLM stream: {e}");
+                        error!(error = %e, "Failed to start LLM stream");
                         let error_delta = MessageDelta {
                             session_id: request.session_id.clone().unwrap_or_default(),
                             message_id: message_id.clone(),
@@ -589,6 +590,7 @@ impl A2aRpcServer for A2aRpcImpl {
 
 pub struct A2aServer {
     config: ServerConfig,
+    buffer_config: BufferConfig,
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
@@ -596,8 +598,13 @@ pub struct A2aServer {
 
 impl A2aServer {
     pub fn new(config: ServerConfig) -> Self {
+        Self::with_buffer_config(config, BufferConfig::default())
+    }
+
+    pub fn with_buffer_config(config: ServerConfig, buffer_config: BufferConfig) -> Self {
         Self {
             config,
+            buffer_config,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
@@ -624,7 +631,7 @@ impl A2aServer {
                 name, model
             );
         } else {
-            eprintln!("Failed to create LLM adapter for model: {model}");
+            error!(model = %model, "Failed to create LLM adapter for model");
         }
     }
 
@@ -680,8 +687,10 @@ impl A2aServer {
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(true)); // TODO: Make configurable
         let llm_adapter = self.llm_adapter.read().await.clone();
-        let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::new(
+        let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::with_config(
             llm_adapter.clone(),
+            3600, // 1 hour TTL
+            self.buffer_config.clone(),
         ));
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
