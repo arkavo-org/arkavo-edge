@@ -9,8 +9,7 @@ use crate::types::PromiseStatus;
 use crate::types::{
     AgentDiscoverFilter, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta,
-    MessageDeltaContent, PromiseCapability, PromiseDeclareResponse, PromiseResponse,
-    UserMessage,
+    MessageDeltaContent, PromiseCapability, PromiseDeclareResponse, PromiseResponse, UserMessage,
 };
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
