@@ -627,7 +627,7 @@ jobs:
         with:
           shared-key: "xtask-schema"
       - name: Run schema validation
-        run: cargo xtask schema-gen --check
+        run: cargo run -p xtask -- schema-gen --check
 
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:

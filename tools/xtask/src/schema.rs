@@ -52,9 +52,17 @@ fn generate_openrpc_schema(schemas_dir: &Path, check: bool) -> Result<()> {
         if schema_path.exists() {
             let existing_content = fs::read_to_string(&schema_path)?;
 
-            // Normalize JSON for comparison
-            let existing_json: serde_json::Value = serde_json::from_str(&existing_content)?;
-            let generated_json: serde_json::Value = serde_json::from_str(&schema_content)?;
+            let mut existing_json: serde_json::Value = serde_json::from_str(&existing_content)?;
+            let mut generated_json: serde_json::Value = serde_json::from_str(&schema_content)?;
+
+            // Ignore version field for comparison
+            if let (Some(existing_info), Some(generated_info)) = (
+                existing_json.get_mut("info").and_then(|i| i.as_object_mut()),
+                generated_json.get_mut("info").and_then(|i| i.as_object_mut()),
+            ) {
+                existing_info.remove("version");
+                generated_info.remove("version");
+            }
 
             if existing_json != generated_json {
                 eprintln!("❌ Schema has drifted from code!");
