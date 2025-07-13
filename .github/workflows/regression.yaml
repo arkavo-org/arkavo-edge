@@ -72,15 +72,10 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libavahi-client-dev libavahi-common-dev
-
       - name: Run regression test for issue #157
         run: |
           echo "Running regression test for issue #157 - MCP servers runtime nesting"
-          cargo test -p arkavo-cli --test regression_issue_157 -- --nocapture || {
+          cargo test -p arkavo-cli --test regression_issue_157 --no-default-features --features "memory,local" -- --nocapture || {
             echo "::error::Regression test for issue #157 failed"
             exit 1
           }
