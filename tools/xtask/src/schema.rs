@@ -57,8 +57,12 @@ fn generate_openrpc_schema(schemas_dir: &Path, check: bool) -> Result<()> {
 
             // Ignore version field for comparison
             if let (Some(existing_info), Some(generated_info)) = (
-                existing_json.get_mut("info").and_then(|i| i.as_object_mut()),
-                generated_json.get_mut("info").and_then(|i| i.as_object_mut()),
+                existing_json
+                    .get_mut("info")
+                    .and_then(|i| i.as_object_mut()),
+                generated_json
+                    .get_mut("info")
+                    .and_then(|i| i.as_object_mut()),
             ) {
                 existing_info.remove("version");
                 generated_info.remove("version");
