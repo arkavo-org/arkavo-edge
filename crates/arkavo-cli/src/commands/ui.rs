@@ -13,11 +13,19 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         7700
     };
 
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
+    // Check if we're already in a runtime context
+    let run_async = async {
         let gateway = AgUiGateway::new(port);
         gateway.start().await
-    })
+    };
+
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(run_async),
+        Err(_) => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(run_async)
+        }
+    }
 }
 
 fn print_usage() {

@@ -6,15 +6,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
-struct McpProcess {
-    child: Child,
+pub struct McpProcess {
+    pub child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
 }
 
 #[derive(Debug, Clone)]
 pub struct McpClient {
-    process: Arc<Mutex<McpProcess>>,
+    pub process: Arc<Mutex<McpProcess>>,
     request_id: Arc<Mutex<u64>>,
 }
 
@@ -81,9 +81,17 @@ impl McpClient {
             (cmd, vec!["mcp".to_string()])
         };
 
+        Self::new_with_command(&cmd, &args)
+    }
+
+    /// Create a new MCP client with explicit command and arguments
+    pub fn new_with_command(
+        cmd: &str,
+        args: &[String],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Start MCP server process
-        let mut child = Command::new(&cmd)
-            .args(&args)
+        let mut child = Command::new(cmd)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

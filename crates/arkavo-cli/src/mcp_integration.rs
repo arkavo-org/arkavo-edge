@@ -25,9 +25,9 @@ impl McpConnection {
                 handle.block_on(async { MemoryIntegration::new().await })?
             }
             Err(_) => {
-                // Not in a runtime, create one temporarily
-                let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(async { MemoryIntegration::new().await })?
+                // Not in a runtime, this is an error in MCP context
+                // MCP servers should always be running in an async context
+                return Err("MCP server must be run within a tokio runtime".into());
             }
         };
 
