@@ -242,8 +242,8 @@ impl Drop for McpProcessManager {
 
 /// Validate that a command exists and is executable
 fn validate_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // For development binaries, check local paths first
-    if command.starts_with("./") || command.starts_with("../") {
+    // For any path (relative like ./, ../ or absolute like /usr/bin/), check if file exists
+    if command.contains('/') {
         if std::path::Path::new(command).exists() {
             return Ok(());
         } else {
