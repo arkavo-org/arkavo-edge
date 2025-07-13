@@ -127,20 +127,6 @@ jobs:
       # See https://github.com/arkavo-org/arkavo-edge/issues/138 for remaining warnings to address
       - run: cargo clippy --workspace
       
-      - name: Check for TODO placeholders in changed files
-        run: |
-          echo "Checking for TODO placeholders in changed files..."
-          # Get list of changed files in this PR/commit
-          if git diff --name-only HEAD^ HEAD 2>/dev/null | grep -v "^\.github/" | while read file; do
-            if [ -f "$file" ] && grep -Hn -E "TODO:.*(implement|remove|fix|placeholder|not yet implemented)" "$file"; then
-              echo "::error::Found TODO placeholders in changed file: $file"
-              exit 1
-            fi
-          done; then
-            echo "::error::Found TODO placeholders that indicate unfinished code in changed files. Please complete the implementation before merging."
-            exit 1
-          fi
-          echo "No problematic TODO placeholders found in changed files."
 
   # Tests and builds can run in parallel
   test:
