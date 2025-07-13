@@ -6,8 +6,11 @@ pub mod error;
 pub mod http;
 pub mod mcp;
 pub mod mcp_registry;
+#[cfg(feature = "mdns")]
+pub mod mdns;
 pub mod metrics;
 pub mod metrics_subscription;
+pub mod network;
 pub mod openrpc;
 pub mod rate_limit;
 pub mod security;
@@ -21,10 +24,13 @@ pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};
 pub use http::HttpTransport;
 pub use mcp_registry::{McpConnectionTrait, McpRegistry};
+#[cfg(feature = "mdns")]
+pub use mdns::{MdnsError, MdnsServiceInfo};
 pub use metrics::{MetricsCollector, RpcTimer};
 pub use metrics_subscription::{
     MetricsApi, MetricsServiceConfig, MetricsSubscriptionServer, MetricsSubscriptionService,
 };
+pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
     IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
