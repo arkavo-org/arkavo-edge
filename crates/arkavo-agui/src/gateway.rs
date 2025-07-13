@@ -551,12 +551,12 @@ async fn run_mdns_discovery(
             let tx_clone = tx;
             browser.set_service_discovered_callback(Box::new(move |result, _| match result {
                 Ok(service) => {
-                    let host = service.address().to_string();
+                    let discovered_host = service.address().to_string();
 
                     println!(
                         "AG-UI: Discovered service: {} at {}:{}",
                         service.name(),
-                        host,
+                        discovered_host,
                         service.port()
                     );
 
@@ -567,17 +567,32 @@ async fn run_mdns_discovery(
 
                     let mut purpose = "Agent discovered via mDNS".to_string();
                     let mut model = "Unknown".to_string();
+                    let mut txt_ip: Option<String> = None;
 
+                    // Extract information from TXT records, including IP if available
                     if let Some(txt) = service.txt() {
                         for (key, value) in txt.iter() {
                             match key.as_str() {
                                 "agent_id" => agent_id = value.clone(),
                                 "purpose" => purpose = value.clone(),
                                 "model" => model = value.clone(),
+                                "ip" => txt_ip = Some(value.clone()),
                                 _ => {}
                             }
                         }
                     }
+
+                    // Determine the best IP address to use for connection
+                    let host = if discovered_host == "0.0.0.0" {
+                        if let Some(ip) = txt_ip {
+                            ip
+                        } else {
+                            println!("AG-UI: WARNING: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1");
+                            "127.0.0.1".to_string()
+                        }
+                    } else {
+                        discovered_host
+                    };
 
                     let agent_info = serde_json::json!({
                         "id": agent_id,

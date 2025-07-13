@@ -4,6 +4,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
 
+#[cfg(feature = "mdns")]
+use crate::mdns::MdnsServiceInfo;
+
+#[cfg(not(feature = "mdns"))]
+pub struct MdnsServiceInfo;
+
 #[derive(Debug, Clone)]
 pub struct DiscoveryConfig {
     pub method: DiscoveryMethod,
@@ -26,6 +32,8 @@ pub enum DiscoveryMethod {
     Static,
     Dns,
     Environment,
+    #[cfg(feature = "mdns")]
+    Mdns,
 }
 
 pub struct DiscoveryService {
@@ -72,6 +80,10 @@ impl DiscoveryService {
             ))),
             DiscoveryMethod::Environment => self.discover_from_environment(agent_id),
             DiscoveryMethod::Dns => self.discover_via_dns(agent_id),
+            #[cfg(feature = "mdns")]
+            DiscoveryMethod::Mdns => Err(A2aError::ServiceDiscovery(
+                "mDNS discovery should be initiated through AG-UI gateway".to_string(),
+            )),
         }
     }
 
@@ -97,6 +109,10 @@ impl DiscoveryService {
             }
             DiscoveryMethod::Dns => {
                 warn!("DNS discovery for all agents not implemented");
+            }
+            #[cfg(feature = "mdns")]
+            DiscoveryMethod::Mdns => {
+                warn!("mDNS discovery for all agents should be initiated through AG-UI gateway");
             }
         }
 
@@ -189,6 +205,58 @@ impl DiscoveryService {
     pub fn clear_cache(&self) {
         self.discovered_endpoints.write().unwrap().clear();
         info!("Cleared discovery cache");
+    }
+
+    /// Start mDNS discovery for A2A agents
+    ///
+    /// This method starts discovering A2A agents on the local network using mDNS.
+    /// Note: This is a placeholder implementation. The actual mDNS discovery logic
+    /// is implemented in the arkavo-agui crate's gateway module.
+    #[cfg(feature = "mdns")]
+    pub async fn start_mdns_discovery(&self) -> Result<()> {
+        info!("Starting mDNS discovery for A2A agents");
+
+        // The actual mDNS discovery implementation is in arkavo-agui/src/gateway.rs
+        // This method is provided for API compatibility with the example
+        warn!("mDNS discovery should be started through the AG-UI gateway");
+
+        Err(A2aError::ServiceDiscovery(
+            "mDNS discovery is implemented in the AG-UI gateway, not the protocol layer"
+                .to_string(),
+        ))
+    }
+
+    #[cfg(not(feature = "mdns"))]
+    pub async fn start_mdns_discovery(&self) -> Result<()> {
+        Err(A2aError::ServiceDiscovery(
+            "mDNS feature not compiled in".to_string(),
+        ))
+    }
+
+    /// Register an mDNS service for an A2A agent
+    ///
+    /// This method registers an A2A agent as an mDNS service on the local network.
+    /// Note: This is a placeholder implementation. The actual mDNS registration logic
+    /// is implemented in the arkavo-cli crate's agent module.
+    #[cfg(feature = "mdns")]
+    pub async fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
+        info!("Registering mDNS service for A2A agent");
+
+        // The actual mDNS registration implementation is in arkavo-cli/src/commands/agent.rs
+        // This method is provided for API compatibility with the example
+        warn!("mDNS service registration should be done through the agent command");
+
+        Err(A2aError::ServiceDiscovery(
+            "mDNS service registration is implemented in the agent command, not the protocol layer"
+                .to_string(),
+        ))
+    }
+
+    #[cfg(not(feature = "mdns"))]
+    pub async fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
+        Err(A2aError::ServiceDiscovery(
+            "mDNS feature not compiled in".to_string(),
+        ))
     }
 }
 
