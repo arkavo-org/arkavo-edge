@@ -585,7 +585,6 @@ async fn run_mdns_discovery(
                     // Determine the best IP address to use for connection
                     let host = if discovered_host == "0.0.0.0" {
                         if let Some(ip) = txt_ip {
-                            println!("AG-UI: Using IP from TXT record: {}", ip);
                             ip
                         } else {
                             println!("AG-UI: WARNING: Service advertised 0.0.0.0 with no IP in TXT records, using 127.0.0.1");
@@ -594,8 +593,6 @@ async fn run_mdns_discovery(
                     } else {
                         discovered_host
                     };
-
-                    println!("AG-UI: Final endpoint will be: {}:{}", host, service.port());
 
                     let agent_info = serde_json::json!({
                         "id": agent_id,

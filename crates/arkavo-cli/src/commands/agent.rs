@@ -529,7 +529,8 @@ fn broadcast_agent_mdns_sync(
         let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
         service.set_name(&format!("arkavo-agent-{}", config.name));
         service.set_txt_record(txt);
-        service.set_host(&service_ip.to_string());
+        // Note: set_host() doesn't work as expected with zeroconf library
+        // The IP is provided in TXT records instead
 
         let service = service.register()?;
 
