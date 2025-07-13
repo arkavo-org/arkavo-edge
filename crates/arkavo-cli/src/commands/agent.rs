@@ -127,9 +127,41 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         return Err("No agent configurations found in file".into());
     }
 
-    // For now, run the first agent found
-    // TODO: Add agent selection if multiple agents are defined
-    let agent_config = &agents[0];
+    // If multiple agents are defined, let user select which one to run
+    let agent_config = if agents.len() == 1 {
+        &agents[0]
+    } else {
+        println!("Multiple agents found in configuration:");
+        for (i, agent) in agents.iter().enumerate() {
+            println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
+        }
+
+        println!("Select agent to run (1-{}): ", agents.len());
+
+        // Read user input
+        use std::io::{self, Write};
+        print!("Enter selection: ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        let selection: usize = input
+            .trim()
+            .parse()
+            .map_err(|_| "Invalid selection. Please enter a number.")?;
+
+        if selection == 0 || selection > agents.len() {
+            return Err(format!(
+                "Selection {} is out of range. Please select 1-{}",
+                selection,
+                agents.len()
+            )
+            .into());
+        }
+
+        &agents[selection - 1]
+    };
 
     println!("Starting agent: {}", agent_config.name);
     println!("Purpose: {}", agent_config.purpose);
