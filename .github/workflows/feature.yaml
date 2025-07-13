@@ -617,6 +617,18 @@ jobs:
             fi
           done
 
+  validate-xtask-schema:
+    name: Validate Schemas with xtask
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "xtask-schema"
+      - name: Run schema validation
+        run: cargo run -p xtask -- schema-gen --check
+
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:
     name: Regression Tests
@@ -717,7 +729,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check]
+    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -734,7 +746,8 @@ jobs:
                 "${{ needs.validate-openrpc.result }}" != "success" || \
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \
                 "${{ needs.regression-tests.result }}" != "success" || \
-                "${{ needs.zero-config-check.result }}" != "success" ]]; then
+                "${{ needs.zero-config-check.result }}" != "success" || \
+                "${{ needs.validate-xtask-schema.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

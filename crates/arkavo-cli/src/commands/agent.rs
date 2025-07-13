@@ -1,4 +1,4 @@
-use arkavo_protocol::McpConnectionTrait;
+use arkavo_protocol::{McpConnectionTrait, get_service_ip};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -511,11 +511,16 @@ fn broadcast_agent_mdns_sync(
         let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
         println!("broadcast_agent_mdns: Parsed port: {port}");
 
+        // Get the actual network IP for advertising instead of 0.0.0.0
+        let service_ip = get_service_ip();
+        println!("broadcast_agent_mdns: Using IP address: {service_ip}");
+
         let mut txt = TxtRecord::new();
         let mut properties = HashMap::new();
         properties.insert("agent_id", config.name.clone());
         properties.insert("purpose", config.purpose.clone());
         properties.insert("model", config.model.clone());
+        properties.insert("ip", service_ip.to_string());
 
         for (key, value) in &properties {
             txt.insert(key, value)?;
@@ -524,13 +529,17 @@ fn broadcast_agent_mdns_sync(
         let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
         service.set_name(&format!("arkavo-agent-{}", config.name));
         service.set_txt_record(txt);
+        // Note: set_host() doesn't work as expected with zeroconf library
+        // The IP is provided in TXT records instead
 
         let service = service.register()?;
 
         println!("mDNS service registered successfully!");
         println!("Service name: arkavo-agent-{}", config.name);
         println!("Service type: _a2a._tcp");
+        println!("Host: {service_ip}");
         println!("Port: {port}");
+        println!("WebSocket endpoint: ws://{service_ip}:{port}/ws");
 
         // The service automatically unregisters when it goes out of scope.
         // We need to keep it alive.
