@@ -127,9 +127,41 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         return Err("No agent configurations found in file".into());
     }
 
-    // For now, run the first agent found
-    // TODO: Add agent selection if multiple agents are defined
-    let agent_config = &agents[0];
+    // If multiple agents are defined, let user select which one to run
+    let agent_config = if agents.len() == 1 {
+        &agents[0]
+    } else {
+        println!("Multiple agents found in configuration:");
+        for (i, agent) in agents.iter().enumerate() {
+            println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
+        }
+
+        println!("Select agent to run (1-{}): ", agents.len());
+
+        // Read user input
+        use std::io::{self, Write};
+        print!("Enter selection: ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        let selection: usize = input
+            .trim()
+            .parse()
+            .map_err(|_| "Invalid selection. Please enter a number.")?;
+
+        if selection == 0 || selection > agents.len() {
+            return Err(format!(
+                "Selection {} is out of range. Please select 1-{}",
+                selection,
+                agents.len()
+            )
+            .into());
+        }
+
+        &agents[selection - 1]
+    };
 
     println!("Starting agent: {}", agent_config.name);
     println!("Purpose: {}", agent_config.purpose);
@@ -150,8 +182,18 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     }
 
     // Start the A2A server with the agent configuration
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async { agent::start_agent_server(agent_config).await })
+    // Check if we're already in a runtime context
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            // Already in a runtime, use the existing handle
+            handle.block_on(async { agent::start_agent_server(agent_config).await })
+        }
+        Err(_) => {
+            // Not in a runtime, create one
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { agent::start_agent_server(agent_config).await })
+        }
+    }
 }
 
 // Agent configuration parsing
@@ -247,7 +289,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
         if in_mcp_section && current_mcp_server.is_some() {
             if let Some(server) = current_mcp_server.as_mut() {
                 if trimmed.starts_with("command:") {
-                    server.command = Some(trimmed[8..].trim().to_string());
+                    server.command = Some(trimmed[8..].trim().trim_matches('"').to_string());
                 } else if trimmed.starts_with("args:") {
                     // Parse array format: ["arg1", "arg2"]
                     let args_str = trimmed[5..].trim();
@@ -260,7 +302,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                             .collect();
                     }
                 } else if trimmed.starts_with("url:") {
-                    server.url = Some(trimmed[4..].trim().to_string());
+                    server.url = Some(trimmed[4..].trim().trim_matches('"').to_string());
                 } else if !trimmed.is_empty()
                     && !trimmed.starts_with(' ')
                     && !trimmed.starts_with('-')
@@ -280,11 +322,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
         if !in_mcp_section {
             if let Some(agent) = current_agent.as_mut() {
                 if trimmed.starts_with("purpose:") {
-                    agent.purpose = trimmed[8..].trim().to_string();
+                    agent.purpose = trimmed[8..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("model:") {
-                    agent.model = trimmed[6..].trim().to_string();
+                    agent.model = trimmed[6..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("listen:") {
-                    agent.listen = trimmed[7..].trim().to_string();
+                    agent.listen = trimmed[7..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("mdns:") {
                     // Only disable if explicitly set to false
                     agent.mdns_enabled = !trimmed.contains("false");
@@ -309,7 +351,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 }
 
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::mcp_spawner::McpProcessManager;
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
+
+    // Create process manager for MCP servers
+    let process_manager = McpProcessManager::new();
 
     // Parse listen address
     let parts: Vec<&str> = config.listen.split(':').collect();
@@ -344,11 +390,50 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
         // Create appropriate MCP connection based on config
         if let Some(command) = &mcp_config.command {
-            // TODO: Launch command-based MCP server
-            eprintln!(
-                "Command-based MCP servers not yet implemented: {} with args {:?}",
-                command, mcp_config.args
-            );
+            // Create MCP client using the existing sync approach
+            use crate::mcp_client::McpClient;
+            use crate::mcp_integration::McpConnection;
+
+            match McpClient::new_with_command(command, &mcp_config.args) {
+                Ok(client) => {
+                    // Register the spawned process with the process manager for cleanup
+                    // Note: McpClient handles its own process lifecycle, but we track it for coordinated shutdown
+                    let pid = if let Ok(process) = client.process.lock() {
+                        let pid = process.child.id();
+                        process_manager.register_process(mcp_config.name.clone(), pid);
+                        pid
+                    } else {
+                        0
+                    };
+
+                    // Telemetry: MCP server started
+                    println!(
+                        "[INFO] mcp.server.started name={} command={} pid={} args={:?}",
+                        mcp_config.name, command, pid, mcp_config.args
+                    );
+
+                    let connection = McpConnection::External(client);
+                    let wrapped = McpConnectionWrapper::new(connection);
+                    mcp_registry
+                        .register(mcp_config.name.clone(), Box::new(wrapped))
+                        .await;
+                    println!(
+                        "Started command-based MCP server: {} ({})",
+                        mcp_config.name, command
+                    );
+                }
+                Err(e) => {
+                    // Telemetry: MCP server failed to start
+                    println!(
+                        "[ERROR] mcp.server.start_failed name={} command={} error=\"{}\"",
+                        mcp_config.name, command, e
+                    );
+                    eprintln!(
+                        "Failed to initialize MCP client for {}: {}",
+                        mcp_config.name, e
+                    );
+                }
+            }
         } else if let Some(url) = &mcp_config.url {
             // Create external MCP connection
             use crate::mcp_integration::McpConnection;
@@ -398,8 +483,16 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Keep the server running
     tokio::signal::ctrl_c().await?;
+
+    println!("Shutting down agent server...");
+
+    // Stop the A2A server
     handle.stop()?;
 
+    // Shutdown all MCP processes
+    process_manager.shutdown_all()?;
+
+    println!("Agent server stopped.");
     Ok(())
 }
 

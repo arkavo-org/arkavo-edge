@@ -57,3 +57,25 @@ jobs:
         run: |
           cd crates/arkavo-llm
           cargo test test_phi2_tokenizer_metadata --features llm-local -- --nocapture
+
+  test-issue-157-mcp-runtime:
+    name: Test Issue #157 - MCP Runtime Nesting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Run regression test for issue #157
+        run: |
+          echo "Running regression test for issue #157 - MCP servers runtime nesting"
+          cargo test -p arkavo-cli --test regression_issue_157 --no-default-features --features "memory,local" -- --nocapture || {
+            echo "::error::Regression test for issue #157 failed"
+            exit 1
+          }

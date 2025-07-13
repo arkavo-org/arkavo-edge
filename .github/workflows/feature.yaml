@@ -126,6 +126,7 @@ jobs:
       # Note: Clippy warnings are shown but don't fail the build
       # See https://github.com/arkavo-org/arkavo-edge/issues/138 for remaining warnings to address
       - run: cargo clippy --workspace
+      
 
   # Tests and builds can run in parallel
   test:

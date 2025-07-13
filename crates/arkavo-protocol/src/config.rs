@@ -25,6 +25,53 @@ impl Default for BufferConfig {
     }
 }
 
+impl BufferConfig {
+    /// Validate buffer configuration and warn on invalid values
+    pub fn validate(&self) -> Result<()> {
+        const MIN_BUFFER_SIZE: usize = 1;
+        const MAX_BUFFER_SIZE: usize = 4096;
+        const WARN_MIN_SIZE: usize = 0;
+        const WARN_MAX_SIZE: usize = 10_000;
+
+        // Helper to check and warn about buffer sizes
+        let check_buffer = |name: &str, size: usize| {
+            if size == WARN_MIN_SIZE {
+                warn!(
+                    "{} is set to 0, which may cause blocking. Consider using a value between {} and {}",
+                    name, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE
+                );
+            } else if size > WARN_MAX_SIZE {
+                warn!(
+                    "{} is set to {}, which is very large and may consume excessive memory. Consider using a value between {} and {}",
+                    name, size, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE
+                );
+            } else if size < MIN_BUFFER_SIZE || size > MAX_BUFFER_SIZE {
+                warn!(
+                    "{} is set to {}, which is outside the recommended range of {} to {}",
+                    name, size, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE
+                );
+            }
+        };
+
+        check_buffer("chat_delta_buffer_size", self.chat_delta_buffer_size);
+        check_buffer(
+            "metrics_broadcast_buffer_size",
+            self.metrics_broadcast_buffer_size,
+        );
+        check_buffer(
+            "telemetry_channel_buffer_size",
+            self.telemetry_channel_buffer_size,
+        );
+        check_buffer(
+            "agui_broadcast_buffer_size",
+            self.agui_broadcast_buffer_size,
+        );
+
+        // Don't fail on validation - just warn
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct A2aConfig {
     pub agent_id: String,
@@ -88,6 +135,7 @@ impl A2aConfig {
         }
 
         self.security.validate()?;
+        self.buffers.validate()?;
 
         Ok(())
     }

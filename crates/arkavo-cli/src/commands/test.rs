@@ -40,11 +40,17 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
         println!("Description: {desc}");
     }
 
-    let runtime = tokio::runtime::Runtime::new()?;
     let runner = TestRunner::new();
 
-    let results =
-        runtime.block_on(async { runner.run_parallel_scenarios(feature.scenarios).await })?;
+    let results = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.block_on(async { runner.run_parallel_scenarios(feature.scenarios).await })?
+        }
+        Err(_) => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { runner.run_parallel_scenarios(feature.scenarios).await })?
+        }
+    };
 
     let reporter = BusinessReporter::new(OutputFormat::Markdown)?;
     let report = reporter.generate_report(&results)?;
@@ -181,9 +187,7 @@ fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::erro
     println!("🧠 Running Intelligent Test Exploration...\n");
 
     // Auto-discover and analyze project
-    let runtime = tokio::runtime::Runtime::new()?;
-
-    runtime.block_on(async {
+    let run_async = async {
         // Step 1: Auto-discover project type
         let discovery = AutoDiscovery::new()?;
         let project_info = discovery.analyze_project().await?;
@@ -230,7 +234,15 @@ fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::erro
         println!("\n⏱️  Total time: {:?}", report.duration);
 
         Ok::<(), Box<dyn std::error::Error>>(())
-    })?;
+    };
+
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(run_async),
+        Err(_) => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(run_async)
+        }
+    }?;
 
     Ok(())
 }
