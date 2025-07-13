@@ -257,7 +257,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
         if in_mcp_section && current_mcp_server.is_some() {
             if let Some(server) = current_mcp_server.as_mut() {
                 if trimmed.starts_with("command:") {
-                    server.command = Some(trimmed[8..].trim().to_string());
+                    server.command = Some(trimmed[8..].trim().trim_matches('"').to_string());
                 } else if trimmed.starts_with("args:") {
                     // Parse array format: ["arg1", "arg2"]
                     let args_str = trimmed[5..].trim();
@@ -270,7 +270,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                             .collect();
                     }
                 } else if trimmed.starts_with("url:") {
-                    server.url = Some(trimmed[4..].trim().to_string());
+                    server.url = Some(trimmed[4..].trim().trim_matches('"').to_string());
                 } else if !trimmed.is_empty()
                     && !trimmed.starts_with(' ')
                     && !trimmed.starts_with('-')
@@ -290,11 +290,11 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
         if !in_mcp_section {
             if let Some(agent) = current_agent.as_mut() {
                 if trimmed.starts_with("purpose:") {
-                    agent.purpose = trimmed[8..].trim().to_string();
+                    agent.purpose = trimmed[8..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("model:") {
-                    agent.model = trimmed[6..].trim().to_string();
+                    agent.model = trimmed[6..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("listen:") {
-                    agent.listen = trimmed[7..].trim().to_string();
+                    agent.listen = trimmed[7..].trim().trim_matches('"').to_string();
                 } else if trimmed.starts_with("mdns:") {
                     // Only disable if explicitly set to false
                     agent.mdns_enabled = !trimmed.contains("false");
