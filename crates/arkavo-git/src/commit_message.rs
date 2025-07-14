@@ -1,3 +1,4 @@
+use crate::attribution::format_commit_message;
 use crate::{DiffOptions, GitManager, Result};
 use git2::Repository;
 use std::collections::HashMap;
@@ -26,7 +27,14 @@ impl CommitMessageGenerator {
         // Generate message based on changes
         let message = self.create_message(&change_summary);
 
-        Ok(message)
+        // Check if files are being modified
+        let files_modified =
+            !status.modified.is_empty() || !status.added.is_empty() || !status.deleted.is_empty();
+
+        // Add attribution
+        let formatted_message = format_commit_message(&message, files_modified);
+
+        Ok(formatted_message)
     }
 
     fn analyze_changes(&self, status: &crate::GitStatus, diff: &str) -> ChangeSummary {

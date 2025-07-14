@@ -10,11 +10,11 @@ fn main() {
     // This simulates what would happen when discover_swift_tests is called
     match test_swift_discovery() {
         Ok(count) => {
-            println!("Successfully discovered {} Swift tests", count);
+            println!("Successfully discovered {count} Swift tests");
             exit(0);
         }
         Err(e) => {
-            println!("Swift test discovery unavailable: {}", e);
+            println!("Swift test discovery unavailable: {e}");
             // This is expected behavior when Xcode is not installed
             // The important thing is that no system prompt was triggered
             exit(0);

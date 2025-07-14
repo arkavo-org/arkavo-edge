@@ -1,5 +1,6 @@
 use crate::mcp::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
+use arkavo_git::attribution::format_pr_body;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::process::Command;
@@ -128,7 +129,14 @@ impl Tool for GitHubPrCreateKit {
 
         if let Some(body) = params["body"].as_str() {
             args.push("--body".to_string());
-            args.push(body.to_string());
+            // Format the PR body with attribution
+            let formatted_body = format_pr_body(body);
+            args.push(formatted_body);
+        } else {
+            // If no body provided, add attribution footer to empty body
+            args.push("--body".to_string());
+            let formatted_body = format_pr_body("");
+            args.push(formatted_body);
         }
 
         if let Some(base) = params["base"].as_str() {
@@ -359,7 +367,14 @@ impl Tool for GitHubIssueCreateKit {
 
         if let Some(body) = params["body"].as_str() {
             args.push("--body".to_string());
-            args.push(body.to_string());
+            // Format the issue body with attribution
+            let formatted_body = format_pr_body(body);
+            args.push(formatted_body);
+        } else {
+            // If no body provided, add attribution footer to empty body
+            args.push("--body".to_string());
+            let formatted_body = format_pr_body("");
+            args.push(formatted_body);
         }
 
         if let Some(assignee) = params["assignee"].as_str() {
@@ -797,5 +812,37 @@ mod tests {
 
         let pr_merge = GitHubPrMergeKit::new();
         assert_eq!(pr_merge.schema().name, "github_pr_merge");
+    }
+
+    #[test]
+    fn test_pr_body_formatting() {
+        // Test that PR body gets attribution footer
+        let pr_create = GitHubPrCreateKit::new();
+
+        // Simulate parameters with body
+        let params_with_body = json!({
+            "title": "Test PR",
+            "body": "This is a test PR description"
+        });
+
+        // We can't easily test the execute method without mocking gh,
+        // but we can test the attribution formatting directly
+        let formatted_body = format_pr_body("This is a test PR description");
+        assert!(formatted_body.contains("This is a test PR description"));
+        assert!(formatted_body.contains("🤖 Generated with [Arkavo Edge]"));
+        assert!(formatted_body.contains("https://arkavo.ai/edge"));
+
+        // Test empty body
+        let formatted_empty = format_pr_body("");
+        assert!(formatted_empty.contains("🤖 Generated with [Arkavo Edge]"));
+    }
+
+    #[test]
+    fn test_issue_body_formatting() {
+        // Test that issue body gets attribution footer
+        let formatted_body = format_pr_body("This is a test issue description");
+        assert!(formatted_body.contains("This is a test issue description"));
+        assert!(formatted_body.contains("🤖 Generated with [Arkavo Edge]"));
+        assert!(formatted_body.contains("https://arkavo.ai/edge"));
     }
 }

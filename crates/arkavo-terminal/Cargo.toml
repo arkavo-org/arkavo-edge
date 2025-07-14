@@ -31,8 +31,6 @@ semver = { version = "1.0", features = ["serde"] }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
-arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
-arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 arkavo-test = { path = "../arkavo-test" }
 tokio-stream = "0.1"
 regex = { workspace = true }

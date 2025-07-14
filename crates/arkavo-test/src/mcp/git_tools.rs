@@ -1,5 +1,6 @@
 use crate::mcp::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
+use arkavo_git::attribution::format_commit_message;
 use arkavo_git::safety::sanitize_repo_path;
 use arkavo_git::{DiffOptions, GitManager};
 use async_trait::async_trait;
@@ -226,21 +227,35 @@ impl Tool for GitCommitKit {
 
         let repo = safe_open_repo(&self.git_manager, path)?;
 
+        // Check if there are any changes before staging
+        let status_before = self
+            .git_manager
+            .status(&repo)
+            .map_err(|e| TestError::Mcp(format!("Failed to get status: {e}")))?;
+
+        // Check if any files will be modified (not just added/deleted)
+        let files_modified = !status_before.modified.is_empty()
+            || !status_before.added.is_empty()
+            || !status_before.deleted.is_empty();
+
         // Stage all changes
         self.git_manager
             .add_all(&repo)
             .map_err(|e| TestError::Mcp(format!("Failed to stage changes: {e}")))?;
 
+        // Format the commit message with attribution
+        let formatted_message = format_commit_message(message, files_modified);
+
         // Create commit
         let oid = self
             .git_manager
-            .commit_changes(&repo, message)
+            .commit_changes(&repo, &formatted_message)
             .map_err(|e| TestError::Mcp(format!("Failed to commit: {e}")))?;
 
         Ok(json!({
             "success": true,
             "commit_id": oid.to_string(),
-            "message": message
+            "message": formatted_message
         }))
     }
 
@@ -560,5 +575,48 @@ impl Tool for GitRemoteKit {
 
     fn schema(&self) -> &ToolSchema {
         &self.schema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_git_commit_with_attribution() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = GitManager::new();
+
+        // Initialize repo
+        manager.init_repo(temp_dir.path()).unwrap();
+        let repo = manager.open_repo(temp_dir.path()).unwrap();
+
+        // Set up git config for tests
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+
+        // Create a file
+        fs::write(temp_dir.path().join("test.txt"), "Hello world").unwrap();
+
+        // Test GitCommitKit
+        let commit_kit = GitCommitKit::new();
+        let params = json!({
+            "path": temp_dir.path().to_str().unwrap(),
+            "message": "Add test file"
+        });
+
+        let result = commit_kit.execute(params).await.unwrap();
+
+        // Check that the commit was successful
+        assert!(result["success"].as_bool().unwrap());
+
+        // Check the formatted message
+        let message = result["message"].as_str().unwrap();
+        assert!(message.contains("Add test file"));
+        assert!(message.contains("🤖 Generated with [Arkavo Edge]"));
+        assert!(message.contains("Co-Authored-By: Arkavo Edge <edge@arkavo.com>"));
     }
 }

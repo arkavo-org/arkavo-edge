@@ -22,6 +22,12 @@ pub struct McpProcess {
     pub stdout: BufReader<ChildStdout>,
 }
 
+impl Default for McpProcessManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpProcessManager {
     pub fn new() -> Self {
         Self {
@@ -49,10 +55,7 @@ impl McpProcessManager {
 
         // Debug log for MCP server spawn
         if std::env::var("ARKAVO_DEBUG").is_ok() {
-            eprintln!(
-                "[DEBUG] mcp.spawner Spawning MCP server '{}': {} {:?}",
-                name, command, args
-            );
+            eprintln!("[DEBUG] mcp.spawner Spawning MCP server '{name}': {command} {args:?}");
         }
 
         // Start the process
@@ -62,18 +65,18 @@ impl McpProcessManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn MCP server '{}': {}", command, e))?;
+            .map_err(|e| format!("Failed to spawn MCP server '{command}': {e}"))?;
 
         // Take ownership of stdin and stdout
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| format!("Failed to get stdin for MCP server '{}'", name))?;
+            .ok_or_else(|| format!("Failed to get stdin for MCP server '{name}'"))?;
 
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| format!("Failed to get stdout for MCP server '{}'", name))?;
+            .ok_or_else(|| format!("Failed to get stdout for MCP server '{name}'"))?;
 
         let stdout_reader = BufReader::new(stdout);
 
@@ -87,8 +90,7 @@ impl McpProcessManager {
                         // Only show stderr in debug mode
                         if std::env::var("ARKAVO_DEBUG").is_ok() {
                             eprintln!(
-                                "[DEBUG] mcp.server.stderr name={} line=\"{}\"",
-                                name_clone, line
+                                "[DEBUG] mcp.server.stderr name={name_clone} line=\"{line}\""
                             );
                         }
                     }
@@ -246,9 +248,8 @@ fn validate_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
     if command.contains('/') {
         if std::path::Path::new(command).exists() {
             return Ok(());
-        } else {
-            return Err(format!("Command not found at path: {}", command).into());
         }
+        return Err(format!("Command not found at path: {command}").into());
     }
 
     // Use 'which' command on Unix-like systems to check if command exists
@@ -257,12 +258,11 @@ fn validate_command(command: &str) -> Result<(), Box<dyn std::error::Error>> {
         let output = Command::new("which")
             .arg(command)
             .output()
-            .map_err(|e| format!("Failed to run 'which' command: {}", e))?;
+            .map_err(|e| format!("Failed to run 'which' command: {e}"))?;
 
         if !output.status.success() {
             return Err(format!(
-                "Command '{}' not found in PATH. Please ensure it is installed and accessible.",
-                command
+                "Command '{command}' not found in PATH. Please ensure it is installed and accessible."
             )
             .into());
         }

@@ -281,7 +281,7 @@ impl ConversationManager {
             id: Uuid::new_v4(),
             session_id,
             role: "system".to_string(),
-            content: format!("Previous conversation summary:\n{}", summary),
+            content: format!("Previous conversation summary:\n{summary}"),
             timestamp: Utc::now(),
             token_count: self.count_tokens(&summary),
             is_summary: true,
