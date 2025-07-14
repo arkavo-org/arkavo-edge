@@ -24,6 +24,7 @@ pub mod filesystem_tools;
 #[cfg(target_os = "macos")]
 pub mod frameworks_data;
 pub mod git_tools;
+pub mod github_tools;
 #[cfg(target_os = "macos")]
 pub mod idb_companion_health;
 #[cfg(target_os = "macos")]
