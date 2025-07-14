@@ -8,8 +8,8 @@ pub mod memory_integration;
 
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
-        // No command provided, default to chat
-        return commands::chat::execute(&[]);
+        // No command provided, default to agent run
+        return commands::agent::execute(&["run".to_string()]);
     }
 
     match args[0].as_str() {
@@ -113,10 +113,11 @@ fn print_usage() {
     println!("Arkavo Edge - Developer-centric agentic CLI tool for AI-agent development");
     println!();
     println!("USAGE:");
-    println!("    arkavo <COMMAND> [OPTIONS]");
+    println!("    arkavo              Run default agent (auto-generates config if needed)");
+    println!("    arkavo <COMMAND>    Run specific command");
     println!();
     println!("COMMANDS:");
-    println!("    agent     Configure and run AI agents");
+    println!("    agent     Configure and run AI agents (default when no command given)");
     println!(
         "    chat      Start conversational agent with repository context (Terminal UI by default)"
     );
