@@ -22,8 +22,6 @@ jsonrpsee = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 
 # Server dependencies
-tower = { version = "0.4", features = ["full"] }
-hyper = { version = "1.0", features = ["full"] }
 governor = { version = "0.6", features = ["std", "jitter"] }
 dashmap = { version = "5.5" }
 crossbeam-queue = "0.3"

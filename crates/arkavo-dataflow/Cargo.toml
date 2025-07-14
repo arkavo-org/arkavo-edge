@@ -37,10 +37,10 @@ arkavo-memory = { path = "../arkavo-memory" }
 tokio-stream = "0.1"
 tracing = { workspace = true }
 base64 = { workspace = true }
-url = "2.5"
 reqwest = { workspace = true, features = ["stream"] }
 rand = "0.8"
 ring = "0.17"
+url = "2.5.4"
 
 [dev-dependencies]
 
