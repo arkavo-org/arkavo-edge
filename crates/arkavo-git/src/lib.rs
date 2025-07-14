@@ -1,3 +1,4 @@
+pub mod attribution;
 pub mod backend;
 pub mod commit_message;
 pub mod remote_fallback;
