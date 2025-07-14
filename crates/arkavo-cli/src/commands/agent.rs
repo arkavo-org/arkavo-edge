@@ -1,4 +1,4 @@
-use arkavo_protocol::{McpConnectionTrait, get_service_ip};
+use arkavo_protocol::{get_service_ip, McpConnectionTrait};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -108,14 +108,43 @@ listen:  0.0.0.0:8342
 
 fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
+    use std::env;
 
     let config_file = config_path.unwrap_or("AGENTS.md");
     let config_path = Path::new(config_file);
 
     if !config_path.exists() {
-        eprintln!("Error: Configuration file '{config_file}' not found");
-        eprintln!("Run 'arkavo agent init <name>' to create one");
-        return Err(format!("Config file not found: {config_file}").into());
+        // Auto-generate AGENTS.md with directory-based naming
+
+        // Get current directory name
+        let current_dir = env::current_dir()?;
+        let dir_name = current_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project")
+            .to_string();
+
+        // Generate a short random ID from UUID (first 7 chars)
+        use uuid::Uuid;
+        let random_id = &Uuid::new_v4().to_string()[..7];
+
+        // Create agent name: directory-randomid
+        let agent_name = format!("{}-{}", dir_name, random_id);
+
+        // Generate AGENTS.md with defaults
+        let template = format!(
+            r#"# AGENTS.md
+
+## {}
+purpose: AI agent for {} development
+model:   ollama://127.0.0.1:11434/qwen:0.6b
+listen:  0.0.0.0:8342
+"#,
+            agent_name, dir_name
+        );
+
+        fs::write(config_path, template)?;
+        println!("Auto-generated AGENTS.md with agent '{}'", agent_name);
     }
 
     let config_content = fs::read_to_string(config_path)?;
@@ -136,7 +165,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
             println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
         }
 
-        println!("Select agent to run (1-{}): ", agents.len());
+        print!("Select agent to run (1-{}): ", agents.len());
 
         // Read user input
         use std::io::{self, Write};
