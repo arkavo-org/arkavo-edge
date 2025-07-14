@@ -55,9 +55,7 @@ impl McpProcessManager {
 
         // Debug log for MCP server spawn
         if std::env::var("ARKAVO_DEBUG").is_ok() {
-            eprintln!(
-                "[DEBUG] mcp.spawner Spawning MCP server '{name}': {command} {args:?}"
-            );
+            eprintln!("[DEBUG] mcp.spawner Spawning MCP server '{name}': {command} {args:?}");
         }
 
         // Start the process

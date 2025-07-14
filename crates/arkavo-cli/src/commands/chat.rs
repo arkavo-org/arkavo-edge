@@ -1068,8 +1068,8 @@ fn handle_tool_calls_in_response(
                         tool_results.push((tool_name.to_string(), format!("Error: {e}")));
                     }
                 }
-            } 
-        } 
+            }
+        }
     }
 
     // Return the original response text to avoid interrupting the flow
