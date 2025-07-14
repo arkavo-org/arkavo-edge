@@ -1068,9 +1068,7 @@ fn handle_tool_calls_in_response(
                         tool_results.push((tool_name.to_string(), format!("Error: {e}")));
                     }
                 }
-            } else {
             }
-        } else {
         }
     }
 
@@ -1169,14 +1167,14 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 }
                 Err(e) => {
                     if !print_mode {
-                        eprintln!("Could not connect to Ollama at localhost:11434: {}", e);
+                        eprintln!("Could not connect to Ollama at localhost:11434: {e}");
                     }
                 }
             }
         }
         Err(e) => {
             if !print_mode {
-                eprintln!("Ollama not available: {}", e);
+                eprintln!("Ollama not available: {e}");
             }
         }
     }
@@ -1190,7 +1188,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 .strip_prefix("local:")
                 .unwrap();
             if !print_mode {
-                eprintln!("Checking for previously used local model: {}", model_name);
+                eprintln!("Checking for previously used local model: {model_name}");
             }
         }
     }

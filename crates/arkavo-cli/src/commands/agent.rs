@@ -176,7 +176,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
             if let Some(cmd) = &server.command {
                 println!("    command: {} {:?}", cmd, server.args);
             } else if let Some(url) = &server.url {
-                println!("    url: {}", url);
+                println!("    url: {url}");
             }
         }
     }

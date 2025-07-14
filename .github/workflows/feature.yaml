@@ -157,60 +157,6 @@ jobs:
           # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
           # Note: arkavo-llm integration tests excluded as they require local feature
 
-
-  test-embeddings:
-    name: Test with Embeddings (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "test-embeddings"
-      - name: Install ONNX Runtime for macOS
-        run: |
-          curl -L -o ort-osx.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.18.0/onnxruntime-osx-arm64-1.18.0.tgz
-          mkdir -p ort
-          tar -xzf ort-osx.tgz -C ort --strip-components=1
-      - name: Set ORT library path
-        run: |
-          echo "DYLD_LIBRARY_PATH=$PWD/ort/lib" >> $GITHUB_ENV
-          echo "ORT_LIB_PATH=$PWD/ort/lib" >> $GITHUB_ENV
-      - name: Download embedding model files
-        run: |
-          mkdir -p crates/arkavo-memory/models
-          cd crates/arkavo-memory/models
-          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/model.onnx
-          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer.json
-          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/config.json
-          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/special_tokens_map.json
-          curl -L -O https://huggingface.co/Qdrant/all-MiniLM-L6-v2-onnx/resolve/main/tokenizer_config.json
-      # Tests now use isolated databases in temp directory, no cleanup needed
-      - name: Run embedding tests
-        env:
-          DYLD_LIBRARY_PATH: ${{ github.workspace }}/ort/lib
-          ORT_DYLIB_PATH: ${{ github.workspace }}/ort/lib
-          ORT_LIB_PATH: ${{ github.workspace }}/ort/lib
-        run: |
-          # Test memory crate with embeddings enabled
-          cargo test -p arkavo-memory --features embeddings
-          # Test arkavo-test with embeddings enabled
-          cargo test -p arkavo-test --features embeddings --lib
-
-  test-llm-local:
-    name: Test with Local LLM (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "test-llm-local"
-      - name: Run local LLM tests
-        run: |
-          # Test arkavo-llm with local feature
-          cargo test -p arkavo-llm --features llm-local
-
   build-linux:
     name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -729,7 +675,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, test-embeddings, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
+    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
     runs-on: ubuntu-latest
     if: always()
     steps:

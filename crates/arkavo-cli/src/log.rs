@@ -6,23 +6,23 @@
 
 #[allow(dead_code)]
 pub fn info(component: &str, message: &str) {
-    eprintln!("[INFO] {} {}", component, message);
+    eprintln!("[INFO] {component} {message}");
 }
 
 #[allow(dead_code)]
 pub fn warn(component: &str, message: &str) {
-    eprintln!("[WARN] {} {}", component, message);
+    eprintln!("[WARN] {component} {message}");
 }
 
 #[allow(dead_code)]
 pub fn error(component: &str, message: &str) {
-    eprintln!("[ERROR] {} {}", component, message);
+    eprintln!("[ERROR] {component} {message}");
 }
 
 #[allow(dead_code)]
 pub fn debug(component: &str, message: &str) {
     if std::env::var("ARKAVO_DEBUG").is_ok() {
-        eprintln!("[DEBUG] {} {}", component, message);
+        eprintln!("[DEBUG] {component} {message}");
     }
 }
 
@@ -31,8 +31,8 @@ pub fn debug(component: &str, message: &str) {
 pub fn telemetry(event: &str, fields: &[(&str, &str)]) {
     let fields_str = fields
         .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
+        .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join(" ");
-    eprintln!("[INFO] {} {}", event, fields_str);
+    eprintln!("[INFO] {event} {fields_str}");
 }
