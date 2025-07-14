@@ -4,6 +4,10 @@ use super::{
     device_tools::DeviceManagementKit,
     filesystem_tools::FileSystemKit,
     git_tools::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit},
+    github_tools::{
+        GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit,
+        GitHubPrMergeKit, GitHubReleaseCreateKit, GitHubRepoCloneKit,
+    },
     ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit},
     simulator_tools::SimulatorControl,
     tui_interaction_kit::TuiInteractionKit,
@@ -132,6 +136,49 @@ impl McpConnection {
 
         let tui_harness = TuiTestHarness::new();
         tools.insert(tui_harness.schema().name.clone(), Box::new(tui_harness));
+
+        // Add GitHub tools
+        let github_pr_create = GitHubPrCreateKit::new();
+        tools.insert(
+            github_pr_create.schema().name.clone(),
+            Box::new(github_pr_create),
+        );
+
+        let github_pr_list = GitHubPrListKit::new();
+        tools.insert(
+            github_pr_list.schema().name.clone(),
+            Box::new(github_pr_list),
+        );
+
+        let github_pr_merge = GitHubPrMergeKit::new();
+        tools.insert(
+            github_pr_merge.schema().name.clone(),
+            Box::new(github_pr_merge),
+        );
+
+        let github_issue_create = GitHubIssueCreateKit::new();
+        tools.insert(
+            github_issue_create.schema().name.clone(),
+            Box::new(github_issue_create),
+        );
+
+        let github_issue_list = GitHubIssueListKit::new();
+        tools.insert(
+            github_issue_list.schema().name.clone(),
+            Box::new(github_issue_list),
+        );
+
+        let github_repo_clone = GitHubRepoCloneKit::new();
+        tools.insert(
+            github_repo_clone.schema().name.clone(),
+            Box::new(github_repo_clone),
+        );
+
+        let github_release_create = GitHubReleaseCreateKit::new();
+        tools.insert(
+            github_release_create.schema().name.clone(),
+            Box::new(github_release_create),
+        );
 
         // Add any additional tools provided
         tools.extend(additional_tools);
