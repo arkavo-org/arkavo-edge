@@ -96,10 +96,9 @@ impl SnapshotManager {
         drop(nodes);
 
         {
-            let mut current = self
-                .current_branch
-                .write()
-                .map_err(|e| TestError::Execution(format!("Failed to write current branch: {e}")))?;
+            let mut current = self.current_branch.write().map_err(|e| {
+                TestError::Execution(format!("Failed to write current branch: {e}"))
+            })?;
 
             *current = snapshot_id.to_string();
         } // current lock is dropped here
