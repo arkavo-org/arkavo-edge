@@ -1,5 +1,5 @@
 /// iOS 26 beta compilation guidance constants
-pub(crate) const IOS26_BETA_COMPILATION_GUIDANCE: &str = r#"
+pub const IOS26_BETA_COMPILATION_GUIDANCE: &str = r#"
 ## iOS 26 Beta Compilation Fix
 
 ### Problem
@@ -38,10 +38,10 @@ The harness builder automatically:
 "#;
 
 /// Error codes for AXP harness operations
-pub(crate) mod error_codes {
-    pub(crate) const IOS_SDK_MISSING: &str = "IOS_SDK_MISSING";
-    pub(crate) const INVALID_BUNDLE_ID: &str = "INVALID_BUNDLE_ID";
-    pub(crate) const COMPILATION_FAILED: &str = "COMPILATION_FAILED";
-    pub(crate) const BETA_COMPILATION_FAILED: &str = "BETA_COMPILATION_FAILED";
-    pub(crate) const SDK_NOT_FOUND: &str = "SDK_NOT_FOUND";
+pub mod error_codes {
+    pub const IOS_SDK_MISSING: &str = "IOS_SDK_MISSING";
+    pub const INVALID_BUNDLE_ID: &str = "INVALID_BUNDLE_ID";
+    pub const COMPILATION_FAILED: &str = "COMPILATION_FAILED";
+    pub const BETA_COMPILATION_FAILED: &str = "BETA_COMPILATION_FAILED";
+    pub const SDK_NOT_FOUND: &str = "SDK_NOT_FOUND";
 }

@@ -129,22 +129,21 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         let random_id = &Uuid::new_v4().to_string()[..7];
 
         // Create agent name: directory-randomid
-        let agent_name = format!("{}-{}", dir_name, random_id);
+        let agent_name = format!("{dir_name}-{random_id}");
 
         // Generate AGENTS.md with defaults
         let template = format!(
             r#"# AGENTS.md
 
-## {}
-purpose: AI agent for {} development
+## {agent_name}
+purpose: AI agent for {dir_name} development
 model:   ollama://127.0.0.1:11434/qwen:0.6b
 listen:  0.0.0.0:8342
-"#,
-            agent_name, dir_name
+"#
         );
 
         fs::write(config_path, template)?;
-        println!("Auto-generated AGENTS.md with agent '{}'", agent_name);
+        println!("Auto-generated AGENTS.md with agent '{agent_name}'");
     }
 
     let config_content = fs::read_to_string(config_path)?;

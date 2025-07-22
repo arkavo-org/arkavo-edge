@@ -101,6 +101,6 @@ mod tests {
         let available = XcodebuildWrapper::is_available();
         // We don't assert the result as it depends on the system
         // Just ensure it doesn't crash or trigger prompts
-        println!("xcodebuild available: {}", available);
+        println!("xcodebuild available: {available}");
     }
 }

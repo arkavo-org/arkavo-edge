@@ -45,7 +45,7 @@ impl BufferConfig {
                     "{} is set to {}, which is very large and may consume excessive memory. Consider using a value between {} and {}",
                     name, size, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE
                 );
-            } else if size < MIN_BUFFER_SIZE || size > MAX_BUFFER_SIZE {
+            } else if !(MIN_BUFFER_SIZE..=MAX_BUFFER_SIZE).contains(&size) {
                 warn!(
                     "{} is set to {}, which is outside the recommended range of {} to {}",
                     name, size, MIN_BUFFER_SIZE, MAX_BUFFER_SIZE

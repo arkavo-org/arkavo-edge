@@ -374,7 +374,7 @@ mod tests {
         assert!(snapshot.validate_size().is_ok());
 
         let size = snapshot.estimated_json_size();
-        println!("Snapshot size with 100 sessions: {} bytes", size);
-        assert!(size <= 1024, "Snapshot size {} exceeds 1KB limit", size);
+        println!("Snapshot size with 100 sessions: {size} bytes");
+        assert!(size <= 1024, "Snapshot size {size} exceeds 1KB limit");
     }
 }

@@ -9,13 +9,13 @@ fn test_tokenizer_temp_file_cleanup() {
     let test_model_name = format!("test_model_{}", std::process::id());
 
     // Create a pattern to match our temp files
-    let _pattern = format!("arkavo_tokenizer_{}_*.spm", test_model_name);
+    let _pattern = format!("arkavo_tokenizer_{test_model_name}_*.spm");
 
     // Clean up any existing files first
     if let Ok(entries) = std::fs::read_dir(&temp_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with(&format!("arkavo_tokenizer_{}_", test_model_name)) {
+                if name.starts_with(&format!("arkavo_tokenizer_{test_model_name}_")) {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
@@ -64,7 +64,7 @@ fn test_unique_tokenizer_filenames() {
     let model_name = "test_model";
     let pid = std::process::id();
 
-    let expected_pattern = format!("arkavo_tokenizer_{}_{}.spm", model_name, pid);
+    let expected_pattern = format!("arkavo_tokenizer_{model_name}_{pid}.spm");
     let _path = temp_dir.join(&expected_pattern);
 
     // Verify the pattern includes process ID for uniqueness

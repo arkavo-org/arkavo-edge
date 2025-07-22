@@ -275,8 +275,8 @@ mod tests {
 
         // Verify size is within limits
         let size = snapshot.estimated_json_size();
-        println!("MetricsSnapshot JSON size: {} bytes", size);
-        assert!(size <= 1024, "Snapshot size {} exceeds 1KB limit", size);
+        println!("MetricsSnapshot JSON size: {size} bytes");
+        assert!(size <= 1024, "Snapshot size {size} exceeds 1KB limit");
 
         // Validation should pass
         assert!(snapshot.validate_size().is_ok());
@@ -330,7 +330,7 @@ mod tests {
 
         // Should have max 2 error types, sorted by count
         assert!(top_errors.len() <= 2);
-        if top_errors.len() >= 1 {
+        if !top_errors.is_empty() {
             assert_eq!(top_errors[0].error_type, "timeout");
             assert_eq!(top_errors[0].count, 2);
         }

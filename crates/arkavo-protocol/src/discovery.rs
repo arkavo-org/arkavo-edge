@@ -274,7 +274,7 @@ mod tests {
             public_key: None,
         };
 
-        service.register_static_endpoint(endpoint.clone());
+        service.register_static_endpoint(endpoint);
 
         let found = service.check_static_endpoints("test-agent");
         assert!(found.is_some());

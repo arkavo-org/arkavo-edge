@@ -17,7 +17,7 @@ async fn test_gemma_without_tokenizer() -> anyhow::Result<()> {
         .join(".cache/arkavo/models/gemma-3n-E2B-it-Q4_K_M.gguf");
 
     if !model_path.exists() {
-        eprintln!("Gemma model not found at {:?}, skipping test", model_path);
+        eprintln!("Gemma model not found at {model_path:?}, skipping test");
         return Ok(());
     }
 
