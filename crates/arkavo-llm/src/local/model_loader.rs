@@ -661,14 +661,25 @@ impl ModelLoader {
 
         // Check if we're already in a tokio runtime
         let result = if tokio::runtime::Handle::try_current().is_ok() {
-            // We're in an async context, use spawn_blocking to avoid nested runtime
+            // We're in an async context, spawn a new thread to avoid nested runtime
             let base_repo_id = base_repo_id.to_string();
             let model_path = self.model_path.clone();
             let tokenizer_type = spec.tokenizer_type.clone();
 
-            let handle = tokio::runtime::Handle::current();
-            let result = std::thread::spawn(move || {
-                handle.block_on(async move {
+            // Use a separate thread to avoid runtime conflicts
+            std::thread::spawn(move || {
+                // Create a new runtime in the spawned thread - this is safe
+                let runtime = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::error!("Failed to create runtime for tokenizer download: {}", e);
+                        return false;
+                    }
+                };
+
+                // Allow block_on here since we're in a separate thread
+                #[allow(clippy::disallowed_methods)]
+                runtime.block_on(async move {
                     let downloader = match super::download_manager::ModelDownloader::new() {
                         Ok(d) => d,
                         Err(e) => {
@@ -691,8 +702,7 @@ impl ModelLoader {
                 })
             })
             .join()
-            .unwrap_or(false);
-            result
+            .unwrap_or(false)
         } else {
             // Not in async context, create a runtime
             let runtime = match tokio::runtime::Runtime::new() {
@@ -703,6 +713,8 @@ impl ModelLoader {
                 }
             };
 
+            // Allow block_on here since we're not in an async context
+            #[allow(clippy::disallowed_methods)]
             runtime.block_on(async {
                 let downloader = match super::download_manager::ModelDownloader::new() {
                     Ok(d) => d,

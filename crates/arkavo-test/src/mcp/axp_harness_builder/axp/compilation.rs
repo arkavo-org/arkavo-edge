@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Handles compilation of AXP harness with various SDK configurations
-pub(crate) struct HarnessCompiler;
+pub struct HarnessCompiler;
 
 impl HarnessCompiler {
     /// Compile harness using Swift Package Manager

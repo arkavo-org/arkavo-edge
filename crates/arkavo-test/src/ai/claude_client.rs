@@ -35,6 +35,11 @@ struct Content {
 }
 
 impl ClaudeClient {
+    /// Creates a new ClaudeClient with the given API key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the HTTP client cannot be created.
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))

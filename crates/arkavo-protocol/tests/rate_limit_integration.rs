@@ -21,7 +21,7 @@ async fn test_rate_limit_eviction_with_background_task() {
 
     // Add some IPs
     for i in 0..50 {
-        let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+        let ip: IpAddr = format!("192.168.1.{i}").parse().unwrap();
         let _ = limiter.check_rate_limit(ip);
     }
 
@@ -89,7 +89,7 @@ async fn test_per_ip_rate_limiting_stress() {
     for i in 0..10 {
         let limiter_clone = limiter.clone();
         let handle = tokio::spawn(async move {
-            let ip: IpAddr = format!("192.168.1.{}", i).parse().unwrap();
+            let ip: IpAddr = format!("192.168.1.{i}").parse().unwrap();
 
             let mut allowed = 0;
             let mut blocked = 0;

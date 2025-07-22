@@ -25,8 +25,7 @@ mod local_smoke_tests {
 
             if !default_path.exists() {
                 eprintln!(
-                    "Skipping test - set TINY_MODEL_PATH env var or place model at: {:?}",
-                    default_path
+                    "Skipping test - set TINY_MODEL_PATH env var or place model at: {default_path:?}"
                 );
                 return;
             }
@@ -35,7 +34,7 @@ mod local_smoke_tests {
 
         // Verify the model file exists
         if !model_path.exists() {
-            eprintln!("Skipping test - model file not found at: {:?}", model_path);
+            eprintln!("Skipping test - model file not found at: {model_path:?}");
             return;
         }
 
@@ -59,6 +58,6 @@ mod local_smoke_tests {
 
         // Assert we got a non-empty response
         assert!(!reply.trim().is_empty(), "Model returned empty string");
-        println!("Model response: {}", reply);
+        println!("Model response: {reply}");
     }
 }

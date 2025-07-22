@@ -25,7 +25,7 @@ fn test_xcode_version_no_prompt() {
 fn test_xcodebuild_wrapper_no_prompt() {
     // Test that the wrapper correctly handles missing xcodebuild
     let available = XcodebuildWrapper::is_available();
-    println!("xcodebuild available: {}", available);
+    println!("xcodebuild available: {available}");
 
     // Try to execute a command - should fail gracefully without prompts
     if !available {
@@ -94,7 +94,7 @@ fn test_environment_variables_set_correctly() {
                 );
             }
             Err(e) => {
-                println!("Command failed (expected on systems without sh): {}", e);
+                println!("Command failed (expected on systems without sh): {e}");
             }
         }
     }
@@ -116,7 +116,7 @@ fn test_no_system_prompt_simulation() {
         let xcodebuild_path = String::from_utf8_lossy(&which_output.stdout)
             .trim()
             .to_string();
-        println!("xcodebuild found at: {}", xcodebuild_path);
+        println!("xcodebuild found at: {xcodebuild_path}");
 
         // Create a PATH that excludes the directory containing xcodebuild
         // On GitHub Actions, xcodebuild is in /usr/bin, so we need a truly minimal PATH
@@ -133,8 +133,7 @@ fn test_no_system_prompt_simulation() {
         // Should fail to find xcodebuild without triggering any prompts
         assert!(
             !output.status.success(),
-            "Should not find xcodebuild in restricted PATH. Found at: {}",
-            xcodebuild_path
+            "Should not find xcodebuild in restricted PATH. Found at: {xcodebuild_path}"
         );
     } else {
         // If xcodebuild is not available, that's fine - test passes

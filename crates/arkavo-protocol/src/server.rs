@@ -857,7 +857,7 @@ mod tests {
         let result = result.unwrap();
         assert_eq!(result.len(), 1);
         let agent = &result[0];
-        assert!(agent.agent_id.to_string().len() > 0);
+        assert!(!agent.agent_id.to_string().is_empty());
         assert!(agent.metadata.is_some());
     }
 

@@ -146,8 +146,7 @@ mod tests {
 
         assert!(
             is_valid,
-            "IP address {} should be valid for service registration",
-            ip
+            "IP address {ip} should be valid for service registration"
         );
     }
 }

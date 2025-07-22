@@ -8,6 +8,12 @@ pub struct DataflowHandler {
     agent: LlmDataflowAgent,
 }
 
+impl Default for DataflowHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataflowHandler {
     pub fn new() -> Self {
         Self {
@@ -20,7 +26,7 @@ impl DataflowHandler {
         path: Vec<String>,
         body: serde_json::Value,
     ) -> Result<warp::reply::WithStatus<warp::reply::Json>, warp::Rejection> {
-        match path.get(0).map(|s| s.as_str()) {
+        match path.first().map(|s| s.as_str()) {
             Some("discover") => Ok(self.discover_capabilities().await),
             Some("configure") => Ok(self.configure_providers(body).await),
             Some("suggest") => Ok(self.suggest_blueprint(body).await),

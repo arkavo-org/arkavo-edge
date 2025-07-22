@@ -329,7 +329,7 @@ mod tests {
 
         // Add a session that will be stale
         {
-            let mut metrics = SessionMetrics::new("stale-session".to_string());
+            let metrics = SessionMetrics::new("stale-session".to_string());
             // Set last activity to 2 minutes ago
             {
                 let mut last_activity = metrics.last_activity.lock().unwrap();
@@ -466,7 +466,7 @@ mod tests {
 
         // Add multiple stale sessions
         for i in 1..=3 {
-            let metrics = SessionMetrics::new(format!("stale-session-{}", i));
+            let metrics = SessionMetrics::new(format!("stale-session-{i}"));
             // Set last activity to 2 minutes ago
             {
                 let mut last_activity = metrics.last_activity.lock().unwrap();
@@ -475,7 +475,7 @@ mod tests {
             sessions
                 .write()
                 .await
-                .insert(format!("stale-session-{}", i), metrics);
+                .insert(format!("stale-session-{i}"), metrics);
         }
 
         let cleaner = SessionTtlCleaner::new(60, 1); // 60s TTL, check every 1s

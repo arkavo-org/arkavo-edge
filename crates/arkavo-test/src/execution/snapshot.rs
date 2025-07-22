@@ -65,16 +65,18 @@ impl SnapshotManager {
             tags: Vec::new(),
         };
 
-        let mut nodes = self
-            .nodes
-            .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write nodes: {e}")))?;
+        {
+            let mut nodes = self
+                .nodes
+                .write()
+                .map_err(|e| TestError::Execution(format!("Failed to write nodes: {e}")))?;
 
-        if let Some(parent) = nodes.get_mut(&current_id) {
-            parent.children.push(new_id.clone());
-        }
+            if let Some(parent) = nodes.get_mut(&current_id) {
+                parent.children.push(new_id.clone());
+            }
 
-        nodes.insert(new_id.clone(), new_node);
+            nodes.insert(new_id.clone(), new_node);
+        } // nodes lock is dropped here
 
         Ok(new_id)
     }
@@ -93,12 +95,14 @@ impl SnapshotManager {
 
         drop(nodes);
 
-        let mut current = self
-            .current_branch
-            .write()
-            .map_err(|e| TestError::Execution(format!("Failed to write current branch: {e}")))?;
+        {
+            let mut current = self
+                .current_branch
+                .write()
+                .map_err(|e| TestError::Execution(format!("Failed to write current branch: {e}")))?;
 
-        *current = snapshot_id.to_string();
+            *current = snapshot_id.to_string();
+        } // current lock is dropped here
 
         Ok(())
     }

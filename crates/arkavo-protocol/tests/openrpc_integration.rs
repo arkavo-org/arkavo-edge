@@ -8,7 +8,7 @@ async fn test_openrpc_schema_generation() {
     // Verify basic structure
     assert_eq!(schema.openrpc, "1.2.6");
     assert_eq!(schema.info.title, "Arkavo A2A Transport Protocol");
-    assert!(schema.info.version.len() > 0);
+    assert!(!schema.info.version.is_empty());
 
     // Verify methods exist
     assert!(schema.methods.len() >= 3);
@@ -23,7 +23,7 @@ async fn test_openrpc_schema_generation() {
 
     // Verify servers
     assert!(schema.servers.is_some());
-    assert!(schema.servers.as_ref().unwrap().len() >= 1);
+    assert!(!schema.servers.as_ref().unwrap().is_empty());
 }
 
 #[tokio::test]

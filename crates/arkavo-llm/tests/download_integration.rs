@@ -37,9 +37,7 @@ async fn test_download_tiny_model() -> anyhow::Result<()> {
     // Allow 10% tolerance for file size
     assert!(
         (size_mb - expected_size_mb).abs() / expected_size_mb < 0.1,
-        "File size {:.1} MB is not close to expected {:.1} MB",
-        size_mb,
-        expected_size_mb
+        "File size {size_mb:.1} MB is not close to expected {expected_size_mb:.1} MB"
     );
 
     Ok(())
