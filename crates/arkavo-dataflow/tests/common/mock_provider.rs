@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use tokio_stream::Stream;
 
 /// Simple mock provider for testing
-pub struct MockProvider {
+pub(crate) struct MockProvider {
     responses: Arc<RwLock<Vec<String>>>,
     current_index: Arc<RwLock<usize>>,
     pub request_count: Arc<RwLock<usize>>,

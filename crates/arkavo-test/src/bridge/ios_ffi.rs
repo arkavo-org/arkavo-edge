@@ -26,6 +26,11 @@ impl RustTestHarness {
         self.bridge = Some(bridge);
     }
 
+    /// Executes an action on the iOS bridge.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn execute_action(&self, action: &str, params: &str) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({
@@ -67,6 +72,11 @@ impl RustTestHarness {
         }
     }
 
+    /// Gets the current state from the iOS bridge.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn get_current_state(&self) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({
@@ -97,6 +107,11 @@ impl RustTestHarness {
         }
     }
 
+    /// Mutates state on the iOS bridge.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn mutate_state(&self, entity: &str, action: &str, data: &str) -> Result<String> {
         if self.bridge.is_none() {
             return Ok(serde_json::json!({

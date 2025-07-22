@@ -19,6 +19,10 @@ impl IntelligentRunner {
     }
 
     /// Explore code to find bugs autonomously
+    ///
+    /// # Panics
+    ///
+    /// Panics if a failed test result is missing its bug analysis.
     pub async fn explore_code(&self, path: &Path) -> Result<ExplorationReport> {
         let start_time = Instant::now();
         let mut report = ExplorationReport::new();

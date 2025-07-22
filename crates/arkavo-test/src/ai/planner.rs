@@ -122,7 +122,7 @@ impl TestPlanner {
         objectives: Vec<String>,
         duration_minutes: u32,
     ) -> Result<TestPlan> {
-        let state = self.get_initial_state().await?;
+        let state = self.get_initial_state()?;
 
         let strategy_prompt = format!(
             r#"Given the current application state and test objectives, generate a comprehensive test plan.
@@ -210,7 +210,7 @@ Example format:
         let max_iterations = 100;
 
         for _iteration in 0..max_iterations {
-            let current_state = self.get_current_state().await?;
+            let current_state = self.get_current_state()?;
             let history = self.state_tracker.get_recent_actions(10);
 
             let exploration_prompt = format!(
@@ -293,7 +293,7 @@ Example:
         Ok(findings)
     }
 
-    async fn get_initial_state(&self) -> Result<Value> {
+    fn get_initial_state(&self) -> Result<Value> {
         Ok(serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "environment": "test",
@@ -301,7 +301,7 @@ Example:
         }))
     }
 
-    async fn get_current_state(&self) -> Result<Value> {
+    fn get_current_state(&self) -> Result<Value> {
         Ok(serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "state": "current"

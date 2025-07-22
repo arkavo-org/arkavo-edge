@@ -34,8 +34,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
     // Verify model file exists
     assert!(
         model_path.exists(),
-        "Model file should exist at {:?}",
-        model_path
+        "Model file should exist at {model_path:?}"
     );
 
     // Create and initialize provider
@@ -50,7 +49,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
             eprintln!("Provider initialized successfully");
         }
         Err(e) if e.to_string().contains("Tokenizer not loaded") => {
-            eprintln!("Skipping test due to missing tokenizer: {}", e);
+            eprintln!("Skipping test due to missing tokenizer: {e}");
             eprintln!(
                 "This is expected for some GGUF models that don't include embedded tokenizers"
             );
@@ -78,7 +77,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
 
     // Log performance metrics
     eprintln!("Model response: {}", reply.trim());
-    eprintln!("Inference time: {:?}", duration);
+    eprintln!("Inference time: {duration:?}");
 
     // Basic sanity check - response should be reasonably short for "say hello in one word"
     assert!(

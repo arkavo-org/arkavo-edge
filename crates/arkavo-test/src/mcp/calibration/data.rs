@@ -19,7 +19,7 @@ impl CalibrationDataStore {
         // Create directory if it doesn't exist
         fs::create_dir_all(&storage_path)?;
 
-        let mut store = Self {
+        let store = Self {
             storage_path,
             cache: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -211,7 +211,7 @@ impl CalibrationDataStore {
         Ok(removed)
     }
 
-    fn load_all_calibrations(&mut self) -> Result<(), CalibrationError> {
+    fn load_all_calibrations(&self) -> Result<(), CalibrationError> {
         let mut cache = self.cache.lock().unwrap();
 
         if let Ok(entries) = fs::read_dir(&self.storage_path) {

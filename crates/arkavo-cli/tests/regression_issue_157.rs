@@ -5,7 +5,6 @@
 ///
 /// Issue: https://github.com/arkavo-org/arkavo-edge/issues/157
 use std::process::Command;
-use std::time::Duration;
 
 #[tokio::test]
 async fn test_mcp_server_spawn_from_agent() {

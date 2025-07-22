@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 /// Manages AXP socket connections and cleanup
 #[allow(dead_code)]
-pub(crate) struct SocketManager {
+pub struct SocketManager {
     /// Cache of active socket paths (device_id -> socket_path)
     /// Using Mutex instead of RwLock to prevent race conditions
     socket_cache: Arc<Mutex<Option<(String, String)>>>,

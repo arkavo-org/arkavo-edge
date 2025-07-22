@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_rpc_timer() {
         let collector = Arc::new(MetricsCollector::new(true));
-        let timer = RpcTimer::new("test_method".to_string(), collector.clone());
+        let timer = RpcTimer::new("test_method".to_string(), collector);
 
         // Simulate some work
         std::thread::sleep(std::time::Duration::from_millis(10));

@@ -172,8 +172,7 @@ impl ChatSessionManager {
             if session_state.state != SessionState::Active {
                 warn!(session.state = %session_state.state, "Attempted to send message to non-active session");
                 return Err(A2aError::SessionNotFound(format!(
-                    "Session {} is not active",
-                    session_id
+                    "Session {session_id} is not active"
                 )));
             }
 
@@ -390,7 +389,7 @@ impl ChatSessionManager {
                                                 // Record stream completion
                                                 let duration = start_time.elapsed();
                                                 metrics_collector.record_response_time(duration.as_millis() as u64);
-                                                session_observability::log_stream_end(&session_id, &format!("{:?}", end_reason), None);
+                                                session_observability::log_stream_end(&session_id, &format!("{end_reason:?}"), None);
 
                                                 MessageDelta {
                                                     session_id: session_id.clone(),
