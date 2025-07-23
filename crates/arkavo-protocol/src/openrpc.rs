@@ -1,6 +1,7 @@
 use crate::types::{
-    AgentDiscoverFilter, DiscoveredAgent, PromiseCapability, PromiseDeclareResponse,
-    PromiseRequest, PromiseResponse, PromiseStatus,
+    AgentDiscoverFilter, DiscoveredAgent, Message, MessagePart, MessageSendRequest,
+    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskRequest, TaskResponse, TaskStatus,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -124,9 +125,9 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
         },
         methods: vec![
             OpenRpcMethod {
-                name: "promise_request".to_string(),
-                description: Some("Request a promise from another agent".to_string()),
-                summary: Some("Promise request".to_string()),
+                name: "task_request".to_string(),
+                description: Some("Request a task from another agent".to_string()),
+                summary: Some("Task request".to_string()),
                 params: vec![
                     OpenRpcParam {
                         name: "agent_id".to_string(),
@@ -137,8 +138,8 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                         }),
                     },
                     OpenRpcParam {
-                        name: "promise_type".to_string(),
-                        description: Some("The type of promise being requested".to_string()),
+                        name: "task_type".to_string(),
+                        description: Some("The type of task being requested".to_string()),
                         required: Some(true),
                         schema: json!({
                             "type": "string"
@@ -146,7 +147,7 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                     },
                     OpenRpcParam {
                         name: "payload".to_string(),
-                        description: Some("Additional data for the promise request".to_string()),
+                        description: Some("Additional data for the task request".to_string()),
                         required: Some(false),
                         schema: json!({
                             "type": "object"
@@ -154,9 +155,9 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                     },
                 ],
                 result: OpenRpcResult {
-                    name: "promise_response".to_string(),
-                    description: Some("The promise response from the agent".to_string()),
-                    schema: serde_json::to_value(schema_for!(PromiseResponse)).unwrap(),
+                    name: "task_response".to_string(),
+                    description: Some("The task response from the agent".to_string()),
+                    schema: serde_json::to_value(schema_for!(TaskResponse)).unwrap(),
                 },
                 errors: Some(vec![
                     OpenRpcError {
@@ -171,7 +172,7 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                     },
                 ]),
                 examples: Some(vec![OpenRpcExample {
-                    name: Some("Simple promise request".to_string()),
+                    name: Some("Simple task request".to_string()),
                     description: None,
                     params: vec![
                         OpenRpcExampleParam {
@@ -179,21 +180,21 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                             value: json!("550e8400-e29b-41d4-a716-446655440000"),
                         },
                         OpenRpcExampleParam {
-                            name: "promise_type".to_string(),
+                            name: "task_type".to_string(),
                             value: json!("data_access"),
                         },
                     ],
                     result: Some(json!({
-                        "promise_id": "660e8400-e29b-41d4-a716-446655440001",
+                        "task_id": "660e8400-e29b-41d4-a716-446655440001",
                         "status": "accepted",
                         "data": {}
                     })),
                 }]),
             },
             OpenRpcMethod {
-                name: "promise_declare".to_string(),
-                description: Some("Declare a promise capability to other agents".to_string()),
-                summary: Some("Promise declaration".to_string()),
+                name: "task_declare".to_string(),
+                description: Some("Declare a task capability to other agents".to_string()),
+                summary: Some("Task declaration".to_string()),
                 params: vec![
                     OpenRpcParam {
                         name: "agent_id".to_string(),
@@ -204,16 +205,16 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                         }),
                     },
                     OpenRpcParam {
-                        name: "promises".to_string(),
-                        description: Some("List of promises the agent can fulfill".to_string()),
+                        name: "tasks".to_string(),
+                        description: Some("List of tasks the agent can fulfill".to_string()),
                         required: Some(true),
-                        schema: serde_json::to_value(schema_for!(Vec<PromiseCapability>)).unwrap(),
+                        schema: serde_json::to_value(schema_for!(Vec<TaskCapability>)).unwrap(),
                     },
                 ],
                 result: OpenRpcResult {
                     name: "declaration_result".to_string(),
-                    description: Some("Confirmation of promise declaration".to_string()),
-                    schema: serde_json::to_value(schema_for!(PromiseDeclareResponse)).unwrap(),
+                    description: Some("Confirmation of task declaration".to_string()),
+                    schema: serde_json::to_value(schema_for!(TaskDeclareResponse)).unwrap(),
                 },
                 errors: None,
                 examples: None,
@@ -236,34 +237,89 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                 errors: None,
                 examples: None,
             },
+            // A2A Protocol Methods
+            OpenRpcMethod {
+                name: "message/send".to_string(),
+                description: Some("Send a message synchronously to an agent".to_string()),
+                summary: Some("Send message".to_string()),
+                params: vec![OpenRpcParam {
+                    name: "request".to_string(),
+                    description: Some("Message send request".to_string()),
+                    required: Some(true),
+                    schema: serde_json::to_value(schema_for!(MessageSendRequest)).unwrap(),
+                }],
+                result: OpenRpcResult {
+                    name: "message_response".to_string(),
+                    description: Some("Response containing task ID and status".to_string()),
+                    schema: serde_json::to_value(schema_for!(MessageSendResponse)).unwrap(),
+                },
+                errors: None,
+                examples: None,
+            },
+            OpenRpcMethod {
+                name: "tasks/get".to_string(),
+                description: Some("Get task status and result".to_string()),
+                summary: Some("Get task".to_string()),
+                params: vec![OpenRpcParam {
+                    name: "request".to_string(),
+                    description: Some("Task get request".to_string()),
+                    required: Some(true),
+                    schema: serde_json::to_value(schema_for!(TaskGetRequest)).unwrap(),
+                }],
+                result: OpenRpcResult {
+                    name: "task_status".to_string(),
+                    description: Some("Current task status and result".to_string()),
+                    schema: serde_json::to_value(schema_for!(TaskGetResponse)).unwrap(),
+                },
+                errors: None,
+                examples: None,
+            },
+            OpenRpcMethod {
+                name: "tasks/cancel".to_string(),
+                description: Some("Cancel a running task".to_string()),
+                summary: Some("Cancel task".to_string()),
+                params: vec![OpenRpcParam {
+                    name: "request".to_string(),
+                    description: Some("Task cancel request".to_string()),
+                    required: Some(true),
+                    schema: serde_json::to_value(schema_for!(TaskCancelRequest)).unwrap(),
+                }],
+                result: OpenRpcResult {
+                    name: "cancel_response".to_string(),
+                    description: Some("Task cancellation result".to_string()),
+                    schema: serde_json::to_value(schema_for!(TaskCancelResponse)).unwrap(),
+                },
+                errors: None,
+                examples: None,
+            },
         ],
         components: Some(OpenRpcComponents {
             schemas: Some({
                 let mut schemas = HashMap::new();
 
                 schemas.insert(
-                    "PromiseStatus".to_string(),
-                    serde_json::to_value(schema_for!(PromiseStatus)).unwrap(),
+                    "TaskStatus".to_string(),
+                    serde_json::to_value(schema_for!(TaskStatus)).unwrap(),
                 );
 
                 schemas.insert(
-                    "PromiseRequest".to_string(),
-                    serde_json::to_value(schema_for!(PromiseRequest)).unwrap(),
+                    "TaskRequest".to_string(),
+                    serde_json::to_value(schema_for!(TaskRequest)).unwrap(),
                 );
 
                 schemas.insert(
-                    "PromiseResponse".to_string(),
-                    serde_json::to_value(schema_for!(PromiseResponse)).unwrap(),
+                    "TaskResponse".to_string(),
+                    serde_json::to_value(schema_for!(TaskResponse)).unwrap(),
                 );
 
                 schemas.insert(
-                    "PromiseCapability".to_string(),
-                    serde_json::to_value(schema_for!(PromiseCapability)).unwrap(),
+                    "TaskCapability".to_string(),
+                    serde_json::to_value(schema_for!(TaskCapability)).unwrap(),
                 );
 
                 schemas.insert(
-                    "PromiseDeclareResponse".to_string(),
-                    serde_json::to_value(schema_for!(PromiseDeclareResponse)).unwrap(),
+                    "TaskDeclareResponse".to_string(),
+                    serde_json::to_value(schema_for!(TaskDeclareResponse)).unwrap(),
                 );
 
                 schemas.insert(
@@ -274,6 +330,47 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                 schemas.insert(
                     "DiscoveredAgent".to_string(),
                     serde_json::to_value(schema_for!(DiscoveredAgent)).unwrap(),
+                );
+
+                // A2A Protocol Schemas
+                schemas.insert(
+                    "MessageSendRequest".to_string(),
+                    serde_json::to_value(schema_for!(MessageSendRequest)).unwrap(),
+                );
+
+                schemas.insert(
+                    "MessageSendResponse".to_string(),
+                    serde_json::to_value(schema_for!(MessageSendResponse)).unwrap(),
+                );
+
+                schemas.insert(
+                    "Message".to_string(),
+                    serde_json::to_value(schema_for!(Message)).unwrap(),
+                );
+
+                schemas.insert(
+                    "MessagePart".to_string(),
+                    serde_json::to_value(schema_for!(MessagePart)).unwrap(),
+                );
+
+                schemas.insert(
+                    "TaskGetRequest".to_string(),
+                    serde_json::to_value(schema_for!(TaskGetRequest)).unwrap(),
+                );
+
+                schemas.insert(
+                    "TaskGetResponse".to_string(),
+                    serde_json::to_value(schema_for!(TaskGetResponse)).unwrap(),
+                );
+
+                schemas.insert(
+                    "TaskCancelRequest".to_string(),
+                    serde_json::to_value(schema_for!(TaskCancelRequest)).unwrap(),
+                );
+
+                schemas.insert(
+                    "TaskCancelResponse".to_string(),
+                    serde_json::to_value(schema_for!(TaskCancelResponse)).unwrap(),
                 );
 
                 schemas
@@ -318,8 +415,8 @@ mod tests {
     fn test_openrpc_json_serialization() {
         let json = openrpc_to_json().unwrap();
         assert!(json.contains("\"openrpc\": \"1.2.6\""));
-        assert!(json.contains("promise_request"));
-        assert!(json.contains("promise_declare"));
+        assert!(json.contains("task_request"));
+        assert!(json.contains("task_declare"));
         assert!(json.contains("agent_discover"));
     }
 
@@ -330,8 +427,8 @@ mod tests {
         let components = schema.components.unwrap();
         assert!(components.schemas.is_some());
         let schemas = components.schemas.unwrap();
-        assert!(schemas.contains_key("PromiseStatus"));
-        assert!(schemas.contains_key("PromiseRequest"));
-        assert!(schemas.contains_key("PromiseResponse"));
+        assert!(schemas.contains_key("TaskStatus"));
+        assert!(schemas.contains_key("TaskRequest"));
+        assert!(schemas.contains_key("TaskResponse"));
     }
 }

@@ -5,8 +5,8 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Filter criteria for agent discovery",
         "properties": {
-          "promise_types": {
-            "description": "Filter by promise types",
+          "tags": {
+            "description": "Filter by tags",
             "items": {
               "type": "string"
             },
@@ -15,8 +15,8 @@
               "null"
             ]
           },
-          "tags": {
-            "description": "Filter by tags",
+          "task_types": {
+            "description": "Filter by task types",
             "items": {
               "type": "string"
             },
@@ -45,8 +45,8 @@
           "metadata": {
             "description": "Additional metadata about the agent"
           },
-          "promises": {
-            "description": "Promise types the agent supports",
+          "tasks": {
+            "description": "Task types the agent supports",
             "items": {
               "type": "string"
             },
@@ -63,30 +63,671 @@
         "title": "DiscoveredAgent",
         "type": "object"
       },
-      "PromiseCapability": {
+      "Message": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "A promise capability that an agent can fulfill",
+        "definitions": {
+          "MessagePart": {
+            "description": "Part of a message",
+            "oneOf": [
+              {
+                "description": "Text content",
+                "properties": {
+                  "content": {
+                    "description": "The text content",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "File content",
+                "properties": {
+                  "data": {
+                    "description": "File data (base64 encoded) or URI",
+                    "type": "string"
+                  },
+                  "is_uri": {
+                    "default": false,
+                    "description": "Whether data is a URI (true) or base64 (false)",
+                    "type": "boolean"
+                  },
+                  "mime_type": {
+                    "description": "MIME type",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "File name",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "file"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "mime_type",
+                  "name",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Structured data",
+                "properties": {
+                  "content": {
+                    "description": "The actual data"
+                  },
+                  "schema": {
+                    "description": "Data schema identifier",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "data"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "schema",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "description": "Message for A2A communication",
+        "properties": {
+          "metadata": {
+            "description": "Optional metadata"
+          },
+          "parts": {
+            "description": "Message parts",
+            "items": {
+              "$ref": "#/definitions/MessagePart"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "Message",
+        "type": "object"
+      },
+      "MessagePart": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Part of a message",
+        "oneOf": [
+          {
+            "description": "Text content",
+            "properties": {
+              "content": {
+                "description": "The text content",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "File content",
+            "properties": {
+              "data": {
+                "description": "File data (base64 encoded) or URI",
+                "type": "string"
+              },
+              "is_uri": {
+                "default": false,
+                "description": "Whether data is a URI (true) or base64 (false)",
+                "type": "boolean"
+              },
+              "mime_type": {
+                "description": "MIME type",
+                "type": "string"
+              },
+              "name": {
+                "description": "File name",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "file"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "data",
+              "mime_type",
+              "name",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Structured data",
+            "properties": {
+              "content": {
+                "description": "The actual data"
+              },
+              "schema": {
+                "description": "Data schema identifier",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "data"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "schema",
+              "type"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "MessagePart"
+      },
+      "MessageSendRequest": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Message": {
+            "description": "Message for A2A communication",
+            "properties": {
+              "metadata": {
+                "description": "Optional metadata"
+              },
+              "parts": {
+                "description": "Message parts",
+                "items": {
+                  "$ref": "#/definitions/MessagePart"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "parts"
+            ],
+            "type": "object"
+          },
+          "MessagePart": {
+            "description": "Part of a message",
+            "oneOf": [
+              {
+                "description": "Text content",
+                "properties": {
+                  "content": {
+                    "description": "The text content",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "File content",
+                "properties": {
+                  "data": {
+                    "description": "File data (base64 encoded) or URI",
+                    "type": "string"
+                  },
+                  "is_uri": {
+                    "default": false,
+                    "description": "Whether data is a URI (true) or base64 (false)",
+                    "type": "boolean"
+                  },
+                  "mime_type": {
+                    "description": "MIME type",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "File name",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "file"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "mime_type",
+                  "name",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Structured data",
+                "properties": {
+                  "content": {
+                    "description": "The actual data"
+                  },
+                  "schema": {
+                    "description": "Data schema identifier",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "data"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "schema",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "description": "Message send request",
+        "properties": {
+          "message": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/Message"
+              }
+            ],
+            "description": "The message content"
+          },
+          "task_id": {
+            "description": "Optional task context",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MessageSendRequest",
+        "type": "object"
+      },
+      "MessageSendResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Message": {
+            "description": "Message for A2A communication",
+            "properties": {
+              "metadata": {
+                "description": "Optional metadata"
+              },
+              "parts": {
+                "description": "Message parts",
+                "items": {
+                  "$ref": "#/definitions/MessagePart"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "parts"
+            ],
+            "type": "object"
+          },
+          "MessagePart": {
+            "description": "Part of a message",
+            "oneOf": [
+              {
+                "description": "Text content",
+                "properties": {
+                  "content": {
+                    "description": "The text content",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "File content",
+                "properties": {
+                  "data": {
+                    "description": "File data (base64 encoded) or URI",
+                    "type": "string"
+                  },
+                  "is_uri": {
+                    "default": false,
+                    "description": "Whether data is a URI (true) or base64 (false)",
+                    "type": "boolean"
+                  },
+                  "mime_type": {
+                    "description": "MIME type",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "File name",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "file"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "mime_type",
+                  "name",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Structured data",
+                "properties": {
+                  "content": {
+                    "description": "The actual data"
+                  },
+                  "schema": {
+                    "description": "Data schema identifier",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "data"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "schema",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "TaskStatus": {
+            "description": "Status of a task",
+            "oneOf": [
+              {
+                "description": "Task has been submitted",
+                "enum": [
+                  "submitted"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task is being worked on",
+                "enum": [
+                  "working"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires input from the requester",
+                "enum": [
+                  "input_required"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been completed successfully",
+                "enum": [
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been canceled",
+                "enum": [
+                  "canceled"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has failed",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been rejected",
+                "enum": [
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires authentication",
+                "enum": [
+                  "auth_required"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Message send response",
+        "properties": {
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/Message"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional immediate response"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/TaskStatus"
+              }
+            ],
+            "description": "Initial task status"
+          },
+          "task_id": {
+            "description": "Task ID for this message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "task_id"
+        ],
+        "title": "MessageSendResponse",
+        "type": "object"
+      },
+      "TaskCancelRequest": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Task cancel request",
+        "properties": {
+          "reason": {
+            "description": "Reason for cancellation",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "description": "Task ID to cancel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "TaskCancelRequest",
+        "type": "object"
+      },
+      "TaskCancelResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TaskStatus": {
+            "description": "Status of a task",
+            "oneOf": [
+              {
+                "description": "Task has been submitted",
+                "enum": [
+                  "submitted"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task is being worked on",
+                "enum": [
+                  "working"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires input from the requester",
+                "enum": [
+                  "input_required"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been completed successfully",
+                "enum": [
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been canceled",
+                "enum": [
+                  "canceled"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has failed",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been rejected",
+                "enum": [
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires authentication",
+                "enum": [
+                  "auth_required"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Task cancel response",
+        "properties": {
+          "message": {
+            "description": "Optional message",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/TaskStatus"
+              }
+            ],
+            "description": "Final task status"
+          },
+          "success": {
+            "description": "Whether the cancellation was successful",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "success"
+        ],
+        "title": "TaskCancelResponse",
+        "type": "object"
+      },
+      "TaskCapability": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "A task capability that an agent can fulfill",
         "properties": {
           "constraints": {
-            "description": "Constraints on the promise"
+            "description": "Constraints on the task"
           },
           "metadata": {
             "description": "Additional metadata"
           },
           "type": {
-            "description": "Type of promise",
+            "description": "Type of task",
             "type": "string"
           }
         },
         "required": [
           "type"
         ],
-        "title": "PromiseCapability",
+        "title": "TaskCapability",
         "type": "object"
       },
-      "PromiseDeclareResponse": {
+      "TaskDeclareResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Response to a promise declaration",
+        "description": "Response to a task declaration",
         "properties": {
           "acknowledged": {
             "description": "Whether the declaration was acknowledged",
@@ -102,12 +743,302 @@
           "acknowledged",
           "timestamp"
         ],
-        "title": "PromiseDeclareResponse",
+        "title": "TaskDeclareResponse",
         "type": "object"
       },
-      "PromiseRequest": {
+      "TaskGetRequest": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Request to make a promise from another agent",
+        "description": "Task get request",
+        "properties": {
+          "task_id": {
+            "description": "Task ID to retrieve",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "TaskGetRequest",
+        "type": "object"
+      },
+      "TaskGetResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Message": {
+            "description": "Message for A2A communication",
+            "properties": {
+              "metadata": {
+                "description": "Optional metadata"
+              },
+              "parts": {
+                "description": "Message parts",
+                "items": {
+                  "$ref": "#/definitions/MessagePart"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "parts"
+            ],
+            "type": "object"
+          },
+          "MessagePart": {
+            "description": "Part of a message",
+            "oneOf": [
+              {
+                "description": "Text content",
+                "properties": {
+                  "content": {
+                    "description": "The text content",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "File content",
+                "properties": {
+                  "data": {
+                    "description": "File data (base64 encoded) or URI",
+                    "type": "string"
+                  },
+                  "is_uri": {
+                    "default": false,
+                    "description": "Whether data is a URI (true) or base64 (false)",
+                    "type": "boolean"
+                  },
+                  "mime_type": {
+                    "description": "MIME type",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "File name",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "file"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data",
+                  "mime_type",
+                  "name",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Structured data",
+                "properties": {
+                  "content": {
+                    "description": "The actual data"
+                  },
+                  "schema": {
+                    "description": "Data schema identifier",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "data"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "schema",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "TaskError": {
+            "description": "Task error information",
+            "properties": {
+              "code": {
+                "description": "Error code",
+                "type": "string"
+              },
+              "details": {
+                "description": "Additional error details"
+              },
+              "message": {
+                "description": "Error message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "TaskProgress": {
+            "description": "Task progress information",
+            "properties": {
+              "eta_seconds": {
+                "description": "Estimated time remaining in seconds",
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "message": {
+                "description": "Progress message",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "percentage": {
+                "description": "Progress percentage (0-100)",
+                "format": "uint8",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "TaskStatus": {
+            "description": "Status of a task",
+            "oneOf": [
+              {
+                "description": "Task has been submitted",
+                "enum": [
+                  "submitted"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task is being worked on",
+                "enum": [
+                  "working"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires input from the requester",
+                "enum": [
+                  "input_required"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been completed successfully",
+                "enum": [
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been canceled",
+                "enum": [
+                  "canceled"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has failed",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been rejected",
+                "enum": [
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires authentication",
+                "enum": [
+                  "auth_required"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Task get response",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/TaskError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error details if failed"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/TaskProgress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Progress information"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/Message"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Task result if completed"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/TaskStatus"
+              }
+            ],
+            "description": "Current task status"
+          },
+          "task_id": {
+            "description": "Task ID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "task_id"
+        ],
+        "title": "TaskGetResponse",
+        "type": "object"
+      },
+      "TaskRequest": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Request to make a task from another agent",
         "properties": {
           "agent_id": {
             "description": "The ID of the requesting agent",
@@ -117,10 +1048,10 @@
             "type": "string"
           },
           "payload": {
-            "description": "Additional data for the promise request"
+            "description": "Additional data for the task request"
           },
-          "promise_type": {
-            "description": "The type of promise being requested",
+          "task_type": {
+            "description": "The type of task being requested",
             "examples": [
               "data_access"
             ],
@@ -129,122 +1060,164 @@
         },
         "required": [
           "agent_id",
-          "promise_type"
+          "task_type"
         ],
-        "title": "PromiseRequest",
+        "title": "TaskRequest",
         "type": "object"
       },
-      "PromiseResponse": {
+      "TaskResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "definitions": {
-          "PromiseStatus": {
-            "description": "Status of a promise",
+          "TaskStatus": {
+            "description": "Status of a task",
             "oneOf": [
               {
-                "description": "Promise has been accepted",
+                "description": "Task has been submitted",
                 "enum": [
-                  "accepted"
+                  "submitted"
                 ],
                 "type": "string"
               },
               {
-                "description": "Promise has been rejected",
+                "description": "Task is being worked on",
+                "enum": [
+                  "working"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task requires input from the requester",
+                "enum": [
+                  "input_required"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been completed successfully",
+                "enum": [
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been canceled",
+                "enum": [
+                  "canceled"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has failed",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Task has been rejected",
                 "enum": [
                   "rejected"
                 ],
                 "type": "string"
               },
               {
-                "description": "Promise is pending",
+                "description": "Task requires authentication",
                 "enum": [
-                  "pending"
-                ],
-                "type": "string"
-              },
-              {
-                "description": "Promise has been fulfilled",
-                "enum": [
-                  "fulfilled"
-                ],
-                "type": "string"
-              },
-              {
-                "description": "Promise has been broken",
-                "enum": [
-                  "broken"
+                  "auth_required"
                 ],
                 "type": "string"
               }
             ]
           }
         },
-        "description": "Response to a promise request",
+        "description": "Response to a task request",
         "properties": {
           "data": {
             "description": "Additional data in the response"
           },
-          "promise_id": {
-            "description": "Unique identifier for the promise",
-            "format": "uuid",
-            "type": "string"
-          },
           "status": {
             "allOf": [
               {
-                "$ref": "#/definitions/PromiseStatus"
+                "$ref": "#/definitions/TaskStatus"
               }
             ],
-            "description": "Current status of the promise"
+            "description": "Current status of the task"
+          },
+          "task_id": {
+            "description": "Unique identifier for the task",
+            "format": "uuid",
+            "type": "string"
           }
         },
         "required": [
-          "promise_id",
-          "status"
+          "status",
+          "task_id"
         ],
-        "title": "PromiseResponse",
+        "title": "TaskResponse",
         "type": "object"
       },
-      "PromiseStatus": {
+      "TaskStatus": {
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "description": "Status of a promise",
+        "description": "Status of a task",
         "oneOf": [
           {
-            "description": "Promise has been accepted",
+            "description": "Task has been submitted",
             "enum": [
-              "accepted"
+              "submitted"
             ],
             "type": "string"
           },
           {
-            "description": "Promise has been rejected",
+            "description": "Task is being worked on",
+            "enum": [
+              "working"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Task requires input from the requester",
+            "enum": [
+              "input_required"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Task has been completed successfully",
+            "enum": [
+              "completed"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Task has been canceled",
+            "enum": [
+              "canceled"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Task has failed",
+            "enum": [
+              "failed"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Task has been rejected",
             "enum": [
               "rejected"
             ],
             "type": "string"
           },
           {
-            "description": "Promise is pending",
+            "description": "Task requires authentication",
             "enum": [
-              "pending"
-            ],
-            "type": "string"
-          },
-          {
-            "description": "Promise has been fulfilled",
-            "enum": [
-              "fulfilled"
-            ],
-            "type": "string"
-          },
-          {
-            "description": "Promise has been broken",
-            "enum": [
-              "broken"
+              "auth_required"
             ],
             "type": "string"
           }
         ],
-        "title": "PromiseStatus"
+        "title": "TaskStatus"
       }
     }
   },
@@ -260,11 +1233,11 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.20.0"
+    "version": "0.24.0"
   },
   "methods": [
     {
-      "description": "Request a promise from another agent",
+      "description": "Request a task from another agent",
       "errors": [
         {
           "code": -32601,
@@ -280,25 +1253,25 @@
       "examples": [
         {
           "description": null,
-          "name": "Simple promise request",
+          "name": "Simple task request",
           "params": [
             {
               "name": "agent_id",
               "value": "550e8400-e29b-41d4-a716-446655440000"
             },
             {
-              "name": "promise_type",
+              "name": "task_type",
               "value": "data_access"
             }
           ],
           "result": {
             "data": {},
-            "promise_id": "660e8400-e29b-41d4-a716-446655440001",
-            "status": "accepted"
+            "status": "accepted",
+            "task_id": "660e8400-e29b-41d4-a716-446655440001"
           }
         }
       ],
-      "name": "promise_request",
+      "name": "task_request",
       "params": [
         {
           "description": "The ID of the requesting agent",
@@ -309,15 +1282,15 @@
           }
         },
         {
-          "description": "The type of promise being requested",
-          "name": "promise_type",
+          "description": "The type of task being requested",
+          "name": "task_type",
           "required": true,
           "schema": {
             "type": "string"
           }
         },
         {
-          "description": "Additional data for the promise request",
+          "description": "Additional data for the task request",
           "name": "payload",
           "required": false,
           "schema": {
@@ -326,86 +1299,107 @@
         }
       ],
       "result": {
-        "description": "The promise response from the agent",
-        "name": "promise_response",
+        "description": "The task response from the agent",
+        "name": "task_response",
         "schema": {
           "$schema": "http://json-schema.org/draft-07/schema#",
           "definitions": {
-            "PromiseStatus": {
-              "description": "Status of a promise",
+            "TaskStatus": {
+              "description": "Status of a task",
               "oneOf": [
                 {
-                  "description": "Promise has been accepted",
+                  "description": "Task has been submitted",
                   "enum": [
-                    "accepted"
+                    "submitted"
                   ],
                   "type": "string"
                 },
                 {
-                  "description": "Promise has been rejected",
+                  "description": "Task is being worked on",
+                  "enum": [
+                    "working"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires input from the requester",
+                  "enum": [
+                    "input_required"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been completed successfully",
+                  "enum": [
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been canceled",
+                  "enum": [
+                    "canceled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has failed",
+                  "enum": [
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been rejected",
                   "enum": [
                     "rejected"
                   ],
                   "type": "string"
                 },
                 {
-                  "description": "Promise is pending",
+                  "description": "Task requires authentication",
                   "enum": [
-                    "pending"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "description": "Promise has been fulfilled",
-                  "enum": [
-                    "fulfilled"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "description": "Promise has been broken",
-                  "enum": [
-                    "broken"
+                    "auth_required"
                   ],
                   "type": "string"
                 }
               ]
             }
           },
-          "description": "Response to a promise request",
+          "description": "Response to a task request",
           "properties": {
             "data": {
               "description": "Additional data in the response"
             },
-            "promise_id": {
-              "description": "Unique identifier for the promise",
-              "format": "uuid",
-              "type": "string"
-            },
             "status": {
               "allOf": [
                 {
-                  "$ref": "#/definitions/PromiseStatus"
+                  "$ref": "#/definitions/TaskStatus"
                 }
               ],
-              "description": "Current status of the promise"
+              "description": "Current status of the task"
+            },
+            "task_id": {
+              "description": "Unique identifier for the task",
+              "format": "uuid",
+              "type": "string"
             }
           },
           "required": [
-            "promise_id",
-            "status"
+            "status",
+            "task_id"
           ],
-          "title": "PromiseResponse",
+          "title": "TaskResponse",
           "type": "object"
         }
       },
-      "summary": "Promise request"
+      "summary": "Task request"
     },
     {
-      "description": "Declare a promise capability to other agents",
+      "description": "Declare a task capability to other agents",
       "errors": null,
       "examples": null,
-      "name": "promise_declare",
+      "name": "task_declare",
       "params": [
         {
           "description": "The ID of the declaring agent",
@@ -416,23 +1410,23 @@
           }
         },
         {
-          "description": "List of promises the agent can fulfill",
-          "name": "promises",
+          "description": "List of tasks the agent can fulfill",
+          "name": "tasks",
           "required": true,
           "schema": {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "definitions": {
-              "PromiseCapability": {
-                "description": "A promise capability that an agent can fulfill",
+              "TaskCapability": {
+                "description": "A task capability that an agent can fulfill",
                 "properties": {
                   "constraints": {
-                    "description": "Constraints on the promise"
+                    "description": "Constraints on the task"
                   },
                   "metadata": {
                     "description": "Additional metadata"
                   },
                   "type": {
-                    "description": "Type of promise",
+                    "description": "Type of task",
                     "type": "string"
                   }
                 },
@@ -443,19 +1437,19 @@
               }
             },
             "items": {
-              "$ref": "#/definitions/PromiseCapability"
+              "$ref": "#/definitions/TaskCapability"
             },
-            "title": "Array_of_PromiseCapability",
+            "title": "Array_of_TaskCapability",
             "type": "array"
           }
         }
       ],
       "result": {
-        "description": "Confirmation of promise declaration",
+        "description": "Confirmation of task declaration",
         "name": "declaration_result",
         "schema": {
           "$schema": "http://json-schema.org/draft-07/schema#",
-          "description": "Response to a promise declaration",
+          "description": "Response to a task declaration",
           "properties": {
             "acknowledged": {
               "description": "Whether the declaration was acknowledged",
@@ -471,11 +1465,11 @@
             "acknowledged",
             "timestamp"
           ],
-          "title": "PromiseDeclareResponse",
+          "title": "TaskDeclareResponse",
           "type": "object"
         }
       },
-      "summary": "Promise declaration"
+      "summary": "Task declaration"
     },
     {
       "description": "Discover available agents in the network",
@@ -501,8 +1495,8 @@
               "AgentDiscoverFilter": {
                 "description": "Filter criteria for agent discovery",
                 "properties": {
-                  "promise_types": {
-                    "description": "Filter by promise types",
+                  "tags": {
+                    "description": "Filter by tags",
                     "items": {
                       "type": "string"
                     },
@@ -511,8 +1505,8 @@
                       "null"
                     ]
                   },
-                  "tags": {
-                    "description": "Filter by tags",
+                  "task_types": {
+                    "description": "Filter by task types",
                     "items": {
                       "type": "string"
                     },
@@ -550,8 +1544,8 @@
                 "metadata": {
                   "description": "Additional metadata about the agent"
                 },
-                "promises": {
-                  "description": "Promise types the agent supports",
+                "tasks": {
+                  "description": "Task types the agent supports",
                   "items": {
                     "type": "string"
                   },
@@ -576,6 +1570,798 @@
         }
       },
       "summary": "Agent discovery"
+    },
+    {
+      "description": "Send a message synchronously to an agent",
+      "errors": null,
+      "examples": null,
+      "name": "message/send",
+      "params": [
+        {
+          "description": "Message send request",
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "definitions": {
+              "Message": {
+                "description": "Message for A2A communication",
+                "properties": {
+                  "metadata": {
+                    "description": "Optional metadata"
+                  },
+                  "parts": {
+                    "description": "Message parts",
+                    "items": {
+                      "$ref": "#/definitions/MessagePart"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "parts"
+                ],
+                "type": "object"
+              },
+              "MessagePart": {
+                "description": "Part of a message",
+                "oneOf": [
+                  {
+                    "description": "Text content",
+                    "properties": {
+                      "content": {
+                        "description": "The text content",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "text"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "content",
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "description": "File content",
+                    "properties": {
+                      "data": {
+                        "description": "File data (base64 encoded) or URI",
+                        "type": "string"
+                      },
+                      "is_uri": {
+                        "default": false,
+                        "description": "Whether data is a URI (true) or base64 (false)",
+                        "type": "boolean"
+                      },
+                      "mime_type": {
+                        "description": "MIME type",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "File name",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "file"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "mime_type",
+                      "name",
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "description": "Structured data",
+                    "properties": {
+                      "content": {
+                        "description": "The actual data"
+                      },
+                      "schema": {
+                        "description": "Data schema identifier",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "data"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "content",
+                      "schema",
+                      "type"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            },
+            "description": "Message send request",
+            "properties": {
+              "message": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/Message"
+                  }
+                ],
+                "description": "The message content"
+              },
+              "task_id": {
+                "description": "Optional task context",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "title": "MessageSendRequest",
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "Response containing task ID and status",
+        "name": "message_response",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "Message": {
+              "description": "Message for A2A communication",
+              "properties": {
+                "metadata": {
+                  "description": "Optional metadata"
+                },
+                "parts": {
+                  "description": "Message parts",
+                  "items": {
+                    "$ref": "#/definitions/MessagePart"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "parts"
+              ],
+              "type": "object"
+            },
+            "MessagePart": {
+              "description": "Part of a message",
+              "oneOf": [
+                {
+                  "description": "Text content",
+                  "properties": {
+                    "content": {
+                      "description": "The text content",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "text"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "File content",
+                  "properties": {
+                    "data": {
+                      "description": "File data (base64 encoded) or URI",
+                      "type": "string"
+                    },
+                    "is_uri": {
+                      "default": false,
+                      "description": "Whether data is a URI (true) or base64 (false)",
+                      "type": "boolean"
+                    },
+                    "mime_type": {
+                      "description": "MIME type",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "File name",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "file"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "mime_type",
+                    "name",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "Structured data",
+                  "properties": {
+                    "content": {
+                      "description": "The actual data"
+                    },
+                    "schema": {
+                      "description": "Data schema identifier",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "data"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "schema",
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "TaskStatus": {
+              "description": "Status of a task",
+              "oneOf": [
+                {
+                  "description": "Task has been submitted",
+                  "enum": [
+                    "submitted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task is being worked on",
+                  "enum": [
+                    "working"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires input from the requester",
+                  "enum": [
+                    "input_required"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been completed successfully",
+                  "enum": [
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been canceled",
+                  "enum": [
+                    "canceled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has failed",
+                  "enum": [
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been rejected",
+                  "enum": [
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires authentication",
+                  "enum": [
+                    "auth_required"
+                  ],
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "description": "Message send response",
+          "properties": {
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Message"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional immediate response"
+            },
+            "status": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TaskStatus"
+                }
+              ],
+              "description": "Initial task status"
+            },
+            "task_id": {
+              "description": "Task ID for this message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "task_id"
+          ],
+          "title": "MessageSendResponse",
+          "type": "object"
+        }
+      },
+      "summary": "Send message"
+    },
+    {
+      "description": "Get task status and result",
+      "errors": null,
+      "examples": null,
+      "name": "tasks/get",
+      "params": [
+        {
+          "description": "Task get request",
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "description": "Task get request",
+            "properties": {
+              "task_id": {
+                "description": "Task ID to retrieve",
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id"
+            ],
+            "title": "TaskGetRequest",
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "Current task status and result",
+        "name": "task_status",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "Message": {
+              "description": "Message for A2A communication",
+              "properties": {
+                "metadata": {
+                  "description": "Optional metadata"
+                },
+                "parts": {
+                  "description": "Message parts",
+                  "items": {
+                    "$ref": "#/definitions/MessagePart"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "parts"
+              ],
+              "type": "object"
+            },
+            "MessagePart": {
+              "description": "Part of a message",
+              "oneOf": [
+                {
+                  "description": "Text content",
+                  "properties": {
+                    "content": {
+                      "description": "The text content",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "text"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "File content",
+                  "properties": {
+                    "data": {
+                      "description": "File data (base64 encoded) or URI",
+                      "type": "string"
+                    },
+                    "is_uri": {
+                      "default": false,
+                      "description": "Whether data is a URI (true) or base64 (false)",
+                      "type": "boolean"
+                    },
+                    "mime_type": {
+                      "description": "MIME type",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "File name",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "file"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "mime_type",
+                    "name",
+                    "type"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "description": "Structured data",
+                  "properties": {
+                    "content": {
+                      "description": "The actual data"
+                    },
+                    "schema": {
+                      "description": "Data schema identifier",
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "data"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "content",
+                    "schema",
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "TaskError": {
+              "description": "Task error information",
+              "properties": {
+                "code": {
+                  "description": "Error code",
+                  "type": "string"
+                },
+                "details": {
+                  "description": "Additional error details"
+                },
+                "message": {
+                  "description": "Error message",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "TaskProgress": {
+              "description": "Task progress information",
+              "properties": {
+                "eta_seconds": {
+                  "description": "Estimated time remaining in seconds",
+                  "format": "uint64",
+                  "minimum": 0.0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "description": "Progress message",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "percentage": {
+                  "description": "Progress percentage (0-100)",
+                  "format": "uint8",
+                  "minimum": 0.0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "TaskStatus": {
+              "description": "Status of a task",
+              "oneOf": [
+                {
+                  "description": "Task has been submitted",
+                  "enum": [
+                    "submitted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task is being worked on",
+                  "enum": [
+                    "working"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires input from the requester",
+                  "enum": [
+                    "input_required"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been completed successfully",
+                  "enum": [
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been canceled",
+                  "enum": [
+                    "canceled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has failed",
+                  "enum": [
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been rejected",
+                  "enum": [
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires authentication",
+                  "enum": [
+                    "auth_required"
+                  ],
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "description": "Task get response",
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskError"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Error details if failed"
+            },
+            "progress": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Progress information"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Message"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Task result if completed"
+            },
+            "status": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TaskStatus"
+                }
+              ],
+              "description": "Current task status"
+            },
+            "task_id": {
+              "description": "Task ID",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "task_id"
+          ],
+          "title": "TaskGetResponse",
+          "type": "object"
+        }
+      },
+      "summary": "Get task"
+    },
+    {
+      "description": "Cancel a running task",
+      "errors": null,
+      "examples": null,
+      "name": "tasks/cancel",
+      "params": [
+        {
+          "description": "Task cancel request",
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "description": "Task cancel request",
+            "properties": {
+              "reason": {
+                "description": "Reason for cancellation",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "task_id": {
+                "description": "Task ID to cancel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id"
+            ],
+            "title": "TaskCancelRequest",
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "Task cancellation result",
+        "name": "cancel_response",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "TaskStatus": {
+              "description": "Status of a task",
+              "oneOf": [
+                {
+                  "description": "Task has been submitted",
+                  "enum": [
+                    "submitted"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task is being worked on",
+                  "enum": [
+                    "working"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires input from the requester",
+                  "enum": [
+                    "input_required"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been completed successfully",
+                  "enum": [
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been canceled",
+                  "enum": [
+                    "canceled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has failed",
+                  "enum": [
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task has been rejected",
+                  "enum": [
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "description": "Task requires authentication",
+                  "enum": [
+                    "auth_required"
+                  ],
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "description": "Task cancel response",
+          "properties": {
+            "message": {
+              "description": "Optional message",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TaskStatus"
+                }
+              ],
+              "description": "Final task status"
+            },
+            "success": {
+              "description": "Whether the cancellation was successful",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "success"
+          ],
+          "title": "TaskCancelResponse",
+          "type": "object"
+        }
+      },
+      "summary": "Cancel task"
     }
   ],
   "openrpc": "1.2.6",
