@@ -19,7 +19,6 @@ impl RepositoryContextTool {
                 .map_err(|e| TestError::Mcp(e.to_string()))?,
         );
         let context_manager = RepositoryContextManager::new(memory_storage)
-            .await
             .map_err(|e| TestError::Mcp(e.to_string()))?;
         Ok(Self {
             schema: ToolSchema {
