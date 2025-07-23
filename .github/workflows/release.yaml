@@ -8,7 +8,7 @@ jobs:
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -80,7 +80,7 @@ jobs:
   build-linux-x86_64:
     needs: release
     name: Build Linux (x86_64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -292,7 +292,7 @@ jobs:
   smoke-test-linux:
     needs: [release, build-linux-x86_64]
     name: Smoke Test Linux Binary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         include:
@@ -300,6 +300,9 @@ jobs:
             binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux-musl.tar.gz
             test_deb: false
           - container: ubuntu:latest
+            binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
+            test_deb: true
+          - container: ubuntu:22.04
             binary: arkavo-${{ needs.release.outputs.version }}-x86_64-linux.tar.gz
             test_deb: true
     container:
@@ -347,7 +350,7 @@ jobs:
   publish-release:
     needs: [release, smoke-test-linux, smoke-test-macos]
     name: Publish Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
