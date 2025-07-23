@@ -1036,7 +1036,7 @@ mod tests {
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
-                promise_types: Some(vec!["test".to_string()]),
+                task_types: Some(vec!["test".to_string()]),
                 tags: None,
             }))
             .await;
