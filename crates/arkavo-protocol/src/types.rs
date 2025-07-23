@@ -3,74 +3,80 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Request to make a promise from another agent
+/// Request to make a task from another agent
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PromiseRequest {
+pub struct TaskRequest {
     /// The ID of the requesting agent
     #[serde(rename = "agent_id")]
     #[schemars(example = "example_agent_id")]
     pub agent_id: String,
 
-    /// The type of promise being requested
-    #[serde(rename = "promise_type")]
-    #[schemars(example = "example_promise_type")]
-    pub promise_type: String,
+    /// The type of task being requested
+    #[serde(rename = "task_type")]
+    #[schemars(example = "example_task_type")]
+    pub task_type: String,
 
-    /// Additional data for the promise request
+    /// Additional data for the task request
     #[serde(rename = "payload", skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
 }
 
-/// Response to a promise request
+/// Response to a task request
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PromiseResponse {
-    /// Unique identifier for the promise
-    #[serde(rename = "promise_id")]
-    pub promise_id: Uuid,
+pub struct TaskResponse {
+    /// Unique identifier for the task
+    #[serde(rename = "task_id")]
+    pub task_id: Uuid,
 
-    /// Current status of the promise
-    pub status: PromiseStatus,
+    /// Current status of the task
+    pub status: TaskStatus,
 
     /// Additional data in the response
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
 
-/// Status of a promise
+/// Status of a task
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum PromiseStatus {
-    /// Promise has been accepted
-    Accepted,
-    /// Promise has been rejected
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    /// Task has been submitted
+    Submitted,
+    /// Task is being worked on
+    Working,
+    /// Task requires input from the requester
+    InputRequired,
+    /// Task has been completed successfully
+    Completed,
+    /// Task has been canceled
+    Canceled,
+    /// Task has failed
+    Failed,
+    /// Task has been rejected
     Rejected,
-    /// Promise is pending
-    Pending,
-    /// Promise has been fulfilled
-    Fulfilled,
-    /// Promise has been broken
-    Broken,
+    /// Task requires authentication
+    AuthRequired,
 }
 
-/// Declaration of promises an agent can fulfill
+/// Declaration of tasks an agent can fulfill
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PromiseDeclareRequest {
+pub struct TaskDeclareRequest {
     /// The ID of the declaring agent
     #[serde(rename = "agent_id")]
     pub agent_id: String,
 
-    /// List of promises the agent can fulfill
-    pub promises: Vec<PromiseCapability>,
+    /// List of tasks the agent can fulfill
+    pub tasks: Vec<TaskCapability>,
 }
 
-/// A promise capability that an agent can fulfill
+/// A task capability that an agent can fulfill
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PromiseCapability {
-    /// Type of promise
+pub struct TaskCapability {
+    /// Type of task
     #[serde(rename = "type")]
-    pub promise_type: String,
+    pub task_type: String,
 
-    /// Constraints on the promise
+    /// Constraints on the task
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constraints: Option<serde_json::Value>,
 
@@ -79,9 +85,9 @@ pub struct PromiseCapability {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Response to a promise declaration
+/// Response to a task declaration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PromiseDeclareResponse {
+pub struct TaskDeclareResponse {
     /// Whether the declaration was acknowledged
     pub acknowledged: bool,
 
@@ -100,9 +106,9 @@ pub struct AgentDiscoverRequest {
 /// Filter criteria for agent discovery
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentDiscoverFilter {
-    /// Filter by promise types
+    /// Filter by task types
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub promise_types: Option<Vec<String>>,
+    pub task_types: Option<Vec<String>>,
 
     /// Filter by tags
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,9 +124,9 @@ pub struct DiscoveredAgent {
     /// Network endpoint for the agent
     pub endpoint: String,
 
-    /// Promise types the agent supports
+    /// Task types the agent supports
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub promises: Option<Vec<String>>,
+    pub tasks: Option<Vec<String>>,
 
     /// Additional metadata about the agent
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,12 +191,110 @@ pub enum FeatureType {
     McpServer,
 }
 
+/// Agent Card - JSON metadata document describing an agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentCard {
+    /// Agent identity information
+    pub identity: AgentIdentity,
+
+    /// Agent capabilities
+    pub capabilities: Vec<AgentCapability>,
+
+    /// Authentication requirements
+    pub authentication: AuthenticationRequirements,
+
+    /// Supported interaction modes
+    pub interaction_modes: Vec<InteractionMode>,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Agent identity information
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentIdentity {
+    /// Unique agent ID
+    pub id: String,
+
+    /// Human-readable name
+    pub name: String,
+
+    /// Agent description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Agent version
+    pub version: String,
+
+    /// Organization or owner
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
+}
+
+/// Agent capability description
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentCapability {
+    /// Skill or capability name
+    pub name: String,
+
+    /// Capability description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Input schema for this capability
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<serde_json::Value>,
+
+    /// Output schema for this capability
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
+}
+
+/// Authentication requirements
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AuthenticationRequirements {
+    /// Supported authentication methods
+    pub methods: Vec<AuthMethod>,
+
+    /// Whether authentication is required
+    pub required: bool,
+}
+
+/// Authentication method
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// OAuth2 authentication
+    OAuth2,
+    /// JWT bearer token
+    JwtBearer,
+    /// API key
+    ApiKey,
+    /// mTLS client certificate
+    Mtls,
+    /// Basic authentication
+    Basic,
+}
+
+/// Interaction mode supported by the agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionMode {
+    /// Synchronous request/response
+    Synchronous,
+    /// Server-sent events streaming
+    Streaming,
+    /// Asynchronous with push notifications
+    Asynchronous,
+}
+
 // Helper function for examples
 fn example_agent_id() -> &'static str {
     "550e8400-e29b-41d4-a716-446655440000"
 }
 
-fn example_promise_type() -> &'static str {
+fn example_task_type() -> &'static str {
     "data_access"
 }
 
@@ -351,4 +455,156 @@ pub enum StreamEndReason {
     Error,
     /// Session closed
     SessionClosed,
+}
+
+// A2A Protocol Types
+
+/// Message send request
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MessageSendRequest {
+    /// The message content
+    pub message: Message,
+
+    /// Optional task context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}
+
+/// Message for A2A communication
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Message {
+    /// Message parts
+    pub parts: Vec<MessagePart>,
+
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Part of a message
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MessagePart {
+    /// Text content
+    Text {
+        /// The text content
+        content: String,
+    },
+    /// File content
+    File {
+        /// File name
+        name: String,
+        /// MIME type
+        mime_type: String,
+        /// File data (base64 encoded) or URI
+        data: String,
+        /// Whether data is a URI (true) or base64 (false)
+        #[serde(default)]
+        is_uri: bool,
+    },
+    /// Structured data
+    Data {
+        /// Data schema identifier
+        schema: String,
+        /// The actual data
+        content: serde_json::Value,
+    },
+}
+
+/// Message send response
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MessageSendResponse {
+    /// Task ID for this message
+    pub task_id: String,
+
+    /// Initial task status
+    pub status: TaskStatus,
+
+    /// Optional immediate response
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<Message>,
+}
+
+/// Task get request
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskGetRequest {
+    /// Task ID to retrieve
+    pub task_id: String,
+}
+
+/// Task get response
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskGetResponse {
+    /// Task ID
+    pub task_id: String,
+
+    /// Current task status
+    pub status: TaskStatus,
+
+    /// Task result if completed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Message>,
+
+    /// Error details if failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<TaskError>,
+
+    /// Progress information
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<TaskProgress>,
+}
+
+/// Task error information
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskError {
+    /// Error code
+    pub code: String,
+
+    /// Error message
+    pub message: String,
+
+    /// Additional error details
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+/// Task progress information
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskProgress {
+    /// Progress percentage (0-100)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percentage: Option<u8>,
+
+    /// Progress message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+
+    /// Estimated time remaining in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eta_seconds: Option<u64>,
+}
+
+/// Task cancel request
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskCancelRequest {
+    /// Task ID to cancel
+    pub task_id: String,
+
+    /// Reason for cancellation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Task cancel response
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskCancelResponse {
+    /// Whether the cancellation was successful
+    pub success: bool,
+
+    /// Final task status
+    pub status: TaskStatus,
+
+    /// Optional message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }

@@ -11,8 +11,8 @@ async fn test_metrics_collection() {
     let collector = Arc::new(MetricsCollector::new(true));
 
     // Record some RPC requests
-    collector.record_rpc_request("promise_request", true);
-    collector.record_rpc_request("promise_request", false);
+    collector.record_rpc_request("task_request", true);
+    collector.record_rpc_request("task_request", false);
     collector.record_rpc_request("agent_discover", true);
 
     // Record rate limit blocks
@@ -23,7 +23,7 @@ async fn test_metrics_collection() {
     collector.record_mdns_discovery();
 
     // Record latency
-    collector.record_rpc_latency("promise_request", Duration::from_millis(100));
+    collector.record_rpc_latency("task_request", Duration::from_millis(100));
 
     // Update gauge
     collector.update_rate_limit_entries(42);

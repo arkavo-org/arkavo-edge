@@ -4,12 +4,12 @@ use crate::mcp_registry::McpRegistry;
 use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
-#[cfg(feature = "stub_handlers")]
-use crate::types::PromiseStatus;
 use crate::types::{
     AgentDiscoverFilter, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
     DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta,
-    MessageDeltaContent, PromiseCapability, PromiseDeclareResponse, PromiseResponse, UserMessage,
+    MessageDeltaContent, MessageSendRequest, MessageSendResponse, TaskCancelRequest,
+    TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest, TaskGetResponse,
+    TaskResponse, UserMessage,
 };
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
@@ -27,20 +27,20 @@ use tracing::{error, info};
 
 #[rpc(server)]
 pub trait A2aRpc {
-    #[method(name = "promise_request")]
-    async fn promise_request(
+    #[method(name = "task_request")]
+    async fn task_request(
         &self,
         agent_id: String,
-        promise_type: String,
+        task_type: String,
         payload: Option<serde_json::Value>,
-    ) -> RpcResult<PromiseResponse>;
+    ) -> RpcResult<TaskResponse>;
 
-    #[method(name = "promise_declare")]
-    async fn promise_declare(
+    #[method(name = "task_declare")]
+    async fn task_declare(
         &self,
         agent_id: String,
-        promises: Vec<PromiseCapability>,
-    ) -> RpcResult<PromiseDeclareResponse>;
+        tasks: Vec<TaskCapability>,
+    ) -> RpcResult<TaskDeclareResponse>;
 
     #[method(name = "agent_discover")]
     async fn agent_discover(
@@ -59,6 +59,24 @@ pub trait A2aRpc {
 
     #[method(name = "rpc.discover")]
     async fn rpc_discover(&self) -> RpcResult<serde_json::Value>;
+
+    // A2A Protocol Methods
+
+    /// Send a message synchronously
+    #[method(name = "message/send")]
+    async fn message_send(&self, request: MessageSendRequest) -> RpcResult<MessageSendResponse>;
+
+    /// Get task status and result
+    #[method(name = "tasks/get")]
+    async fn tasks_get(&self, request: TaskGetRequest) -> RpcResult<TaskGetResponse>;
+
+    /// Cancel a running task
+    #[method(name = "tasks/cancel")]
+    async fn tasks_cancel(&self, request: TaskCancelRequest) -> RpcResult<TaskCancelResponse>;
+
+    /// Stream message updates
+    #[subscription(name = "message/stream", unsubscribe = "message/stream/unsubscribe", item = MessageDelta)]
+    async fn message_stream(&self, task_id: String) -> SubscriptionResult;
 
     /// Open a new chat session
     #[method(name = "chat_open")]
@@ -100,13 +118,13 @@ struct AgentMetadata {
 
 #[async_trait]
 impl A2aRpcServer for A2aRpcImpl {
-    async fn promise_request(
+    async fn task_request(
         &self,
         _agent_id: String,
-        _promise_type: String,
+        _task_type: String,
         _payload: Option<serde_json::Value>,
-    ) -> RpcResult<PromiseResponse> {
-        let timer = RpcTimer::new("promise_request".to_string(), self.metrics.clone());
+    ) -> RpcResult<TaskResponse> {
+        let timer = RpcTimer::new("task_request".to_string(), self.metrics.clone());
 
         // Check rate limit
         if let Err(e) = self.rate_limiter.check_rate_limit() {
@@ -117,9 +135,9 @@ impl A2aRpcServer for A2aRpcImpl {
 
         #[cfg(feature = "stub_handlers")]
         {
-            let response = PromiseResponse {
-                promise_id: uuid::Uuid::new_v4(),
-                status: PromiseStatus::Pending,
+            let response = TaskResponse {
+                task_id: uuid::Uuid::new_v4(),
+                status: TaskStatus::Submitted,
                 data: _payload,
             };
             timer.success();
@@ -132,17 +150,17 @@ impl A2aRpcServer for A2aRpcImpl {
             Err(ErrorObjectOwned::owned(
                 -32601,
                 "Method not yet implemented",
-                Some("promise_request is not yet implemented".to_string()),
+                Some("task_request is not yet implemented".to_string()),
             ))
         }
     }
 
-    async fn promise_declare(
+    async fn task_declare(
         &self,
         _agent_id: String,
-        _promises: Vec<PromiseCapability>,
-    ) -> RpcResult<PromiseDeclareResponse> {
-        let timer = RpcTimer::new("promise_declare".to_string(), self.metrics.clone());
+        _tasks: Vec<TaskCapability>,
+    ) -> RpcResult<TaskDeclareResponse> {
+        let timer = RpcTimer::new("task_declare".to_string(), self.metrics.clone());
 
         // Check rate limit
         if let Err(e) = self.rate_limiter.check_rate_limit() {
@@ -153,7 +171,7 @@ impl A2aRpcServer for A2aRpcImpl {
 
         #[cfg(feature = "stub_handlers")]
         {
-            let response = PromiseDeclareResponse {
+            let response = TaskDeclareResponse {
                 acknowledged: true,
                 timestamp: chrono::Utc::now(),
             };
@@ -167,7 +185,7 @@ impl A2aRpcServer for A2aRpcImpl {
             Err(ErrorObjectOwned::owned(
                 -32601,
                 "Method not yet implemented",
-                Some("promise_declare is not yet implemented".to_string()),
+                Some("task_declare is not yet implemented".to_string()),
             ))
         }
     }
@@ -215,7 +233,7 @@ impl A2aRpcServer for A2aRpcImpl {
         let agent = DiscoveredAgent {
             agent_id: uuid::Uuid::new_v4(), // Generate a unique ID for the agent
             endpoint,
-            promises: Some(vec![]), // TODO: Populate with actual promise types
+            tasks: Some(vec![]), // TODO: Populate with actual task types
             metadata: Some(metadata_json),
         };
 
@@ -330,6 +348,176 @@ impl A2aRpcServer for A2aRpcImpl {
                 ))
             }
         }
+    }
+
+    // A2A Protocol Method Implementations
+
+    async fn message_send(&self, _request: MessageSendRequest) -> RpcResult<MessageSendResponse> {
+        let timer = RpcTimer::new("message/send".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        #[cfg(feature = "stub_handlers")]
+        {
+            // Create a new task for this message
+            let task_id = uuid::Uuid::new_v4().to_string();
+            let response = MessageSendResponse {
+                task_id,
+                status: TaskStatus::Submitted,
+                response: None, // Async processing, no immediate response
+            };
+            timer.success();
+            Ok(response)
+        }
+
+        #[cfg(not(feature = "stub_handlers"))]
+        {
+            timer.error();
+            Err(ErrorObjectOwned::owned(
+                -32601,
+                "Method not yet implemented",
+                Some("message/send is not yet implemented".to_string()),
+            ))
+        }
+    }
+
+    async fn tasks_get(&self, _request: TaskGetRequest) -> RpcResult<TaskGetResponse> {
+        let timer = RpcTimer::new("tasks/get".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        #[cfg(feature = "stub_handlers")]
+        {
+            // Return a mock task status
+            let response = TaskGetResponse {
+                task_id: _request.task_id,
+                status: TaskStatus::Working,
+                result: None,
+                error: None,
+                progress: None,
+            };
+            timer.success();
+            Ok(response)
+        }
+
+        #[cfg(not(feature = "stub_handlers"))]
+        {
+            timer.error();
+            Err(ErrorObjectOwned::owned(
+                -32601,
+                "Method not yet implemented",
+                Some("tasks/get is not yet implemented".to_string()),
+            ))
+        }
+    }
+
+    async fn tasks_cancel(&self, _request: TaskCancelRequest) -> RpcResult<TaskCancelResponse> {
+        let timer = RpcTimer::new("tasks/cancel".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        #[cfg(feature = "stub_handlers")]
+        {
+            // Return a mock cancellation response
+            let response = TaskCancelResponse {
+                success: true,
+                status: TaskStatus::Canceled,
+                message: Some(format!("Task {} canceled", _request.task_id)),
+            };
+            timer.success();
+            Ok(response)
+        }
+
+        #[cfg(not(feature = "stub_handlers"))]
+        {
+            timer.error();
+            Err(ErrorObjectOwned::owned(
+                -32601,
+                "Method not yet implemented",
+                Some("tasks/cancel is not yet implemented".to_string()),
+            ))
+        }
+    }
+
+    async fn message_stream(
+        &self,
+        sink: PendingSubscriptionSink,
+        _task_id: String,
+    ) -> SubscriptionResult {
+        let timer = RpcTimer::new("message/stream".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        let _sink = match sink.accept().await {
+            Ok(sink) => sink,
+            Err(_) => {
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        #[cfg(feature = "stub_handlers")]
+        {
+            // Send a few mock updates
+            tokio::spawn(async move {
+                // Send initial status
+                let delta = MessageDelta {
+                    session_id: _task_id.clone(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::Text {
+                        text: "Processing task...".to_string(),
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                    let _ = _sink.send(msg).await;
+                }
+
+                // Simulate some processing time
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+                // Send completion
+                let delta = MessageDelta {
+                    session_id: _task_id,
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 1,
+                    delta: MessageDeltaContent::StreamEnd {
+                        reason: crate::types::StreamEndReason::Complete,
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                    let _ = _sink.send(msg).await;
+                }
+            });
+        }
+
+        timer.success();
+        Ok(())
     }
 
     async fn chat_open(&self, _request: ChatOpenRequest) -> RpcResult<ChatSession> {
@@ -721,7 +909,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_promise_request_handler() {
+    async fn test_task_request_handler() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
@@ -735,7 +923,7 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance
-            .promise_request(
+            .task_request(
                 "test-agent".to_string(),
                 "data_access".to_string(),
                 Some(serde_json::json!({"key": "value"})),
@@ -745,8 +933,8 @@ mod tests {
         #[cfg(feature = "stub_handlers")]
         {
             let result = result.unwrap();
-            assert!(result.promise_id.to_string().len() > 0);
-            assert!(matches!(result.status, PromiseStatus::Pending));
+            assert!(result.task_id.to_string().len() > 0);
+            assert!(matches!(result.status, TaskStatus::Submitted));
         }
 
         #[cfg(not(feature = "stub_handlers"))]
@@ -759,7 +947,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_promise_declare_handler() {
+    async fn test_task_declare_handler() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
@@ -773,10 +961,10 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
         };
         let result = impl_instance
-            .promise_declare(
+            .task_declare(
                 "test-agent".to_string(),
-                vec![PromiseCapability {
-                    promise_type: "compute".to_string(),
+                vec![TaskCapability {
+                    task_type: "compute".to_string(),
                     constraints: None,
                     metadata: None,
                 }],
@@ -827,8 +1015,8 @@ mod tests {
             .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
             .collect();
 
-        assert!(method_names.contains(&"promise_request"));
-        assert!(method_names.contains(&"promise_declare"));
+        assert!(method_names.contains(&"task_request"));
+        assert!(method_names.contains(&"task_declare"));
         assert!(method_names.contains(&"agent_discover"));
     }
 
