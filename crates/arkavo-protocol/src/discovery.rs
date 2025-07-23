@@ -213,7 +213,7 @@ impl DiscoveryService {
     /// Note: This is a placeholder implementation. The actual mDNS discovery logic
     /// is implemented in the arkavo-agui crate's gateway module.
     #[cfg(feature = "mdns")]
-    pub async fn start_mdns_discovery(&self) -> Result<()> {
+    pub fn start_mdns_discovery(&self) -> Result<()> {
         info!("Starting mDNS discovery for A2A agents");
 
         // The actual mDNS discovery implementation is in arkavo-agui/src/gateway.rs
@@ -239,7 +239,7 @@ impl DiscoveryService {
     /// Note: This is a placeholder implementation. The actual mDNS registration logic
     /// is implemented in the arkavo-cli crate's agent module.
     #[cfg(feature = "mdns")]
-    pub async fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
+    pub fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
         info!("Registering mDNS service for A2A agent");
 
         // The actual mDNS registration implementation is in arkavo-cli/src/commands/agent.rs

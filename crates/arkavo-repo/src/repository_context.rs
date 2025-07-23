@@ -9,6 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -67,7 +68,12 @@ pub struct RepositoryContextManager {
 }
 
 impl RepositoryContextManager {
-    pub async fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
+    /// Creates a new repository context manager.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `CACHE_SIZE` is 0, which would make `NonZeroUsize::new()` return `None`.
+    pub fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
         let cache_size = NonZeroUsize::new(CACHE_SIZE).unwrap();
         Ok(Self {
             git_manager: GitManager::new(),
@@ -333,8 +339,10 @@ impl RepositoryContextManager {
             let content = result.memory.content.clone();
 
             // Update LRU cache
-            let mut cache = self.file_cache.lock().await;
-            cache.put(cache_key.clone(), content.clone());
+            {
+                let mut cache = self.file_cache.lock().await;
+                cache.put(cache_key.clone(), content.clone());
+            }
 
             return Ok(content);
         }
@@ -421,65 +429,71 @@ impl RepositoryContextManager {
     fn context_to_string(&self, context: &RepositoryContext) -> String {
         let mut result = String::new();
 
-        result.push_str(&format!(
-            "Working directory: {}\n",
+        writeln!(
+            &mut result,
+            "Working directory: {}",
             context.working_directory
-        ));
-        result.push_str(&format!("Git repository: {}\n", context.is_git_repo));
+        )
+        .unwrap();
+        writeln!(&mut result, "Git repository: {}", context.is_git_repo).unwrap();
 
         if let Some(branch) = &context.current_branch {
-            result.push_str(&format!("Current branch: {branch}\n"));
+            writeln!(&mut result, "Current branch: {branch}").unwrap();
         }
 
         if let Some(status) = &context.git_status {
             result.push_str("\nGit status:\n");
             if !status.modified.is_empty() {
-                result.push_str(&format!("  Modified: {} files\n", status.modified.len()));
+                writeln!(&mut result, "  Modified: {} files", status.modified.len()).unwrap();
             }
             if !status.added.is_empty() {
-                result.push_str(&format!("  Added: {} files\n", status.added.len()));
+                writeln!(&mut result, "  Added: {} files", status.added.len()).unwrap();
             }
             if !status.deleted.is_empty() {
-                result.push_str(&format!("  Deleted: {} files\n", status.deleted.len()));
+                writeln!(&mut result, "  Deleted: {} files", status.deleted.len()).unwrap();
             }
             if !status.untracked.is_empty() {
-                result.push_str(&format!("  Untracked: {} files\n", status.untracked.len()));
+                writeln!(&mut result, "  Untracked: {} files", status.untracked.len()).unwrap();
             }
         }
 
         if !context.recent_commits.is_empty() {
             result.push_str("\nRecent commits:\n");
             for commit in &context.recent_commits {
-                result.push_str(&format!(
-                    "  {} - {} ({})\n",
+                writeln!(
+                    &mut result,
+                    "  {} - {} ({})",
                     &commit.id[..8],
                     commit.message,
                     commit.author
-                ));
+                )
+                .unwrap();
             }
         }
 
         if let Some(project_type) = &context.project_type {
-            result.push_str(&format!("\nProject type: {project_type}\n"));
+            writeln!(&mut result, "\nProject type: {project_type}").unwrap();
         }
 
         if !context.dependencies.is_empty() {
             result.push_str("\nDependencies:\n");
             for (manager, deps) in &context.dependencies {
-                result.push_str(&format!("  {} ({} packages)\n", manager, deps.len()));
+                writeln!(&mut result, "  {} ({} packages)", manager, deps.len()).unwrap();
             }
         }
 
         result.push_str("\nProject structure:\n");
         for file in context.project_files.iter().take(30) {
-            result.push_str(&format!("  - {}\n", file.path));
+            writeln!(&mut result, "  - {}", file.path).unwrap();
         }
 
         if context.project_files.len() > 30 {
-            result.push_str(&format!(
-                "  ... and {} more files\n",
+            writeln!(
+                &mut result,
+                "  ... and {} more files",
                 context.project_files.len() - 30
-            ));
+            )
+            .unwrap();
         }
 
         result
