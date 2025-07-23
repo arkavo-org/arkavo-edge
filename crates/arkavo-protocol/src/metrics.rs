@@ -127,9 +127,7 @@ impl MetricsCollector {
 
     /// Record task submission
     pub fn record_task_submitted(&self) {
-        if !self.enabled {
-            return;
-        }
+        if !self.enabled {}
 
         #[cfg(feature = "metrics")]
         {

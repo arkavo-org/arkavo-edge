@@ -44,8 +44,7 @@ impl MetricsSubscriptionServer {
     }
 
     /// Start the metrics sampler task
-    #[instrument(skip(self))]
-    pub async fn start_sampler(&self) -> tokio::task::JoinHandle<()> {
+    pub fn start_sampler(&self) -> tokio::task::JoinHandle<()> {
         let tx = self.metrics_tx.clone();
         let collector = self.metrics_collector.clone();
         let config = self.sampler_config.clone();
@@ -123,15 +122,20 @@ impl MetricsSubscriptionServer {
 
     /// Get current metrics snapshot immediately
     pub async fn get_current_snapshot(&self) -> MetricsSnapshot {
-        let config = self.sampler_config.read().await;
-        let mut sampler = MetricsSampler::new(config.clone());
+        let config = {
+            let config_guard = self.sampler_config.read().await;
+            config_guard.clone()
+        };
+        let mut sampler = MetricsSampler::new(config);
         sampler.sample_metrics(&self.metrics_collector)
     }
 
     /// Update sampler configuration
     pub async fn update_config(&self, new_config: MetricsSamplerConfig) {
-        let mut config = self.sampler_config.write().await;
-        *config = new_config.clone();
+        {
+            let mut config = self.sampler_config.write().await;
+            *config = new_config.clone();
+        }
 
         info!(
             sample_interval_seconds = new_config.sample_interval_seconds,
@@ -216,7 +220,7 @@ impl MetricsSubscriptionService {
         );
 
         // Start the sampler task
-        let handle = self.server.start_sampler().await;
+        let handle = self.server.start_sampler();
         self.sampler_handle = Some(handle);
 
         info!("Metrics subscription service started successfully");
@@ -282,7 +286,7 @@ mod tests {
         };
         server.update_config(fast_config).await;
 
-        let _handle = server.start_sampler().await;
+        let _handle = server.start_sampler();
 
         // Generate some metrics
         collector.record_session_created();

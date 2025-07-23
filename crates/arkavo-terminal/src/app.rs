@@ -335,7 +335,7 @@ impl App {
                     .find(|p| p.provider_type == ProviderType::Claude)
                 {
                     mcp_provider.status = ProviderStatus::Connected;
-                    mcp_provider.mcp_tools = tools.clone();
+                    mcp_provider.mcp_tools.clone_from(&tools);
                 }
 
                 self.add_debug_log(
