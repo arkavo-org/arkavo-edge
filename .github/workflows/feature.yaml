@@ -24,7 +24,7 @@ jobs:
   # Version check from PR
   version-check:
     name: Verify Version Increment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
   # Quick checks that can run in parallel
   format:
     name: Format Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -108,7 +108,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -131,7 +131,7 @@ jobs:
   # Tests and builds can run in parallel
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -159,7 +159,7 @@ jobs:
 
   build-linux:
     name: Build Linux (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -268,7 +268,7 @@ jobs:
   # Performance check can run independently
   performance-check:
     name: Performance Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -310,12 +310,13 @@ jobs:
   smoke-test-linux:
     name: Smoke Test Linux (${{ matrix.container }})
     needs: build-linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         container:
           - alpine:latest
           - ubuntu:latest
+          - ubuntu:22.04
     container:
       image: ${{ matrix.container }}
     steps:
@@ -363,7 +364,7 @@ jobs:
   # Schema validation jobs
   validate-openrpc:
     name: Validate OpenRPC Schema
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -462,7 +463,7 @@ jobs:
 
   check-schema-backwards-compatibility:
     name: Check Schema Backwards Compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -539,7 +540,7 @@ jobs:
 
   validate-doc-snippets:
     name: Validate Documentation Code Snippets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -565,7 +566,7 @@ jobs:
 
   validate-xtask-schema:
     name: Validate Schemas with xtask
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -638,7 +639,7 @@ jobs:
   # Zero-config and portability verification
   zero-config-check:
     name: Zero Configuration Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       
@@ -676,7 +677,7 @@ jobs:
   release-readiness:
     name: Release Readiness
     needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: always()
     steps:
       - name: Check job results
