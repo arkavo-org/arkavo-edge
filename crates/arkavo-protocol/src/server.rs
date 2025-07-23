@@ -945,20 +945,21 @@ impl A2aServer {
         ));
 
         // Create task store and executor
-        let task_store: Arc<dyn TaskStore> = match &self.config.task_store_path {
-            Some(path) => {
-                let task_store_path = std::path::Path::new(path);
-                Arc::new(SqliteTaskStore::new(task_store_path).await.map_err(|e| {
-                    A2aError::Internal(format!("Failed to create task store: {e}"))
-                })?)
-            }
-            None => {
-                // Use in-memory database
-                Arc::new(SqliteTaskStore::new_in_memory().await.map_err(|e| {
-                    A2aError::Internal(format!("Failed to create in-memory task store: {e}"))
-                })?)
-            }
-        };
+        let task_store: Arc<dyn TaskStore> =
+            match &self.config.task_store_path {
+                Some(path) => {
+                    let task_store_path = std::path::Path::new(path);
+                    Arc::new(SqliteTaskStore::new(task_store_path).await.map_err(|e| {
+                        A2aError::Internal(format!("Failed to create task store: {e}"))
+                    })?)
+                }
+                None => {
+                    // Use in-memory database
+                    Arc::new(SqliteTaskStore::new_in_memory().await.map_err(|e| {
+                        A2aError::Internal(format!("Failed to create in-memory task store: {e}"))
+                    })?)
+                }
+            };
         let task_executor = Arc::new(TaskExecutor::with_metrics(
             task_store.clone(),
             TaskExecutorConfig::default(),

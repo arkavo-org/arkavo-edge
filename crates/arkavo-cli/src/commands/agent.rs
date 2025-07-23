@@ -398,6 +398,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         max_connections: 100,
         idle_timeout_seconds: 300,
         rate_limit: RateLimitConfig::default(),
+        task_store_path: Some(".arkavo/arkavo_tasks.db".to_string()),
     };
 
     let server = A2aServer::new(server_config);
