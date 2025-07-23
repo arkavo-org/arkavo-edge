@@ -15,6 +15,8 @@ pub mod openrpc;
 pub mod rate_limit;
 pub mod security;
 pub mod server;
+pub mod task_executor;
+pub mod task_store;
 pub mod transport;
 pub mod types;
 pub mod websocket;
@@ -37,6 +39,8 @@ pub use rate_limit::{
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;
+pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
+pub use task_store::{SqliteTaskStore, Task, TaskStore};
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 pub use types::{
     DiscoverFeaturesDisclose, DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,

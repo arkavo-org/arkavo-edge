@@ -41,6 +41,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+# Database
+sqlx = { workspace = true }
+
 # MCP support
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 
@@ -78,6 +81,8 @@ metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 jsonrpsee = { version = "0.24", features = ["server", "macros"] }
 # For examples
 tracing-subscriber = { workspace = true }
+# For tests
+tempfile = { workspace = true }
 
 [[example]]
 name = "mdns_browser"

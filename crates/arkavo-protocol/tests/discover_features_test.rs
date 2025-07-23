@@ -10,6 +10,7 @@ mod discover_features_tests {
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
         config.port = 18901; // Use specific test port
+        config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
         let handle = server.start().await.unwrap();
@@ -53,6 +54,7 @@ mod discover_features_tests {
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
         config.port = 18902; // Use different test port
+        config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
         let handle = server.start().await.unwrap();
@@ -99,6 +101,7 @@ mod discover_features_tests {
         let mut config = ServerConfig::default();
         config.bind_address = "127.0.0.1".to_string();
         config.port = 18903; // Use another different test port
+        config.task_store_path = None; // Use in-memory database for tests
 
         let server = A2aServer::new(config.clone());
 

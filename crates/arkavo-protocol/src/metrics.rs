@@ -124,6 +124,91 @@ impl MetricsCollector {
             let _ = count; // Suppress unused warning
         }
     }
+
+    /// Record task submission
+    pub fn record_task_submitted(&self) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            counter!("a2a_tasks_submitted_total").increment(1);
+        }
+    }
+
+    /// Record task status change
+    pub fn record_task_status_change(&self, from_status: &str, to_status: &str) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            counter!(
+                "a2a_task_transitions_total",
+                "from" => from_status.to_string(),
+                "to" => to_status.to_string()
+            )
+            .increment(1);
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = (from_status, to_status); // Suppress unused warnings
+        }
+    }
+
+    /// Update task count by status
+    pub fn update_task_count_by_status(&self, status: &str, count: usize) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            gauge!("a2a_tasks_by_status", "status" => status.to_string()).set(count as f64);
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = (status, count); // Suppress unused warnings
+        }
+    }
+
+    /// Record task completion time
+    pub fn record_task_completion_time(&self, duration: std::time::Duration) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            histogram!("a2a_task_completion_seconds").record(duration.as_secs_f64());
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = duration; // Suppress unused warning
+        }
+    }
+
+    /// Record task error
+    pub fn record_task_error(&self, error_code: &str) {
+        if !self.enabled {
+            return;
+        }
+
+        #[cfg(feature = "metrics")]
+        {
+            counter!("a2a_task_errors_total", "code" => error_code.to_string()).increment(1);
+        }
+
+        #[cfg(not(feature = "metrics"))]
+        {
+            let _ = error_code; // Suppress unused warning
+        }
+    }
 }
 
 /// Timer for measuring RPC latency

@@ -227,7 +227,7 @@ impl DiscoveryService {
     }
 
     #[cfg(not(feature = "mdns"))]
-    pub async fn start_mdns_discovery(&self) -> Result<()> {
+    pub fn start_mdns_discovery(&self) -> Result<()> {
         Err(A2aError::ServiceDiscovery(
             "mDNS feature not compiled in".to_string(),
         ))
@@ -253,7 +253,7 @@ impl DiscoveryService {
     }
 
     #[cfg(not(feature = "mdns"))]
-    pub async fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
+    pub fn register_mdns_service(&self, _service_info: MdnsServiceInfo) -> Result<()> {
         Err(A2aError::ServiceDiscovery(
             "mDNS feature not compiled in".to_string(),
         ))
