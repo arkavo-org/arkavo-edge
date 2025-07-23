@@ -4,12 +4,14 @@ use crate::mcp_registry::McpRegistry;
 use crate::metrics::{MetricsCollector, RpcTimer};
 use crate::openrpc;
 use crate::rate_limit::RateLimiter;
+use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
+use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
     AgentDiscoverFilter, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
-    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, MessageDelta,
+    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta,
     MessageDeltaContent, MessageSendRequest, MessageSendResponse, TaskCancelRequest,
     TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest, TaskGetResponse,
-    TaskResponse, UserMessage,
+    TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
@@ -106,6 +108,8 @@ pub struct A2aRpcImpl {
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     llm_adapter: Option<Arc<LlmClientAdapter>>,
     chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
+    task_store: Arc<dyn TaskStore>,
+    task_executor: Arc<TaskExecutor>,
 }
 
 #[derive(Default, Clone)]
@@ -352,7 +356,7 @@ impl A2aRpcServer for A2aRpcImpl {
 
     // A2A Protocol Method Implementations
 
-    async fn message_send(&self, _request: MessageSendRequest) -> RpcResult<MessageSendResponse> {
+    async fn message_send(&self, request: MessageSendRequest) -> RpcResult<MessageSendResponse> {
         let timer = RpcTimer::new("message/send".to_string(), self.metrics.clone());
 
         // Check rate limit
@@ -362,31 +366,29 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            // Create a new task for this message
-            let task_id = uuid::Uuid::new_v4().to_string();
-            let response = MessageSendResponse {
-                task_id,
-                status: TaskStatus::Submitted,
-                response: None, // Async processing, no immediate response
-            };
-            timer.success();
-            Ok(response)
-        }
-
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            timer.error();
-            Err(ErrorObjectOwned::owned(
-                -32601,
-                "Method not yet implemented",
-                Some("message/send is not yet implemented".to_string()),
-            ))
+        // Submit the task using our task executor
+        match self.task_executor.submit_task(request.message).await {
+            Ok(task_id) => {
+                let response = MessageSendResponse {
+                    task_id: task_id.to_string(),
+                    status: TaskStatus::Submitted,
+                    response: None, // Async processing, no immediate response
+                };
+                timer.success();
+                Ok(response)
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "Failed to submit task",
+                    Some(format!("Error: {}", e)),
+                ))
+            }
         }
     }
 
-    async fn tasks_get(&self, _request: TaskGetRequest) -> RpcResult<TaskGetResponse> {
+    async fn tasks_get(&self, request: TaskGetRequest) -> RpcResult<TaskGetResponse> {
         let timer = RpcTimer::new("tasks/get".to_string(), self.metrics.clone());
 
         // Check rate limit
@@ -396,32 +398,64 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            // Return a mock task status
-            let response = TaskGetResponse {
-                task_id: _request.task_id,
-                status: TaskStatus::Working,
-                result: None,
-                error: None,
-                progress: None,
-            };
-            timer.success();
-            Ok(response)
-        }
+        // Parse task ID
+        let task_id = match uuid::Uuid::parse_str(&request.task_id) {
+            Ok(id) => id,
+            Err(_) => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32602,
+                    "Invalid task ID",
+                    Some("Task ID must be a valid UUID".to_string()),
+                ));
+            }
+        };
 
-        #[cfg(not(feature = "stub_handlers"))]
-        {
-            timer.error();
-            Err(ErrorObjectOwned::owned(
-                -32601,
-                "Method not yet implemented",
-                Some("tasks/get is not yet implemented".to_string()),
-            ))
+        // Get task from store
+        match self.task_store.get_task(&task_id).await {
+            Ok(Some(task)) => {
+                // Get task result if completed
+                let result = if task.status == TaskStatus::Completed {
+                    self.task_store
+                        .get_task_result(&task_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|v| serde_json::from_value::<Message>(v).ok())
+                } else {
+                    task.result
+                };
+
+                let response = TaskGetResponse {
+                    task_id: task.id.to_string(),
+                    status: task.status,
+                    result,
+                    error: task.error,
+                    progress: task.progress,
+                };
+                timer.success();
+                Ok(response)
+            }
+            Ok(None) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32602,
+                    "Task not found",
+                    Some(format!("No task found with ID: {}", request.task_id)),
+                ))
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32603,
+                    "Failed to retrieve task",
+                    Some(format!("Error: {}", e)),
+                ))
+            }
         }
     }
 
-    async fn tasks_cancel(&self, _request: TaskCancelRequest) -> RpcResult<TaskCancelResponse> {
+    async fn tasks_cancel(&self, request: TaskCancelRequest) -> RpcResult<TaskCancelResponse> {
         let timer = RpcTimer::new("tasks/cancel".to_string(), self.metrics.clone());
 
         // Check rate limit
@@ -431,26 +465,55 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        #[cfg(feature = "stub_handlers")]
-        {
-            // Return a mock cancellation response
-            let response = TaskCancelResponse {
-                success: true,
-                status: TaskStatus::Canceled,
-                message: Some(format!("Task {} canceled", _request.task_id)),
-            };
-            timer.success();
-            Ok(response)
-        }
+        // Parse task ID
+        let task_id = match uuid::Uuid::parse_str(&request.task_id) {
+            Ok(id) => id,
+            Err(_) => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32602,
+                    "Invalid task ID",
+                    Some("Task ID must be a valid UUID".to_string()),
+                ));
+            }
+        };
 
-        #[cfg(not(feature = "stub_handlers"))]
+        // Try to cancel the task
+        match self
+            .task_executor
+            .update_task_status(&task_id, TaskStatus::Canceled)
+            .await
         {
-            timer.error();
-            Err(ErrorObjectOwned::owned(
-                -32601,
-                "Method not yet implemented",
-                Some("tasks/cancel is not yet implemented".to_string()),
-            ))
+            Ok(()) => {
+                let response = TaskCancelResponse {
+                    success: true,
+                    status: TaskStatus::Canceled,
+                    message: request
+                        .reason
+                        .or(Some("Task cancelled successfully".to_string())),
+                };
+                timer.success();
+                Ok(response)
+            }
+            Err(e) => {
+                // Get the current task status
+                let current_status = self
+                    .task_store
+                    .get_task(&task_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|t| t.status)
+                    .unwrap_or(TaskStatus::Failed);
+
+                let response = TaskCancelResponse {
+                    success: false,
+                    status: current_status,
+                    message: Some(format!("Failed to cancel task: {}", e)),
+                };
+                timer.success(); // Still a valid response
+                Ok(response)
+            }
         }
     }
 
@@ -880,6 +943,25 @@ impl A2aServer {
             3600, // 1 hour TTL
             self.buffer_config.clone(),
         ));
+
+        // Create task store and executor
+        let task_store_path = std::path::Path::new("arkavo_tasks.db");
+        let task_store: Arc<dyn TaskStore> = Arc::new(
+            SqliteTaskStore::new(task_store_path)
+                .await
+                .map_err(|e| A2aError::Internal(format!("Failed to create task store: {}", e)))?,
+        );
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+
+        // Start the task executor
+        task_executor
+            .start()
+            .map_err(|e| A2aError::Internal(format!("Failed to start task executor: {}", e)))?;
+
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -887,6 +969,8 @@ impl A2aServer {
             agent_metadata: self.agent_metadata.clone(),
             llm_adapter,
             chat_sessions,
+            task_store,
+            task_executor,
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -914,6 +998,14 @@ mod tests {
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
         let metrics = Arc::new(MetricsCollector::new(false));
+        let task_store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+        task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -921,6 +1013,8 @@ mod tests {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: None,
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
+            task_store,
+            task_executor,
         };
         let result = impl_instance
             .task_request(
@@ -952,6 +1046,14 @@ mod tests {
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
         let metrics = Arc::new(MetricsCollector::new(false));
+        let task_store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+        task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -959,6 +1061,8 @@ mod tests {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: None,
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
+            task_store,
+            task_executor,
         };
         let result = impl_instance
             .task_declare(
@@ -993,6 +1097,14 @@ mod tests {
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
         let metrics = Arc::new(MetricsCollector::new(false));
+        let task_store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+        task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1000,6 +1112,8 @@ mod tests {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: None,
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
+            task_store,
+            task_executor,
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -1026,6 +1140,14 @@ mod tests {
         config.max_requests_per_second = 100;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
         let metrics = Arc::new(MetricsCollector::new(false));
+        let task_store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+        task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1033,6 +1155,8 @@ mod tests {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: None,
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
+            task_store,
+            task_executor,
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -1056,6 +1180,14 @@ mod tests {
         config.burst_size = 1;
         let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
         let metrics = Arc::new(MetricsCollector::new(false));
+        let task_store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
+        let task_executor = Arc::new(TaskExecutor::with_metrics(
+            task_store.clone(),
+            TaskExecutorConfig::default(),
+            metrics.clone(),
+        ));
+        task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
             metrics,
@@ -1063,6 +1195,8 @@ mod tests {
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: None,
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
+            task_store,
+            task_executor,
         };
 
         // First request should succeed

@@ -37,7 +37,7 @@ pub struct TaskResponse {
 }
 
 /// Status of a task
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     /// Task has been submitted

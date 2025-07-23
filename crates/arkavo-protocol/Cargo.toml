@@ -41,6 +41,9 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+# Database
+sqlx = { workspace = true }
+
 # MCP support
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 
