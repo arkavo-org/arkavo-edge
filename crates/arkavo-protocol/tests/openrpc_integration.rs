@@ -14,8 +14,8 @@ async fn test_openrpc_schema_generation() {
     assert!(schema.methods.len() >= 3);
     let method_names: Vec<&str> = schema.methods.iter().map(|m| m.name.as_str()).collect();
 
-    assert!(method_names.contains(&"promise_request"));
-    assert!(method_names.contains(&"promise_declare"));
+    assert!(method_names.contains(&"task_request"));
+    assert!(method_names.contains(&"task_declare"));
     assert!(method_names.contains(&"agent_discover"));
 
     // Verify components

@@ -25,7 +25,7 @@ fuzz_target!(|data: &[u8]| {
             
             // Method should be one of our known methods
             match request.method.as_str() {
-                "promise_request" | "promise_declare" | "agent_discover" | "rpc.discover" => {},
+                "task_request" | "task_declare" | "agent_discover" | "rpc.discover" => {},
                 _ => {
                     // Unknown method is still valid JSON-RPC
                 }

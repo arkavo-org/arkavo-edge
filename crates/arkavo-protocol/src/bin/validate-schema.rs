@@ -59,8 +59,8 @@ fn main() {
     // Check required methods exist
     let method_names: Vec<&str> = schema.methods.iter().map(|m| m.name.as_str()).collect();
     let required_methods = [
-        "promise_request",
-        "promise_declare",
+        "task_request",
+        "task_declare",
         "agent_discover",
         "rpc.discover",
     ];
