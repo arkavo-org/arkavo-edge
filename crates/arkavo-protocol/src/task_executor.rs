@@ -218,8 +218,8 @@ impl TaskExecutor {
 
         // Record metrics
         self.metrics.record_task_status_change(
-            &format!("{:?}", old_status).to_lowercase(),
-            &format!("{:?}", new_status).to_lowercase(),
+            &format!("{old_status:?}").to_lowercase(),
+            &format!("{new_status:?}").to_lowercase(),
         );
 
         // If task completed or failed, record completion time
@@ -227,7 +227,8 @@ impl TaskExecutor {
             new_status,
             TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Canceled
         ) {
-            if let Some(start_time) = self.task_start_times.write().await.remove(task_id) {
+            let value = self.task_start_times.write().await.remove(task_id);
+            if let Some(start_time) = value {
                 let duration = chrono::Utc::now().signed_duration_since(start_time);
                 self.metrics
                     .record_task_completion_time(
@@ -437,8 +438,7 @@ impl TaskExecutor {
 
         for status in statuses {
             let tasks = store.get_tasks_by_status(status).await?;
-            metrics
-                .update_task_count_by_status(&format!("{status:?}").to_lowercase(), tasks.len());
+            metrics.update_task_count_by_status(&format!("{status:?}").to_lowercase(), tasks.len());
         }
 
         Ok(())
@@ -446,13 +446,17 @@ impl TaskExecutor {
 
     /// Check if a status transition is valid
     fn is_valid_transition(from: TaskStatus, to: TaskStatus) -> bool {
-        use TaskStatus::{AuthRequired, Canceled, Completed, Failed, InputRequired, Rejected, Submitted, Working};
+        use TaskStatus::{
+            AuthRequired, Canceled, Completed, Failed, InputRequired, Rejected, Submitted, Working,
+        };
 
         matches!(
             (from, to),
-            (Submitted | InputRequired, Working) | (Submitted, Rejected | Canceled) |
-            (Working, Completed | Failed | Canceled | InputRequired) |
-            (InputRequired, Canceled | Failed) | (_, AuthRequired) // Any status can transition to AuthRequired
+            (Submitted | InputRequired, Working)
+                | (Submitted, Rejected | Canceled)
+                | (Working, Completed | Failed | Canceled | InputRequired)
+                | (InputRequired, Canceled | Failed)
+                | (_, AuthRequired) // Any status can transition to AuthRequired
         )
     }
 

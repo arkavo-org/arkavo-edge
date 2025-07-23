@@ -382,7 +382,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 Err(ErrorObjectOwned::owned(
                     -32603,
                     "Failed to submit task",
-                    Some(format!("Error: {}", e)),
+                    Some(format!("Error: {e}")),
                 ))
             }
         }
@@ -449,7 +449,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 Err(ErrorObjectOwned::owned(
                     -32603,
                     "Failed to retrieve task",
-                    Some(format!("Error: {}", e)),
+                    Some(format!("Error: {e}")),
                 ))
             }
         }
@@ -490,7 +490,7 @@ impl A2aRpcServer for A2aRpcImpl {
                     status: TaskStatus::Canceled,
                     message: request
                         .reason
-                        .or(Some("Task cancelled successfully".to_string())),
+                        .or_else(|| Some("Task cancelled successfully".to_string())),
                 };
                 timer.success();
                 Ok(response)
@@ -509,7 +509,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 let response = TaskCancelResponse {
                     success: false,
                     status: current_status,
-                    message: Some(format!("Failed to cancel task: {}", e)),
+                    message: Some(format!("Failed to cancel task: {e}")),
                 };
                 timer.success(); // Still a valid response
                 Ok(response)
@@ -945,12 +945,20 @@ impl A2aServer {
         ));
 
         // Create task store and executor
-        let task_store_path = std::path::Path::new("arkavo_tasks.db");
-        let task_store: Arc<dyn TaskStore> = Arc::new(
-            SqliteTaskStore::new(task_store_path)
-                .await
-                .map_err(|e| A2aError::Internal(format!("Failed to create task store: {}", e)))?,
-        );
+        let task_store: Arc<dyn TaskStore> = match &self.config.task_store_path {
+            Some(path) => {
+                let task_store_path = std::path::Path::new(path);
+                Arc::new(SqliteTaskStore::new(task_store_path).await.map_err(|e| {
+                    A2aError::Internal(format!("Failed to create task store: {e}"))
+                })?)
+            }
+            None => {
+                // Use in-memory database
+                Arc::new(SqliteTaskStore::new_in_memory().await.map_err(|e| {
+                    A2aError::Internal(format!("Failed to create in-memory task store: {e}"))
+                })?)
+            }
+        };
         let task_executor = Arc::new(TaskExecutor::with_metrics(
             task_store.clone(),
             TaskExecutorConfig::default(),
@@ -960,7 +968,7 @@ impl A2aServer {
         // Start the task executor
         task_executor
             .start()
-            .map_err(|e| A2aError::Internal(format!("Failed to start task executor: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to start task executor: {e}")))?;
 
         let rpc_impl = A2aRpcImpl {
             rate_limiter,

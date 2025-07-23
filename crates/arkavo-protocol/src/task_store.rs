@@ -61,6 +61,11 @@ pub struct SqliteTaskStore {
 
 impl SqliteTaskStore {
     pub async fn new(db_path: &Path) -> Result<Self> {
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = db_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
         let db_url = format!("sqlite:{}", db_path.display());
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -345,9 +350,7 @@ impl TaskStore for SqliteTaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        AgentIdentity, AuthenticationRequirements, InteractionMode, MessagePart,
-    };
+    use crate::types::{AgentIdentity, AuthenticationRequirements, InteractionMode, MessagePart};
 
     #[tokio::test]
     async fn test_task_store_crud() -> Result<()> {
