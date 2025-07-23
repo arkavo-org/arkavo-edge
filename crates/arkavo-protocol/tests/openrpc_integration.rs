@@ -44,6 +44,7 @@ async fn test_server_with_openrpc() {
     let mut config = ServerConfig::default();
     config.port = 0; // Use random port
     config.enabled = true;
+    config.task_store_path = None; // Use in-memory database for tests
 
     let _server = A2aServer::new(config);
 

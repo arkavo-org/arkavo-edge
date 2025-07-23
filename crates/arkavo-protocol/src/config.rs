@@ -103,6 +103,7 @@ pub struct ServerConfig {
     pub max_connections: usize,
     pub idle_timeout_seconds: u64,
     pub rate_limit: RateLimitConfig,
+    pub task_store_path: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -114,6 +115,7 @@ impl Default for ServerConfig {
             max_connections: 100,
             idle_timeout_seconds: 300,
             rate_limit: RateLimitConfig::default(),
+            task_store_path: Some(".arkavo/arkavo_tasks.db".to_string()),
         }
     }
 }
