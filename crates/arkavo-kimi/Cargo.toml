@@ -1,0 +1,42 @@
+[package]
+name = "arkavo-kimi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native Kimi (Moonshot) API integration for Arkavo Edge"
+readme = "README.md"
+keywords = ["cli", "ai", "agent", "llm", "kimi", "moonshot"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "json"] }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+tokio-stream = "0.1"
+anyhow = { workspace = true }
+chrono = { workspace = true }
+
+# For retry logic
+rand = "0.8"
+
+# For stream parsing
+bytes = "1.8"
+
+# Note: arkavo-llm dependency removed to avoid circular dependency
+# The provider.rs file exports a type that implements arkavo_llm::Provider
+# when used through arkavo-llm with the kimi feature enabled
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio-test = "0.4"
+
+[lints]
+workspace = true
