@@ -19,6 +19,11 @@ pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file
 pub use message::{Message, Role};
 pub use provider::Provider;
 pub use stream::StreamResponse;
+
+#[cfg(feature = "kimi")]
+mod kimi_adapter;
+#[cfg(feature = "kimi")]
+pub use kimi_adapter::KimiProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
     DeltaStream, DeltaType, EndReason, StreamControl, StreamDelta, StreamError, StreamId,
