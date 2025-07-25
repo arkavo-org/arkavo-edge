@@ -6,10 +6,15 @@ use tracing::warn;
 
 #[derive(Clone, Debug)]
 pub struct RetryConfig {
+    /// Maximum number of retry attempts
     pub max_retries: u32,
+    /// Initial delay before first retry
     pub initial_delay: Duration,
+    /// Maximum delay between retries
     pub max_delay: Duration,
+    /// Exponential backoff multiplier
     pub backoff_factor: f32,
+    /// Jitter factor (0.0 to 1.0) to randomize delays
     pub jitter_factor: f32,
 }
 
@@ -22,6 +27,38 @@ impl Default for RetryConfig {
             backoff_factor: 2.0,
             jitter_factor: 0.1,
         }
+    }
+}
+
+impl RetryConfig {
+    /// Set the maximum number of retry attempts
+    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    /// Set the initial delay before the first retry
+    pub fn with_initial_delay(mut self, delay: Duration) -> Self {
+        self.initial_delay = delay;
+        self
+    }
+
+    /// Set the maximum delay between retries
+    pub fn with_max_delay(mut self, delay: Duration) -> Self {
+        self.max_delay = delay;
+        self
+    }
+
+    /// Set the exponential backoff factor
+    pub fn with_backoff_factor(mut self, factor: f32) -> Self {
+        self.backoff_factor = factor;
+        self
+    }
+
+    /// Set the jitter factor (0.0 to 1.0)
+    pub fn with_jitter_factor(mut self, factor: f32) -> Self {
+        self.jitter_factor = factor.clamp(0.0, 1.0);
+        self
     }
 }
 
@@ -102,6 +139,31 @@ impl RetryClient {
 mod tests {
     use super::*;
     use crate::error::KimiError;
+
+    #[test]
+    fn test_retry_config_builder() {
+        let config = RetryConfig::default()
+            .with_max_retries(5)
+            .with_initial_delay(Duration::from_millis(500))
+            .with_max_delay(Duration::from_secs(60))
+            .with_backoff_factor(3.0)
+            .with_jitter_factor(0.2);
+
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.initial_delay, Duration::from_millis(500));
+        assert_eq!(config.max_delay, Duration::from_secs(60));
+        assert_eq!(config.backoff_factor, 3.0);
+        assert_eq!(config.jitter_factor, 0.2);
+    }
+
+    #[test]
+    fn test_jitter_factor_clamping() {
+        let config1 = RetryConfig::default().with_jitter_factor(1.5);
+        assert_eq!(config1.jitter_factor, 1.0);
+
+        let config2 = RetryConfig::default().with_jitter_factor(-0.5);
+        assert_eq!(config2.jitter_factor, 0.0);
+    }
 
     #[tokio::test]
     async fn test_successful_operation() {
