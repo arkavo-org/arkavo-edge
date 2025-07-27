@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Message role in a conversation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatRole {
+    System,
+    User,
+    Assistant,
+}
+
 /// Kimi model names
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -26,7 +35,7 @@ impl Model {
 /// Chat message for Kimi API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String,
+    pub role: ChatRole,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -207,4 +216,57 @@ pub struct ErrorDetail {
     #[serde(rename = "type")]
     pub error_type: Option<String>,
     pub code: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chat_role_serialization() {
+        // Test serialization
+        assert_eq!(
+            serde_json::to_string(&ChatRole::System).unwrap(),
+            "\"system\""
+        );
+        assert_eq!(serde_json::to_string(&ChatRole::User).unwrap(), "\"user\"");
+        assert_eq!(
+            serde_json::to_string(&ChatRole::Assistant).unwrap(),
+            "\"assistant\""
+        );
+
+        // Test deserialization
+        assert_eq!(
+            serde_json::from_str::<ChatRole>("\"system\"").unwrap(),
+            ChatRole::System
+        );
+        assert_eq!(
+            serde_json::from_str::<ChatRole>("\"user\"").unwrap(),
+            ChatRole::User
+        );
+        assert_eq!(
+            serde_json::from_str::<ChatRole>("\"assistant\"").unwrap(),
+            ChatRole::Assistant
+        );
+    }
+
+    #[test]
+    fn test_chat_message_serialization() {
+        let msg = ChatMessage {
+            role: ChatRole::User,
+            content: "Hello".to_string(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"Hello\""));
+
+        // Test round-trip
+        let deserialized: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.role, ChatRole::User);
+        assert_eq!(deserialized.content, "Hello");
+    }
 }

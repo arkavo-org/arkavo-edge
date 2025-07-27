@@ -19,6 +19,7 @@ mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm?/metal"]
 llm-remote = ["dep:arkavo-llm", "arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
+kimi = ["dep:arkavo-llm", "arkavo-llm/kimi"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", default-features = false }
