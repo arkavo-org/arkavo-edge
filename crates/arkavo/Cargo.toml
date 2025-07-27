@@ -19,6 +19,7 @@ mdns = ["arkavo-cli/mdns"]
 local = ["arkavo-cli/local"]
 metal = ["arkavo-cli/metal"]
 llm-remote = ["arkavo-cli/llm-remote"]
+kimi = ["arkavo-cli/kimi"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

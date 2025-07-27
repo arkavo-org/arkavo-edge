@@ -37,6 +37,12 @@ bytes = "1.8"
 [dev-dependencies]
 wiremock = "0.6"
 tokio-test = "0.4"
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "sse_parse"
+harness = false
 
 [lints]
 workspace = true

@@ -3,8 +3,8 @@ use crate::provider::{Message, Role};
 use crate::retry::{RetryClient, RetryConfig};
 use crate::stream::SseParser;
 use crate::types::{
-    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ErrorResponse, Model, Tool,
-    ToolChoice,
+    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatRole, ErrorResponse, Model,
+    Tool, ToolChoice,
 };
 use reqwest::Client;
 use std::time::Duration;
@@ -23,6 +23,8 @@ pub struct KimiConfig {
     pub timeout: Duration,
     /// Retry configuration
     pub retry_config: RetryConfig,
+    /// Buffer size for SSE streaming (default: 1024)
+    pub buffer_size: usize,
 }
 
 impl Default for KimiConfig {
@@ -33,6 +35,7 @@ impl Default for KimiConfig {
             model: Model::MoonshotV1_8k,
             timeout: Duration::from_secs(60),
             retry_config: RetryConfig::default(),
+            buffer_size: 1024,
         }
     }
 }
@@ -42,6 +45,16 @@ impl KimiConfig {
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("MOONSHOT_API_KEY")
             .map_err(|_| KimiError::Config("MOONSHOT_API_KEY not set".to_string()))?;
+
+        // Validate API key format
+        if api_key.trim().is_empty() {
+            return Err(KimiError::Config("MOONSHOT_API_KEY is empty".to_string()));
+        }
+        if api_key.len() < 10 {
+            return Err(KimiError::Config(
+                "MOONSHOT_API_KEY appears to be invalid (too short)".to_string(),
+            ));
+        }
 
         let base_url = std::env::var("KIMI_API_BASE")
             .unwrap_or_else(|_| "https://api.moonshot.ai/v1".to_string());
@@ -62,6 +75,12 @@ impl KimiConfig {
             model,
             ..Default::default()
         })
+    }
+
+    /// Set the buffer size for SSE streaming
+    pub fn with_buffer_size(mut self, size: usize) -> Self {
+        self.buffer_size = size;
+        self
     }
 }
 
@@ -95,9 +114,9 @@ impl KimiClient {
             .into_iter()
             .map(|msg| ChatMessage {
                 role: match msg.role {
-                    Role::System => "system".to_string(),
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
+                    Role::System => ChatRole::System,
+                    Role::User => ChatRole::User,
+                    Role::Assistant => ChatRole::Assistant,
                 },
                 content: msg.content,
                 name: None,
@@ -158,7 +177,9 @@ impl KimiClient {
                             .first()
                             .map(|choice| choice.message.content.clone())
                             .ok_or_else(|| {
-                                KimiError::Other(anyhow::anyhow!("No response from Kimi API"))
+                                KimiError::Other(anyhow::anyhow!(
+                                    "Empty choices array in Kimi API response"
+                                ))
                             })
                     } else {
                         let status = resp.status();
@@ -236,6 +257,27 @@ impl KimiClient {
             return Err(KimiError::from_status(status, error_text));
         }
 
-        Ok(SseParser::new(response.bytes_stream()))
+        Ok(SseParser::new(
+            response.bytes_stream(),
+            self.config.buffer_size,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_with_buffer_size() {
+        let config = KimiConfig::default().with_buffer_size(2048);
+
+        assert_eq!(config.buffer_size, 2048);
+    }
+
+    #[test]
+    fn test_config_default_buffer_size() {
+        let config = KimiConfig::default();
+        assert_eq!(config.buffer_size, 1024);
     }
 }

@@ -157,6 +157,48 @@ jobs:
           # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
           # Note: arkavo-llm integration tests excluded as they require local feature
 
+  test-kimi-feature:
+    name: Test Kimi Feature
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-kimi"
+      
+      - name: Test arkavo-kimi crate
+        run: |
+          # Test the arkavo-kimi crate directly
+          cargo test -p arkavo-kimi --all-targets
+      
+      - name: Test arkavo-llm with kimi feature
+        run: |
+          # Test arkavo-llm with kimi feature enabled (no live API calls)
+          cargo test -p arkavo-llm --lib --no-default-features --features kimi
+      
+      - name: Check feature flag isolation
+        run: |
+          # Verify that kimi feature doesn't pull in heavy dependencies
+          # Build with just kimi feature and check binary size
+          cargo build -p arkavo --no-default-features --features kimi --release
+          SIZE=$(stat -c%s target/release/arkavo || stat -f%z target/release/arkavo)
+          echo "Binary size with kimi feature: $SIZE bytes"
+          # Build without kimi feature
+          cargo clean
+          cargo build -p arkavo --no-default-features --release
+          BASE_SIZE=$(stat -c%s target/release/arkavo || stat -f%z target/release/arkavo)
+          echo "Base binary size: $BASE_SIZE bytes"
+          DIFF=$((SIZE - BASE_SIZE))
+          echo "Kimi feature adds: $DIFF bytes"
+          # Fail if kimi adds more than 5MB
+          if [ $DIFF -gt 5242880 ]; then
+            echo "ERROR: Kimi feature adds more than 5MB to binary size!"
+            exit 1
+          fi
+
   build-linux:
     name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-22.04
