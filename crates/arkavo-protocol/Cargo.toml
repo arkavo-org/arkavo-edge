@@ -48,7 +48,7 @@ sqlx = { workspace = true }
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 
 # LLM support for chat
-arkavo-llm = { path = "../arkavo-llm" }
+arkavo-llm = { path = "../arkavo-llm", features = ["kimi"] }
 
 # Observability
 arkavo-observability = { path = "../arkavo-observability" }

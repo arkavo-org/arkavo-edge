@@ -28,13 +28,19 @@ impl LlmClient {
                 let provider = Box::new(OllamaClient::from_env()?);
                 Ok(Self::new(provider))
             }
+            #[cfg(feature = "kimi")]
+            "kimi" => {
+                use crate::KimiProvider;
+                let provider = Box::new(KimiProvider::from_env()?);
+                Ok(Self::new(provider))
+            }
             _ => {
-                #[cfg(feature = "llm-remote")]
+                #[cfg(any(feature = "llm-remote", feature = "kimi"))]
                 return Err(Error::Config(format!("Unknown provider: {provider_name}")));
 
-                #[cfg(not(feature = "llm-remote"))]
+                #[cfg(not(any(feature = "llm-remote", feature = "kimi")))]
                 return Err(Error::Config(
-                    "No LLM providers available. Build with 'llm-remote' or 'llm-local' feature enabled.".to_string()
+                    "No LLM providers available. Build with 'llm-remote', 'kimi', or 'llm-local' feature enabled.".to_string()
                 ));
             }
         }
