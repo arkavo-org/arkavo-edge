@@ -937,14 +937,8 @@ impl A2aServer {
                         std::env::set_var("LLM_PROVIDER", "kimi");
                         // Extract model name from rest (e.g., moonshot-v1-128k)
                         if !rest.is_empty() {
-                            // Map model names to KIMI's expected format
-                            let kimi_model = match rest {
-                                "moonshot-v1-8k" => "moonshot-v1-8k",
-                                "moonshot-v1-32k" => "moonshot-v1-32k",
-                                "moonshot-v1-128k" => "moonshot-v1-128k",
-                                _ => rest, // Use as-is if not recognized
-                            };
-                            std::env::set_var("KIMI_MODEL", kimi_model);
+                            // Model name is already in the correct format
+                            std::env::set_var("KIMI_MODEL", rest);
                         }
 
                         // Set API key from agent config if available
