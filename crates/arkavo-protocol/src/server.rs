@@ -118,6 +118,7 @@ struct AgentMetadata {
     purpose: String,
     model: String,
     endpoint: String,
+    api_keys: std::collections::HashMap<String, String>,
 }
 
 #[async_trait]
@@ -875,18 +876,37 @@ impl A2aServer {
         drop(metadata); // Release lock before creating LLM adapter
 
         // Create LLM adapter from model URL
-        if let Ok(adapter) = self.create_llm_adapter(&model) {
+        self.recreate_llm_adapter().await;
+    }
+
+    pub async fn set_api_keys(&self, api_keys: std::collections::HashMap<String, String>) {
+        let mut metadata = self.agent_metadata.write().await;
+        metadata.api_keys = api_keys;
+        drop(metadata); // Release lock before creating LLM adapter
+
+        // Recreate LLM adapter with new API keys
+        self.recreate_llm_adapter().await;
+    }
+
+    async fn recreate_llm_adapter(&self) {
+        let metadata = self.agent_metadata.read().await;
+        let model = metadata.model.clone();
+        let api_keys = metadata.api_keys.clone();
+        drop(metadata); // Release lock before creating adapter
+
+        if let Ok(adapter) = self.create_llm_adapter(&model, &api_keys) {
             *self.llm_adapter.write().await = Some(adapter);
-            info!(
-                "Created LLM adapter for agent '{}' with model: {}",
-                name, model
-            );
+            info!("Created LLM adapter with model: {}", model);
         } else {
             error!(model = %model, "Failed to create LLM adapter for model");
         }
     }
 
-    fn create_llm_adapter(&self, model_url: &str) -> Result<Arc<LlmClientAdapter>> {
+    fn create_llm_adapter(
+        &self,
+        model_url: &str,
+        api_keys: &std::collections::HashMap<String, String>,
+    ) -> Result<Arc<LlmClientAdapter>> {
         // Parse the model URL to extract provider and configuration
         // Format: provider://host:port/model
         if let Some((provider, rest)) = model_url.split_once("://") {
@@ -910,6 +930,27 @@ impl A2aServer {
                             "Invalid Ollama URL format: {model_url}"
                         )))
                     }
+                }
+                "kimi" => {
+                    // KIMI format: kimi://model-name (e.g., kimi://moonshot-v1-128k)
+                    unsafe {
+                        std::env::set_var("LLM_PROVIDER", "kimi");
+                        // Extract model name from rest (e.g., moonshot-v1-128k)
+                        if !rest.is_empty() {
+                            // Model name is already in the correct format
+                            std::env::set_var("KIMI_MODEL", rest);
+                        }
+
+                        // Set API key from agent config if available
+                        if let Some(api_key) = api_keys.get("MOONSHOT_API_KEY") {
+                            std::env::set_var("MOONSHOT_API_KEY", api_key);
+                        }
+                    }
+                    // Create LLM client from environment
+                    let client = LlmClient::from_env().map_err(|e| {
+                        A2aError::InvalidRequest(format!("Failed to create KIMI client: {e}"))
+                    })?;
+                    Ok(Arc::new(LlmClientAdapter::new(client)))
                 }
                 _ => Err(A2aError::InvalidRequest(format!(
                     "Unsupported LLM provider: {provider}"

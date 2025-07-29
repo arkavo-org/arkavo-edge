@@ -78,12 +78,18 @@ listen:  0.0.0.0:8342
 # Additional agent configurations can be added below
 # Each agent starts with ## agent-name
 
+# API keys can be configured per agent (will be disseminated from UI):
+# MOONSHOT_API_KEY: sk-your-api-key-here
+# OPENAI_API_KEY: sk-your-openai-key
+# ANTHROPIC_API_KEY: sk-your-anthropic-key
+
 # Example configurations:
 #
 # ## code-reviewer
 # purpose: Review code for quality and suggest improvements
 # model:   openai://gpt-4
 # listen:  0.0.0.0:8343
+# OPENAI_API_KEY: sk-your-openai-key
 # mcp_servers:
 #   - name: git
 #     command: mcp-git
@@ -93,8 +99,15 @@ listen:  0.0.0.0:8342
 # purpose: Run tests and report results
 # model:   anthropic://claude-3-opus
 # listen:  0.0.0.0:8344
+# ANTHROPIC_API_KEY: sk-your-anthropic-key
 # discovery:
 #   mdns: false  # Explicitly disable mDNS for this agent
+#
+# ## kimi-assistant
+# purpose: AI assistant with 128k context window
+# model:   kimi://moonshot-v1-128k
+# listen:  0.0.0.0:8345
+# MOONSHOT_API_KEY: sk-your-moonshot-key
 "#
     );
 
@@ -233,6 +246,7 @@ pub struct AgentConfig {
     pub listen: String,
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
+    pub api_keys: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +292,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 listen: String::new(),
                 mdns_enabled: true, // Default to true for zero-config
                 mcp_servers: Vec::new(),
+                api_keys: std::collections::HashMap::new(),
             });
             in_agent_section = true;
             continue;
@@ -358,6 +373,16 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 } else if trimmed.starts_with("mdns:") {
                     // Only disable if explicitly set to false
                     agent.mdns_enabled = !trimmed.contains("false");
+                } else if trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:") {
+                    // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
+                    if let Some(colon_pos) = trimmed.find(':') {
+                        let key_name = trimmed[..colon_pos].trim().to_string();
+                        let key_value = trimmed[colon_pos + 1..]
+                            .trim()
+                            .trim_matches('"')
+                            .to_string();
+                        agent.api_keys.insert(key_name, key_value);
+                    }
                 }
             }
         }
@@ -411,6 +436,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             config.model.clone(),
         )
         .await;
+
+    // Set API keys in the server
+    server.set_api_keys(config.api_keys.clone()).await;
 
     // Initialize MCP connections
     let mcp_registry = server.mcp_registry();
