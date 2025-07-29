@@ -377,7 +377,10 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
                     if let Some(colon_pos) = trimmed.find(':') {
                         let key_name = trimmed[..colon_pos].trim().to_string();
-                        let key_value = trimmed[colon_pos + 1..].trim().trim_matches('"').to_string();
+                        let key_value = trimmed[colon_pos + 1..]
+                            .trim()
+                            .trim_matches('"')
+                            .to_string();
                         agent.api_keys.insert(key_name, key_value);
                     }
                 }

@@ -902,7 +902,11 @@ impl A2aServer {
         }
     }
 
-    fn create_llm_adapter(&self, model_url: &str, api_keys: &std::collections::HashMap<String, String>) -> Result<Arc<LlmClientAdapter>> {
+    fn create_llm_adapter(
+        &self,
+        model_url: &str,
+        api_keys: &std::collections::HashMap<String, String>,
+    ) -> Result<Arc<LlmClientAdapter>> {
         // Parse the model URL to extract provider and configuration
         // Format: provider://host:port/model
         if let Some((provider, rest)) = model_url.split_once("://") {
@@ -936,13 +940,13 @@ impl A2aServer {
                             // Map model names to KIMI's expected format
                             let kimi_model = match rest {
                                 "moonshot-v1-8k" => "moonshot-v1-8k",
-                                "moonshot-v1-32k" => "moonshot-v1-32k", 
+                                "moonshot-v1-32k" => "moonshot-v1-32k",
                                 "moonshot-v1-128k" => "moonshot-v1-128k",
                                 _ => rest, // Use as-is if not recognized
                             };
                             std::env::set_var("KIMI_MODEL", kimi_model);
                         }
-                        
+
                         // Set API key from agent config if available
                         if let Some(api_key) = api_keys.get("MOONSHOT_API_KEY") {
                             std::env::set_var("MOONSHOT_API_KEY", api_key);

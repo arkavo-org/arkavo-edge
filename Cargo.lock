@@ -171,14 +171,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
 name = "arkavo-agui"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -260,11 +260,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.24.4"
+version = "0.24.6"
 
 [[package]]
 name = "arkavo-git"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "git2",
  "tempfile",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-kimi",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "async-trait",
  "serde",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-mcp",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -402,7 +402,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.24.4"
+version = "0.24.6"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
