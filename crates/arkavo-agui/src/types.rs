@@ -1,3 +1,6 @@
+use arkavo_budget::config::{AgentBudget, BudgetAlert};
+use arkavo_budget::tracker::{BudgetStatus, SpendingRecord};
+use arkavo_budget::{BudgetConfig, TokenCost};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -100,6 +103,53 @@ pub enum AgUiEvent {
     Error {
         code: String,
         message: String,
+    },
+
+    // Budget events
+    BudgetStatusUpdate {
+        #[serde(rename = "agentId")]
+        agent_id: Option<String>,
+        status: BudgetStatus,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    BudgetAlert {
+        alert: BudgetAlert,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    SpendingRecorded {
+        record: SpendingRecord,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    BudgetConfigUpdate {
+        config: BudgetConfig,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    ModelSelected {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        provider: String,
+        model: String,
+        #[serde(rename = "estimatedCost")]
+        estimated_cost: TokenCost,
+        reason: String,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    GetBudgetStatus {
+        #[serde(rename = "agentId")]
+        agent_id: Option<String>,
+    },
+    SetAgentBudget {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        budget: AgentBudget,
+    },
+    ResetBudgetWindow {
+        window: String,
     },
 }
 

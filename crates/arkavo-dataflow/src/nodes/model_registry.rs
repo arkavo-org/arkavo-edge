@@ -22,6 +22,16 @@ pub struct ModelInfo {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    pub pricing: Option<ModelPricing>,
+}
+
+/// Model pricing information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelPricing {
+    pub input_cost_per_thousand_cents: u64,
+    pub output_cost_per_thousand_cents: u64,
+    pub effective_date: DateTime<Utc>,
+    pub currency: String,
 }
 
 /// Model capabilities and features
@@ -290,6 +300,26 @@ impl ModelRegistry {
 
         Ok(imported_count)
     }
+
+    /// Update pricing information for a model
+    pub async fn update_model_pricing(
+        &self,
+        provider: &str,
+        model_id: &str,
+        pricing: ModelPricing,
+    ) -> Result<()> {
+        let model_key = format!("{provider}:{model_id}");
+        let models = self.models.read().await;
+
+        if let Some(mut model) = models.get(&model_key).cloned() {
+            drop(models);
+            model.pricing = Some(pricing);
+            model.updated_at = Utc::now();
+            self.update_model(model).await?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Pre-defined model configurations for common models
@@ -312,6 +342,12 @@ pub fn get_default_models() -> Vec<ModelInfo> {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             metadata: None,
+            pricing: Some(ModelPricing {
+                input_cost_per_thousand_cents: 0,
+                output_cost_per_thousand_cents: 0,
+                effective_date: Utc::now(),
+                currency: "USD".to_string(),
+            }),
         },
         ModelInfo {
             model_id: "devstral:latest".to_string(),
@@ -330,6 +366,12 @@ pub fn get_default_models() -> Vec<ModelInfo> {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             metadata: None,
+            pricing: Some(ModelPricing {
+                input_cost_per_thousand_cents: 0,
+                output_cost_per_thousand_cents: 0,
+                effective_date: Utc::now(),
+                currency: "USD".to_string(),
+            }),
         },
         ModelInfo {
             model_id: "qwen3:0.6b".to_string(),
@@ -352,6 +394,12 @@ pub fn get_default_models() -> Vec<ModelInfo> {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             metadata: None,
+            pricing: Some(ModelPricing {
+                input_cost_per_thousand_cents: 0,
+                output_cost_per_thousand_cents: 0,
+                effective_date: Utc::now(),
+                currency: "USD".to_string(),
+            }),
         },
     ]
 }
