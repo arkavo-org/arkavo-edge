@@ -30,6 +30,19 @@ pub struct BudgetStatus {
     pub last_updated: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetStatusWithLimits {
+    pub session_spent: TokenCost,
+    pub hourly_spent: TokenCost,
+    pub daily_spent: TokenCost,
+    pub monthly_spent: TokenCost,
+    pub total_spent: TokenCost,
+    pub last_updated: DateTime<Utc>,
+    pub session_limit: Option<TokenCost>,
+    pub session_remaining: Option<TokenCost>,
+    pub session_usage_percent: f64,
+}
+
 impl Default for BudgetStatus {
     fn default() -> Self {
         Self {
@@ -312,8 +325,28 @@ impl BudgetTracker {
         Ok(())
     }
 
-    pub async fn get_status(&self) -> BudgetStatus {
-        self.status.read().await.clone()
+    pub async fn get_status(&self) -> BudgetStatusWithLimits {
+        let status = self.status.read().await.clone();
+        let config = self.config.read().await;
+
+        BudgetStatusWithLimits {
+            session_spent: status.session_spent,
+            hourly_spent: status.hourly_spent,
+            daily_spent: status.daily_spent,
+            monthly_spent: status.monthly_spent,
+            total_spent: status.total_spent,
+            last_updated: status.last_updated,
+            session_limit: config.limits.session_limit,
+            session_remaining: config
+                .limits
+                .session_limit
+                .map(|l| l - status.session_spent),
+            session_usage_percent: config
+                .limits
+                .session_limit
+                .map(|l| (status.session_spent.as_cents() as f64 / l.as_cents() as f64) * 100.0)
+                .unwrap_or(0.0),
+        }
     }
 
     pub async fn get_agent_status(&self, agent_id: &str) -> Option<BudgetStatus> {
@@ -347,3 +380,7 @@ impl BudgetTracker {
         self.event_sender.subscribe()
     }
 }
+
+#[cfg(test)]
+#[path = "tracker_tests.rs"]
+mod tracker_tests;

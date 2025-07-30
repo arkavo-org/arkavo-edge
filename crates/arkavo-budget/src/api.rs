@@ -119,14 +119,22 @@ impl BudgetApiHandler {
             BudgetAgUiEvent::GetBudgetStatus { agent_id } => {
                 let tracker = self.manager.tracker();
 
-                let status = if let Some(id) = agent_id {
+                let status = if let Some(id) = agent_id.clone() {
                     tracker.get_agent_status(&id).await.unwrap_or_default()
                 } else {
-                    tracker.get_status().await
+                    let status_with_limits = tracker.get_status().await;
+                    BudgetStatus {
+                        session_spent: status_with_limits.session_spent,
+                        hourly_spent: status_with_limits.hourly_spent,
+                        daily_spent: status_with_limits.daily_spent,
+                        monthly_spent: status_with_limits.monthly_spent,
+                        total_spent: status_with_limits.total_spent,
+                        last_updated: status_with_limits.last_updated,
+                    }
                 };
 
                 Ok(Some(BudgetAgUiEvent::BudgetStatusUpdate {
-                    agent_id: None,
+                    agent_id,
                     status,
                     event_id: uuid::Uuid::new_v4().to_string(),
                 }))

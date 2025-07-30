@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TokenCost {
@@ -94,6 +94,26 @@ impl SubAssign for TokenCost {
     }
 }
 
+impl Mul<u64> for TokenCost {
+    type Output = Self;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        Self {
+            cents: self.cents.saturating_mul(rhs),
+        }
+    }
+}
+
+impl Div<u64> for TokenCost {
+    type Output = Self;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        Self {
+            cents: self.cents / rhs,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u32,
@@ -158,6 +178,10 @@ mod tests {
         let mut cost3 = cost1;
         cost3 += cost2;
         assert_eq!(cost3.as_cents(), 150);
+
+        // Test multiplication and division
+        assert_eq!((cost1 * 2).as_cents(), 200);
+        assert_eq!((cost1 / 2).as_cents(), 50);
     }
 
     #[test]

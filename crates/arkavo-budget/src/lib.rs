@@ -1,14 +1,16 @@
 pub mod api;
 pub mod config;
 pub mod cost;
+pub mod middleware;
 pub mod policy;
 pub mod provider_costs;
 pub mod tracker;
 
 pub use config::{BudgetConfig, BudgetLimits, BudgetThresholds};
 pub use cost::TokenCost;
+pub use middleware::{BudgetMiddleware, BudgetProviderBuilder};
 pub use policy::{ModelSelectionPolicy, SelectionCriteria};
-pub use tracker::BudgetTracker;
+pub use tracker::{BudgetStatusWithLimits, BudgetTracker};
 
 use anyhow::Result;
 use std::sync::Arc;
