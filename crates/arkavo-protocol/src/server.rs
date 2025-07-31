@@ -7,11 +7,11 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
-    AgentDiscoverFilter, ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose,
-    DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta,
-    MessageDeltaContent, MessageSendRequest, MessageSendResponse, TaskCancelRequest,
-    TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest, TaskGetResponse,
-    TaskResponse, TaskStatus, UserMessage,
+    AgentBroadcast, AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, ChatOpenRequest,
+    ChatRequest, ChatSession, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
+    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
@@ -95,6 +95,14 @@ pub trait A2aRpc {
     /// Subscribe to message deltas for a session
     #[subscription(name = "chat_stream", unsubscribe = "chat_stream_unsubscribe", item = MessageDelta)]
     async fn chat_stream(&self, session_id: String) -> SubscriptionResult;
+
+    /// Query another agent
+    #[method(name = "agent_query")]
+    async fn agent_query(&self, request: AgentQueryRequest) -> RpcResult<AgentQueryResponse>;
+
+    /// Broadcast agent capabilities
+    #[method(name = "agent_broadcast")]
+    async fn agent_broadcast(&self, broadcast: AgentBroadcast) -> RpcResult<()>;
 
     /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
@@ -838,6 +846,53 @@ impl A2aRpcServer for A2aRpcImpl {
         timer.success();
         Ok(())
     }
+
+    async fn agent_query(&self, request: AgentQueryRequest) -> RpcResult<AgentQueryResponse> {
+        let timer = RpcTimer::new("agent_query".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // TODO: Implement agent query logic
+        // For now, return a placeholder response
+        let response = AgentQueryResponse {
+            from_agent_id: self.agent_metadata.read().await.name.clone(),
+            response: format!("Response to query: {}", request.query),
+            confidence: 0.8,
+            domain: request.domain,
+            evidence: None,
+        };
+
+        timer.success();
+        Ok(response)
+    }
+
+    async fn agent_broadcast(&self, broadcast: AgentBroadcast) -> RpcResult<()> {
+        let timer = RpcTimer::new("agent_broadcast".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // TODO: Implement broadcast logic
+        // For now, just log the broadcast
+        info!(
+            agent_id = broadcast.agent_id,
+            broadcast_type = ?broadcast.broadcast_type,
+            capabilities = ?broadcast.capabilities,
+            "Agent broadcast received"
+        );
+
+        timer.success();
+        Ok(())
+    }
 }
 
 pub struct A2aServer {
@@ -898,7 +953,7 @@ impl A2aServer {
             *self.llm_adapter.write().await = Some(adapter);
             info!("Created LLM adapter with model: {}", model);
         } else {
-            error!(model = %model, "Failed to create LLM adapter for model");
+            error!(model = model, "Failed to create LLM adapter for model");
         }
     }
 

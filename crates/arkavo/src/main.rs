@@ -6,10 +6,12 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     // Check if we need to relaunch in Terminal (macOS only)
-    // Skip for serve command which needs to stay in current process
+    // Skip for serve and agent commands which need to stay in current process
     // Also skip if --prompt is provided (for testing/CI)
     #[cfg(target_os = "macos")]
-    if args.get(1).is_none_or(|s| s != "serve") && !args.iter().any(|arg| arg == "--prompt") {
+    if args.get(1).is_none_or(|s| s != "serve" && s != "agent")
+        && !args.iter().any(|arg| arg == "--prompt")
+    {
         maybe_relaunch_in_terminal();
     }
 

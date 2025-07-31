@@ -277,6 +277,80 @@ pub enum AuthMethod {
     Basic,
 }
 
+/// Request from one agent to query another agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentQueryRequest {
+    /// ID of the requesting agent
+    pub from_agent_id: String,
+
+    /// ID of the target agent (optional, can be broadcast)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_agent_id: Option<String>,
+
+    /// The query/question being asked
+    pub query: String,
+
+    /// Optional context for the query
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+
+    /// Domain or capability being queried
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+}
+
+/// Response to an agent query
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentQueryResponse {
+    /// ID of the responding agent
+    pub from_agent_id: String,
+
+    /// The response to the query
+    pub response: String,
+
+    /// Confidence score (0.0 to 1.0)
+    pub confidence: f32,
+
+    /// Domain expertise of the response
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+
+    /// Optional supporting evidence or context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<serde_json::Value>,
+}
+
+/// Broadcast message for agent capabilities
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentBroadcast {
+    /// ID of the broadcasting agent
+    pub agent_id: String,
+
+    /// Type of broadcast
+    pub broadcast_type: BroadcastType,
+
+    /// Capabilities or specializations
+    pub capabilities: Vec<String>,
+
+    /// Additional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Types of broadcasts agents can make
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BroadcastType {
+    /// Announcing availability
+    Available,
+    /// Updating capabilities
+    CapabilityUpdate,
+    /// Going offline
+    Offline,
+    /// Seeking collaboration
+    SeekingCollaboration,
+}
+
 /// Interaction mode supported by the agent
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
