@@ -1,4 +1,5 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
+use crate::budget_handler::BudgetHandler;
 use crate::dataflow_handler::DataflowHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
@@ -23,6 +24,7 @@ pub struct AgUiGateway {
     telemetry_tx: mpsc::Sender<TelemetryEvent>,
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
     dataflow_handler: Arc<DataflowHandler>,
+    budget_handler: Arc<RwLock<BudgetHandler>>,
 }
 
 impl AgUiGateway {
@@ -36,12 +38,33 @@ impl AgUiGateway {
             telemetry_tx,
             telemetry_rx: Some(telemetry_rx),
             dataflow_handler: Arc::new(DataflowHandler::new()),
+            budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
         }
     }
 
     pub async fn start(mut self) -> Result<(), Box<dyn std::error::Error>> {
         let discovered_agents = self.discovered_agents.clone();
         let agents_clone = discovered_agents.clone();
+
+        // Initialize budget handler with default configuration
+        {
+            let budget_config = arkavo_budget::BudgetConfig::default();
+            let (budget_tx, mut budget_rx) = mpsc::channel::<AgUiEvent>(100);
+
+            let mut handler = self.budget_handler.write().await;
+            handler.initialize(budget_config, budget_tx).await?;
+
+            // Forward budget events to all connected clients
+            let connections = self.connections.clone();
+            tokio::spawn(async move {
+                while let Some(event) = budget_rx.recv().await {
+                    let conns = connections.read().await;
+                    for (_, conn_info) in conns.iter() {
+                        let _ = conn_info._ws_tx.send(event.clone()).await;
+                    }
+                }
+            });
+        }
 
         // Start mDNS discovery in background
         let agent_connections_for_mdns = self.agent_connections.clone();
@@ -97,17 +120,27 @@ impl AgUiGateway {
         let connections = self.connections.clone();
         let agents_for_ws = discovered_agents.clone();
         let agent_connections_for_ws = self.agent_connections.clone();
+        let budget_handler_for_ws = self.budget_handler.clone();
 
         let websocket = warp::path("ws")
             .and(warp::ws())
             .and(warp::any().map(move || connections.clone()))
             .and(warp::any().map(move || agents_for_ws.clone()))
             .and(warp::any().map(move || agent_connections_for_ws.clone()))
-            .map(|ws: warp::ws::Ws, connections, agents, agent_connections| {
-                ws.on_upgrade(move |socket| {
-                    handle_websocket(socket, connections, agents, agent_connections)
-                })
-            });
+            .and(warp::any().map(move || budget_handler_for_ws.clone()))
+            .map(
+                |ws: warp::ws::Ws, connections, agents, agent_connections, budget_handler| {
+                    ws.on_upgrade(move |socket| {
+                        handle_websocket(
+                            socket,
+                            connections,
+                            agents,
+                            agent_connections,
+                            budget_handler,
+                        )
+                    })
+                },
+            );
 
         // SSE endpoint for legacy agent discovery (to be deprecated)
         let agents_for_sse = discovered_agents.clone();
@@ -206,6 +239,7 @@ async fn handle_websocket(
     connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    budget_handler: Arc<RwLock<BudgetHandler>>,
 ) {
     use futures::StreamExt;
 
@@ -244,6 +278,7 @@ async fn handle_websocket(
                                 &connections,
                                 &agents,
                                 &agent_connections,
+                                &budget_handler,
                                 &tx,
                             )
                             .await
@@ -289,6 +324,7 @@ async fn handle_event(
     connections: &Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agents: &Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: &Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    budget_handler: &Arc<RwLock<BudgetHandler>>,
     tx: &mpsc::Sender<AgUiEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
@@ -420,6 +456,14 @@ async fn handle_event(
                 };
                 tx.send(error).await?;
             }
+        }
+
+        // Budget-related events
+        AgUiEvent::GetBudgetStatus { .. }
+        | AgUiEvent::SetAgentBudget { .. }
+        | AgUiEvent::ResetBudgetWindow { .. } => {
+            let handler = budget_handler.read().await;
+            handler.handle_event(&event, tx).await?;
         }
 
         _ => {

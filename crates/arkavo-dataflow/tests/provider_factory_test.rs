@@ -118,8 +118,11 @@ async fn test_provider_factory_registry() {
     assert!(types.contains(&ProviderType::Ollama));
     assert!(types.contains(&ProviderType::OpenAI));
     assert!(types.contains(&ProviderType::Anthropic));
+    #[cfg(feature = "llm-local")]
     assert!(types.contains(&ProviderType::Local));
-    assert_eq!(types.len(), 4);
+
+    let expected_count = if cfg!(feature = "llm-local") { 4 } else { 3 };
+    assert_eq!(types.len(), expected_count);
 }
 
 #[tokio::test]

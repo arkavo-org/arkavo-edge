@@ -159,3 +159,4 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - Do not keep a change log file; github handles that functionality
 - minimize key mappings.  Ideally the app works intuitively.  a power user can use Natural Language to set a key mapping.
 - when a context is nearing completion, write to docs/longterm-memory.md about any important details or reveleations that are currently not there.  and on each new context read it
+- when version is updated, cargo build, then also git commit the Cargo.lock with the Cargo.toml
