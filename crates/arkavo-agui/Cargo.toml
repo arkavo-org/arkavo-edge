@@ -26,6 +26,7 @@ reqwest = { workspace = true }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
+arkavo-budget = { path = "../arkavo-budget" }
 anyhow = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 

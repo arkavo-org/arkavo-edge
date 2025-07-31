@@ -51,6 +51,7 @@ fn test_model_info_serialization() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         metadata: None,
+        pricing: None,
     };
 
     // Test serialization
@@ -90,6 +91,7 @@ async fn test_model_search_by_capability() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         metadata: None,
+        pricing: None,
     };
 
     let vision_model = ModelInfo {
@@ -114,6 +116,7 @@ async fn test_model_search_by_capability() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         metadata: None,
+        pricing: None,
     };
 
     // Test capability filtering
@@ -166,7 +169,7 @@ async fn test_find_models_for_task() {
     assert!(!summary_models.is_empty());
 
     // Find translation models
-    let translation_models: Vec<_> = models
+    let _translation_models: Vec<_> = models
         .iter()
         .filter(|m| {
             m.tags

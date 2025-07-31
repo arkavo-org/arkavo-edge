@@ -497,15 +497,23 @@ mod tests {
 
         // Check default registered types
         let types = registry.registered_types();
-        assert!(types.contains(&ProviderType::Ollama));
-        assert!(types.contains(&ProviderType::OpenAI));
-        assert!(types.contains(&ProviderType::Anthropic));
+        #[cfg(feature = "llm-remote")]
+        {
+            assert!(types.contains(&ProviderType::Ollama));
+            assert!(types.contains(&ProviderType::OpenAI));
+            assert!(types.contains(&ProviderType::Anthropic));
+        }
+        #[cfg(feature = "llm-local")]
         assert!(types.contains(&ProviderType::Local));
 
         // Get factory
-        assert!(registry.get_factory(&ProviderType::Ollama).is_some());
-        assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
-        assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
+        #[cfg(feature = "llm-remote")]
+        {
+            assert!(registry.get_factory(&ProviderType::Ollama).is_some());
+            assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
+            assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
+        }
+        #[cfg(feature = "llm-local")]
         assert!(registry.get_factory(&ProviderType::Local).is_some());
     }
 }
