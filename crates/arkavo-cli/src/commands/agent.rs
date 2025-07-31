@@ -416,6 +416,11 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         return Err("Invalid listen address format. Expected: host:port".into());
     }
 
+    // Use absolute path for task store to avoid issues with directory changes
+    let task_store_path = std::env::current_dir()?
+        .join(".arkavo")
+        .join("arkavo_tasks.db");
+
     let server_config = ServerConfig {
         enabled: true,
         bind_address: parts[0].to_string(),
@@ -423,7 +428,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         max_connections: 100,
         idle_timeout_seconds: 300,
         rate_limit: RateLimitConfig::default(),
-        task_store_path: Some(".arkavo/arkavo_tasks.db".to_string()),
+        task_store_path: Some(task_store_path.to_string_lossy().to_string()),
     };
 
     let server = A2aServer::new(server_config);
