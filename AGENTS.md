@@ -160,3 +160,10 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - minimize key mappings.  Ideally the app works intuitively.  a power user can use Natural Language to set a key mapping.
 - when a context is nearing completion, write to docs/longterm-memory.md about any important details or reveleations that are currently not there.  and on each new context read it
 - when version is updated, cargo build, then also git commit the Cargo.lock with the Cargo.toml
+
+## Event Storage Configuration
+
+- **Event Retention**: 24 hours by default (configurable via `ARKAVO_EVENT_RETENTION_HOURS` env var)
+- **Maximum Events**: 100,000 events per session (configurable via `ARKAVO_MAX_EVENTS_PER_SESSION`)
+- **Storage Limits**: Automatic cleanup when database exceeds 1GB
+- **Pruning Strategy**: Keep most recent events when limits are reached
