@@ -1,6 +1,6 @@
 use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
-use crate::models::{Memory, SearchResult};
+use crate::models::{AgentConversation, Memory, SearchResult};
 use hnsw_rs::prelude::*;
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -144,6 +144,42 @@ impl MemoryStorage {
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create agent conversations table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                id TEXT PRIMARY KEY,
+                from_agent_id TEXT NOT NULL,
+                to_agent_id TEXT NOT NULL,
+                query TEXT NOT NULL,
+                response TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                domain TEXT,
+                created_at TIMESTAMP NOT NULL
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_conversations_agents 
+            ON agent_conversations(from_agent_id, to_agent_id)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_conversations_domain 
+            ON agent_conversations(domain)
             "#,
         )
         .execute(pool)
@@ -388,5 +424,101 @@ impl MemoryStorage {
         } else {
             Ok(("uncategorized".to_string(), best_score))
         }
+    }
+
+    /// Store an agent conversation
+    pub async fn store_conversation(&self, conversation: AgentConversation) -> Result<()> {
+        let id_str = conversation.id.to_string();
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_conversations 
+            (id, from_agent_id, to_agent_id, query, response, confidence, domain, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&id_str)
+        .bind(&conversation.from_agent_id)
+        .bind(&conversation.to_agent_id)
+        .bind(&conversation.query)
+        .bind(&conversation.response)
+        .bind(conversation.confidence)
+        .bind(&conversation.domain)
+        .bind(conversation.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get recent conversations between agents
+    pub async fn get_agent_conversations(
+        &self,
+        from_agent_id: Option<&str>,
+        to_agent_id: Option<&str>,
+        domain: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentConversation>> {
+        let mut query = String::from("SELECT * FROM agent_conversations WHERE 1=1");
+        let mut params = Vec::new();
+
+        if let Some(from_id) = from_agent_id {
+            query.push_str(" AND from_agent_id = ?");
+            params.push(from_id.to_string());
+        }
+
+        if let Some(to_id) = to_agent_id {
+            query.push_str(" AND to_agent_id = ?");
+            params.push(to_id.to_string());
+        }
+
+        if let Some(d) = domain {
+            query.push_str(" AND domain = ?");
+            params.push(d.to_string());
+        }
+
+        query.push_str(" ORDER BY created_at DESC LIMIT ?");
+
+        let mut sql_query = sqlx::query(&query);
+        for param in params {
+            sql_query = sql_query.bind(param);
+        }
+        sql_query = sql_query.bind(limit as i64);
+
+        let rows = sql_query.fetch_all(&self.pool).await?;
+
+        let mut conversations = Vec::new();
+        for row in rows {
+            let id_str: String = row.get("id");
+            let created_at_str: String = row.get("created_at");
+
+            let conversation = AgentConversation {
+                id: Uuid::parse_str(&id_str)
+                    .map_err(|e| MemoryError::Storage(format!("Invalid UUID: {e}")))?,
+                from_agent_id: row.get("from_agent_id"),
+                to_agent_id: row.get("to_agent_id"),
+                query: row.get("query"),
+                response: row.get("response"),
+                confidence: row.get("confidence"),
+                domain: row.get("domain"),
+                created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                    .map_err(|e| MemoryError::Storage(format!("Invalid timestamp: {e}")))?
+                    .with_timezone(&chrono::Utc),
+            };
+            conversations.push(conversation);
+        }
+
+        Ok(conversations)
+    }
+
+    /// Search for agent knowledge by domain
+    pub async fn search_by_domain(
+        &self,
+        domain: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>> {
+        // Use the existing search method with category filter
+        self.search(query, limit, Some(domain)).await
     }
 }
