@@ -579,6 +579,19 @@ fn broadcast_agent_mdns_sync(
         properties.insert("model", config.model.clone());
         properties.insert("ip", service_ip.to_string());
 
+        // Add capabilities based on agent name/purpose
+        let capabilities = get_agent_capabilities(&config.name, &config.purpose);
+        if !capabilities.is_empty() {
+            properties.insert("capabilities", capabilities.join(","));
+        }
+
+        // Add MCP servers as capabilities
+        if !config.mcp_servers.is_empty() {
+            let mcp_tools: Vec<String> =
+                config.mcp_servers.iter().map(|s| s.name.clone()).collect();
+            properties.insert("mcp_tools", mcp_tools.join(","));
+        }
+
         for (key, value) in &properties {
             txt.insert(key, value)?;
         }
@@ -654,4 +667,61 @@ impl McpConnectionTrait for McpConnectionWrapper {
     ) -> Result<Value, Box<dyn std::error::Error>> {
         self.inner.call_tool(tool_name, arguments, llm_provider)
     }
+}
+
+/// Determine agent capabilities based on name and purpose
+fn get_agent_capabilities(name: &str, purpose: &str) -> Vec<String> {
+    let mut capabilities = Vec::new();
+
+    // Extract capabilities from agent name and purpose
+    let combined = format!("{} {}", name.to_lowercase(), purpose.to_lowercase());
+
+    // Domain-specific capabilities
+    if combined.contains("orchestrat") {
+        capabilities.push("orchestration".to_string());
+        capabilities.push("task_decomposition".to_string());
+        capabilities.push("agent_coordination".to_string());
+    }
+    if combined.contains("security") {
+        capabilities.push("security_analysis".to_string());
+        capabilities.push("vulnerability_detection".to_string());
+    }
+    if combined.contains("code") || combined.contains("review") {
+        capabilities.push("code_review".to_string());
+        capabilities.push("pattern_analysis".to_string());
+    }
+    if combined.contains("database") || combined.contains("sql") {
+        capabilities.push("database_optimization".to_string());
+        capabilities.push("schema_design".to_string());
+    }
+    if combined.contains("test") {
+        capabilities.push("test_generation".to_string());
+        capabilities.push("coverage_analysis".to_string());
+    }
+    if combined.contains("doc") {
+        capabilities.push("documentation_generation".to_string());
+        capabilities.push("api_documentation".to_string());
+    }
+    if combined.contains("performance") || combined.contains("profil") {
+        capabilities.push("performance_analysis".to_string());
+        capabilities.push("optimization".to_string());
+    }
+    if combined.contains("devops") || combined.contains("deploy") {
+        capabilities.push("ci_cd".to_string());
+        capabilities.push("deployment_strategies".to_string());
+    }
+    if combined.contains("frontend") || combined.contains("ui") || combined.contains("ux") {
+        capabilities.push("ui_ux_analysis".to_string());
+        capabilities.push("accessibility".to_string());
+    }
+    if combined.contains("architect") || combined.contains("design") {
+        capabilities.push("system_design".to_string());
+        capabilities.push("scalability_patterns".to_string());
+    }
+    if combined.contains("data") || combined.contains("science") || combined.contains("ml") {
+        capabilities.push("data_analysis".to_string());
+        capabilities.push("ml_modeling".to_string());
+    }
+
+    capabilities
 }

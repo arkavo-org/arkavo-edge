@@ -43,7 +43,8 @@ pub use task_executor::{TaskEvent, TaskExecutor, TaskExecutorConfig};
 pub use task_store::{SqliteTaskStore, Task, TaskStore};
 pub use transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 pub use types::{
-    DiscoverFeaturesDisclose, DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
+    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType, DiscoverFeaturesDisclose,
+    DiscoverFeaturesQuery, FeatureDisclosure, FeatureQuery, FeatureType,
 };
 pub use websocket::WebSocketTransport;
 
