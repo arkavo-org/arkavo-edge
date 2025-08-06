@@ -27,6 +27,8 @@ arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-budget = { path = "../arkavo-budget" }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-memory = { path = "../arkavo-memory" }
 anyhow = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
@@ -37,6 +39,7 @@ rand = "0.8"
 
 # mDNS discovery
 zeroconf = { version = "0.14", optional = true }
+bincode = "1.3"
 
 [dev-dependencies]
 uuid = { workspace = true }

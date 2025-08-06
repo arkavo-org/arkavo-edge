@@ -32,7 +32,7 @@ impl HealthReport {
     pub fn is_healthy(&self) -> bool {
         self.status == HealthStatus::Healthy
     }
-    
+
     pub fn calculate_status(error_rate: f64, recent_errors: u32) -> HealthStatus {
         if error_rate > 0.1 || recent_errors > 10 {
             HealthStatus::Unhealthy

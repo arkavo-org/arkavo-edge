@@ -183,8 +183,11 @@ dependencies = [
  "anyhow",
  "arkavo-budget",
  "arkavo-dataflow",
+ "arkavo-events",
+ "arkavo-memory",
  "arkavo-observability",
  "arkavo-protocol",
+ "bincode",
  "chrono",
  "futures",
  "jsonrpsee",
@@ -429,6 +432,7 @@ name = "arkavo-memory"
 version = "0.25.0"
 dependencies = [
  "anyhow",
+ "arkavo-events",
  "arkavo-mcp",
  "async-trait",
  "bytemuck",

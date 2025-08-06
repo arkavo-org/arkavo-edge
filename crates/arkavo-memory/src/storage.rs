@@ -152,6 +152,49 @@ impl MemoryStorage {
         )
         .execute(pool)
         .await?;
+        
+        // Create events table for event store
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                schema_version TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)
+            "#,
+        )
+        .execute(pool)
+        .await?;
 
         // Create agent conversations table
         sqlx::query(

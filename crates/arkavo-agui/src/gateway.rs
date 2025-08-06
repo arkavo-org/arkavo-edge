@@ -1,6 +1,7 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
 use crate::budget_handler::BudgetHandler;
 use crate::dataflow_handler::DataflowHandler;
+use crate::debug_handler::DebugHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use std::collections::HashMap;
@@ -25,6 +26,7 @@ pub struct AgUiGateway {
     telemetry_rx: Option<mpsc::Receiver<TelemetryEvent>>,
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
+    debug_handler: Option<Arc<DebugHandler>>,
 }
 
 impl AgUiGateway {
@@ -39,7 +41,15 @@ impl AgUiGateway {
             telemetry_rx: Some(telemetry_rx),
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
+            debug_handler: None,
         }
+    }
+
+    pub async fn with_debug_handler(mut self, storage: arkavo_memory::storage::MemoryStorage) -> Self {
+        self.debug_handler = Some(Arc::new(
+            DebugHandler::new(Arc::new(storage)).await
+        ));
+        self
     }
 
     pub async fn start(mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -211,13 +221,23 @@ impl AgUiGateway {
                 ws.on_upgrade(move |socket| handle_telemetry_websocket(socket, telemetry))
             });
 
+        // Debug WebSocket endpoint
+        let debug_handler_for_ws = self.debug_handler.clone();
+        let debug_ws = warp::path("debug")
+            .and(warp::ws())
+            .and(warp::any().map(move || debug_handler_for_ws.clone()))
+            .map(|ws: warp::ws::Ws, debug_handler: Option<Arc<DebugHandler>>| {
+                ws.on_upgrade(move |socket| handle_debug_websocket(socket, debug_handler))
+            });
+
         let routes = index_file
             .or(chat_ui)
             .or(websocket)
             .or(agent_events)
             .or(agent_proxy)
             .or(dataflow_api)
-            .or(telemetry_ws);
+            .or(telemetry_ws)
+            .or(debug_ws);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
         println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
@@ -568,6 +588,82 @@ async fn handle_telemetry_websocket(
     }
 
     println!("Telemetry WebSocket connection closed");
+}
+
+async fn handle_debug_websocket(
+    ws: warp::ws::WebSocket,
+    debug_handler: Option<Arc<DebugHandler>>,
+) {
+    use futures::{SinkExt, StreamExt};
+
+    let (ws_sink, mut ws_stream) = ws.split();
+
+    if let Some(handler) = debug_handler {
+        println!("New debug WebSocket connection");
+
+        // Create channel for events
+        let (tx, mut rx) = mpsc::channel::<AgUiEvent>(100);
+
+        // Spawn task to forward events
+        let forward_task = tokio::spawn(async move {
+            let mut ws_tx = ws_sink;
+            while let Some(event) = rx.recv().await {
+                if let Ok(json) = serde_json::to_string(&event) {
+                    if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Handle incoming debug commands
+        while let Some(result) = ws_stream.next().await {
+            match result {
+                Ok(msg) => {
+                    if let Ok(text) = msg.to_str() {
+                        if let Ok(cmd) = serde_json::from_str::<DebugCommand>(text) {
+                            match cmd {
+                                DebugCommand::SubscribeSession { session_id } => {
+                                    let _ = handler.subscribe_to_session(session_id, tx.clone()).await;
+                                }
+                                DebugCommand::GetRecentSessions { limit } => {
+                                    if let Ok(_sessions) = handler.get_recent_sessions(limit).await {
+                                        let event = AgUiEvent::StateDelta {
+                                            patch: vec![],
+                                            event_id: format!("sessions-{}", uuid::Uuid::new_v4()),
+                                        };
+                                        let _ = tx.send(event).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        forward_task.abort();
+        println!("Debug WebSocket connection closed");
+    } else {
+        // Debug handler not available
+        use futures::SinkExt;
+        let mut ws_tx = ws_sink;
+        let error = AgUiEvent::Error {
+            code: "DEBUG_DISABLED".to_string(),
+            message: "Debug handler not configured".to_string(),
+        };
+        if let Ok(json) = serde_json::to_string(&error) {
+            let _ = ws_tx.send(warp::ws::Message::text(json)).await;
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum DebugCommand {
+    SubscribeSession { session_id: String },
+    GetRecentSessions { limit: usize },
 }
 
 async fn run_mdns_discovery(

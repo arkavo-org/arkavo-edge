@@ -124,6 +124,12 @@ pub struct EventWriterBuilder {
     handlers: Vec<EventHandler>,
 }
 
+impl Default for EventWriterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventWriterBuilder {
     pub fn new() -> Self {
         Self {
