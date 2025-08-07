@@ -372,12 +372,10 @@ impl CircuitBreaker {
             });
 
         // Check if circuit should be closed after recovery timeout
-        if state.is_open {
-            if let Some(last_failure) = state.last_failure {
-                if Utc::now() - last_failure > self.recovery_timeout {
-                    state.is_open = false;
-                    state.consecutive_failures = 0;
-                }
+        if state.is_open && let Some(last_failure) = state.last_failure {
+            if Utc::now() - last_failure > self.recovery_timeout {
+                state.is_open = false;
+                state.consecutive_failures = 0;
             }
         }
 
