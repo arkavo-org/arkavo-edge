@@ -13,6 +13,7 @@ use crate::types::{
     MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
+use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -118,6 +119,9 @@ pub struct A2aRpcImpl {
     chat_sessions: Arc<crate::chat_session::ChatSessionManager>,
     task_store: Arc<dyn TaskStore>,
     task_executor: Arc<TaskExecutor>,
+    event_writer: Option<Arc<EventWriter>>,
+    session_id: String,
+    event_sequence: Arc<tokio::sync::RwLock<u64>>,
 }
 
 #[derive(Default, Clone)]
@@ -144,6 +148,26 @@ impl A2aRpcServer for A2aRpcImpl {
             self.metrics.record_rate_limit_blocked(None);
             timer.error();
             return Err(e);
+        }
+
+        // Emit tool call event if event writer is configured
+        if let Some(writer) = &self.event_writer {
+            let agent_metadata = self.agent_metadata.read().await;
+            let mut seq = self.event_sequence.write().await;
+            let sequence = *seq;
+            *seq += 1;
+
+            let event = Event::new(
+                self.session_id.clone(),
+                sequence,
+                agent_metadata.name.clone(),
+                EventPayload::ToolCall {
+                    tool_name: format!("task_{}", _task_type),
+                    parameters: _payload.clone().unwrap_or(serde_json::Value::Null),
+                    tool_call_id: Some(uuid::Uuid::new_v4().to_string()),
+                },
+            );
+            let _ = writer.write(event).await;
         }
 
         #[cfg(feature = "stub_handlers")]
@@ -214,6 +238,28 @@ impl A2aRpcServer for A2aRpcImpl {
             self.metrics.record_rate_limit_blocked(None);
             timer.error();
             return Err(e);
+        }
+
+        // Emit agent discover event
+        if let Some(writer) = &self.event_writer {
+            let agent_metadata = self.agent_metadata.read().await;
+            let mut seq = self.event_sequence.write().await;
+            let sequence = *seq;
+            *seq += 1;
+
+            let event = Event::new(
+                self.session_id.clone(),
+                sequence,
+                agent_metadata.name.clone(),
+                EventPayload::ToolCall {
+                    tool_name: "agent_discover".to_string(),
+                    parameters: serde_json::json!({
+                        "filter": _filter
+                    }),
+                    tool_call_id: Some(uuid::Uuid::new_v4().to_string()),
+                },
+            );
+            let _ = writer.write(event).await;
         }
 
         // Get MCP tools and server status
@@ -901,6 +947,9 @@ pub struct A2aServer {
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
+    event_writer: Arc<tokio::sync::RwLock<Option<Arc<EventWriter>>>>,
+    session_id: String,
+    event_sequence: Arc<tokio::sync::RwLock<u64>>,
 }
 
 impl A2aServer {
@@ -915,6 +964,9 @@ impl A2aServer {
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
+            event_writer: Arc::new(tokio::sync::RwLock::new(None)),
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         }
     }
 
@@ -941,6 +993,98 @@ impl A2aServer {
 
         // Recreate LLM adapter with new API keys
         self.recreate_llm_adapter().await;
+    }
+
+    /// Initialize the event writer for debugging
+    pub async fn initialize_event_writer(&self) -> Result<()> {
+        use arkavo_events::writer::EventWriterBuilder;
+        use std::time::Duration;
+
+        let config = EventWriterConfig {
+            buffer_size: 10_000,
+            flush_interval: Duration::from_millis(100),
+            batch_size: 200,
+        };
+
+        let writer = EventWriterBuilder::new()
+            .with_config(config)
+            .add_handler(move |events| {
+                // Log events for now - will be sent to debug handler later
+                for event in events {
+                    tracing::debug!(
+                        event_type = %event.event_type(),
+                        session_id = %event.session_id,
+                        "Event captured"
+                    );
+                }
+            })
+            .build();
+
+        *self.event_writer.write().await = Some(Arc::new(writer));
+
+        // Emit session started event
+        self.emit_session_started().await?;
+
+        Ok(())
+    }
+
+    /// Get the session ID for this server instance
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Get next event sequence number
+    async fn next_sequence(&self) -> u64 {
+        let mut seq = self.event_sequence.write().await;
+        let current = *seq;
+        *seq += 1;
+        current
+    }
+
+    /// Emit a session started event
+    async fn emit_session_started(&self) -> Result<()> {
+        if let Some(writer) = self.event_writer.read().await.as_ref() {
+            let metadata = self.agent_metadata.read().await;
+            let capabilities = vec![
+                "a2a-protocol".to_string(),
+                "mcp-integration".to_string(),
+                "chat-streaming".to_string(),
+            ];
+
+            let sequence = self.next_sequence().await;
+            let event = Event::new(
+                self.session_id.clone(),
+                sequence,
+                metadata.name.clone(),
+                EventPayload::SessionStarted {
+                    capabilities: Some(capabilities),
+                    metadata: Some(
+                        [
+                            (
+                                "model".to_string(),
+                                serde_json::Value::String(metadata.model.clone()),
+                            ),
+                            (
+                                "purpose".to_string(),
+                                serde_json::Value::String(metadata.purpose.clone()),
+                            ),
+                            (
+                                "endpoint".to_string(),
+                                serde_json::Value::String(metadata.endpoint.clone()),
+                            ),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ),
+                },
+            );
+
+            writer.write(event).await.map_err(|e| {
+                A2aError::Internal(format!("Failed to write session started event: {e}"))
+            })?;
+        }
+
+        Ok(())
     }
 
     async fn recreate_llm_adapter(&self) {
@@ -1076,6 +1220,9 @@ impl A2aServer {
             chat_sessions,
             task_store,
             task_executor,
+            event_writer: self.event_writer.read().await.clone(),
+            session_id: self.session_id.clone(),
+            event_sequence: self.event_sequence.clone(),
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -1120,6 +1267,9 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
             task_store,
             task_executor,
+            event_writer: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         };
         let result = impl_instance
             .task_request(
@@ -1168,6 +1318,9 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
             task_store,
             task_executor,
+            event_writer: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         };
         let result = impl_instance
             .task_declare(
@@ -1219,6 +1372,9 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
             task_store,
             task_executor,
+            event_writer: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -1262,6 +1418,9 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
             task_store,
             task_executor,
+            event_writer: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -1302,6 +1461,9 @@ mod tests {
             chat_sessions: Arc::new(crate::chat_session::ChatSessionManager::new(None)),
             task_store,
             task_executor,
+            event_writer: None,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
         };
 
         // First request should succeed

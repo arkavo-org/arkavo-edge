@@ -1,5 +1,6 @@
 use crate::embeddings::EmbeddingService;
 use crate::error::{MemoryError, Result};
+use crate::event_store::{EventStore, SerializedEvent, StoredEvent};
 use crate::models::{AgentConversation, Memory, SearchResult};
 use hnsw_rs::prelude::*;
 use sqlx::Row;
@@ -40,6 +41,7 @@ pub struct MemoryStorage {
     index: Arc<RwLock<Hnsw<'static, f32, DistCosine>>>,
     id_mapping: Arc<RwLock<HashMap<usize, Uuid>>>,
     embedding_service: EmbeddingService,
+    event_store: EventStore,
     #[allow(dead_code)]
     config: HnswConfig,
 }
@@ -101,6 +103,7 @@ impl MemoryStorage {
         Self::ensure_table_exists(&pool).await?;
 
         let hnsw = Self::create_new_index(&config);
+        let event_store = EventStore::new(pool.clone());
 
         let mut storage = Self {
             pool,
@@ -108,6 +111,7 @@ impl MemoryStorage {
             index: Arc::new(RwLock::new(hnsw)),
             id_mapping: Arc::new(RwLock::new(HashMap::new())),
             embedding_service: EmbeddingService::new(),
+            event_store,
             config,
         };
 
@@ -149,6 +153,49 @@ impl MemoryStorage {
         .execute(pool)
         .await?;
 
+        // Create events table for event store
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                schema_version TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
         // Create agent conversations table
         sqlx::query(
             r#"
@@ -180,6 +227,53 @@ impl MemoryStorage {
             r#"
             CREATE INDEX IF NOT EXISTS idx_conversations_domain 
             ON agent_conversations(domain)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create events table for debugging
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                agent_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                schema_version TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(session_id, sequence)
+            )
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_session 
+            ON events(session_id, sequence)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_timestamp 
+            ON events(timestamp)
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_events_created 
+            ON events(created_at)
             "#,
         )
         .execute(pool)
@@ -520,5 +614,41 @@ impl MemoryStorage {
     ) -> Result<Vec<SearchResult>> {
         // Use the existing search method with category filter
         self.search(query, limit, Some(domain)).await
+    }
+
+    // Event Store Methods
+
+    pub async fn store_events(&self, events: Vec<SerializedEvent>) -> Result<()> {
+        self.event_store.store_events(events).await
+    }
+
+    pub async fn get_session_events(
+        &self,
+        session_id: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<StoredEvent>> {
+        self.event_store.get_session_events(session_id, limit).await
+    }
+
+    pub async fn get_recent_events(
+        &self,
+        agent_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>> {
+        self.event_store.get_recent_events(agent_id, limit).await
+    }
+
+    pub async fn get_events_since(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<StoredEvent>> {
+        self.event_store.get_events_since(since, agent_id).await
+    }
+
+    pub async fn get_event_stats(&self) -> Result<(u64, u64)> {
+        let session_count = self.event_store.get_session_count().await?;
+        let event_count = self.event_store.get_total_event_count().await?;
+        Ok((session_count, event_count))
     }
 }

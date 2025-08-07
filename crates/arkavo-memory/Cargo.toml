@@ -38,3 +38,4 @@ async-trait = { workspace = true }
 bytemuck = "1.14"
 
 [dev-dependencies]
+arkavo-events = { path = "../arkavo-events" }

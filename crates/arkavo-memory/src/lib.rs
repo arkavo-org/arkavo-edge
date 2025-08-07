@@ -1,5 +1,6 @@
 pub mod embeddings;
 pub mod error;
+pub mod event_store;
 #[cfg(feature = "vector-search")]
 pub mod mcp_tools;
 pub mod models;
