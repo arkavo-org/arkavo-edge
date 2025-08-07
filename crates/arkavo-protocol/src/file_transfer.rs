@@ -192,7 +192,11 @@ impl FileTransferManager {
         let mut completed = self.completed_files.write().await;
         completed.insert(file_id.to_string(), session.metadata.clone());
 
-        info!("File upload completed: {} -> {}", file_id, final_path.display());
+        info!(
+            "File upload completed: {} -> {}",
+            file_id,
+            final_path.display()
+        );
         Ok(())
     }
 
@@ -294,7 +298,9 @@ impl FileTransferManager {
             });
         }
 
-        Err(A2aError::FileTransfer(format!("Transfer not found: {file_id}")))
+        Err(A2aError::FileTransfer(format!(
+            "Transfer not found: {file_id}"
+        )))
     }
 
     pub async fn cleanup_stale_uploads(&self, max_age_seconds: i64) -> Result<usize> {
