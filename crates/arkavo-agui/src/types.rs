@@ -197,7 +197,11 @@ pub enum MessageDeltaContent {
     ToolCall {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        delta: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(rename = "argsJsonFragment")]
+        args_json_fragment: String,
+        done: bool,
     },
 }
 

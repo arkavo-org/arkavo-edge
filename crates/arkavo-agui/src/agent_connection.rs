@@ -379,6 +379,7 @@ impl AgentConnection {
 
         // Open a new chat session
         let open_request = ChatOpenRequest {
+            token: None,
             context: None,
             metadata: None,
         };
@@ -482,10 +483,14 @@ impl AgentConnection {
                         }
                         MessageDeltaContent::ToolCall {
                             tool_call_id,
-                            delta,
+                            name,
+                            args_json_fragment,
+                            done,
                         } => crate::types::MessageDeltaContent::ToolCall {
                             tool_call_id,
-                            delta,
+                            name,
+                            args_json_fragment,
+                            done,
                         },
                         MessageDeltaContent::StreamEnd { .. } => {
                             // Convert stream end to text for UI
