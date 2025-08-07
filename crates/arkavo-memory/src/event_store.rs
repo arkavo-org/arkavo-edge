@@ -204,7 +204,7 @@ impl EventStore {
 
         for (session_id, count) in large_sessions {
             let to_delete = count - self.max_events_per_session as i64;
-            
+
             // Delete oldest events from this session
             sqlx::query(
                 r#"
@@ -262,10 +262,12 @@ impl EventStore {
     }
 
     async fn get_database_size(&self) -> Result<u64> {
-        let result: (i64,) = sqlx::query_as("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()")
-            .fetch_one(&self.pool)
-            .await?;
-        
+        let result: (i64,) = sqlx::query_as(
+            "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
         Ok(result.0 as u64)
     }
 
@@ -273,7 +275,7 @@ impl EventStore {
         let result: (i64,) = sqlx::query_as("SELECT COUNT(DISTINCT session_id) FROM events")
             .fetch_one(&self.pool)
             .await?;
-        
+
         Ok(result.0 as u64)
     }
 
@@ -281,7 +283,7 @@ impl EventStore {
         let result: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM events")
             .fetch_one(&self.pool)
             .await?;
-        
+
         Ok(result.0 as u64)
     }
 }

@@ -4,16 +4,16 @@ use thiserror::Error;
 pub enum EventError {
     #[error("Serialization error: {0}")]
     Serialization(String),
-    
+
     #[error("Deserialization error: {0}")]
     Deserialization(String),
-    
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Invalid event: {0}")]
     InvalidEvent(String),
-    
+
     #[error("Buffer full")]
     BufferFull,
 }

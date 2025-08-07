@@ -152,7 +152,7 @@ impl MemoryStorage {
         )
         .execute(pool)
         .await?;
-        
+
         // Create events table for event store
         sqlx::query(
             r#"
@@ -171,7 +171,7 @@ impl MemoryStorage {
         )
         .execute(pool)
         .await?;
-        
+
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id)
@@ -179,7 +179,7 @@ impl MemoryStorage {
         )
         .execute(pool)
         .await?;
-        
+
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)
@@ -187,7 +187,7 @@ impl MemoryStorage {
         )
         .execute(pool)
         .await?;
-        
+
         sqlx::query(
             r#"
             CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)

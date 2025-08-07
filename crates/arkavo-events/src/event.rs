@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::payload::EventPayload;
 use crate::SCHEMA_VERSION;
+use crate::payload::EventPayload;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -26,12 +26,7 @@ pub struct EventMetadata {
 }
 
 impl Event {
-    pub fn new(
-        session_id: String,
-        sequence: u64,
-        agent_id: String,
-        payload: EventPayload,
-    ) -> Self {
+    pub fn new(session_id: String, sequence: u64, agent_id: String, payload: EventPayload) -> Self {
         Self {
             id: Uuid::new_v4(),
             session_id,

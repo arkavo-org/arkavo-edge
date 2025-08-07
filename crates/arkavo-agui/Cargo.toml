@@ -29,6 +29,7 @@ arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-debugger = { path = "../arkavo-debugger" }
 anyhow = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 

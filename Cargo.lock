@@ -183,6 +183,7 @@ dependencies = [
  "anyhow",
  "arkavo-budget",
  "arkavo-dataflow",
+ "arkavo-debugger",
  "arkavo-events",
  "arkavo-memory",
  "arkavo-observability",
@@ -470,6 +471,7 @@ name = "arkavo-protocol"
 version = "0.25.0"
 dependencies = [
  "anyhow",
+ "arkavo-events",
  "arkavo-llm",
  "arkavo-mcp-core",
  "arkavo-observability",
