@@ -1,0 +1,39 @@
+[package]
+name = "arkavo-authorization"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "OpenTDF Authorization v2 integration for Arkavo - Connect protocol client for entitlement-based access control"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["authorization", "opentdf", "connect-rpc", "abac", "security"]
+categories = ["authentication", "web-programming::http-client"]
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.42", features = ["rt", "macros", "time"] }
+thiserror = "2.0"
+url = "2.5"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+lru = "0.12"
+tracing = "0.1"
+
+# Optional gRPC support
+tonic = { version = "0.12", optional = true }
+prost = { version = "0.13", optional = true }
+
+[dev-dependencies]
+mockito = "1.6"
+tokio = { version = "1.42", features = ["full"] }
+wiremock = "0.6"
+
+[features]
+default = ["connect"]
+connect = []
+grpc = ["tonic", "prost"]
+
+[lints]
+workspace = true
