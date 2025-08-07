@@ -1,7 +1,9 @@
 // Core A2A protocol integration tests
 use arkavo_protocol::{
-    file_transfer::{FileTransferManager, FileUploadRequest, FileMetadata, FileChunk, calculate_chunks},
-    oauth2::{OAuth2Provider, OAuth2Config, TokenRequest, GrantType},
+    file_transfer::{
+        FileChunk, FileMetadata, FileTransferManager, FileUploadRequest, calculate_chunks,
+    },
+    oauth2::{GrantType, OAuth2Config, OAuth2Provider, TokenRequest},
 };
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -91,7 +93,7 @@ async fn test_file_transfer_chunked_upload() {
         assert_eq!(response.file_id, file_id);
         assert_eq!(response.chunks_received, i + 1);
         assert_eq!(response.chunks_total, chunks_total);
-        
+
         if i == chunks_total - 1 {
             assert!(response.completed);
         } else {

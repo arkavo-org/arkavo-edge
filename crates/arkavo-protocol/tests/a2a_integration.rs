@@ -1,7 +1,12 @@
 use arkavo_protocol::{
-    file_transfer::{FileTransferManager, FileUploadRequest, FileMetadata, FileChunk, FileDownloadRequest, calculate_chunks},
-    oauth2::{OAuth2Provider, OAuth2Config, TokenRequest, GrantType},
-    push_notifications::{PushNotificationService, PushNotification, EventType, Subscription, SubscriptionFilter},
+    file_transfer::{
+        FileChunk, FileDownloadRequest, FileMetadata, FileTransferManager, FileUploadRequest,
+        calculate_chunks,
+    },
+    oauth2::{GrantType, OAuth2Config, OAuth2Provider, TokenRequest},
+    push_notifications::{
+        EventType, PushNotification, PushNotificationService, Subscription, SubscriptionFilter,
+    },
 };
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -142,8 +147,8 @@ async fn test_file_transfer_complete_flow() {
 
 #[tokio::test]
 async fn test_push_notifications_with_filtering() {
-    use arkavo_protocol::push_notifications::{SubscriptionRequest, EventData};
-    
+    use arkavo_protocol::push_notifications::{EventData, SubscriptionRequest};
+
     let service = PushNotificationService::new(3); // max_retries = 3
 
     // Create subscriptions with different filters
@@ -171,9 +176,15 @@ async fn test_push_notifications_with_filtering() {
     // Register channels for clients
     let (tx1, mut rx1) = tokio::sync::mpsc::channel(10);
     let (tx2, mut rx2) = tokio::sync::mpsc::channel(10);
-    
-    service.register_channel(client1_id.to_string(), tx1).await.unwrap();
-    service.register_channel(client2_id.to_string(), tx2).await.unwrap();
+
+    service
+        .register_channel(client1_id.to_string(), tx1)
+        .await
+        .unwrap();
+    service
+        .register_channel(client2_id.to_string(), tx2)
+        .await
+        .unwrap();
 
     // Send task update event
     let task_event = EventData {
@@ -215,7 +226,10 @@ async fn test_push_notifications_with_filtering() {
     }
 
     // Test unsubscribe
-    service.unsubscribe(&sub1_resp.subscription_id).await.unwrap();
+    service
+        .unsubscribe(&sub1_resp.subscription_id)
+        .await
+        .unwrap();
     let subs = service.get_client_subscriptions(client1_id).await;
     assert_eq!(subs.len(), 0);
 }
@@ -307,10 +321,7 @@ async fn test_oauth2_token_revocation() {
         .unwrap();
 
     // Revoke the access token
-    provider
-        .revoke_token(&response.access_token)
-        .await
-        .unwrap();
+    provider.revoke_token(&response.access_token).await.unwrap();
 
     // Verify token is no longer valid
     let validation_result = provider.validate_access_token(&response.access_token).await;
@@ -319,7 +330,7 @@ async fn test_oauth2_token_revocation() {
     // Revoke refresh token
     if let Some(refresh_token) = response.refresh_token {
         provider.revoke_token(&refresh_token).await.unwrap();
-        
+
         // Attempting to use revoked refresh token should fail
         let refresh_request = TokenRequest {
             grant_type: GrantType::RefreshToken,
@@ -336,10 +347,10 @@ async fn test_oauth2_token_revocation() {
     }
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_push_notification_cleanup() {
-    use arkavo_protocol::push_notifications::{SubscriptionRequest, EventData};
-    
+    use arkavo_protocol::push_notifications::{EventData, SubscriptionRequest};
+
     let service = PushNotificationService::new(3);
 
     // Add a subscription
@@ -367,12 +378,15 @@ async fn test_push_notification_cleanup() {
 
     // Clean up inactive subscriptions
     let removed = service.cleanup_inactive_subscriptions().await.unwrap();
-    
+
     // Verify cleanup works (won't remove active subscriptions in this test)
     assert_eq!(removed, 0);
 
     // Unsubscribe and verify
-    service.unsubscribe(&sub_resp.subscription_id).await.unwrap();
+    service
+        .unsubscribe(&sub_resp.subscription_id)
+        .await
+        .unwrap();
     let subs = service.get_client_subscriptions("test_client").await;
     assert_eq!(subs.len(), 0);
 }
@@ -432,9 +446,9 @@ async fn test_oauth2_authorization_url_generation() {
     };
 
     let provider = OAuth2Provider::new(config, "secret_key".to_string());
-    
+
     let auth_url = provider.get_authorization_url("random_state_123");
-    
+
     assert!(auth_url.contains("response_type=code"));
     assert!(auth_url.contains("client_id=app_client"));
     assert!(auth_url.contains("redirect_uri="));
