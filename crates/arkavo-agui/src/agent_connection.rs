@@ -328,11 +328,12 @@ impl AgentConnection {
         Ok(result)
     }
 
-    /// Subscribe to chat streaming for a given agent
+    /// Subscribe to chat streaming for a given agent with optional authentication
     pub async fn subscribe_to_chat(
         &self,
         agent_id: String,
         ui_tx: mpsc::Sender<crate::types::AgUiEvent>, // Bounded channel
+        auth_token: Option<String>,                   // JWT token for authenticated sessions
     ) -> Result<SubscriptionHandle, Box<dyn std::error::Error + Send + Sync>> {
         let client_guard = self.client.read().await;
         let client = client_guard.as_ref().ok_or("Not connected")?;
@@ -377,9 +378,9 @@ impl AgentConnection {
             session_id: Some(sub_id.clone()),
         };
 
-        // Open a new chat session
+        // Open a new chat session with optional authentication
         let open_request = ChatOpenRequest {
-            token: None,
+            token: auth_token.clone(),
             context: None,
             metadata: None,
         };
@@ -404,9 +405,15 @@ impl AgentConnection {
             )
             .await?;
 
-        // Spawn task to handle streaming
+        // Spawn task to handle streaming with back-pressure management
+        let session_id_for_ack = session.session_id.clone();
+        let client_for_ack = self.client.clone();
+
         tokio::spawn(async move {
             let mut cancel_rx = cancel_rx;
+            let mut last_sequence = 0u64;
+            let mut pending_acks = 0u64;
+            const ACK_WINDOW: u64 = 50; // Send ack every 50 messages
 
             loop {
                 tokio::select! {
@@ -414,18 +421,32 @@ impl AgentConnection {
                     delta_result = subscription.next() => {
                         match delta_result {
                             Some(Ok(delta)) => {
-                                // Convert to ordered delta with sequence tracking
-                                // Note: Protocol server doesn't provide sequence numbers yet,
-                                // so we'll use timestamp-based ordering for now
+                                // Extract sequence number from delta
+                                let sequence = delta.sequence;
+                                last_sequence = sequence;
+                                pending_acks += 1;
+
+                                // Convert to ordered delta with proper sequence tracking
                                 let ordered_delta = OrderedMessageDelta {
                                     delta,
-                                    sequence: 0, // TODO: Get from protocol server
+                                    sequence,
                                     trace_id: uuid::Uuid::new_v4().to_string(),
                                     agent_id: agent_id_for_task.clone(),
                                 };
 
                                 // Broadcast to all UIs watching this session
                                 let _ = broadcast_tx.send(ordered_delta);
+
+                                // Send MetricsAck for back-pressure management
+                                if pending_acks >= ACK_WINDOW {
+                                    if let Some(client) = &*client_for_ack.read().await {
+                                        let _ = client.request::<(), _>(
+                                            "chat_metrics_ack",
+                                            rpc_params![session_id_for_ack.clone(), last_sequence]
+                                        ).await;
+                                        pending_acks = 0;
+                                    }
+                                }
 
                                 // Send telemetry
                                 let _ = telemetry_tx
@@ -454,6 +475,18 @@ impl AgentConnection {
                         let _ = subscription.unsubscribe().await;
                         break;
                     }
+                }
+            }
+
+            // Send final MetricsAck if we have pending acks
+            if pending_acks > 0 {
+                if let Some(client) = &*client_for_ack.read().await {
+                    let _ = client
+                        .request::<(), _>(
+                            "chat_metrics_ack",
+                            rpc_params![session_id_for_ack.clone(), last_sequence],
+                        )
+                        .await;
                 }
             }
 
