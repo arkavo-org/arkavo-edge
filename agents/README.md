@@ -146,6 +146,28 @@ User asks: "Review my Python web app for security issues"
 5. **Security Agent** might query **Database Agent** for proper SQL patterns
 6. **Orchestrator** aggregates findings and presents report to user
 
+## MCP Server Integration
+
+Agents can use MCP (Model Context Protocol) servers for additional capabilities:
+
+### Built-in MCP Servers
+- **arkavo serve**: Provides memory tools (store_memory, search_memory, etc.)
+  - Used by orchestrator agent for context preservation
+  - Automatically available when running `arkavo serve`
+
+### External MCP Servers (Optional)
+Some agent configurations reference external MCP servers that are npm packages:
+- **mcp-filesystem**: File system access for agents
+- **mcp-git**: Git repository operations
+
+To install external servers (optional):
+```bash
+npm install -g @modelcontextprotocol/server-filesystem
+npm install -g @cyanheads/git-mcp-server
+```
+
+**Note**: Agents work without external MCP servers. They will log warnings and continue with reduced capabilities if servers are unavailable.
+
 ## Extending the System
 
 To add a new specialized agent:

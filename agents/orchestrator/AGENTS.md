@@ -14,10 +14,12 @@ listen:  0.0.0.0:8342
 # - Presenting coherent responses to users
 
 # Memory integration for tracking agent conversations
-mcp_servers:
-  - name: memory
-    command: arkavo-memory-server
-    args: ["--port", "8001"]
+# The arkavo serve command provides built-in memory tools
+# Note: Uncomment if you need memory tools (requires arkavo in PATH)
+# mcp_servers:
+#   - name: memory
+#     command: arkavo
+#     args: ["serve"]
 
 # Enable mDNS for automatic agent discovery
 discovery:

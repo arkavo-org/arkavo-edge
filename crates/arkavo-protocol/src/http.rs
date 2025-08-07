@@ -1,7 +1,8 @@
 use crate::error::{A2aError, Result};
 use crate::transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
 use async_trait::async_trait;
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Certificate, Client, ClientBuilder, Identity};
+use std::fs;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -23,6 +24,44 @@ impl HttpTransport {
 
         if !config.tls_config.verify_cert {
             builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        // Load client certificates for mTLS
+        if let (Some(cert_path), Some(key_path)) = (
+            &config.tls_config.client_cert_path,
+            &config.tls_config.client_key_path,
+        ) {
+            debug!("Loading client certificate from: {}", cert_path);
+            debug!("Loading client key from: {}", key_path);
+
+            let cert_pem = fs::read(cert_path)
+                .map_err(|e| A2aError::Tls(format!("Failed to read client certificate: {e}")))?;
+            let key_pem = fs::read(key_path)
+                .map_err(|e| A2aError::Tls(format!("Failed to read client key: {e}")))?;
+
+            // Combine certificate and key into a single PEM for reqwest
+            let mut combined_pem = cert_pem;
+            combined_pem.extend_from_slice(&key_pem);
+
+            let identity = Identity::from_pem(&combined_pem)
+                .map_err(|e| A2aError::Tls(format!("Failed to create identity from PEM: {e}")))?;
+
+            builder = builder.identity(identity);
+            info!("Client certificate configured for mTLS");
+        }
+
+        // Load CA certificate if provided
+        if let Some(ca_path) = &config.tls_config.ca_cert_path {
+            debug!("Loading CA certificate from: {}", ca_path);
+
+            let ca_pem = fs::read(ca_path)
+                .map_err(|e| A2aError::Tls(format!("Failed to read CA certificate: {e}")))?;
+
+            let ca_cert = Certificate::from_pem(&ca_pem)
+                .map_err(|e| A2aError::Tls(format!("Failed to parse CA certificate: {e}")))?;
+
+            builder = builder.add_root_certificate(ca_cert);
+            info!("CA certificate configured");
         }
 
         let client = builder

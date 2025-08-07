@@ -69,7 +69,6 @@ Arkavo Edge consists of several core components:
 - **Documentation files**: Technical documentation, implementation guides, and historical documents should be placed in the `docs/` directory. The following files should remain in root:
   - `README.md` - Main project documentation
   - `CLAUDE.md` - AI assistant instructions
-  - `REQUIREMENTS.md` - Project requirements
   - `THIRD-PARTY-LICENSES.md` - License information
   - Crate-specific `README.md` files remain in their respective crate directories
 - **Test files**:
