@@ -209,7 +209,7 @@ async fn test_cache_hit() {
         .mount(&mock_server)
         .await;
 
-    // Mock Authorization Service - should only be called once  
+    // Mock Authorization Service - should only be called once
     Mock::given(method("POST"))
         .and(path("/authorization.v2.AuthorizationService/GetDecision"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -263,11 +263,8 @@ async fn test_server_error_retry() {
     // Mock Authorization Service - use up_to(2) to handle both initial failure and retry
     Mock::given(method("POST"))
         .and(path("/authorization.v2.AuthorizationService/GetDecision"))
-        .respond_with(
-            ResponseTemplate::new(503)
-                .append_header("content-type", "application/json")
-        )
-        .up_to_n_times(1)  // First request fails
+        .respond_with(ResponseTemplate::new(503).append_header("content-type", "application/json"))
+        .up_to_n_times(1) // First request fails
         .mount(&mock_server)
         .await;
 
@@ -276,7 +273,7 @@ async fn test_server_error_retry() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "decision": "permit"
         })))
-        .expect(1)  // Second request succeeds
+        .expect(1) // Second request succeeds
         .mount(&mock_server)
         .await;
 
