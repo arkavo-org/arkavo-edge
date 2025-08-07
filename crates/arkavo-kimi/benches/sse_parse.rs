@@ -6,8 +6,7 @@ use std::time::Duration;
 /// Generate a realistic SSE response chunk
 fn generate_sse_chunk(index: usize, content: &str) -> String {
     format!(
-        r#"data: {{"id":"chatcmpl-{}","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{{"index":0,"delta":{{"content":"{}"}},"finish_reason":null}}]}}"#,
-        index, content
+        r#"data: {{"id":"chatcmpl-{index}","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{{"index":0,"delta":{{"content":"{content}"}},"finish_reason":null}}]}}"#
     )
 }
 
@@ -46,7 +45,7 @@ fn bench_parse_stream_100_completions(c: &mut Criterion) {
                 };
 
                 let chunk = generate_sse_chunk(i, content);
-                chunks.push(Ok(Bytes::from(format!("{}\n", chunk))));
+                chunks.push(Ok(Bytes::from(format!("{chunk}\n"))));
 
                 // Add some empty lines for realism
                 if i % 10 == 0 {

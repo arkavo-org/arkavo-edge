@@ -2,7 +2,6 @@ mod e2e_test_infrastructure;
 
 use e2e_test_infrastructure::*;
 use std::time::Duration;
-use tempfile::TempDir;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "Requires arkavo binary to be built"]

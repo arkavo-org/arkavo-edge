@@ -84,7 +84,7 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
         .create_chat_completion(messages.clone(), None, None, None, None)
         .await?;
 
-    println!("Response: {}", response);
+    println!("Response: {response}");
 
     // In a real implementation, we would get actual token counts from the response
     // For now, we'll simulate spending based on estimates
@@ -140,7 +140,7 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
 
         let messages = vec![Message {
             role: Role::User,
-            content: format!("Count to {}. Be very brief.", request_count),
+            content: format!("Count to {request_count}. Be very brief."),
             images: None,
         }];
 
@@ -150,7 +150,7 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Should estimate cost");
 
         if !tracker.can_afford("test-agent-1", estimated_cost).await? {
-            println!("Cannot afford request #{}, stopping", request_count);
+            println!("Cannot afford request #{request_count}, stopping");
             break;
         }
 
@@ -175,7 +175,7 @@ async fn test_kimi_budget_tracking() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
 
-        total_spent = total_spent + cost;
+        total_spent += cost;
         println!(
             "Request #{}: spent ${:.4} (total: ${:.4})",
             request_count,

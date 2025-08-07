@@ -71,18 +71,14 @@ impl AuthorizationConfig {
 
     pub fn authorization_v2_url(&self, method: &str) -> Url {
         self.base_url
-            .join(&format!(
-                "/authorization.v2.AuthorizationService/{}",
-                method
-            ))
+            .join(&format!("/authorization.v2.AuthorizationService/{method}"))
             .unwrap_or_else(|_| self.base_url.clone())
     }
 
     pub fn entity_resolution_v2_url(&self, method: &str) -> Url {
         self.base_url
             .join(&format!(
-                "/entityresolution.v2.EntityResolutionService/{}",
-                method
+                "/entityresolution.v2.EntityResolutionService/{method}"
             ))
             .unwrap_or_else(|_| self.base_url.clone())
     }

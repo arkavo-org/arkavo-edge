@@ -227,6 +227,7 @@ impl McpConnection {
                             .get(&tool_name)
                             .ok_or_else(|| format!("Tool not found: {tool_name}"))?;
 
+                        #[allow(clippy::disallowed_methods)]
                         handle.block_on(async move {
                             tool.execute(args)
                                 .await
@@ -237,6 +238,7 @@ impl McpConnection {
                     .map_err(|_| "Tool execution thread panicked".to_string())?
                 } else {
                     // We're not in an async context, can block directly
+                    #[allow(clippy::disallowed_methods)]
                     handle.block_on(async move {
                         let tool = tools
                             .get(&tool_name)

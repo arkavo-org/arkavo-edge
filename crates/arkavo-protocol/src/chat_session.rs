@@ -1,3 +1,4 @@
+use crate::auth::SessionAuth;
 use crate::config::BufferConfig;
 use crate::error::{A2aError, Result};
 use crate::types::{
@@ -13,7 +14,8 @@ use arkavo_observability::{
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -34,6 +36,10 @@ struct ChatSessionState {
     message_tx: mpsc::Sender<UserMessage>,
     delta_tx: broadcast::Sender<MessageDelta>,
     task_manager: SessionTaskManager,
+    auth: Option<SessionAuth>,
+    inflight_deltas: Arc<AtomicU64>,
+    last_acked_seq: Arc<AtomicU64>,
+    backpressure_notify: Arc<Notify>,
 }
 
 impl ChatSessionManager {
@@ -79,9 +85,9 @@ impl ChatSessionManager {
         }
     }
 
-    /// Create a new chat session
-    #[instrument(skip(self), fields(session.id))]
-    pub async fn create_session(&self) -> ChatSession {
+    /// Create a new chat session with optional authentication
+    #[instrument(skip(self, auth), fields(session.id))]
+    pub async fn create_session(&self, auth: Option<SessionAuth>) -> ChatSession {
         let session_id = Uuid::new_v4().to_string();
         tracing::Span::current().record("session.id", &session_id);
 
@@ -112,19 +118,37 @@ impl ChatSessionManager {
         // Create task manager for this session
         let task_manager = SessionTaskManager::new(session_id.clone());
 
-        // Store session state
+        // Store session state with authentication and back-pressure management
+        let inflight_deltas = Arc::new(AtomicU64::new(0));
+        let last_acked_seq = Arc::new(AtomicU64::new(0));
+        let backpressure_notify = Arc::new(Notify::new());
+
         let session_state = ChatSessionState {
             _session: session.clone(),
             state: SessionState::Active,
             message_tx,
             delta_tx: delta_tx.clone(),
             task_manager,
+            auth: auth.clone(),
+            inflight_deltas: inflight_deltas.clone(),
+            last_acked_seq: last_acked_seq.clone(),
+            backpressure_notify: backpressure_notify.clone(),
         };
 
         self.sessions
             .write()
             .await
             .insert(session_id.clone(), session_state);
+
+        // Log authentication info if present
+        if let Some(auth_info) = &auth {
+            info!(
+                session.id = %session_id,
+                user = %auth_info.sub,
+                scopes = ?auth_info.scopes,
+                "Authenticated session created"
+            );
+        }
 
         // Start session handler if we have an LLM
         if let Some(llm_adapter) = &self.llm_adapter {
@@ -144,6 +168,8 @@ impl ChatSessionManager {
                         sessions,
                         session_metrics,
                         metrics_collector,
+                        inflight_deltas,
+                        backpressure_notify,
                     )
                     .await;
                 });
@@ -290,8 +316,60 @@ impl ChatSessionManager {
         }
     }
 
-    /// Handle a chat session
-    #[instrument(skip(message_rx, delta_tx, llm_adapter, sessions, session_metrics, metrics_collector), fields(session.id = %session_id))]
+    /// Get authentication info for a session
+    pub async fn get_session_auth(&self, session_id: &str) -> Option<SessionAuth> {
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .and_then(|state| state.auth.clone())
+    }
+
+    /// Check if a session exists and is active
+    pub async fn session_exists(&self, session_id: &str) -> bool {
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .map(|state| state.state == SessionState::Active)
+            .unwrap_or(false)
+    }
+
+    /// Process a metrics acknowledgment from the client
+    pub async fn process_metrics_ack(&self, session_id: &str, last_seq: u64) -> Result<()> {
+        let sessions = self.sessions.read().await;
+        if let Some(state) = sessions.get(session_id) {
+            // Update the last acknowledged sequence
+            state.last_acked_seq.store(last_seq, Ordering::SeqCst);
+
+            // Calculate inflight deltas (simplified - in production, track actual sequences)
+            let current_seq = state.inflight_deltas.load(Ordering::SeqCst);
+            if current_seq > last_seq {
+                let inflight = current_seq - last_seq;
+                state.inflight_deltas.store(inflight, Ordering::SeqCst);
+            } else {
+                state.inflight_deltas.store(0, Ordering::SeqCst);
+            }
+
+            // Notify if we were waiting for acknowledgment
+            state.backpressure_notify.notify_one();
+
+            info!(
+                session.id = %session_id,
+                last_seq = last_seq,
+                inflight = state.inflight_deltas.load(Ordering::SeqCst),
+                "Processed metrics acknowledgment"
+            );
+
+            Ok(())
+        } else {
+            Err(A2aError::SessionNotFound(session_id.to_string()))
+        }
+    }
+
+    /// Handle a chat session with back-pressure management
+    #[instrument(skip(message_rx, delta_tx, llm_adapter, sessions, session_metrics, metrics_collector, inflight_deltas, backpressure_notify), fields(session.id = %session_id))]
+    #[allow(clippy::too_many_arguments)]
     async fn handle_session(
         session_id: String,
         mut message_rx: mpsc::Receiver<UserMessage>,
@@ -300,7 +378,10 @@ impl ChatSessionManager {
         sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
+        inflight_deltas: Arc<AtomicU64>,
+        backpressure_notify: Arc<Notify>,
     ) {
+        const MAX_INFLIGHT_WINDOW: u64 = 100; // Maximum deltas before applying back-pressure
         let mut conversation_context = Vec::new();
         info!("Session handler started");
 
@@ -349,18 +430,28 @@ impl ChatSessionManager {
                                                     timestamp: stream_delta.timestamp,
                                                 }
                                             },
-                                            DeltaType::ToolCall { id, name, arguments } => MessageDelta {
-                                                session_id: session_id.clone(),
-                                                message_id: message_id.clone(),
-                                                sequence,
-                                                delta: MessageDeltaContent::ToolCall {
-                                                    tool_call_id: id,
-                                                    delta: serde_json::to_string(&serde_json::json!({
-                                                        "name": name,
-                                                        "arguments": arguments
-                                                    })).unwrap_or_default(),
-                                                },
-                                                timestamp: stream_delta.timestamp,
+                                            DeltaType::ToolCall { id, name, arguments } => {
+                                                // Convert arguments to string
+                                                let args_str = arguments
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_else(|| "{}".to_string());
+
+                                                // Determine if this is the first or last delta for this tool call
+                                                let is_first = !name.is_empty();
+                                                let is_complete = args_str.contains('}'); // Simple heuristic
+
+                                                MessageDelta {
+                                                    session_id: session_id.clone(),
+                                                    message_id: message_id.clone(),
+                                                    sequence,
+                                                    delta: MessageDeltaContent::ToolCall {
+                                                        tool_call_id: id,
+                                                        name: if is_first { Some(name) } else { None },
+                                                        args_json_fragment: args_str,
+                                                        done: is_complete,
+                                                    },
+                                                    timestamp: stream_delta.timestamp,
+                                                }
                                             },
                                             DeltaType::Error(err) => MessageDelta {
                                                 session_id: session_id.clone(),
@@ -402,6 +493,18 @@ impl ChatSessionManager {
                                         };
 
                                         sequence += 1;
+
+                                        // Check for back-pressure before sending
+                                        let current_inflight = inflight_deltas.fetch_add(1, Ordering::SeqCst) + 1;
+                                        if current_inflight > MAX_INFLIGHT_WINDOW {
+                                            // Wait for acknowledgment before continuing
+                                            info!(
+                                                session.id = %session_id,
+                                                inflight = current_inflight,
+                                                "Applying back-pressure, waiting for client acknowledgment"
+                                            );
+                                            backpressure_notify.notified().await;
+                                        }
 
                                         // Broadcast delta to all subscribers
                                         let _ = delta_tx.send(message_delta);
@@ -535,7 +638,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_creation() {
         let manager = ChatSessionManager::new(None);
-        let session = manager.create_session().await;
+        let session = manager.create_session(None).await;
 
         assert!(!session.session_id.is_empty());
         assert!(session.capabilities.is_some());
@@ -551,7 +654,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_lifecycle() {
         let manager = ChatSessionManager::new(None);
-        let session = manager.create_session().await;
+        let session = manager.create_session(None).await;
         let session_id = session.session_id.clone();
 
         // Send a message without LLM adapter should fail
@@ -597,7 +700,7 @@ mod tests {
     async fn test_ttl_cleanup() {
         // Create manager with very short TTL for testing
         let manager = ChatSessionManager::with_config(None, 1, BufferConfig::default()); // 1 second TTL
-        let session = manager.create_session().await;
+        let session = manager.create_session(None).await;
         let _session_id = session.session_id.clone();
 
         // Wait for TTL to expire

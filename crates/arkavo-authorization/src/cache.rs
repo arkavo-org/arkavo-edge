@@ -24,6 +24,12 @@ pub struct DecisionCache {
 }
 
 impl DecisionCache {
+    /// Creates a new decision cache with the specified capacity and default TTL.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if unable to create a NonZeroUsize with value 1000,
+    /// which should never happen in practice.
     pub fn new(capacity: usize, default_ttl: Duration) -> Self {
         let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(1000).unwrap());
         Self {
@@ -32,6 +38,11 @@ impl DecisionCache {
         }
     }
 
+    /// Gets a cached decision for the given entity, action, and resource.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the cache mutex is poisoned.
     pub fn get(
         &self,
         entity: &EntityIdentifier,
@@ -44,13 +55,17 @@ impl DecisionCache {
         if let Some(entry) = cache.get(&key) {
             if entry.expires_at > Instant::now() {
                 return Some(entry.decision.clone());
-            } else {
-                cache.pop(&key);
             }
+            cache.pop(&key);
         }
         None
     }
 
+    /// Puts a decision into the cache for the given entity, action, and resource.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the cache mutex is poisoned.
     pub fn put(
         &self,
         entity: &EntityIdentifier,
@@ -70,11 +85,21 @@ impl DecisionCache {
         cache.put(key, entry);
     }
 
+    /// Clears all entries from the cache.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the cache mutex is poisoned.
     pub fn clear(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
     }
 
+    /// Evicts expired entries from the cache.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the cache mutex is poisoned.
     pub fn evict_expired(&self) {
         let now = Instant::now();
         let mut cache = self.cache.lock().unwrap();

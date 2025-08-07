@@ -17,6 +17,9 @@ pub enum A2aError {
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
 
+    #[error("Auth error: {0}")]
+    Auth(String),
+
     #[error("Invalid endpoint: {0}")]
     InvalidEndpoint(String),
 
@@ -84,6 +87,7 @@ impl A2aError {
             Self::Timeout(_) => crate::transport::error_codes::TIMEOUT_ERROR,
             Self::Tls(_) => crate::transport::error_codes::TLS_ERROR,
             Self::AuthenticationFailed(_) => crate::transport::error_codes::AUTHENTICATION_ERROR,
+            Self::Auth(_) => crate::transport::error_codes::AUTHENTICATION_ERROR,
             Self::InvalidEndpoint(_) => crate::transport::error_codes::INVALID_REQUEST,
             Self::Protocol(_) => crate::transport::error_codes::INVALID_REQUEST,
             Self::Serialization(_) => crate::transport::error_codes::PARSE_ERROR,

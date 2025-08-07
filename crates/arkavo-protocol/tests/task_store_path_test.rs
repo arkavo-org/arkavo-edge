@@ -7,7 +7,7 @@ async fn test_task_store_creates_parent_directory() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let test_dir = format!("target/test_task_store_dir_{}", timestamp);
+    let test_dir = format!("target/test_task_store_dir_{timestamp}");
     let db_path = std::path::PathBuf::from(&test_dir)
         .join(".arkavo")
         .join("test_tasks.db");

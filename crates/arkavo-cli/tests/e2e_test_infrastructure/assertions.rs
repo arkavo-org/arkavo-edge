@@ -23,12 +23,12 @@ impl fmt::Display for WaitError {
                 elapsed,
                 last_state,
             } => {
-                write!(f, "Timeout after {:?}. Last state: {}", elapsed, last_state)
+                write!(f, "Timeout after {elapsed:?}. Last state: {last_state}")
             }
             WaitError::WrongState { expected, actual } => {
-                write!(f, "Wrong state. Expected: {}, Actual: {}", expected, actual)
+                write!(f, "Wrong state. Expected: {expected}, Actual: {actual}")
             }
-            WaitError::NetworkError(e) => write!(f, "Network error: {}", e),
+            WaitError::NetworkError(e) => write!(f, "Network error: {e}"),
         }
     }
 }
@@ -50,7 +50,7 @@ pub async fn wait_for_ready(url: &str, timeout: Duration) -> Result<(), WaitErro
                 last_error = format!("HTTP {}", response.status());
             }
             Err(e) => {
-                last_error = format!("Connection error: {}", e);
+                last_error = format!("Connection error: {e}");
             }
         }
 
@@ -81,7 +81,7 @@ where
     while start.elapsed() < timeout {
         match condition().await {
             Ok(true) => return Ok(()),
-            Ok(false) => last_state = format!("{} not satisfied", description),
+            Ok(false) => last_state = format!("{description} not satisfied"),
             Err(e) => last_state = e,
         }
 

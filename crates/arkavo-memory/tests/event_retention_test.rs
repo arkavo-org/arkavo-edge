@@ -34,7 +34,7 @@ async fn test_event_retention_policy() {
             agent_id.clone(),
             EventPayload::ReasoningStep {
                 step_type: "test".to_string(),
-                description: format!("Old event {}", i),
+                description: format!("Old event {i}"),
                 metadata: None,
             },
         );
@@ -64,7 +64,7 @@ async fn test_event_retention_policy() {
             agent_id.clone(),
             EventPayload::ReasoningStep {
                 step_type: "test".to_string(),
-                description: format!("Recent event {}", i),
+                description: format!("Recent event {i}"),
                 metadata: None,
             },
         );
@@ -154,7 +154,7 @@ async fn test_max_events_per_session() {
             agent_id.clone(),
             EventPayload::ReasoningStep {
                 step_type: "test".to_string(),
-                description: format!("Event {}", i),
+                description: format!("Event {i}"),
                 metadata: None,
             },
         );
