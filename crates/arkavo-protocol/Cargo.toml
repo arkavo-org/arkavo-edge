@@ -21,6 +21,12 @@ jsonrpsee = { workspace = true }
 # Networking with rustls
 reqwest = { workspace = true, features = ["stream"] }
 
+# WebSocket with TLS support
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-pemfile = { version = "2.0" }
+webpki-roots = { version = "0.26" }
+
 # Server dependencies
 governor = { version = "0.6", features = ["std", "jitter"] }
 dashmap = { version = "5.5" }

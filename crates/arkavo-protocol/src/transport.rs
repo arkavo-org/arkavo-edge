@@ -90,8 +90,9 @@ impl Default for TransportConfig {
 pub struct TlsConfig {
     pub verify_cert: bool,
     pub require_tls: bool,
-    pub client_cert: Option<String>,
-    pub client_key: Option<String>,
+    pub client_cert_path: Option<String>,
+    pub client_key_path: Option<String>,
+    pub ca_cert_path: Option<String>,
 }
 
 impl Default for TlsConfig {
@@ -99,8 +100,9 @@ impl Default for TlsConfig {
         Self {
             verify_cert: true,
             require_tls: true,
-            client_cert: None,
-            client_key: None,
+            client_cert_path: None,
+            client_key_path: None,
+            ca_cert_path: None,
         }
     }
 }
