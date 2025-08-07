@@ -27,7 +27,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.25.2"
+version = "0.25.3"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -85,12 +85,33 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = 3
+# Optimize for smaller, faster binaries in production
+panic = "abort"
+debug = 1
 
-# Debug build optimization for speed
 [profile.dev]
 opt-level = 0
 debug = true
 split-debuginfo = "unpacked"
+# Faster incremental compiles and safer dev runtime checks
+incremental = true
+debug-assertions = true
+overflow-checks = true
+
+# Speed up compiling build scripts and proc-macro deps in dev
+[profile.dev.build-override]
+opt-level = 0
+debug = false
+codegen-units = 16
+incremental = true
+
+# Make tests run faster without full release optimizations
+[profile.test]
+opt-level = 1
+debug = 2
+debug-assertions = true
+overflow-checks = true
+incremental = true
 
 [workspace.lints.rust]
 unreachable_pub = "warn"

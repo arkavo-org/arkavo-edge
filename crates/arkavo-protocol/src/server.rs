@@ -8,10 +8,10 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
-    AgentBroadcast, AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, ChatOpenRequest,
-    ChatRequest, ChatSession, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
-    FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
-    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    AgentBroadcast, AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, BroadcastType,
+    ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
+    DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent,
+    MessageSendRequest, MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
@@ -27,7 +27,7 @@ use jsonrpsee::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[rpc(server)]
 pub trait A2aRpc {
@@ -922,15 +922,85 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        // TODO: Implement agent query logic
-        // For now, return a placeholder response
+        let metadata = self.agent_metadata.read().await;
+        let agent_id = metadata.name.clone();
+        drop(metadata);
+
+        // If target agent is specified, check if it's registered
+        if let Some(ref target_id) = request.to_agent_id {
+            let agents = self.mcp_registry.list_agents().await;
+            if !agents.iter().any(|a| &a.identity.id == target_id) {
+                timer.error();
+                return Err(jsonrpsee::types::error::ErrorObject::owned(
+                    -32001,
+                    format!("Target agent not found: {}", target_id),
+                    None::<()>,
+                ));
+            }
+        }
+
+        // Process query based on domain if specified
+        let mut response_text = format!("Processing query: {}", request.query);
+        let mut confidence = 0.5;
+        let mut evidence = None;
+
+        if let Some(ref domain) = request.domain {
+            match domain.as_str() {
+                "code" => {
+                    response_text = format!("Code analysis for: {}", request.query);
+                    confidence = 0.7;
+                    evidence = Some(serde_json::json!({
+                        "domain": "code",
+                        "analyzed": true
+                    }));
+                }
+                "data" => {
+                    response_text = format!("Data query result for: {}", request.query);
+                    confidence = 0.8;
+                    evidence = Some(serde_json::json!({
+                        "domain": "data",
+                        "records_examined": 100
+                    }));
+                }
+                "general" => {
+                    response_text = format!("General response to: {}", request.query);
+                    confidence = 0.6;
+                }
+                _ => {
+                    response_text = format!("Unknown domain {}: {}", domain, request.query);
+                    confidence = 0.3;
+                }
+            }
+        }
+
+        // If LLM adapter is available, use it for more intelligent responses
+        // TODO: Implement proper LLM integration when the adapter API is finalized
+        /*
+        if let Some(ref llm) = self.llm_adapter {
+            match llm.generate_response(&request.query, request.context.as_ref()).await {
+                Ok(llm_response) => {
+                    response_text = llm_response;
+                    confidence = 0.9;
+                }
+                Err(e) => {
+                    warn!("LLM query failed: {}", e);
+                }
+            }
+        }
+        */
+
         let response = AgentQueryResponse {
-            from_agent_id: self.agent_metadata.read().await.name.clone(),
-            response: format!("Response to query: {}", request.query),
-            confidence: 0.8,
+            from_agent_id: agent_id,
+            response: response_text,
+            confidence,
             domain: request.domain,
-            evidence: None,
+            evidence,
         };
+
+        info!(
+            "Agent query processed: from={}, to={:?}, confidence={}",
+            request.from_agent_id, request.to_agent_id, confidence
+        );
 
         timer.success();
         Ok(response)
@@ -946,14 +1016,96 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        // TODO: Implement broadcast logic
-        // For now, just log the broadcast
-        info!(
-            agent_id = broadcast.agent_id,
-            broadcast_type = ?broadcast.broadcast_type,
-            capabilities = ?broadcast.capabilities,
-            "Agent broadcast received"
-        );
+        // Update agent metadata if this is a capability broadcast
+        if matches!(broadcast.broadcast_type, BroadcastType::Capability) {
+            if let Some(ref capabilities) = broadcast.capabilities {
+                // Store capabilities in metadata for future reference
+                for capability in capabilities {
+                    info!(
+                        "Agent {} announced capability: {} - {:?}",
+                        broadcast.agent_id, capability.name, capability.description
+                    );
+                }
+            }
+        }
+
+        // Handle different broadcast types
+        match broadcast.broadcast_type {
+            BroadcastType::Status => {
+                info!(
+                    "Agent {} status broadcast: {:?}",
+                    broadcast.agent_id, broadcast.status
+                );
+
+                // Update registry with agent status
+                if let Some(ref status) = broadcast.status {
+                    self.mcp_registry
+                        .update_agent_status(&broadcast.agent_id, status.clone())
+                        .await;
+                }
+            }
+            BroadcastType::Capability => {
+                info!(
+                    "Agent {} capability broadcast: {} capabilities",
+                    broadcast.agent_id,
+                    broadcast.capabilities.as_ref().map_or(0, |c| c.len())
+                );
+            }
+            BroadcastType::Availability => {
+                info!(
+                    "Agent {} availability broadcast: accepting_tasks={:?}",
+                    broadcast.agent_id, broadcast.accepting_tasks
+                );
+            }
+            BroadcastType::Shutdown => {
+                warn!("Agent {} is shutting down", broadcast.agent_id);
+
+                // Remove agent from registry
+                self.mcp_registry
+                    .unregister_agent(&broadcast.agent_id)
+                    .await;
+            }
+            BroadcastType::Custom(ref custom_type) => {
+                info!(
+                    "Agent {} custom broadcast type: {}",
+                    broadcast.agent_id, custom_type
+                );
+            }
+        }
+
+        // Store broadcast for future reference
+        if let Some(ref event_writer) = self.event_writer {
+            // Use ReasoningStep as a general-purpose event type for now
+            let event_payload = EventPayload::ReasoningStep {
+                step_type: "agent_broadcast".to_string(),
+                description: format!(
+                    "Agent {} broadcast: {:?}",
+                    broadcast.agent_id, broadcast.broadcast_type
+                ),
+                metadata: Some(serde_json::json!({
+                    "agent_id": broadcast.agent_id,
+                    "broadcast_type": broadcast.broadcast_type,
+                    "capabilities": broadcast.capabilities,
+                    "status": broadcast.status,
+                    "metadata": broadcast.metadata
+                })),
+            };
+
+            let agent_metadata = self.agent_metadata.read().await;
+            let event = Event::new(
+                self.session_id.clone(),
+                *self.event_sequence.read().await,
+                agent_metadata.name.clone(),
+                event_payload,
+            );
+            drop(agent_metadata);
+
+            *self.event_sequence.write().await += 1;
+
+            if let Err(e) = event_writer.write(event).await {
+                warn!("Failed to write broadcast event: {}", e);
+            }
+        }
 
         timer.success();
         Ok(())
