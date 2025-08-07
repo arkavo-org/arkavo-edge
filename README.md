@@ -43,3 +43,17 @@ Arkavo Edge now supports Kimi (Moonshot AI) models including the 128k context wi
 - Add `MOONSHOT_API_KEY: sk-your-api-key` to the agent configuration in AGENTS.md
 - API keys are securely disseminated from the UI orchestrator to agents
 - Supports 8k, 32k, and 128k context models
+
+### OpenTDF Authorization
+
+Arkavo Edge integrates with [OpenTDF](https://opentdf.io) platform for entitlement-based access control:
+- **Fine-grained permissions:** Control MCP tool execution with attribute-based policies
+- **JWT-based authentication:** Secure token validation via Entity Resolution Service v2
+- **Connect protocol support:** Uses OpenTDF Authorization v2 APIs with efficient HTTP/JSON
+- **Smart caching:** Reduces latency with TTL-aware decision caching
+- **Fail-closed security:** Denies access by default with safe diagnostic tool allowlist
+
+Configure with environment variables:
+- `OPENTDF_BASE_URL`: Platform endpoint (default: https://platform.opentdf.io)
+- `OIDC_ISSUER`: Token issuer for validation
+- `AUD`: Expected audience claim

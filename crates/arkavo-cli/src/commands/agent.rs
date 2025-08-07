@@ -485,15 +485,26 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                     );
                 }
                 Err(e) => {
-                    // Telemetry: MCP server failed to start
+                    // Telemetry: MCP server failed to start (non-fatal)
                     println!(
-                        "[ERROR] mcp.server.start_failed name={} command={} error=\"{}\"",
+                        "[WARN] mcp.server.start_failed name={} command={} error=\"{}\"",
                         mcp_config.name, command, e
                     );
                     eprintln!(
-                        "Failed to initialize MCP client for {}: {}",
-                        mcp_config.name, e
+                        "Warning: MCP server '{}' not available ({})",
+                        mcp_config.name, command
                     );
+                    eprintln!("  Agent will continue with reduced capabilities.");
+                    if command == "mcp-filesystem" || command == "mcp-git" {
+                        eprintln!(
+                            "  To install: npm install -g @modelcontextprotocol/server-{}",
+                            if command == "mcp-filesystem" {
+                                "filesystem"
+                            } else {
+                                "git"
+                            }
+                        );
+                    }
                 }
             }
         } else if let Some(url) = &mcp_config.url {

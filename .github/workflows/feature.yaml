@@ -171,7 +171,7 @@ jobs:
       
       - name: Test arkavo-kimi crate
         run: |
-          # Test the arkavo-kimi crate directly
+          # Test the arkavo-kimi crate directly (14 tests, should be fast)
           cargo test -p arkavo-kimi --all-targets
       
       - name: Test arkavo-llm with kimi feature
@@ -179,23 +179,24 @@ jobs:
           # Test arkavo-llm with kimi feature enabled (no live API calls)
           cargo test -p arkavo-llm --lib --no-default-features --features kimi
       
-      - name: Check feature flag isolation
+      - name: Check kimi dependencies
         run: |
-          # Verify that kimi feature doesn't pull in heavy dependencies
-          # Build with just kimi feature and check binary size
-          cargo build -p arkavo --no-default-features --features kimi --release
-          SIZE=$(stat -c%s target/release/arkavo || stat -f%z target/release/arkavo)
-          echo "Binary size with kimi feature: $SIZE bytes"
-          # Build without kimi feature
-          cargo clean
-          cargo build -p arkavo --no-default-features --release
-          BASE_SIZE=$(stat -c%s target/release/arkavo || stat -f%z target/release/arkavo)
-          echo "Base binary size: $BASE_SIZE bytes"
-          DIFF=$((SIZE - BASE_SIZE))
-          echo "Kimi feature adds: $DIFF bytes"
-          # Fail if kimi adds more than 5MB
-          if [ $DIFF -gt 5242880 ]; then
-            echo "ERROR: Kimi feature adds more than 5MB to binary size!"
+          # Quick check that kimi feature doesn't add unexpected dependencies
+          # Use cargo tree to analyze dependencies instead of building twice
+          echo "=== Dependencies without kimi feature ==="
+          cargo tree -p arkavo --no-default-features --edges normal --prefix none | sort > /tmp/deps-base.txt
+          echo "=== Dependencies with kimi feature ==="
+          cargo tree -p arkavo --no-default-features --features kimi --edges normal --prefix none | sort > /tmp/deps-kimi.txt
+          echo "=== New dependencies added by kimi feature ==="
+          comm -13 /tmp/deps-base.txt /tmp/deps-kimi.txt || true
+          
+          # Count new dependencies
+          NEW_DEPS=$(comm -13 /tmp/deps-base.txt /tmp/deps-kimi.txt | wc -l)
+          echo "Kimi feature adds $NEW_DEPS new dependencies"
+          
+          # Fail if kimi adds too many dependencies (more than 20)
+          if [ $NEW_DEPS -gt 20 ]; then
+            echo "ERROR: Kimi feature adds too many dependencies ($NEW_DEPS > 20)!"
             exit 1
           fi
 

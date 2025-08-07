@@ -32,6 +32,8 @@ sha256 = "9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0"
 size_gb = 0.64
 context_length = 2048
 license = "apache-2.0"
+base_repo_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tokenizer_type = "json"
 
 [[models]]
 name = "tinyllama-1b-chat-q2"
@@ -42,6 +44,8 @@ sha256 = "030a469a63576d59f601ef5608846b7718eaa884dd820e9aa7493efec1788afa"
 size_gb = 0.43
 context_length = 2048
 license = "apache-2.0"
+base_repo_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tokenizer_type = "json"
 
 [[models]]
 name = "tinyllama-1b-chat-q3"
@@ -52,3 +56,5 @@ sha256 = "ec461c4d2b60896152bca3978aa49cd70edad7298715e4222e12af1eefea2125"
 size_gb = 0.54
 context_length = 2048
 license = "apache-2.0"
+base_repo_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tokenizer_type = "json"
