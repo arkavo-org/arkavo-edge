@@ -10,7 +10,7 @@ pub struct TestHttpClient {
 }
 
 impl TestHttpClient {
-    pub fn new(base_url: &str) -> Self {
+    pub(crate) fn new(base_url: &str) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -22,7 +22,7 @@ impl TestHttpClient {
         }
     }
 
-    pub async fn post<T: Serialize>(
+    pub(crate) async fn post<T: Serialize>(
         &self,
         path: &str,
         body: &T,
@@ -31,7 +31,7 @@ impl TestHttpClient {
         self.client.post(&url).json(body).send().await
     }
 
-    pub async fn get(&self, path: &str) -> Result<Response, reqwest::Error> {
+    pub(crate) async fn get(&self, path: &str) -> Result<Response, reqwest::Error> {
         let url = format!("{}{}", self.base_url, path);
         self.client.get(&url).send().await
     }
@@ -42,12 +42,12 @@ pub struct TestWebSocketClient {
 }
 
 impl TestWebSocketClient {
-    pub async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let (ws_stream, _) = connect_async(url).await?;
         Ok(Self { ws_stream })
     }
 
-    pub async fn send_json<T: Serialize>(
+    pub(crate) async fn send_json<T: Serialize>(
         &mut self,
         data: &T,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -56,7 +56,7 @@ impl TestWebSocketClient {
         Ok(())
     }
 
-    pub async fn receive_json<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn receive_json<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> Result<T, Box<dyn std::error::Error>> {
         while let Some(msg) = self.ws_stream.next().await {
@@ -73,7 +73,7 @@ impl TestWebSocketClient {
         Err("No message received".into())
     }
 
-    pub async fn close(mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn close(mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.ws_stream.close(None).await?;
         Ok(())
     }

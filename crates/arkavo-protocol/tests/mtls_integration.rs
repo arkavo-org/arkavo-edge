@@ -30,12 +30,10 @@ fn test_certs_dir() -> PathBuf {
             .output()
             .expect("Failed to generate test certificates");
 
-        if !output.status.success() {
-            panic!(
+        assert!(output.status.success(), 
                 "Failed to generate test certificates: {}",
                 String::from_utf8_lossy(&output.stderr)
-            );
-        }
+            )
     }
 
     dir
@@ -58,7 +56,7 @@ impl TestApiServer for TestServer {
         &self,
         value: String,
     ) -> Result<String, jsonrpsee::types::ErrorObjectOwned> {
-        Ok(format!("Echo: {}", value))
+        Ok(format!("Echo: {value}"))
     }
 }
 
@@ -94,7 +92,7 @@ async fn test_http_mtls_with_valid_client_cert() {
     sleep(Duration::from_millis(100)).await;
 
     let endpoint = A2aEndpoint {
-        url: format!("http://{}", addr),
+        url: format!("http://{addr}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -157,7 +155,7 @@ async fn test_http_without_client_cert() {
     sleep(Duration::from_millis(100)).await;
 
     let endpoint = A2aEndpoint {
-        url: format!("http://{}", addr),
+        url: format!("http://{addr}"),
         agent_id: "test-agent".to_string(),
         public_key: None,
     };
@@ -221,7 +219,7 @@ async fn test_invalid_cert_paths() {
     };
 
     // HTTP transport should fail to create with invalid paths
-    let result = HttpTransport::new(config.clone());
+    let result = HttpTransport::new(config);
     assert!(result.is_err());
     if let Err(err) = result {
         match err {

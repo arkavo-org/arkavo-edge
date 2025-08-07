@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -16,13 +16,13 @@ pub struct TestComponent {
 }
 
 impl TestComponent {
-    pub async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn kill(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut process = self.process.lock().await;
         process.kill()?;
         Ok(())
     }
 
-    pub async fn is_running(&self) -> bool {
+    pub(crate) async fn is_running(&self) -> bool {
         let mut process = self.process.lock().await;
         match process.try_wait() {
             Ok(None) => true,
@@ -53,8 +53,8 @@ pub async fn spawn_component(
 ) -> Result<TestComponent, Box<dyn std::error::Error>> {
     let log_prefix = format!("[{}]", name.to_uppercase());
 
-    let stdout_path = test_dir.path().join(format!("{}.stdout.log", name));
-    let stderr_path = test_dir.path().join(format!("{}.stderr.log", name));
+    let stdout_path = test_dir.path().join(format!("{name}.stdout.log"));
+    let stderr_path = test_dir.path().join(format!("{name}.stderr.log"));
 
     let stdout_file = File::create(&stdout_path)?;
     let stderr_file = File::create(&stderr_path)?;
@@ -69,7 +69,7 @@ pub async fn spawn_component(
     let arkavo_path = workspace_root.join("target").join("debug").join("arkavo");
 
     if !arkavo_path.exists() {
-        return Err(format!("arkavo binary not found at: {:?}", arkavo_path).into());
+        return Err(format!("arkavo binary not found at: {arkavo_path:?}").into());
     }
 
     println!(
@@ -83,7 +83,7 @@ pub async fn spawn_component(
     cmd.args(args);
 
     // Add --prompt flag after the command to prevent Terminal.app relaunch on macOS
-    if cfg!(target_os = "macos") && !args.iter().any(|&arg| arg == "serve") {
+    if cfg!(target_os = "macos") && !args.contains(&"serve") {
         cmd.arg("--prompt");
     }
 
@@ -95,7 +95,7 @@ pub async fn spawn_component(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", name, e))?;
+        .map_err(|e| format!("Failed to spawn {name}: {e}"))?;
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -105,7 +105,7 @@ pub async fn spawn_component(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line) = line {
-                println!("{} {}", log_prefix_clone, line);
+                println!("{log_prefix_clone} {line}");
             }
         }
     });
@@ -115,7 +115,7 @@ pub async fn spawn_component(
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(line) = line {
-                eprintln!("{} {}", log_prefix_clone, line);
+                eprintln!("{log_prefix_clone} {line}");
             }
         }
     });

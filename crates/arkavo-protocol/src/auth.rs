@@ -62,7 +62,7 @@ impl JwtAuthBackend {
 
         Ok(Self {
             decoding_key: DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
-                .map_err(|e| A2aError::Auth(format!("Invalid RSA public key: {}", e)))?,
+                .map_err(|e| A2aError::Auth(format!("Invalid RSA public key: {e}")))?,
             validation,
             required_audience: None,
             required_issuer: None,
@@ -88,7 +88,7 @@ impl AuthBackend for JwtAuthBackend {
         let token_data =
             decode::<JwtClaims>(token, &self.decoding_key, &self.validation).map_err(|e| {
                 warn!("JWT validation failed: {}", e);
-                A2aError::Auth(format!("Invalid JWT: {}", e))
+                A2aError::Auth(format!("Invalid JWT: {e}"))
             })?;
 
         let claims = token_data.claims;

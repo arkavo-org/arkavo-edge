@@ -1,3 +1,8 @@
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::significant_drop_in_scrutinee)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::nursery)]
+
 pub mod ai;
 pub mod bridge;
 pub mod execution;

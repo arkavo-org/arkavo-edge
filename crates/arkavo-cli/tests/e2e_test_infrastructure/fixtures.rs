@@ -11,7 +11,7 @@ pub struct TestEnvironment {
 }
 
 impl TestEnvironment {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
         let ui_port = get_free_port()?;
         let config_path = temp_dir.path().join("AGENTS.md");
@@ -28,14 +28,14 @@ impl TestEnvironment {
         })
     }
 
-    pub fn with_agents(mut self, count: usize) -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn with_agents(mut self, count: usize) -> Result<Self, Box<dyn std::error::Error>> {
         for _ in 0..count {
             self.agent_ports.push(get_free_port()?);
         }
         Ok(self)
     }
 
-    pub fn create_agent_config(
+    pub(crate) fn create_agent_config(
         &self,
         agent_configs: &[AgentConfig],
     ) -> Result<(), Box<dyn std::error::Error>> {

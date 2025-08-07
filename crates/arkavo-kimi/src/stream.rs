@@ -226,11 +226,9 @@ mod tests {
     #[test]
     fn test_parse_interleaved_done() {
         // Test parsing when [DONE] appears in the middle of other data
-        let lines = vec![
-            r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#,
+        let lines = [r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#,
             "data: [DONE]",
-            r#"data: {"id":"2","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{"index":0,"delta":{"content":"World"},"finish_reason":null}]}"#,
-        ];
+            r#"data: {"id":"2","object":"chat.completion.chunk","created":1234567890,"model":"moonshot-v1-8k","choices":[{"index":0,"delta":{"content":"World"},"finish_reason":null}]}"#];
 
         let results: Vec<_> = lines.iter().map(|line| parse_sse_line(line)).collect();
 
@@ -253,8 +251,7 @@ mod tests {
             let result = parse_sse_line(line);
             assert!(
                 matches!(result, Some(Err(KimiError::Json(_)))),
-                "Failed for case: {}",
-                desc
+                "Failed for case: {desc}"
             );
         }
     }

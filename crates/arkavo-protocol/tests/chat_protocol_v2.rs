@@ -1,11 +1,9 @@
-use arkavo_llm::LlmClientAdapter;
 use arkavo_protocol::auth::{AuthBackend, JwtAuthBackend, SessionAuth};
 use arkavo_protocol::chat_session::ChatSessionManager;
-use arkavo_protocol::types::{ChatOpenRequest, ClientMetrics, MetricsAck};
+use arkavo_protocol::types::{ClientMetrics, MetricsAck};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::time::{Duration, sleep};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TestClaims {
@@ -307,7 +305,7 @@ async fn test_concurrent_sessions() {
         let manager_clone = manager.clone();
         let handle = tokio::spawn(async move {
             let auth = SessionAuth {
-                sub: format!("user_{}", i),
+                sub: format!("user_{i}"),
                 scopes: vec!["chat".to_string()],
                 exp: None,
                 metadata: None,

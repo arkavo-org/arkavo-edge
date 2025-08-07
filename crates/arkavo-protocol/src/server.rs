@@ -164,7 +164,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 sequence,
                 agent_metadata.name.clone(),
                 EventPayload::ToolCall {
-                    tool_name: format!("task_{}", _task_type),
+                    tool_name: format!("task_{_task_type}"),
                     parameters: _payload.clone().unwrap_or(serde_json::Value::Null),
                     tool_call_id: Some(uuid::Uuid::new_v4().to_string()),
                 },
@@ -658,7 +658,7 @@ impl A2aRpcServer for A2aRpcImpl {
                     timer.error();
                     return Err(ErrorObjectOwned::owned(
                         -32004,
-                        format!("Authentication failed: {}", e),
+                        format!("Authentication failed: {e}"),
                         None::<()>,
                     ));
                 }

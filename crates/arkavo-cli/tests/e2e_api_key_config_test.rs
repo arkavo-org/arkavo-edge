@@ -1,6 +1,5 @@
 mod e2e_test_infrastructure;
 
-use e2e_test_infrastructure::*;
 use std::collections::HashMap;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

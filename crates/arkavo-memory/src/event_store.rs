@@ -315,7 +315,7 @@ pub struct StoredEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[tokio::test]
     async fn test_event_store_basic() {

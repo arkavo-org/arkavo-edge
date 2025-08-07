@@ -369,6 +369,7 @@ impl ChatSessionManager {
 
     /// Handle a chat session with back-pressure management
     #[instrument(skip(message_rx, delta_tx, llm_adapter, sessions, session_metrics, metrics_collector, inflight_deltas, backpressure_notify), fields(session.id = %session_id))]
+    #[allow(clippy::too_many_arguments)]
     async fn handle_session(
         session_id: String,
         mut message_rx: mpsc::Receiver<UserMessage>,
@@ -437,7 +438,7 @@ impl ChatSessionManager {
 
                                                 // Determine if this is the first or last delta for this tool call
                                                 let is_first = !name.is_empty();
-                                                let is_complete = args_str.contains("}"); // Simple heuristic
+                                                let is_complete = args_str.contains('}'); // Simple heuristic
 
                                                 MessageDelta {
                                                     session_id: session_id.clone(),

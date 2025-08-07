@@ -169,7 +169,7 @@ async fn test_self_healing_agent() {
             EventPayload::ToolCall {
                 tool_name: "api_call".to_string(),
                 parameters: serde_json::json!({"endpoint": "/data"}),
-                tool_call_id: Some(format!("call-{}", i)),
+                tool_call_id: Some(format!("call-{i}")),
             },
         ));
     }

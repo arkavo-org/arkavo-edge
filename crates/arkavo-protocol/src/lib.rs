@@ -1,3 +1,6 @@
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::significant_drop_in_scrutinee)]
+
 pub mod a2a;
 pub mod auth;
 pub mod chat_session;

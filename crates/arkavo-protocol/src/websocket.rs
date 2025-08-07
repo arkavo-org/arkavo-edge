@@ -47,7 +47,7 @@ impl WebSocketTransport {
         }
     }
 
-    async fn build_tls_connector(&self) -> Result<Connector> {
+    fn build_tls_connector(&self) -> Result<Connector> {
         // Start with root certificates
         let mut root_store = RootCertStore::empty();
 
@@ -120,7 +120,7 @@ impl WebSocketTransport {
 
     async fn connect_websocket(&self, url: &str) -> Result<WsStream> {
         let connector = if url.starts_with("wss://") {
-            self.build_tls_connector().await?
+            self.build_tls_connector()?
         } else {
             Connector::Plain
         };

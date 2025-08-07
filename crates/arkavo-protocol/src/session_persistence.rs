@@ -46,7 +46,7 @@ impl SqliteSessionPersistence {
         let db_url = format!("sqlite://{}", db_path.display());
         let pool = SqlitePool::connect(&db_url)
             .await
-            .map_err(|e| A2aError::Internal(format!("Failed to connect to database: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to connect to database: {e}")))?;
 
         // Create tables if they don't exist
         sqlx::query(
@@ -62,7 +62,7 @@ impl SqliteSessionPersistence {
         )
         .execute(&pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to create sessions table: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to create sessions table: {e}")))?;
 
         sqlx::query(
             r#"
@@ -79,7 +79,7 @@ impl SqliteSessionPersistence {
         )
         .execute(&pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to create messages table: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to create messages table: {e}")))?;
 
         // Create index for session_id in messages table
         sqlx::query(
@@ -89,7 +89,7 @@ impl SqliteSessionPersistence {
         )
         .execute(&pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to create index: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to create index: {e}")))?;
 
         info!(
             "SQLite session persistence initialized at: {}",
@@ -106,12 +106,12 @@ impl SessionPersistence for SqliteSessionPersistence {
         let auth_json = session
             .auth
             .as_ref()
-            .map(|auth| serde_json::to_string(auth))
+            .map(serde_json::to_string)
             .transpose()
-            .map_err(|e| A2aError::Internal(format!("Failed to serialize auth: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to serialize auth: {e}")))?;
 
         let context_json = serde_json::to_string(&session.conversation_context)
-            .map_err(|e| A2aError::Internal(format!("Failed to serialize context: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to serialize context: {e}")))?;
 
         sqlx::query(
             r#"
@@ -130,7 +130,7 @@ impl SessionPersistence for SqliteSessionPersistence {
         .bind(context_json)
         .execute(&self.pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to save session: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to save session: {e}")))?;
 
         Ok(())
     }
@@ -146,7 +146,7 @@ impl SessionPersistence for SqliteSessionPersistence {
         .bind(session_id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to load session: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to load session: {e}")))?;
 
         if let Some(row) = row {
             let auth_data: Option<String> = row.try_get("auth_data").ok();
@@ -189,7 +189,7 @@ impl SessionPersistence for SqliteSessionPersistence {
             .bind(session_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| A2aError::Internal(format!("Failed to delete session: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to delete session: {e}")))?;
 
         Ok(())
     }
@@ -208,7 +208,7 @@ impl SessionPersistence for SqliteSessionPersistence {
         .bind(message.timestamp.to_rfc3339())
         .execute(&self.pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to save message: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to save message: {e}")))?;
 
         Ok(())
     }
@@ -225,7 +225,7 @@ impl SessionPersistence for SqliteSessionPersistence {
         .bind(session_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| A2aError::Internal(format!("Failed to load messages: {}", e)))?;
+        .map_err(|e| A2aError::Internal(format!("Failed to load messages: {e}")))?;
 
         let messages = rows
             .into_iter()
@@ -260,7 +260,7 @@ impl SessionPersistence for SqliteSessionPersistence {
             .bind(older_than.to_rfc3339())
             .execute(&self.pool)
             .await
-            .map_err(|e| A2aError::Internal(format!("Failed to cleanup sessions: {}", e)))?;
+            .map_err(|e| A2aError::Internal(format!("Failed to cleanup sessions: {e}")))?;
 
         let deleted = result.rows_affected() as usize;
         if deleted > 0 {

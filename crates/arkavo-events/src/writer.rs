@@ -202,7 +202,7 @@ mod tests {
                 "test-agent".to_string(),
                 EventPayload::ReasoningStep {
                     step_type: "test".to_string(),
-                    description: format!("Step {}", i),
+                    description: format!("Step {i}"),
                     metadata: None,
                 },
             );

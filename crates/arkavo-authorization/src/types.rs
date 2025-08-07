@@ -161,7 +161,7 @@ impl McpToolMapping {
             "git_push" => "https://arkavo.net/attr/mcp-tool/value/git.push",
             "device_tap" => "https://arkavo.net/attr/mcp-tool/value/device_management.tap",
             "device_swipe" => "https://arkavo.net/attr/mcp-tool/value/device_management.swipe",
-            _ => &format!("https://arkavo.net/attr/mcp-tool/value/{}", tool_name),
+            _ => &format!("https://arkavo.net/attr/mcp-tool/value/{tool_name}"),
         };
         Resource::new(vec![fqn.to_string()])
     }
