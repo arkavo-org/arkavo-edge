@@ -6,36 +6,38 @@ use arkavo_protocol::transport::{
 use arkavo_protocol::websocket::WebSocketTransport;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::{core::async_trait, proc_macros::rpc};
+use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use tokio::time::{Duration, sleep};
-use std::fs;
 
 fn test_certs_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/certs");
-    
+
     // Create certs directory if it doesn't exist
     fs::create_dir_all(&dir).expect("Failed to create certs directory");
-    
+
     // Check if certificates already exist
     if !dir.join("ca.crt").exists() {
         // Generate test certificates
-        let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("scripts/generate_test_certs.sh");
-        
+        let script_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/generate_test_certs.sh");
+
         let output = Command::new("bash")
             .arg(script_path)
             .current_dir(&dir)
             .output()
             .expect("Failed to generate test certificates");
-            
+
         if !output.status.success() {
-            panic!("Failed to generate test certificates: {}", 
-                String::from_utf8_lossy(&output.stderr));
+            panic!(
+                "Failed to generate test certificates: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
-    
+
     dir
 }
 
