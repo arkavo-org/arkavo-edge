@@ -39,7 +39,7 @@ async fn ci_local_inference_test() -> anyhow::Result<()> {
 
     // Create and initialize provider
     let provider = LocalProvider::new(
-        "tinyllama".to_string(),
+        "tinyllama-1b-chat".to_string(),
         Some(model_path.to_string_lossy().into_owned()),
     )?;
 
