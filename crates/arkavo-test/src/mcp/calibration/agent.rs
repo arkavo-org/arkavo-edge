@@ -126,6 +126,7 @@ impl CalibrationAgentImpl {
             let runtime = tokio::runtime::Runtime::new()
                 .map_err(|e| CalibrationError::InteractionFailed(e.to_string()))?;
 
+            #[allow(clippy::disallowed_methods)]
             let tap_result = runtime.block_on(async {
                 tokio::time::timeout(
                     tokio::time::Duration::from_secs(10),

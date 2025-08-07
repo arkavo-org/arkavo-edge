@@ -476,6 +476,7 @@ impl McpTestServer {
         #[cfg(feature = "memory")]
         {
             let runtime = tokio::runtime::Runtime::new()?;
+            #[allow(clippy::disallowed_methods)]
             runtime.block_on(async {
                 if let Ok(repo_context_tool) = RepositoryContextTool::new().await {
                     tools.insert(

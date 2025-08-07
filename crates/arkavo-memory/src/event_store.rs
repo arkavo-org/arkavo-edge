@@ -315,7 +315,6 @@ pub struct StoredEvent {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[tokio::test]
     async fn test_event_store_basic() {

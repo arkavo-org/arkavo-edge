@@ -30,10 +30,11 @@ fn test_certs_dir() -> PathBuf {
             .output()
             .expect("Failed to generate test certificates");
 
-        assert!(output.status.success(), 
-                "Failed to generate test certificates: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )
+        assert!(
+            output.status.success(),
+            "Failed to generate test certificates: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
     }
 
     dir

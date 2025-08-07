@@ -146,17 +146,15 @@ impl Tool for FileSystemKit {
                 let read_dir = fs::read_dir(&abs_path)
                     .map_err(|e| TestError::Mcp(format!("Failed to read directory: {e}")))?;
 
-                for entry in read_dir {
-                    if let Ok(entry) = entry {
-                        let file_type = entry
-                            .file_type()
-                            .map_err(|e| TestError::Mcp(format!("Failed to get file type: {e}")))?;
+                for entry in read_dir.flatten() {
+                    let file_type = entry
+                        .file_type()
+                        .map_err(|e| TestError::Mcp(format!("Failed to get file type: {e}")))?;
 
-                        entries.push(json!({
-                            "name": entry.file_name().to_string_lossy(),
-                            "type": if file_type.is_dir() { "directory" } else { "file" }
-                        }));
-                    }
+                    entries.push(json!({
+                        "name": entry.file_name().to_string_lossy(),
+                        "type": if file_type.is_dir() { "directory" } else { "file" }
+                    }));
                 }
 
                 Ok(json!({
