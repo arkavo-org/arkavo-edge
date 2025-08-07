@@ -5,7 +5,7 @@ use arkavo_protocol::{
     },
     oauth2::{GrantType, OAuth2Config, OAuth2Provider, TokenRequest},
     push_notifications::{
-        EventType, PushNotification, PushNotificationService, Subscription, SubscriptionFilter,
+        EventType, PushNotificationService, SubscriptionFilter, SubscriptionRequest,
     },
 };
 use tempfile::TempDir;
@@ -147,8 +147,6 @@ async fn test_file_transfer_complete_flow() {
 
 #[tokio::test]
 async fn test_push_notifications_with_filtering() {
-    use arkavo_protocol::push_notifications::{EventData, SubscriptionRequest};
-
     let service = PushNotificationService::new(3); // max_retries = 3
 
     // Create subscriptions with different filters
@@ -171,7 +169,7 @@ async fn test_push_notifications_with_filtering() {
     };
 
     let sub1_resp = service.subscribe(sub_req1).await.unwrap();
-    let sub2_resp = service.subscribe(sub_req2).await.unwrap();
+    let _sub2_resp = service.subscribe(sub_req2).await.unwrap();
 
     // Register channels for clients
     let (tx1, mut rx1) = tokio::sync::mpsc::channel(10);
@@ -187,42 +185,46 @@ async fn test_push_notifications_with_filtering() {
         .unwrap();
 
     // Send task update event
-    let task_event = EventData {
-        event_type: EventType::TaskUpdate,
-        data: serde_json::json!({
-            "task_id": "task123",
-            "status": "completed"
-        }),
-        metadata: None,
-    };
+    let task_payload = serde_json::json!({
+        "task_id": "task123",
+        "status": "completed"
+    });
+    
+    service.publish_event(
+        EventType::TaskUpdate,
+        task_payload,
+        None
+    ).await.unwrap();
 
-    service.publish_event(task_event).await.unwrap();
-
-    // Send agent status event
-    let agent_event = EventData {
-        event_type: EventType::AgentStatus,
-        data: serde_json::json!({
-            "agent_id": "agent1",
-            "status": "online"
-        }),
-        metadata: Some(serde_json::json!({
-            "agent_ids": ["agent1"]
-        })),
-    };
-
-    service.publish_event(agent_event).await.unwrap();
+    // Send agent status event with filter
+    let agent_payload = serde_json::json!({
+        "agent_id": "agent1",
+        "status": "online"
+    });
+    
+    let agent_filter = Some(SubscriptionFilter {
+        agent_ids: Some(vec!["agent1".to_string()]),
+        task_ids: None,
+        metadata_filters: None,
+    });
+    
+    service.publish_event(
+        EventType::AgentStatus,
+        agent_payload,
+        agent_filter
+    ).await.unwrap();
 
     // Allow time for async processing
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Verify client1 received task update
-    if let Ok(msg) = rx1.try_recv() {
-        assert!(msg.contains("task123"));
+    if let Ok(notification) = rx1.try_recv() {
+        assert!(notification.payload.to_string().contains("task123"));
     }
 
     // Verify client2 received agent status
-    if let Ok(msg) = rx2.try_recv() {
-        assert!(msg.contains("agent1"));
+    if let Ok(notification) = rx2.try_recv() {
+        assert!(notification.payload.to_string().contains("agent1"));
     }
 
     // Test unsubscribe
@@ -349,8 +351,6 @@ async fn test_oauth2_token_revocation() {
 
 #[tokio::test]
 async fn test_push_notification_cleanup() {
-    use arkavo_protocol::push_notifications::{EventData, SubscriptionRequest};
-
     let service = PushNotificationService::new(3);
 
     // Add a subscription
@@ -362,16 +362,23 @@ async fn test_push_notification_cleanup() {
 
     let sub_resp = service.subscribe(sub_req).await.unwrap();
 
-    // Publish an event
-    let event = EventData {
-        event_type: EventType::SystemAlert,
-        data: serde_json::json!({
-            "message": "Test alert"
-        }),
-        metadata: None,
-    };
+    // Register a channel
+    let (tx, _rx) = tokio::sync::mpsc::channel(10);
+    service
+        .register_channel("test_client".to_string(), tx)
+        .await
+        .unwrap();
 
-    service.publish_event(event).await.unwrap();
+    // Publish an event
+    let event_payload = serde_json::json!({
+        "message": "Test alert"
+    });
+
+    service.publish_event(
+        EventType::SystemAlert,
+        event_payload,
+        None
+    ).await.unwrap();
 
     // Allow time for processing
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
