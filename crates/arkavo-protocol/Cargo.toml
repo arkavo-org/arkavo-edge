@@ -53,6 +53,9 @@ arkavo-llm = { path = "../arkavo-llm", features = ["kimi"] }
 # Observability
 arkavo-observability = { path = "../arkavo-observability" }
 
+# Events for debugging
+arkavo-events = { path = "../arkavo-events" }
+
 # Schema generation
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 

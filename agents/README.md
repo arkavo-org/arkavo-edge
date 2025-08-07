@@ -67,6 +67,12 @@ The system uses a hybrid orchestrator-mesh architecture:
     - Data analysis
     - Feature engineering
 
+12. **Debug** (port 8353)
+    - Session analysis and replay
+    - Error pattern detection
+    - Performance profiling
+    - Self-healing recommendations
+
 ## Running the System
 
 ### Start All Agents
