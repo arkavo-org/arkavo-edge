@@ -45,17 +45,18 @@ impl SqliteSessionPersistence {
     pub async fn new(db_path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| A2aError::Internal(format!("Failed to create database directory: {e}")))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                A2aError::Internal(format!("Failed to create database directory: {e}"))
+            })?;
         }
-        
+
         // Use SQLite connection string with options for creating the database if it doesn't exist
         let db_url = if db_path.to_string_lossy().contains(":memory:") {
             "sqlite::memory:".to_string()
         } else {
             format!("sqlite://{}?mode=rwc", db_path.display())
         };
-        
+
         let pool = SqlitePool::connect(&db_url)
             .await
             .map_err(|e| A2aError::Internal(format!("Failed to connect to database: {e}")))?;
