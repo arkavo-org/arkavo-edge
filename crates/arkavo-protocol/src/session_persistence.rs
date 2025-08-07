@@ -43,7 +43,19 @@ pub struct SqliteSessionPersistence {
 
 impl SqliteSessionPersistence {
     pub async fn new(db_path: &Path) -> Result<Self> {
-        let db_url = format!("sqlite://{}", db_path.display());
+        // Ensure parent directory exists
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| A2aError::Internal(format!("Failed to create database directory: {e}")))?;
+        }
+        
+        // Use SQLite connection string with options for creating the database if it doesn't exist
+        let db_url = if db_path.to_string_lossy().contains(":memory:") {
+            "sqlite::memory:".to_string()
+        } else {
+            format!("sqlite://{}?mode=rwc", db_path.display())
+        };
+        
         let pool = SqlitePool::connect(&db_url)
             .await
             .map_err(|e| A2aError::Internal(format!("Failed to connect to database: {e}")))?;
@@ -311,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_persistence() {
         let dir = tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("sessions").join("test.db");
 
         let persistence = SqliteSessionPersistence::new(&db_path).await.unwrap();
 
