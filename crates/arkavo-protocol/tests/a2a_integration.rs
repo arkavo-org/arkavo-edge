@@ -78,7 +78,7 @@ async fn test_oauth2_full_flow() {
         .refresh_access_token(refresh_request)
         .await
         .unwrap();
-    assert!(refreshed.access_token != response.access_token);
+    assert_ne!(refreshed.access_token, response.access_token);
 }
 
 #[tokio::test]
@@ -189,30 +189,28 @@ async fn test_push_notifications_with_filtering() {
         "task_id": "task123",
         "status": "completed"
     });
-    
-    service.publish_event(
-        EventType::TaskUpdate,
-        task_payload,
-        None
-    ).await.unwrap();
+
+    service
+        .publish_event(EventType::TaskUpdate, task_payload, None)
+        .await
+        .unwrap();
 
     // Send agent status event with filter
     let agent_payload = serde_json::json!({
         "agent_id": "agent1",
         "status": "online"
     });
-    
+
     let agent_filter = Some(SubscriptionFilter {
         agent_ids: Some(vec!["agent1".to_string()]),
         task_ids: None,
         metadata_filters: None,
     });
-    
-    service.publish_event(
-        EventType::AgentStatus,
-        agent_payload,
-        agent_filter
-    ).await.unwrap();
+
+    service
+        .publish_event(EventType::AgentStatus, agent_payload, agent_filter)
+        .await
+        .unwrap();
 
     // Allow time for async processing
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -374,11 +372,10 @@ async fn test_push_notification_cleanup() {
         "message": "Test alert"
     });
 
-    service.publish_event(
-        EventType::SystemAlert,
-        event_payload,
-        None
-    ).await.unwrap();
+    service
+        .publish_event(EventType::SystemAlert, event_payload, None)
+        .await
+        .unwrap();
 
     // Allow time for processing
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

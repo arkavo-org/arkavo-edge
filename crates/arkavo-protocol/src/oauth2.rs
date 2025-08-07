@@ -158,27 +158,31 @@ impl OAuth2Provider {
             .refresh_token
             .ok_or_else(|| A2aError::Auth("Missing refresh token".to_string()))?;
 
-        let tokens = self.refresh_tokens.read().await;
-        let token_data = tokens
-            .get(&refresh_token)
-            .ok_or_else(|| A2aError::Auth("Invalid refresh token".to_string()))?;
+        // Clone the data we need before dropping the lock
+        let (user_id, client_id, scopes) = {
+            let tokens = self.refresh_tokens.read().await;
+            let token_data = tokens
+                .get(&refresh_token)
+                .ok_or_else(|| A2aError::Auth("Invalid refresh token".to_string()))?;
 
-        if let Some(expires_at) = token_data.expires_at {
-            if expires_at < Utc::now().timestamp() {
-                return Err(A2aError::Auth("Refresh token expired".to_string()));
+            if let Some(expires_at) = token_data.expires_at {
+                if expires_at < Utc::now().timestamp() {
+                    return Err(A2aError::Auth("Refresh token expired".to_string()));
+                }
             }
-        }
 
-        if token_data.client_id != request.client_id {
-            return Err(A2aError::Auth("Client ID mismatch".to_string()));
-        }
+            if token_data.client_id != request.client_id {
+                return Err(A2aError::Auth("Client ID mismatch".to_string()));
+            }
 
-        self.generate_tokens(
-            token_data.user_id.clone(),
-            token_data.client_id.clone(),
-            token_data.scopes.clone(),
-        )
-        .await
+            (
+                token_data.user_id.clone(),
+                token_data.client_id.clone(),
+                token_data.scopes.clone(),
+            )
+        }; // Lock is dropped here
+
+        self.generate_tokens(user_id, client_id, scopes).await
     }
 
     async fn generate_tokens(
