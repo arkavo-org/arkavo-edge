@@ -1,0 +1,5 @@
+# Test certificates - generated at test time
+*.crt
+*.key
+*.pem
+*.csr
