@@ -1,6 +1,6 @@
 use crate::error::{A2aError, Result};
 use async_trait::async_trait;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -117,6 +117,7 @@ impl AuthBackend for NoOpAuthBackend {
     }
 }
 
+#[derive(Default)]
 pub struct MultiAuthBackend {
     backends: Vec<Arc<dyn AuthBackend>>,
 }
@@ -138,9 +139,8 @@ impl MultiAuthBackend {
 impl AuthBackend for MultiAuthBackend {
     async fn validate_token(&self, token: &str) -> Result<SessionAuth> {
         for backend in &self.backends {
-            match backend.validate_token(token).await {
-                Ok(auth) => return Ok(auth),
-                Err(_) => continue,
+            if let Ok(auth) = backend.validate_token(token).await {
+                return Ok(auth);
             }
         }
 

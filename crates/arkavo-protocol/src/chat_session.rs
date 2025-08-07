@@ -1,4 +1,4 @@
-use crate::auth::{AuthBackend, SessionAuth};
+use crate::auth::SessionAuth;
 use crate::config::BufferConfig;
 use crate::error::{A2aError, Result};
 use crate::types::{
@@ -12,7 +12,7 @@ use arkavo_observability::{
     task_tracker::{ObservableTaskTracker, SessionTaskManager},
 };
 use futures::StreamExt;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Notify, RwLock, broadcast, mpsc};
