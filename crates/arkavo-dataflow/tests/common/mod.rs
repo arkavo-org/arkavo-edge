@@ -1,1 +1,1 @@
-pub(crate) mod mock_provider;
+pub mod mock_provider;

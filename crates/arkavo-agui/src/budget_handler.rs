@@ -9,6 +9,12 @@ pub struct BudgetHandler {
     event_tx: Option<mpsc::Sender<AgUiEvent>>,
 }
 
+impl Default for BudgetHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BudgetHandler {
     pub fn new() -> Self {
         Self {

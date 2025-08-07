@@ -251,14 +251,12 @@ impl TuiTestHarness {
         // Spawn thread to read output
         let output_thread = thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if let Ok(mut buffer) = buffer_clone.lock() {
-                        buffer.push(line);
-                        // Keep only last 1000 lines to prevent memory issues
-                        if buffer.len() > 1000 {
-                            buffer.remove(0);
-                        }
+            for line in reader.lines().map_while(|result| result.ok()) {
+                if let Ok(mut buffer) = buffer_clone.lock() {
+                    buffer.push(line);
+                    // Keep only last 1000 lines to prevent memory issues
+                    if buffer.len() > 1000 {
+                        buffer.remove(0);
                     }
                 }
             }

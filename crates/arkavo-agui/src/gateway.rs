@@ -413,7 +413,7 @@ async fn handle_event(
             if let Some(agent_conn) = agent_conns.get(&agent_id) {
                 // Subscribe to chat for this agent
                 match agent_conn
-                    .subscribe_to_chat(agent_id.clone(), tx.clone())
+                    .subscribe_to_chat(agent_id.clone(), tx.clone(), None) // TODO: Pass auth token from connection
                     .await
                 {
                     Ok(sub_handle) => {

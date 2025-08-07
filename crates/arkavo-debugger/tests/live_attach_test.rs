@@ -1,5 +1,5 @@
-use arkavo_debugger::{SessionInfo, SessionManager};
-use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
+use arkavo_debugger::SessionManager;
+use arkavo_events::{Event, EventPayload, EventWriterConfig};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;

@@ -1,4 +1,5 @@
 #![deny(clippy::all)]
+#![allow(clippy::collapsible_if)]
 
 //! # Arkavo Dataflow
 //!

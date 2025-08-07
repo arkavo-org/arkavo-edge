@@ -1,3 +1,4 @@
+use crate::auth::{AuthBackend, NoOpAuthBackend};
 use crate::config::{BufferConfig, ServerConfig};
 use crate::error::{A2aError, Result};
 use crate::mcp_registry::McpRegistry;
@@ -122,6 +123,7 @@ pub struct A2aRpcImpl {
     event_writer: Option<Arc<EventWriter>>,
     session_id: String,
     event_sequence: Arc<tokio::sync::RwLock<u64>>,
+    auth_backend: Arc<dyn AuthBackend>,
 }
 
 #[derive(Default, Clone)]
@@ -162,7 +164,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 sequence,
                 agent_metadata.name.clone(),
                 EventPayload::ToolCall {
-                    tool_name: format!("task_{}", _task_type),
+                    tool_name: format!("task_{_task_type}"),
                     parameters: _payload.clone().unwrap_or(serde_json::Value::Null),
                     tool_call_id: Some(uuid::Uuid::new_v4().to_string()),
                 },
@@ -648,8 +650,25 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        // Create a new chat session
-        let session = self.chat_sessions.create_session().await;
+        // Validate JWT token if provided
+        let auth = if let Some(token) = _request.token {
+            match self.auth_backend.validate_token(&token).await {
+                Ok(auth) => Some(auth),
+                Err(e) => {
+                    timer.error();
+                    return Err(ErrorObjectOwned::owned(
+                        -32004,
+                        format!("Authentication failed: {e}"),
+                        None::<()>,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        // Create a new chat session with authentication
+        let session = self.chat_sessions.create_session(auth).await;
 
         timer.success();
         Ok(session)
@@ -815,11 +834,11 @@ impl A2aRpcServer for A2aRpcImpl {
                                             sequence: 0,
                                             delta: MessageDeltaContent::ToolCall {
                                                 tool_call_id: id,
-                                                delta: serde_json::to_string(&serde_json::json!({
-                                                    "name": name,
-                                                    "arguments": arguments
-                                                }))
-                                                .unwrap_or_default(),
+                                                name: Some(name),
+                                                args_json_fragment: arguments
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_else(|| "{}".to_string()),
+                                                done: false, // Will be set to true on stream end
                                             },
                                             timestamp: stream_delta.timestamp,
                                         },
@@ -1223,6 +1242,7 @@ impl A2aServer {
             event_writer: self.event_writer.read().await.clone(),
             session_id: self.session_id.clone(),
             event_sequence: self.event_sequence.clone(),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
         let handle = server.start(rpc_impl.into_rpc());
 
@@ -1270,6 +1290,7 @@ mod tests {
             event_writer: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
         let result = impl_instance
             .task_request(
@@ -1321,6 +1342,7 @@ mod tests {
             event_writer: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
         let result = impl_instance
             .task_declare(
@@ -1375,6 +1397,7 @@ mod tests {
             event_writer: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -1421,6 +1444,7 @@ mod tests {
             event_writer: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -1464,6 +1488,7 @@ mod tests {
             event_writer: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            auth_backend: Arc::new(NoOpAuthBackend),
         };
 
         // First request should succeed

@@ -1,7 +1,11 @@
 use crate::cache::DecisionCache;
 use crate::config::AuthorizationConfig;
 use crate::error::{AuthorizationError, Result};
-use crate::types::*;
+use crate::types::{
+    Action, CreateEntityChainsFromTokensRequest, CreateEntityChainsFromTokensResponse, Decision,
+    DecisionRequest, EntityIdentifier, GetDecisionBulkRequest, GetDecisionBulkResponse,
+    GetDecisionRequest, GetDecisionResponse, McpToolMapping, Resource,
+};
 use base64::{Engine as _, engine::general_purpose};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
@@ -73,7 +77,7 @@ impl AuthorizationClient {
 
         for tool_name in &tool_names {
             if McpToolMapping::is_safe_diagnostic(tool_name) {
-                results.push((tool_name.to_string(), Decision::Permit));
+                results.push(((*tool_name).to_string(), Decision::Permit));
             } else {
                 tools_to_check.push(*tool_name);
             }
@@ -114,7 +118,7 @@ impl AuthorizationClient {
                 Some(ttl),
             );
 
-            results.push((tool_name.to_string(), decision));
+            results.push(((*tool_name).to_string(), decision));
         }
 
         Ok(results)
@@ -133,7 +137,7 @@ impl AuthorizationClient {
             .http_client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .json(&request)
             .send()
             .await
@@ -147,8 +151,7 @@ impl AuthorizationClient {
             let body = response.text().await.unwrap_or_default();
             error!("Entity resolution failed with status {}: {}", status, body);
             return Err(AuthorizationError::EntityResolutionError(format!(
-                "Status {}: {}",
-                status, body
+                "Status {status}: {body}"
             )));
         }
 
@@ -203,7 +206,7 @@ impl AuthorizationClient {
         Ok(bulk_response)
     }
 
-    async fn make_connect_request<T: serde::Serialize>(
+    async fn make_connect_request<T: serde::Serialize + Sync>(
         &self,
         url: &url::Url,
         body: &T,
@@ -244,8 +247,7 @@ impl AuthorizationClient {
                     let body = resp.text().await.unwrap_or_default();
                     error!("Request failed with status {}: {}", status, body);
                     return Err(AuthorizationError::InvalidResponse(format!(
-                        "Status {}: {}",
-                        status, body
+                        "Status {status}: {body}"
                     )));
                 }
                 Err(e) if retries < self.config.max_retries => {

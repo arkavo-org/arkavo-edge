@@ -36,6 +36,9 @@ crossbeam-queue = "0.3"
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# JWT authentication
+jsonwebtoken = { version = "9.3" }
+
 # Error handling
 anyhow = { workspace = true }
 thiserror = { workspace = true }

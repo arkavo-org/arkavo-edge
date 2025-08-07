@@ -1,6 +1,5 @@
 mod e2e_test_infrastructure;
 
-use e2e_test_infrastructure::*;
 use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -44,8 +43,8 @@ async fn test_kimi_api_direct() -> Result<(), Box<dyn std::error::Error>> {
         .create_chat_completion(messages, None, None, None, None)
         .await?;
 
-    println!("KIMI K2 response: {}", response);
-    assert!(response.contains("4"), "Response should contain '4'");
+    println!("KIMI K2 response: {response}");
+    assert!(response.contains('4'), "Response should contain '4'");
 
     Ok(())
 }
@@ -93,7 +92,7 @@ async fn test_kimi_streaming() -> Result<(), Box<dyn std::error::Error>> {
                 full_response.push_str(&response.content);
             }
             Err(e) => {
-                eprintln!("Stream error: {}", e);
+                eprintln!("Stream error: {e}");
                 break;
             }
         }
@@ -105,7 +104,7 @@ async fn test_kimi_streaming() -> Result<(), Box<dyn std::error::Error>> {
         "Should receive streamed response"
     );
     assert!(
-        full_response.contains("1") && full_response.contains("5"),
+        full_response.contains('1') && full_response.contains('5'),
         "Response should contain numbers 1 through 5"
     );
 
@@ -147,8 +146,7 @@ async fn test_kimi_long_context() -> Result<(), Box<dyn std::error::Error>> {
     let messages = vec![Message {
         role: Role::User,
         content: format!(
-            "Here is a long text:\n{}\n\nHow many times does the word 'test' appear?",
-            long_text
+            "Here is a long text:\n{long_text}\n\nHow many times does the word 'test' appear?"
         ),
         images: None,
     }];
@@ -157,7 +155,7 @@ async fn test_kimi_long_context() -> Result<(), Box<dyn std::error::Error>> {
         .create_chat_completion(messages, None, None, None, None)
         .await?;
 
-    println!("Long context response: {}", response);
+    println!("Long context response: {response}");
 
     // The response should contain "1000" as that's the actual count
     assert!(
