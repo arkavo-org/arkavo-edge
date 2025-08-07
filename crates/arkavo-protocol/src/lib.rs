@@ -1,4 +1,5 @@
 pub mod a2a;
+pub mod auth;
 pub mod chat_session;
 pub mod config;
 pub mod discovery;
@@ -15,6 +16,7 @@ pub mod openrpc;
 pub mod rate_limit;
 pub mod security;
 pub mod server;
+pub mod session_persistence;
 pub mod task_executor;
 pub mod task_store;
 pub mod transport;

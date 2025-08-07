@@ -382,6 +382,33 @@ pub struct ChatOpenRequest {
     /// Optional metadata about the chat session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+
+    /// Optional JWT token for authentication
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
+/// Metrics acknowledgment for back-pressure management
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MetricsAck {
+    /// Session ID this acknowledgment is for
+    pub session_id: String,
+    /// Last sequence number received by the client
+    pub last_seq: u64,
+    /// Optional metrics about client buffer state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_metrics: Option<ClientMetrics>,
+}
+
+/// Client-side metrics for monitoring
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ClientMetrics {
+    /// Number of messages in client buffer
+    pub buffer_size: usize,
+    /// Client processing latency in milliseconds
+    pub processing_latency_ms: Option<u64>,
+    /// Whether client is ready for more messages
+    pub ready_for_more: bool,
 }
 
 /// Response from opening a chat session
@@ -494,12 +521,17 @@ pub enum MessageDeltaContent {
         /// The text to append
         text: String,
     },
-    /// Tool call delta
+    /// Tool call delta with streaming support
     ToolCall {
         /// Tool call ID
         tool_call_id: String,
-        /// Delta content for the tool call
-        delta: String,
+        /// Tool name (only sent on first delta)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// JSON fragment of arguments being streamed
+        args_json_fragment: String,
+        /// Whether this completes the tool call
+        done: bool,
     },
     /// Stream ended
     StreamEnd {
