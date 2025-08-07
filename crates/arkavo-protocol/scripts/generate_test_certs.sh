@@ -12,7 +12,10 @@ echo "Creating certificates directory..."
 mkdir -p "$CERTS_DIR"
 
 echo "Building certificate generator..."
-cat > "$SCRIPT_DIR/cert_gen.rs" << 'EOF'
+# Create a temporary Cargo project for the certificate generator
+TEMP_DIR=$(mktemp -d)
+
+cat > "$TEMP_DIR/cert_gen.rs" << 'EOF'
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
 use std::fs;
 use std::path::Path;
@@ -84,8 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 EOF
 
-# Create a temporary Cargo project for the certificate generator
-TEMP_DIR=$(mktemp -d)
+# Change to temporary directory
 cd "$TEMP_DIR"
 
 cat > Cargo.toml << EOF
@@ -99,7 +101,7 @@ rcgen = { version = "0.13", features = ["pem"] }
 EOF
 
 mkdir src
-mv "$SCRIPT_DIR/cert_gen.rs" src/main.rs
+mv cert_gen.rs src/main.rs
 
 echo "Running certificate generator..."
 cargo run --quiet -- "$CERTS_DIR"
