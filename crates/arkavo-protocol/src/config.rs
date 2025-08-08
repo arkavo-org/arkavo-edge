@@ -104,6 +104,8 @@ pub struct ServerConfig {
     pub idle_timeout_seconds: u64,
     pub rate_limit: RateLimitConfig,
     pub task_store_path: Option<String>,
+    pub trusted_proxies: Vec<String>,
+    pub enable_x_forwarded_for: bool,
 }
 
 impl Default for ServerConfig {
@@ -116,6 +118,8 @@ impl Default for ServerConfig {
             idle_timeout_seconds: 300,
             rate_limit: RateLimitConfig::default(),
             task_store_path: Some(".arkavo/arkavo_tasks.db".to_string()),
+            trusted_proxies: vec![],
+            enable_x_forwarded_for: false,
         }
     }
 }

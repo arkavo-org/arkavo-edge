@@ -3,8 +3,9 @@ use crate::config::{BufferConfig, ServerConfig};
 use crate::error::{A2aError, Result};
 use crate::mcp_registry::McpRegistry;
 use crate::metrics::{MetricsCollector, RpcTimer};
+use crate::middleware::ConnectionTracker;
 use crate::openrpc;
-use crate::rate_limit::RateLimiter;
+use crate::rate_limit::{IpRateLimiter, spawn_cleanup_task};
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
@@ -112,7 +113,9 @@ pub trait A2aRpc {
 }
 
 pub struct A2aRpcImpl {
-    rate_limiter: Arc<RateLimiter>,
+    rate_limiter: Arc<IpRateLimiter>,
+    #[allow(dead_code)] // Will be used when jsonrpsee adds connection context support
+    connection_tracker: Arc<ConnectionTracker>,
     metrics: Arc<MetricsCollector>,
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
@@ -145,9 +148,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> RpcResult<TaskResponse> {
         let timer = RpcTimer::new("task_request".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -201,9 +205,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> RpcResult<TaskDeclareResponse> {
         let timer = RpcTimer::new("task_declare".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -235,9 +240,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> RpcResult<Vec<DiscoveredAgent>> {
         let timer = RpcTimer::new("agent_discover".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -308,9 +314,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> RpcResult<DiscoverFeaturesDisclose> {
         let timer = RpcTimer::new("discover_features_query".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -416,9 +423,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn message_send(&self, request: MessageSendRequest) -> RpcResult<MessageSendResponse> {
         let timer = RpcTimer::new("message/send".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -448,9 +456,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn tasks_get(&self, request: TaskGetRequest) -> RpcResult<TaskGetResponse> {
         let timer = RpcTimer::new("tasks/get".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -515,9 +524,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn tasks_cancel(&self, request: TaskCancelRequest) -> RpcResult<TaskCancelResponse> {
         let timer = RpcTimer::new("tasks/cancel".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -581,9 +591,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> SubscriptionResult {
         let timer = RpcTimer::new("message/stream".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(_e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Ok(());
         }
@@ -643,9 +654,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn chat_open(&self, _request: ChatOpenRequest) -> RpcResult<ChatSession> {
         let timer = RpcTimer::new("chat_open".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -677,9 +689,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn chat_send(&self, session_id: String, message: UserMessage) -> RpcResult<()> {
         let timer = RpcTimer::new("chat_send".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -728,9 +741,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> SubscriptionResult {
         let timer = RpcTimer::new("chat_stream".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(_e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Ok(());
         }
@@ -773,9 +787,10 @@ impl A2aRpcServer for A2aRpcImpl {
     ) -> SubscriptionResult {
         let timer = RpcTimer::new("chat_subscribe".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(_e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Ok(());
         }
@@ -915,9 +930,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn agent_query(&self, request: AgentQueryRequest) -> RpcResult<AgentQueryResponse> {
         let timer = RpcTimer::new("agent_query".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -1009,9 +1025,10 @@ impl A2aRpcServer for A2aRpcImpl {
     async fn agent_broadcast(&self, broadcast: AgentBroadcast) -> RpcResult<()> {
         let timer = RpcTimer::new("agent_broadcast".to_string(), self.metrics.clone());
 
-        // Check rate limit
-        if let Err(e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
+        // Check rate limit (use default IP for now - will be enhanced with connection tracking)
+        let client_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0));
+        if let Err(e) = self.rate_limiter.check_rate_limit(client_ip) {
+            self.metrics.record_rate_limit_blocked(Some(client_ip));
             timer.error();
             return Err(e);
         }
@@ -1346,8 +1363,18 @@ impl A2aServer {
             .await
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
 
-        let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
+        let rate_limiter = Arc::new(IpRateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(true)); // TODO: Make configurable
+
+        // Spawn cleanup task for rate limiter
+        let _cleanup_handle = spawn_cleanup_task(rate_limiter.clone(), Some(metrics.clone()));
+
+        // Create connection tracker
+        let connection_tracker = Arc::new(ConnectionTracker::new(
+            self.config.trusted_proxies.clone(),
+            self.config.enable_x_forwarded_for,
+        ));
+
         let llm_adapter = self.llm_adapter.read().await.clone();
         let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::with_config(
             llm_adapter.clone(),
@@ -1384,6 +1411,7 @@ impl A2aServer {
 
         let rpc_impl = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: self.mcp_registry.clone(),
             agent_metadata: self.agent_metadata.clone(),
@@ -1420,7 +1448,8 @@ mod tests {
     async fn test_task_request_handler() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
-        let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
+        let rate_limiter = Arc::new(crate::rate_limit::IpRateLimiter::new(config));
+        let connection_tracker = Arc::new(ConnectionTracker::new(vec![], false));
         let metrics = Arc::new(MetricsCollector::new(false));
         let task_store: Arc<dyn TaskStore> =
             Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
@@ -1432,6 +1461,7 @@ mod tests {
         task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
@@ -1472,7 +1502,8 @@ mod tests {
     async fn test_task_declare_handler() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
-        let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
+        let rate_limiter = Arc::new(crate::rate_limit::IpRateLimiter::new(config));
+        let connection_tracker = Arc::new(ConnectionTracker::new(vec![], false));
         let metrics = Arc::new(MetricsCollector::new(false));
         let task_store: Arc<dyn TaskStore> =
             Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
@@ -1484,6 +1515,7 @@ mod tests {
         task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
@@ -1527,7 +1559,8 @@ mod tests {
     async fn test_rpc_discover() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
-        let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
+        let rate_limiter = Arc::new(crate::rate_limit::IpRateLimiter::new(config));
+        let connection_tracker = Arc::new(ConnectionTracker::new(vec![], false));
         let metrics = Arc::new(MetricsCollector::new(false));
         let task_store: Arc<dyn TaskStore> =
             Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
@@ -1539,6 +1572,7 @@ mod tests {
         task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
@@ -1574,7 +1608,8 @@ mod tests {
     async fn test_agent_discover_handler() {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 100;
-        let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
+        let rate_limiter = Arc::new(crate::rate_limit::IpRateLimiter::new(config));
+        let connection_tracker = Arc::new(ConnectionTracker::new(vec![], false));
         let metrics = Arc::new(MetricsCollector::new(false));
         let task_store: Arc<dyn TaskStore> =
             Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
@@ -1586,6 +1621,7 @@ mod tests {
         task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
@@ -1618,7 +1654,8 @@ mod tests {
         let mut config = crate::rate_limit::RateLimitConfig::default();
         config.max_requests_per_second = 1;
         config.burst_size = 1;
-        let rate_limiter = Arc::new(crate::rate_limit::RateLimiter::new(config));
+        let rate_limiter = Arc::new(crate::rate_limit::IpRateLimiter::new(config));
+        let connection_tracker = Arc::new(ConnectionTracker::new(vec![], false));
         let metrics = Arc::new(MetricsCollector::new(false));
         let task_store: Arc<dyn TaskStore> =
             Arc::new(SqliteTaskStore::new_in_memory().await.unwrap());
@@ -1630,6 +1667,7 @@ mod tests {
         task_executor.start().unwrap();
         let impl_instance = A2aRpcImpl {
             rate_limiter,
+            connection_tracker,
             metrics,
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),

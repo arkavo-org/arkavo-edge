@@ -15,6 +15,7 @@ pub mod mcp_registry;
 pub mod mdns;
 pub mod metrics;
 pub mod metrics_subscription;
+pub mod middleware;
 pub mod network;
 pub mod oauth2;
 pub mod openrpc;
@@ -40,6 +41,7 @@ pub use metrics::{MetricsCollector, RpcTimer};
 pub use metrics_subscription::{
     MetricsApi, MetricsServiceConfig, MetricsSubscriptionServer, MetricsSubscriptionService,
 };
+pub use middleware::{ClientInfo, ConnectionTracker, HeaderMap};
 pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
