@@ -1,5 +1,4 @@
 use std::env;
-use std::io::IsTerminal;
 use std::process;
 
 fn main() {
@@ -40,6 +39,7 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 fn maybe_relaunch_in_terminal() {
+    use std::io::IsTerminal;
     use std::process::Command;
 
     // Check if we're already in a TTY
