@@ -1,4 +1,6 @@
+#[cfg(target_os = "macos")]
 use super::app_diagnostic_tool::AppDiagnosticTool;
+#[cfg(target_os = "macos")]
 use super::axp_harness_builder::AxpHarnessBuilder;
 use super::biometric_dialog_handler::{AccessibilityDialogHandler, BiometricDialogHandler};
 use super::biometric_test_scenarios::{BiometricTestScenario, SmartBiometricHandler};
@@ -26,7 +28,9 @@ use super::template_diagnostics::TemplateDiagnosticsKit;
 use super::ui_element_handler::UiElementHandler;
 use super::usage_guide::UsageGuideKit;
 use super::xcode_info_tool::XcodeInfoTool;
+#[cfg(target_os = "macos")]
 use super::xctest_setup_tool::XCTestSetupKit;
+#[cfg(target_os = "macos")]
 use super::xctest_status_tool::XCTestStatusKit;
 use crate::ai::analysis_engine::AnalysisEngine;
 use crate::state_store::StateStore;
