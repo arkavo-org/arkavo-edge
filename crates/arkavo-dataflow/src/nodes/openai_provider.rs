@@ -238,10 +238,17 @@ impl Provider for OpenAIProvider {
     async fn complete(&self, messages: Vec<Message>) -> Result<String, arkavo_llm::Error> {
         let api_messages = self.convert_messages(messages);
 
+        // GPT-5 only supports default temperature (1.0)
+        let temperature = if self.config.model == "gpt-5" {
+            None  // Use default
+        } else {
+            Some(0.7)
+        };
+
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
             messages: api_messages,
-            temperature: Some(0.7),
+            temperature,
             max_tokens: None,
             stream: Some(false),
             n: Some(1),
@@ -312,10 +319,17 @@ impl Provider for OpenAIProvider {
     > {
         let api_messages = self.convert_messages(messages);
 
+        // GPT-5 only supports default temperature (1.0)
+        let temperature = if self.config.model == "gpt-5" {
+            None  // Use default
+        } else {
+            Some(0.7)
+        };
+
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
             messages: api_messages,
-            temperature: Some(0.7),
+            temperature,
             max_tokens: None,
             stream: Some(true),
             n: Some(1),
