@@ -60,6 +60,7 @@ pub struct DefaultDiagnostics {
     agent_id: String,
     session_id: String,
     storage: Arc<MemoryStorage>,
+    start_time: DateTime<Utc>,
 }
 
 impl DefaultDiagnostics {
@@ -68,6 +69,7 @@ impl DefaultDiagnostics {
             agent_id,
             session_id,
             storage,
+            start_time: Utc::now(),
         }
     }
 }
@@ -137,15 +139,52 @@ impl Diagnostics for DefaultDiagnostics {
     async fn health(&self) -> Result<HealthReport> {
         let (session_count, event_count) = self.storage.get_event_stats().await?;
 
+        // Calculate uptime
+        let uptime_seconds = Utc::now()
+            .signed_duration_since(self.start_time)
+            .num_seconds() as u64;
+
+        // Calculate error rate from recent events
+        let recent_events = self.last_events(100).await?;
+        let error_count = recent_events
+            .iter()
+            .filter(|e| {
+                // Check if it's an error event by examining the EventPayload enum variant
+                matches!(&e.payload, arkavo_events::EventPayload::Error { .. })
+            })
+            .count();
+
+        let error_rate = if !recent_events.is_empty() {
+            error_count as f64 / recent_events.len() as f64
+        } else {
+            0.0
+        };
+
+        // Get last error if any
+        let last_error = recent_events
+            .iter()
+            .filter_map(|e| {
+                if let arkavo_events::EventPayload::Error { message, .. } = &e.payload {
+                    Some(crate::health::LastError {
+                        timestamp: e.timestamp,
+                        error_type: "Error".to_string(),
+                        message: message.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .next();
+
         Ok(HealthReport {
             status: crate::health::HealthStatus::Healthy,
             agent_id: self.agent_id.clone(),
             session_id: self.session_id.clone(),
-            uptime_seconds: 0, // TODO: Track actual uptime
+            uptime_seconds,
             total_events: event_count,
             total_sessions: session_count,
-            error_rate: 0.0, // TODO: Calculate from recent errors
-            last_error: None,
+            error_rate,
+            last_error,
         })
     }
 

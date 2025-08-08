@@ -57,7 +57,26 @@ async fn test_agent_ui_echo() -> Result<(), Box<dyn std::error::Error>> {
     assert!(ui_running, "UI should be running");
     assert!(agent_running, "Agent should be running");
 
-    // TODO: Add actual API testing once we understand the protocol better
+    // Test basic API connectivity
+    // Send a simple request to the UI endpoint
+    let ui_url = "http://localhost:3000/health";
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+
+    // Try to connect with retries
+    let mut connected = false;
+    for _ in 0..5 {
+        if let Ok(response) = client.get(ui_url).send().await {
+            if response.status().is_success() {
+                connected = true;
+                break;
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
+
+    assert!(connected, "Should be able to connect to UI API");
 
     Ok(())
 }

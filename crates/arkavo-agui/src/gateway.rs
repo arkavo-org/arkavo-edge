@@ -628,9 +628,12 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                         handler.subscribe_to_session(session_id, tx.clone()).await;
                                 }
                                 DebugCommand::UnsubscribeSession { session_id } => {
-                                    // TODO: Implement unsubscribe logic
+                                    handler.unsubscribe_session(&session_id).await;
                                     let event = AgUiEvent::StateDelta {
-                                        patch: vec![],
+                                        patch: vec![crate::types::JsonPatch::Add {
+                                            path: "/unsubscribed".to_string(),
+                                            value: serde_json::Value::String(session_id.clone()),
+                                        }],
                                         event_id: format!("unsubscribed-{session_id}"),
                                     };
                                     let _ = tx.send(event).await;
@@ -664,8 +667,8 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                     let _ = tx.send(event).await;
                                 }
                                 DebugCommand::AttachToAgent { agent_id } => {
-                                    // TODO: Implement agent attachment
-                                    // This would connect to the agent's event stream
+                                    let session_id = uuid::Uuid::new_v4().to_string();
+                                    handler.attach_to_agent(agent_id.clone(), session_id).await;
                                     let event = AgUiEvent::StateDelta {
                                         patch: vec![crate::types::JsonPatch::Add {
                                             path: "/attached_agent".to_string(),
@@ -676,7 +679,7 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                     let _ = tx.send(event).await;
                                 }
                                 DebugCommand::DetachFromAgent { agent_id } => {
-                                    // TODO: Implement agent detachment
+                                    handler.detach_from_agent(&agent_id).await;
                                     let event = AgUiEvent::StateDelta {
                                         patch: vec![crate::types::JsonPatch::Remove {
                                             path: format!("/attached_agent/{agent_id}"),
@@ -686,7 +689,7 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                     let _ = tx.send(event).await;
                                 }
                                 DebugCommand::StartRecording { session_id } => {
-                                    // TODO: Start recording events for this session
+                                    handler.start_recording(session_id.clone()).await;
                                     let event = AgUiEvent::StateDelta {
                                         patch: vec![crate::types::JsonPatch::Add {
                                             path: "/recording".to_string(),
@@ -700,7 +703,7 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                     let _ = tx.send(event).await;
                                 }
                                 DebugCommand::StopRecording { session_id } => {
-                                    // TODO: Stop recording events
+                                    handler.stop_recording(&session_id).await;
                                     let event = AgUiEvent::StateDelta {
                                         patch: vec![crate::types::JsonPatch::Add {
                                             path: "/recording".to_string(),
@@ -714,15 +717,32 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                     let _ = tx.send(event).await;
                                 }
                                 DebugCommand::GetSessionEvents { session_id, limit } => {
-                                    // TODO: Fetch events from storage
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/session_events".to_string(),
-                                            value: serde_json::json!({ "session_id": session_id, "limit": limit }),
-                                        }],
-                                        event_id: format!("events-{}", uuid::Uuid::new_v4()),
-                                    };
-                                    let _ = tx.send(event).await;
+                                    match handler.get_session_events(&session_id, limit).await {
+                                        Ok(events) => {
+                                            let event = AgUiEvent::StateDelta {
+                                                patch: vec![crate::types::JsonPatch::Add {
+                                                    path: "/session_events".to_string(),
+                                                    value: serde_json::json!({
+                                                        "session_id": session_id,
+                                                        "events": events,
+                                                        "count": events.len()
+                                                    }),
+                                                }],
+                                                event_id: format!(
+                                                    "events-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ),
+                                            };
+                                            let _ = tx.send(event).await;
+                                        }
+                                        Err(e) => {
+                                            let error = AgUiEvent::Error {
+                                                code: "EVENT_FETCH_FAILED".to_string(),
+                                                message: format!("Failed to fetch events: {e}"),
+                                            };
+                                            let _ = tx.send(error).await;
+                                        }
+                                    }
                                 }
                             }
                         }

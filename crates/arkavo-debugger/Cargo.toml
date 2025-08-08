@@ -19,6 +19,7 @@ chrono = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 bincode = "1.3"
+url = "2.5"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
