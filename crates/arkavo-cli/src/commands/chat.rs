@@ -41,6 +41,7 @@ pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(feature = "local")]
+#[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Terminal UI is now the default, use --no-tui to disable it
     let use_tui = !args.contains(&"--no-tui".to_string());
@@ -1366,6 +1367,7 @@ async fn prompt_for_remote_ollama(
 }
 
 #[cfg(feature = "local")]
+#[allow(clippy::disallowed_methods)]
 fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
     // The UI will handle its own initialization
