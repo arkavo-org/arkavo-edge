@@ -171,14 +171,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "arkavo-cli",
 ]
 
 [[package]]
 name = "arkavo-agui"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -204,7 +204,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -333,11 +333,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.25.6"
+version = "0.25.7"
 
 [[package]]
 name = "arkavo-events"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "bincode",
@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "git2",
  "tempfile",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-kimi",
@@ -419,7 +419,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "async-trait",
  "serde",
@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-test"
-version = "0.25.6"
+version = "0.25.7"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -3889,7 +3889,6 @@ checksum = "1c42fe03df2bd3c53a3a9c7317ad91d80c81cd1fb0caec8d7cc4cd2bfa10c222"
 dependencies = [
  "cc",
  "libc",
- "libssh2-sys",
  "libz-sys",
  "pkg-config",
 ]
@@ -3928,20 +3927,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
-name = "libssh2-sys"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "220e4f05ad4a218192533b300327f5150e809b54c4ec83b5a1d91833601811b9"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
