@@ -32,20 +32,20 @@ arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, featu
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false }
-zeroconf = { version = "0.14", optional = true }
+zeroconf = { workspace = true, optional = true }
 async-trait = { workspace = true }
-log = "0.4"
+log = { workspace = true }
 anyhow = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-indicatif = "0.17"
-tiktoken-rs = "0.6"
+indicatif = { workspace = true }
+tiktoken-rs = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

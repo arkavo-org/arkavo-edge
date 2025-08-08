@@ -137,21 +137,21 @@ impl SessionManager {
         // This is a simplified implementation - in production, we'd use mDNS
         if let Ok(agent_endpoint) = std::env::var("ARKAVO_AGENT_ENDPOINT") {
             // Parse endpoint and check if reachable
-            if let Ok(url) = url::Url::parse(&agent_endpoint) {
-                if let Some(host) = url.host_str() {
-                    // Create a placeholder session for discovered agent
-                    let session_info = SessionInfo {
-                        session_id: format!("discovered-{}", uuid::Uuid::new_v4()),
-                        agent_id: format!("agent-{}", host),
-                        agent_name: format!("Discovered Agent at {}", host),
-                        endpoint: agent_endpoint,
-                        capabilities: vec!["discovered".to_string()],
-                        start_time: chrono::Utc::now(),
-                        event_count: 0,
-                        last_activity: chrono::Utc::now(),
-                    };
-                    discovered.push(session_info);
-                }
+            if let Ok(url) = url::Url::parse(&agent_endpoint)
+                && let Some(host) = url.host_str()
+            {
+                // Create a placeholder session for discovered agent
+                let session_info = SessionInfo {
+                    session_id: format!("discovered-{}", uuid::Uuid::new_v4()),
+                    agent_id: format!("agent-{}", host),
+                    agent_name: format!("Discovered Agent at {}", host),
+                    endpoint: agent_endpoint,
+                    capabilities: vec!["discovered".to_string()],
+                    start_time: chrono::Utc::now(),
+                    event_count: 0,
+                    last_activity: chrono::Utc::now(),
+                };
+                discovered.push(session_info);
             }
         }
 

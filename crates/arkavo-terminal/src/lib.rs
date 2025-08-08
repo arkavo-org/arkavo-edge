@@ -912,7 +912,7 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
         // For now, we'll use environment variables to get the connection info
         if let Ok(ipc_path) = std::env::var("ARKAVO_IPC_PATH") {
             // Connect to IPC endpoint
-            println!("Connecting to IPC at: {}", ipc_path);
+            println!("Connecting to IPC at: {ipc_path}");
         }
     });
 
@@ -920,23 +920,20 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
     // These methods would be added to App in a full implementation
     // app.set_title(&format!("Task: {} (Session: {})", task_id, session_id));
     // app.set_read_only(false); // Allow interaction in task view
-    println!(
-        "Running task view for task: {} in session: {}",
-        task_id, session_id
-    );
+    println!("Running task view for task: {task_id} in session: {session_id}");
 
     // Handle task-specific events
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 TaskViewMessage::UpdateStatus(status) => {
-                    println!("Task status updated: {}", status);
+                    println!("Task status updated: {status}");
                 }
                 TaskViewMessage::AppendOutput(output) => {
-                    println!("Task output: {}", output);
+                    println!("Task output: {output}");
                 }
                 TaskViewMessage::Complete(result) => {
-                    println!("Task completed: {:?}", result);
+                    println!("Task completed: {result:?}");
                     break;
                 }
             }
@@ -948,6 +945,7 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
 }
 
 /// Messages for task-specific view communication
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum TaskViewMessage {
     UpdateStatus(String),
@@ -955,10 +953,11 @@ enum TaskViewMessage {
     Complete(TaskResult),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct TaskResult {
-    success: bool,
-    message: String,
+    pub success: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]

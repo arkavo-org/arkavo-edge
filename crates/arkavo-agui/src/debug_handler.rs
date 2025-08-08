@@ -98,10 +98,10 @@ impl DebugHandler {
         // Broadcast to subscribers
         let subscriptions = self.subscriptions.read().await;
         for sub in subscriptions.iter() {
-            if sub.session_id == session_id {
-                if let Ok(agui_event) = convert_to_agui_event(&event) {
-                    let _ = sub.tx.send(agui_event).await;
-                }
+            if sub.session_id == session_id
+                && let Ok(agui_event) = convert_to_agui_event(&event)
+            {
+                let _ = sub.tx.send(agui_event).await;
             }
         }
 

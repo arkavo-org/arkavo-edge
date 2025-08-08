@@ -226,6 +226,7 @@ fn error_response(
     })
 }
 
+#[allow(clippy::missing_panics_doc)]
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize schemas
     init_schemas();
@@ -283,24 +284,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Request validation error: {e}");
 
             // Try to extract ID for error response
-            if let Some(id) = json_value.get("id") {
-                if let Ok(id_val) = serde_json::from_value::<JsonRpcId>(id.clone()) {
-                    let error_resp = error_response(
-                        id_val,
-                        INVALID_REQUEST,
-                        format!("Invalid request: {e}"),
-                        None,
-                    );
+            if let Some(id) = json_value.get("id")
+                && let Ok(id_val) = serde_json::from_value::<JsonRpcId>(id.clone())
+            {
+                let error_resp = error_response(
+                    id_val,
+                    INVALID_REQUEST,
+                    format!("Invalid request: {e}"),
+                    None,
+                );
 
-                    let resp_json = serde_json::to_value(&error_resp)?;
-                    if let Err(e) = validate_response(&resp_json) {
-                        eprintln!("ERROR: Generated invalid error response: {e}");
-                        continue;
-                    }
-
-                    writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
-                    stdout.flush()?;
+                let resp_json = serde_json::to_value(&error_resp)?;
+                if let Err(e) = validate_response(&resp_json) {
+                    eprintln!("ERROR: Generated invalid error response: {e}");
+                    continue;
                 }
+
+                writeln!(stdout, "{}", serde_json::to_string(&error_resp)?)?;
+                stdout.flush()?;
             }
             continue;
         }

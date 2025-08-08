@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,10 +98,10 @@ impl BudgetTracker {
         ];
 
         for (limit, spent) in global_checks {
-            if let Some(limit_value) = limit {
-                if spent + estimated_cost > limit_value {
-                    return Ok(false);
-                }
+            if let Some(limit_value) = limit
+                && spent + estimated_cost > limit_value
+            {
+                return Ok(false);
             }
         }
 
@@ -116,10 +116,10 @@ impl BudgetTracker {
             ];
 
             for (limit, spent) in agent_checks {
-                if let Some(limit_value) = limit {
-                    if spent + estimated_cost > limit_value {
-                        return Ok(false);
-                    }
+                if let Some(limit_value) = limit
+                    && spent + estimated_cost > limit_value
+                {
+                    return Ok(false);
                 }
             }
         }

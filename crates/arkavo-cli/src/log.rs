@@ -3,7 +3,6 @@
 /// This module provides basic logging functions that output structured logs
 /// to stderr. In the future, this can be replaced with a full logging framework
 /// like tracing or env_logger.
-
 #[allow(dead_code)]
 pub fn info(component: &str, message: &str) {
     eprintln!("[INFO] {component} {message}");

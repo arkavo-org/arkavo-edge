@@ -144,12 +144,12 @@ impl IdbWrapper {
             // Check if .gitignore exists and suggest adding .arkavo
             let gitignore_path = cwd.join(".gitignore");
             if gitignore_path.exists() {
-                if let Ok(content) = fs::read_to_string(&gitignore_path) {
-                    if !content.contains(".arkavo") {
-                        eprintln!(
-                            "[IdbWrapper] 💡 Suggestion: Add '.arkavo/' to your .gitignore file to exclude IDB companion files"
-                        );
-                    }
+                if let Ok(content) = fs::read_to_string(&gitignore_path)
+                    && !content.contains(".arkavo")
+                {
+                    eprintln!(
+                        "[IdbWrapper] 💡 Suggestion: Add '.arkavo/' to your .gitignore file to exclude IDB companion files"
+                    );
                 }
             } else {
                 eprintln!(
@@ -271,10 +271,10 @@ impl IdbWrapper {
                     .args(["-cr", binary_path.to_str().unwrap()])
                     .output();
 
-                if let Ok(output) = xattr_output {
-                    if !output.status.success() {
-                        eprintln!("[IdbWrapper] Warning: Failed to remove extended attributes");
-                    }
+                if let Ok(output) = xattr_output
+                    && !output.status.success()
+                {
+                    eprintln!("[IdbWrapper] Warning: Failed to remove extended attributes");
                 }
 
                 // Also remove quarantine from frameworks
@@ -328,10 +328,8 @@ impl IdbWrapper {
     pub fn get_binary_path() -> Result<PathBuf> {
         // Check if we should use system IDB due to framework conflicts
         let use_system = USE_SYSTEM_IDB.lock().unwrap();
-        if *use_system {
-            if let Some(system_path) = Self::find_system_idb() {
-                return Ok(system_path);
-            }
+        if *use_system && let Some(system_path) = Self::find_system_idb() {
+            return Ok(system_path);
         }
 
         // Use the embedded IDB which includes frameworks
@@ -536,10 +534,10 @@ impl IdbWrapper {
             // Log environment variables to confirm they're set
             eprintln!("[IdbWrapper] Environment variables set for companion spawn:");
             for (key, value) in command.get_envs() {
-                if let (Some(k), Some(v)) = (key.to_str(), value.and_then(|val| val.to_str())) {
-                    if k.starts_with("DYLD_") || k.starts_with("OBJC_") {
-                        eprintln!("[IdbWrapper]   {k}={v}");
-                    }
+                if let (Some(k), Some(v)) = (key.to_str(), value.and_then(|val| val.to_str()))
+                    && (k.starts_with("DYLD_") || k.starts_with("OBJC_"))
+                {
+                    eprintln!("[IdbWrapper]   {k}={v}");
                 }
             }
 
@@ -585,15 +583,15 @@ impl IdbWrapper {
                         );
 
                         // Check if it's signal 9 (SIGKILL)
-                        if let Some(code) = output.status.code() {
-                            if code == 9 {
-                                eprintln!(
-                                    "[IdbWrapper] Binary was killed by SIGKILL - likely a code signing or security issue"
-                                );
-                                eprintln!(
-                                    "[IdbWrapper] Try running: sudo spctl --master-disable (temporarily disable Gatekeeper)"
-                                );
-                            }
+                        if let Some(code) = output.status.code()
+                            && code == 9
+                        {
+                            eprintln!(
+                                "[IdbWrapper] Binary was killed by SIGKILL - likely a code signing or security issue"
+                            );
+                            eprintln!(
+                                "[IdbWrapper] Try running: sudo spctl --master-disable (temporarily disable Gatekeeper)"
+                            );
                         }
                     }
                 }
@@ -638,46 +636,44 @@ impl IdbWrapper {
                             eprintln!("[IdbWrapper] Stderr: {stderr_str}");
 
                             // Check for specific exit codes
-                            if let Some(code) = status.code() {
-                                if code == 9 {
-                                    eprintln!(
-                                        "[IdbWrapper] Exit code 9 (SIGKILL) detected - macOS security issue"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper] The binary is signed by: Arkavo LLC (M8GS7ZT95Y)"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper] But macOS is still blocking it. This can happen when:"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   - The binary is not notarized by Apple"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   - Running from a restricted context (MCP server)"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   - Security settings are preventing execution"
-                                    );
-                                    eprintln!("[IdbWrapper] ");
-                                    eprintln!("[IdbWrapper] Immediate solutions:");
-                                    eprintln!(
-                                        "[IdbWrapper]   1. Install system IDB: brew install facebook/fb/idb-companion"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   2. Set environment variable: export ARKAVO_USE_SYSTEM_IDB=1"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   3. Use AppleScript fallback (automatically attempted)"
-                                    );
-                                    eprintln!("[IdbWrapper] ");
-                                    eprintln!("[IdbWrapper] For development, you can also try:");
-                                    eprintln!(
-                                        "[IdbWrapper]   - Add Terminal/your IDE to Privacy & Security > Developer Tools"
-                                    );
-                                    eprintln!(
-                                        "[IdbWrapper]   - Run: sudo spctl --master-disable (not recommended for production)"
-                                    );
-                                }
+                            if let Some(code) = status.code()
+                                && code == 9
+                            {
+                                eprintln!(
+                                    "[IdbWrapper] Exit code 9 (SIGKILL) detected - macOS security issue"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper] The binary is signed by: Arkavo LLC (M8GS7ZT95Y)"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper] But macOS is still blocking it. This can happen when:"
+                                );
+                                eprintln!("[IdbWrapper]   - The binary is not notarized by Apple");
+                                eprintln!(
+                                    "[IdbWrapper]   - Running from a restricted context (MCP server)"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper]   - Security settings are preventing execution"
+                                );
+                                eprintln!("[IdbWrapper] ");
+                                eprintln!("[IdbWrapper] Immediate solutions:");
+                                eprintln!(
+                                    "[IdbWrapper]   1. Install system IDB: brew install facebook/fb/idb-companion"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper]   2. Set environment variable: export ARKAVO_USE_SYSTEM_IDB=1"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper]   3. Use AppleScript fallback (automatically attempted)"
+                                );
+                                eprintln!("[IdbWrapper] ");
+                                eprintln!("[IdbWrapper] For development, you can also try:");
+                                eprintln!(
+                                    "[IdbWrapper]   - Add Terminal/your IDE to Privacy & Security > Developer Tools"
+                                );
+                                eprintln!(
+                                    "[IdbWrapper]   - Run: sudo spctl --master-disable (not recommended for production)"
+                                );
                             }
 
                             // Check for framework conflicts in stderr
@@ -762,25 +758,23 @@ impl IdbWrapper {
                         .output()
                         .ok();
 
-                    if let Some(output) = simctl_output {
-                        if let Ok(json) =
+                    if let Some(output) = simctl_output
+                        && let Ok(json) =
                             serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                    {
+                        for (_runtime, devices) in json["devices"]
+                            .as_object()
+                            .unwrap_or(&serde_json::Map::new())
                         {
-                            for (_runtime, devices) in json["devices"]
-                                .as_object()
-                                .unwrap_or(&serde_json::Map::new())
-                            {
-                                if let Some(device_array) = devices.as_array() {
-                                    for device in device_array {
-                                        if device["udid"].as_str() == Some(device_id) {
-                                            let state =
-                                                device["state"].as_str().unwrap_or("Unknown");
+                            if let Some(device_array) = devices.as_array() {
+                                for device in device_array {
+                                    if device["udid"].as_str() == Some(device_id) {
+                                        let state = device["state"].as_str().unwrap_or("Unknown");
 
-                                            if state != "Booted" {
-                                                // Device is not booted
-                                            }
-                                            break;
+                                        if state != "Booted" {
+                                            // Device is not booted
                                         }
+                                        break;
                                     }
                                 }
                             }
@@ -815,10 +809,10 @@ impl IdbWrapper {
                                 .output()
                                 .ok();
 
-                            if let Some(output) = port_output {
-                                if output.status.success() {
-                                    connection_established = true;
-                                }
+                            if let Some(output) = port_output
+                                && output.status.success()
+                            {
+                                connection_established = true;
                             }
                         }
                     }
@@ -1104,23 +1098,22 @@ impl IdbWrapper {
         // Check if device is in the targets list
         if let Some(devices) = targets.as_array() {
             for device in devices {
-                if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
-                    if udid == device_id {
-                        eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
-                        return Ok(true);
-                    }
+                if let Some(udid) = device.get("udid").and_then(|v| v.as_str())
+                    && udid == device_id
+                {
+                    eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
+                    return Ok(true);
                 }
             }
         } else if let Some(raw_output) = targets.get("raw_output").and_then(|v| v.as_str()) {
             // Parse newline-delimited JSON
             for line in raw_output.lines() {
-                if let Ok(device) = serde_json::from_str::<serde_json::Value>(line) {
-                    if let Some(udid) = device.get("udid").and_then(|v| v.as_str()) {
-                        if udid == device_id {
-                            eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
-                            return Ok(true);
-                        }
-                    }
+                if let Ok(device) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(udid) = device.get("udid").and_then(|v| v.as_str())
+                    && udid == device_id
+                {
+                    eprintln!("[IdbWrapper] Device {device_id} found in IDB targets");
+                    return Ok(true);
                 }
             }
         }
@@ -1134,29 +1127,29 @@ impl IdbWrapper {
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to run simctl: {e}")))?;
 
-        if simctl_output.status.success() {
-            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&simctl_output.stdout) {
-                for (_runtime, devices) in json["devices"]
-                    .as_object()
-                    .unwrap_or(&serde_json::Map::new())
-                {
-                    if let Some(device_array) = devices.as_array() {
-                        for device in device_array {
-                            if device["udid"].as_str() == Some(device_id) {
-                                let state = device["state"].as_str().unwrap_or("Unknown");
-                                let name = device["name"].as_str().unwrap_or("Unknown");
+        if simctl_output.status.success()
+            && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&simctl_output.stdout)
+        {
+            for (_runtime, devices) in json["devices"]
+                .as_object()
+                .unwrap_or(&serde_json::Map::new())
+            {
+                if let Some(device_array) = devices.as_array() {
+                    for device in device_array {
+                        if device["udid"].as_str() == Some(device_id) {
+                            let state = device["state"].as_str().unwrap_or("Unknown");
+                            let name = device["name"].as_str().unwrap_or("Unknown");
+                            eprintln!(
+                                "[IdbWrapper] Found device in simctl: {device_id} - {name} (state: {state})"
+                            );
+
+                            if state != "Booted" {
                                 eprintln!(
-                                    "[IdbWrapper] Found device in simctl: {device_id} - {name} (state: {state})"
+                                    "[IdbWrapper] WARNING: Device is not booted! Current state: {state}"
                                 );
-
-                                if state != "Booted" {
-                                    eprintln!(
-                                        "[IdbWrapper] WARNING: Device is not booted! Current state: {state}"
-                                    );
-                                }
-
-                                return Ok(false); // Found in simctl but not in IDB
                             }
+
+                            return Ok(false); // Found in simctl but not in IDB
                         }
                     }
                 }
@@ -1321,10 +1314,10 @@ impl IdbWrapper {
 
     /// Clean up extracted binary on drop
     pub fn cleanup() {
-        if let Ok(mut path_guard) = EXTRACTED_IDB_PATH.lock() {
-            if let Some(path) = path_guard.take() {
-                let _ = fs::remove_file(&path);
-            }
+        if let Ok(mut path_guard) = EXTRACTED_IDB_PATH.lock()
+            && let Some(path) = path_guard.take()
+        {
+            let _ = fs::remove_file(&path);
         }
 
         if let Ok(mut connected) = CONNECTED_DEVICES.lock() {

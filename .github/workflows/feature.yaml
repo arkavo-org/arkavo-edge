@@ -123,9 +123,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       
-      # Note: Clippy warnings are shown but don't fail the build
-      # See https://github.com/arkavo-org/arkavo-edge/issues/138 for remaining warnings to address
-      - run: cargo clippy --workspace
+      # Fail on clippy warnings to enforce code quality
+      - run: cargo clippy --workspace -- -D warnings
       
 
   # Tests and builds can run in parallel

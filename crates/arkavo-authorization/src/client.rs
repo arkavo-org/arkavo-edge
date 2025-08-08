@@ -272,12 +272,11 @@ impl AuthorizationClient {
             return Duration::from_secs(60);
         }
 
-        if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-            if let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&decoded) {
-                if let Some(exp) = claims.get("exp").and_then(|v| v.as_i64()) {
-                    return DecisionCache::calculate_ttl_from_token(Some(exp));
-                }
-            }
+        if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1])
+            && let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&decoded)
+            && let Some(exp) = claims.get("exp").and_then(|v| v.as_i64())
+        {
+            return DecisionCache::calculate_ttl_from_token(Some(exp));
         }
 
         Duration::from_secs(60)

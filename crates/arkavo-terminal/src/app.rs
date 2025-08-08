@@ -1989,10 +1989,10 @@ Scrolling (when in scroll mode):
         ];
 
         for pattern in patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if let Some(mat) = re.find(input) {
-                    return Some(mat.as_str().to_string());
-                }
+            if let Ok(re) = regex::Regex::new(pattern)
+                && let Some(mat) = re.find(input)
+            {
+                return Some(mat.as_str().to_string());
             }
         }
         None

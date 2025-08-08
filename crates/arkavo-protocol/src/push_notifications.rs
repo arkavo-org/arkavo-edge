@@ -124,8 +124,7 @@ impl PushNotificationService {
             Ok(())
         } else {
             Err(A2aError::InvalidRequest(format!(
-                "Subscription not found: {}",
-                subscription_id
+                "Subscription not found: {subscription_id}"
             )))
         }
     }
@@ -156,8 +155,7 @@ impl PushNotificationService {
         } else {
             warn!("Channel not found for client {}", client_id);
             Err(A2aError::InvalidRequest(format!(
-                "Channel not found for client: {}",
-                client_id
+                "Channel not found for client: {client_id}"
             )))
         }
     }
@@ -182,7 +180,7 @@ impl PushNotificationService {
                 continue;
             }
 
-            if !self.matches_filter(&subscription.filter, &target_filter) {
+            if !self.matches_filter(subscription.filter.as_ref(), target_filter.as_ref()) {
                 continue;
             }
 
@@ -301,8 +299,8 @@ impl PushNotificationService {
 
     fn matches_filter(
         &self,
-        subscription_filter: &Option<SubscriptionFilter>,
-        target_filter: &Option<SubscriptionFilter>,
+        subscription_filter: Option<&SubscriptionFilter>,
+        target_filter: Option<&SubscriptionFilter>,
     ) -> bool {
         match (subscription_filter, target_filter) {
             (None, _) => true,
@@ -310,18 +308,16 @@ impl PushNotificationService {
             (Some(sub_filter), Some(target)) => {
                 if let (Some(sub_agents), Some(target_agents)) =
                     (&sub_filter.agent_ids, &target.agent_ids)
+                    && !sub_agents.iter().any(|a| target_agents.contains(a))
                 {
-                    if !sub_agents.iter().any(|a| target_agents.contains(a)) {
-                        return false;
-                    }
+                    return false;
                 }
 
                 if let (Some(sub_tasks), Some(target_tasks)) =
                     (&sub_filter.task_ids, &target.task_ids)
+                    && !sub_tasks.iter().any(|t| target_tasks.contains(t))
                 {
-                    if !sub_tasks.iter().any(|t| target_tasks.contains(t)) {
-                        return false;
-                    }
+                    return false;
                 }
 
                 true

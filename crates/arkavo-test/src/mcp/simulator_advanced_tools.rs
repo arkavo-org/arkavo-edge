@@ -127,21 +127,21 @@ impl SimulatorAdvancedKit {
         for line in process_list.lines().skip(1) {
             // Skip header
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                if let Ok(pid) = parts[0].parse::<u32>() {
-                    let name = parts[2].to_string();
-                    let bundle_id = if name.contains('.') {
-                        Some(name.clone())
-                    } else {
-                        None
-                    };
+            if parts.len() >= 3
+                && let Ok(pid) = parts[0].parse::<u32>()
+            {
+                let name = parts[2].to_string();
+                let bundle_id = if name.contains('.') {
+                    Some(name.clone())
+                } else {
+                    None
+                };
 
-                    processes.push(SimulatorProcess {
-                        pid,
-                        name,
-                        bundle_id,
-                    });
-                }
+                processes.push(SimulatorProcess {
+                    pid,
+                    name,
+                    bundle_id,
+                });
             }
         }
 
@@ -156,10 +156,10 @@ impl SimulatorAdvancedKit {
 
         if output.status.success() {
             let size_str = String::from_utf8_lossy(&output.stdout);
-            if let Some(size_kb) = size_str.split_whitespace().next() {
-                if let Ok(kb) = size_kb.parse::<f64>() {
-                    return Ok(kb / 1024.0); // Convert KB to MB
-                }
+            if let Some(size_kb) = size_str.split_whitespace().next()
+                && let Ok(kb) = size_kb.parse::<f64>()
+            {
+                return Ok(kb / 1024.0); // Convert KB to MB
             }
         }
 

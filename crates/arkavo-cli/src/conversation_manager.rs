@@ -40,7 +40,7 @@ pub struct ConversationManager {
 }
 
 impl ConversationManager {
-    pub async fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
+    pub fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
         Ok(Self {
             memory_storage,
             token_encoder: cl100k_base()?,
@@ -78,6 +78,10 @@ impl ConversationManager {
         Ok(session_id)
     }
 
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn restore_last_session(&mut self) -> anyhow::Result<Option<Uuid>> {
         let progress = ProgressBar::new_spinner();
         progress.set_style(
@@ -93,17 +97,16 @@ impl ConversationManager {
             .search("conversation_session", 10, Some("conversation"))
             .await?;
 
-        if let Some(latest_session) = sessions.first() {
-            if let Ok(session) =
+        if let Some(latest_session) = sessions.first()
+            && let Ok(session) =
                 serde_json::from_str::<ConversationSession>(&latest_session.memory.content)
-            {
-                self.current_session_id = Some(session.id);
-                progress.finish_with_message(format!(
-                    "Restored session from {}",
-                    session.created_at.format("%Y-%m-%d %H:%M")
-                ));
-                return Ok(Some(session.id));
-            }
+        {
+            self.current_session_id = Some(session.id);
+            progress.finish_with_message(format!(
+                "Restored session from {}",
+                session.created_at.format("%Y-%m-%d %H:%M")
+            ));
+            return Ok(Some(session.id));
         }
 
         progress.finish_and_clear();
@@ -151,6 +154,10 @@ impl ConversationManager {
     }
 
     #[cfg(feature = "local")]
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn get_context_messages(
         &self,
         system_message: Option<arkavo_llm::Message>,
@@ -243,6 +250,10 @@ impl ConversationManager {
     }
 
     #[cfg(feature = "local")]
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn create_summary(
         &self,
         client: &LlmClient,
@@ -263,7 +274,13 @@ impl ConversationManager {
         );
 
         for msg in &messages_to_summarize {
-            summary_prompt.push_str(&format!("{}: {}\n\n", msg.role.to_uppercase(), msg.content));
+            use std::fmt::Write;
+            let _ = write!(
+                summary_prompt,
+                "{}: {}\n\n",
+                msg.role.to_uppercase(),
+                msg.content
+            );
         }
 
         let messages = vec![

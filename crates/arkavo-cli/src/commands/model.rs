@@ -124,7 +124,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 // Download the model (or get from cache if already downloaded)
                 let model_path = downloader.download(spec).await?;
 
-                println!("Model '{model_name}' ready at: {model_path:?}");
+                println!("Model '{model_name}' ready at: {}", model_path.display());
 
                 // Model is now available in HF cache
             }

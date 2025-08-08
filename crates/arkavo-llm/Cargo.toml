@@ -29,7 +29,7 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 base64 = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
@@ -42,13 +42,13 @@ candle-nn = { workspace = true, optional = true }
 candle-transformers = { workspace = true, optional = true }
 hf-hub = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
-bytemuck = { version = "1.20", optional = true }
-cfg-if = { version = "1.0", optional = true }
-sha2 = { version = "0.10", optional = true }
-indicatif = { version = "0.17", optional = true }
-dirs = { version = "5.0", optional = true }
-toml = { version = "0.8", optional = true }
-rand = { version = "0.8", optional = true }
+bytemuck = { workspace = true, optional = true }
+cfg-if = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+indicatif = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 
 # Kimi integration
 arkavo-kimi = { path = "../arkavo-kimi", optional = true }

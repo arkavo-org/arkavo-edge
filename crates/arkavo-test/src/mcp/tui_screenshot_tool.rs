@@ -174,7 +174,7 @@ impl TuiScreenshotKit {
         // First, find the terminal window
         let window_id = if let Some(title) = &params.window_title {
             let output = Command::new("xdotool")
-                .args(&["search", "--name", title])
+                .args(["search", "--name", title])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to find window: {}", e)))?;
 
@@ -186,7 +186,7 @@ impl TuiScreenshotKit {
         } else {
             // Get the active window
             let output = Command::new("xdotool")
-                .args(&["getactivewindow"])
+                .args(["getactivewindow"])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to get active window: {}", e)))?;
 
@@ -199,7 +199,7 @@ impl TuiScreenshotKit {
 
         // Select all and copy
         Command::new("xdotool")
-            .args(&[
+            .args([
                 "windowfocus",
                 &window_id,
                 "key",
@@ -211,7 +211,7 @@ impl TuiScreenshotKit {
 
         // Get clipboard content
         let output = Command::new("xclip")
-            .args(&["-selection", "clipboard", "-o"])
+            .args(["-selection", "clipboard", "-o"])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to get clipboard: {}", e)))?;
 
@@ -280,14 +280,14 @@ impl TuiScreenshotKit {
         // Use import (ImageMagick) or scrot
         let window_id = if let Some(title) = &params.window_title {
             let output = Command::new("xdotool")
-                .args(&["search", "--name", title])
+                .args(["search", "--name", title])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to find window: {}", e)))?;
 
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
             let output = Command::new("xdotool")
-                .args(&["getactivewindow"])
+                .args(["getactivewindow"])
                 .output()
                 .map_err(|e| TestError::Mcp(format!("Failed to get active window: {}", e)))?;
 
@@ -296,7 +296,7 @@ impl TuiScreenshotKit {
 
         // Capture with import
         let output = Command::new("import")
-            .args(&["-window", &window_id, &temp_file])
+            .args(["-window", &window_id, &temp_file])
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to capture screenshot: {}", e)))?;
 

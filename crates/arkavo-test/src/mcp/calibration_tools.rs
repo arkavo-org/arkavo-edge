@@ -108,18 +108,17 @@ impl Tool for CalibrationTool {
                     if let Some(success) = install_result
                         .get("success")
                         .and_then(serde_json::Value::as_bool)
+                        && !success
                     {
-                        if !success {
-                            return Ok(json!({
-                                "success": false,
-                                "error": {
-                                    "code": "REFERENCE_APP_INSTALL_FAILED",
-                                    "message": "Failed to install ArkavoReference app",
-                                    "details": install_result.get("error").cloned().unwrap_or(json!("Unknown error")),
-                                    "critical": true
-                                }
-                            }));
-                        }
+                        return Ok(json!({
+                            "success": false,
+                            "error": {
+                                "code": "REFERENCE_APP_INSTALL_FAILED",
+                                "message": "Failed to install ArkavoReference app",
+                                "details": install_result.get("error").cloned().unwrap_or(json!("Unknown error")),
+                                "critical": true
+                            }
+                        }));
                     }
 
                     eprintln!(

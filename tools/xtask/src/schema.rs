@@ -128,6 +128,7 @@ fn generate_config_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
 
     // Generate schema for ServerConfig
     #[derive(JsonSchema)]
+    #[allow(dead_code)]
     struct ServerConfigSchema {
         enabled: bool,
         bind_address: String,
@@ -140,6 +141,7 @@ fn generate_config_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
     }
 
     #[derive(JsonSchema)]
+    #[allow(dead_code)]
     struct RateLimitConfigSchema {
         max_requests_per_second: u32,
         burst_size: u32,

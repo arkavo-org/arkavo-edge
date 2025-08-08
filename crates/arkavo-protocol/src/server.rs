@@ -401,27 +401,27 @@ impl A2aRpcServer for A2aRpcImpl {
         }
 
         // Filter based on query if provided
-        if let Some(query) = query {
-            if let Some(queries) = query.queries {
-                disclosures.retain(|disclosure| {
-                    queries.iter().any(|q| {
-                        if q.feature_type as i32 != disclosure.feature_type as i32 {
-                            return false;
-                        }
-                        if let Some(pattern) = &q.match_pattern {
-                            // Simple wildcard matching
-                            if pattern.contains('*') {
-                                let prefix = pattern.trim_end_matches('*');
-                                disclosure.id.starts_with(prefix)
-                            } else {
-                                disclosure.id == *pattern
-                            }
+        if let Some(query) = query
+            && let Some(queries) = query.queries
+        {
+            disclosures.retain(|disclosure| {
+                queries.iter().any(|q| {
+                    if q.feature_type as i32 != disclosure.feature_type as i32 {
+                        return false;
+                    }
+                    if let Some(pattern) = &q.match_pattern {
+                        // Simple wildcard matching
+                        if pattern.contains('*') {
+                            let prefix = pattern.trim_end_matches('*');
+                            disclosure.id.starts_with(prefix)
                         } else {
-                            true
+                            disclosure.id == *pattern
                         }
-                    })
-                });
-            }
+                    } else {
+                        true
+                    }
+                })
+            });
         }
 
         timer.success();
@@ -791,10 +791,10 @@ impl A2aRpcServer for A2aRpcImpl {
             // Spawn a task to forward deltas to the subscription
             tokio::spawn(async move {
                 while let Some(delta) = delta_rx.recv().await {
-                    if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
-                        if sink.send(msg).await.is_err() {
-                            break; // Client disconnected
-                        }
+                    if let Ok(msg) = SubscriptionMessage::from_json(&delta)
+                        && sink.send(msg).await.is_err()
+                    {
+                        break; // Client disconnected
                     }
                 }
             });
@@ -899,10 +899,9 @@ impl A2aRpcServer for A2aRpcImpl {
 
                                     // Send the delta using the subscription sink
                                     if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
+                                        && sink.send(msg).await.is_err()
                                     {
-                                        if sink.send(msg).await.is_err() {
-                                            break; // Client disconnected
-                                        }
+                                        break; // Client disconnected
                                     }
                                 }
                                 Err(e) => {
@@ -975,7 +974,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.error();
                 return Err(jsonrpsee::types::error::ErrorObject::owned(
                     -32001,
-                    format!("Target agent not found: {}", target_id),
+                    format!("Target agent not found: {target_id}"),
                     None::<()>,
                 ));
             }
@@ -1046,15 +1045,15 @@ impl A2aRpcServer for A2aRpcImpl {
         }
 
         // Update agent metadata if this is a capability broadcast
-        if matches!(broadcast.broadcast_type, BroadcastType::Capability) {
-            if let Some(ref capabilities) = broadcast.capabilities {
-                // Store capabilities in metadata for future reference
-                for capability in capabilities {
-                    info!(
-                        "Agent {} announced capability: {} - {:?}",
-                        broadcast.agent_id, capability.name, capability.description
-                    );
-                }
+        if matches!(broadcast.broadcast_type, BroadcastType::Capability)
+            && let Some(ref capabilities) = broadcast.capabilities
+        {
+            // Store capabilities in metadata for future reference
+            for capability in capabilities {
+                info!(
+                    "Agent {} announced capability: {} - {:?}",
+                    broadcast.agent_id, capability.name, capability.description
+                );
             }
         }
 

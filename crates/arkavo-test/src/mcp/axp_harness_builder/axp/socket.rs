@@ -127,28 +127,23 @@ impl SocketManager {
             }
 
             // Check file age
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(age) = now.duration_since(modified) {
-                        if age > max_age {
-                            // Try to remove stale socket
-                            match fs::remove_file(&path) {
-                                Ok(()) => {
-                                    eprintln!(
-                                        "[SocketManager] Removed stale socket: {}",
-                                        path.display()
-                                    );
-                                    removed_count += 1;
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[SocketManager] Failed to remove stale socket {}: {}",
-                                        path.display(),
-                                        e
-                                    );
-                                }
-                            }
-                        }
+            if let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified()
+                && let Ok(age) = now.duration_since(modified)
+                && age > max_age
+            {
+                // Try to remove stale socket
+                match fs::remove_file(&path) {
+                    Ok(()) => {
+                        eprintln!("[SocketManager] Removed stale socket: {}", path.display());
+                        removed_count += 1;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[SocketManager] Failed to remove stale socket {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -169,25 +164,25 @@ impl SocketManager {
             let entry = entry?;
             let path = entry.path();
 
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with(&format!("arkavo-axp-{device_id}-")) && name.ends_with(".sock")
-                {
-                    match fs::remove_file(&path) {
-                        Ok(()) => {
-                            eprintln!(
-                                "[SocketManager] Removed socket for device {}: {}",
-                                device_id,
-                                path.display()
-                            );
-                            removed_count += 1;
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[SocketManager] Failed to remove socket {}: {}",
-                                path.display(),
-                                e
-                            );
-                        }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.starts_with(&format!("arkavo-axp-{device_id}-"))
+                && name.ends_with(".sock")
+            {
+                match fs::remove_file(&path) {
+                    Ok(()) => {
+                        eprintln!(
+                            "[SocketManager] Removed socket for device {}: {}",
+                            device_id,
+                            path.display()
+                        );
+                        removed_count += 1;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[SocketManager] Failed to remove socket {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
