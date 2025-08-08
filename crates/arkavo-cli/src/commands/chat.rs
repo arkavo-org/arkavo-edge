@@ -75,8 +75,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
 
     // Initialize conversation manager
-    let mut conversation_manager =
-        ConversationManager::new(memory_storage.clone())?;
+    let mut conversation_manager = ConversationManager::new(memory_storage.clone())?;
 
     // Initialize repository context manager
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;

@@ -479,14 +479,15 @@ impl AgentConnection {
 
             // Send final MetricsAck if we have pending acks
             if pending_acks > 0
-                && let Some(client) = &*client_for_ack.read().await {
-                    let _ = client
-                        .request::<(), _>(
-                            "chat_metrics_ack",
-                            rpc_params![session_id_for_ack.clone(), last_sequence],
-                        )
-                        .await;
-                }
+                && let Some(client) = &*client_for_ack.read().await
+            {
+                let _ = client
+                    .request::<(), _>(
+                        "chat_metrics_ack",
+                        rpc_params![session_id_for_ack.clone(), last_sequence],
+                    )
+                    .await;
+            }
 
             // Cleanup
             active_subs.write().await.remove(&sub_id_for_task);
@@ -494,9 +495,10 @@ impl AgentConnection {
             // Remove broadcast channel if no more subscribers
             let mut broadcasts = chat_broadcasts.write().await;
             if let Some(tx) = broadcasts.get(&agent_id_for_task)
-                && tx.receiver_count() == 0 {
-                    broadcasts.remove(&agent_id_for_task);
-                }
+                && tx.receiver_count() == 0
+            {
+                broadcasts.remove(&agent_id_for_task);
+            }
         });
 
         // Spawn task to forward broadcasts to this specific UI
