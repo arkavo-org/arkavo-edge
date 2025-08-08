@@ -71,14 +71,14 @@ impl Tokenizer {
 
         // Look in snapshots directory
         let snapshots_dir = dir.join("snapshots");
-        if snapshots_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
-                for entry in entries.flatten() {
-                    let snapshot_path = entry.path();
-                    let tokenizer_path = snapshot_path.join("tokenizer.json");
-                    if tokenizer_path.exists() {
-                        return self.load_from_file(&tokenizer_path);
-                    }
+        if snapshots_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&snapshots_dir)
+        {
+            for entry in entries.flatten() {
+                let snapshot_path = entry.path();
+                let tokenizer_path = snapshot_path.join("tokenizer.json");
+                if tokenizer_path.exists() {
+                    return self.load_from_file(&tokenizer_path);
                 }
             }
         }
