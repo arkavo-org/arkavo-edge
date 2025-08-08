@@ -429,43 +429,43 @@ impl Provider for AnthropicProvider {
                             if let Some(data) = line.strip_prefix("data: ")
                                 && let Ok(event) = serde_json::from_str::<StreamEvent>(data)
                             {
-                                    match event {
-                                        StreamEvent::ContentBlockDelta { delta, .. } => {
-                                            if let Some(text) = delta.text
-                                                && tx
-                                                    .send(Ok(StreamResponse {
-                                                        content: text,
-                                                        done: false,
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                            {
-                                                break; // Receiver dropped
-                                            }
-                                        }
-                                        StreamEvent::MessageStop => {
-                                            if tx
+                                match event {
+                                    StreamEvent::ContentBlockDelta { delta, .. } => {
+                                        if let Some(text) = delta.text
+                                            && tx
                                                 .send(Ok(StreamResponse {
-                                                    content: String::new(),
-                                                    done: true,
+                                                    content: text,
+                                                    done: false,
                                                 }))
                                                 .await
                                                 .is_err()
-                                            {
-                                                break; // Receiver dropped
-                                            }
+                                        {
+                                            break; // Receiver dropped
                                         }
-                                        StreamEvent::Error { error } => {
-                                            let _ = tx
-                                                .send(Err(crate::Error::Provider(format!(
-                                                    "Stream error: {}",
-                                                    error.message
-                                                ))))
-                                                .await;
-                                            break;
-                                        }
-                                        _ => {} // Ignore other event types
                                     }
+                                    StreamEvent::MessageStop => {
+                                        if tx
+                                            .send(Ok(StreamResponse {
+                                                content: String::new(),
+                                                done: true,
+                                            }))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break; // Receiver dropped
+                                        }
+                                    }
+                                    StreamEvent::Error { error } => {
+                                        let _ = tx
+                                            .send(Err(crate::Error::Provider(format!(
+                                                "Stream error: {}",
+                                                error.message
+                                            ))))
+                                            .await;
+                                        break;
+                                    }
+                                    _ => {} // Ignore other event types
+                                }
                             }
                         }
 

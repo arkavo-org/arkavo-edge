@@ -1,8 +1,6 @@
 mod common;
 
-use arkavo_llm::providers::{
-    ProviderConfig, ProviderFactoryRegistry, ProviderType,
-};
+use arkavo_llm::providers::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
 use arkavo_llm::{Message, Role};
 
 #[tokio::test]

@@ -15,6 +15,8 @@ pub use factory::{
     ProviderFactory, ProviderFactoryRegistry, ProviderType,
 };
 #[cfg(feature = "llm-remote")]
-pub use health::{CircuitBreaker, HealthCheckResult, HealthStatus, ProviderHealthMonitor, ProviderMetrics};
+pub use health::{
+    CircuitBreaker, HealthCheckResult, HealthStatus, ProviderHealthMonitor, ProviderMetrics,
+};
 #[cfg(feature = "llm-remote")]
 pub use openai::{OpenAIConfig, OpenAIProvider};
