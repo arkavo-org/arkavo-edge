@@ -310,6 +310,9 @@ impl AuthManager {
     async fn store_secure_data(&self, credential_id: &str, value: &str) -> Result<()> {
         use base64::Engine;
 
+        // PBKDF2 iteration count for key derivation
+        const PBKDF2_ITERATIONS: u32 = 100_000;
+
         // Generate salt for key derivation
         let mut salt = [0u8; 32];
         self.rng
@@ -321,7 +324,7 @@ impl AuthManager {
         let mut derived_key = [0u8; 32];
         pbkdf2::derive(
             pbkdf2::PBKDF2_HMAC_SHA256,
-            std::num::NonZeroU32::new(100_000).unwrap(),
+            std::num::NonZeroU32::new(PBKDF2_ITERATIONS).expect("PBKDF2_ITERATIONS is non-zero"),
             &salt,
             master_key.as_bytes(),
             &mut derived_key,
@@ -411,12 +414,16 @@ impl AuthManager {
                 base64::engine::general_purpose::STANDARD.decode(&secure_data.nonce)?;
             let salt = base64::engine::general_purpose::STANDARD.decode(&secure_data.salt)?;
 
+            // PBKDF2 iteration count for key derivation
+            const PBKDF2_ITERATIONS: u32 = 100_000;
+
             // Derive key from master key
             let master_key = self.get_or_create_master_key()?;
             let mut derived_key = [0u8; 32];
             pbkdf2::derive(
                 pbkdf2::PBKDF2_HMAC_SHA256,
-                std::num::NonZeroU32::new(100_000).unwrap(),
+                std::num::NonZeroU32::new(PBKDF2_ITERATIONS)
+                    .expect("PBKDF2_ITERATIONS is non-zero"),
                 &salt,
                 master_key.as_bytes(),
                 &mut derived_key,

@@ -603,12 +603,16 @@ impl ModelLoader {
                     tracing::info!("Successfully loaded embedded tokenizer from GGUF");
 
                     // Clean up temp file
-                    let _ = std::fs::remove_file(&tokenizer_path);
+                    if let Err(e) = std::fs::remove_file(&tokenizer_path) {
+                        tracing::debug!("Failed to remove temporary tokenizer file: {}", e);
+                    }
                     return true;
                 }
                 Err(e) => {
                     tracing::error!("Failed to load tokenizer from temp file: {}", e);
-                    let _ = std::fs::remove_file(&tokenizer_path);
+                    if let Err(e) = std::fs::remove_file(&tokenizer_path) {
+                        tracing::debug!("Failed to remove temporary tokenizer file: {}", e);
+                    }
                 }
             }
         }

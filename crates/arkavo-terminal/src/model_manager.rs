@@ -1,6 +1,27 @@
+/// Model management module for dynamic LLM selection in the terminal UI.
+///
+/// This module provides functionality to:
+/// - Register and manage multiple LLM models from different providers
+/// - Route requests to appropriate model endpoints
+/// - Parse model selection from user prompts using @model syntax
+/// - Track model capabilities and context lengths
+///
+/// # Example
+///
+/// User can select a model by prefixing their prompt with @model:
+/// ```text
+/// @gpt-4 Explain this code
+/// @claude-3 Generate a test suite
+/// @llama-3 What is rust?
+/// ```
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// Default context lengths for various models
+const CONTEXT_LENGTH_GPT4: usize = 8192;
+const CONTEXT_LENGTH_CLAUDE3: usize = 200000;
+const CONTEXT_LENGTH_LLAMA3: usize = 4096;
 
 /// Model information
 #[derive(Debug, Clone)]
@@ -30,7 +51,7 @@ impl ModelManager {
                 provider: "openai".to_string(),
                 endpoint: None,
                 capabilities: vec!["chat".to_string(), "code".to_string()],
-                context_length: 8192,
+                context_length: CONTEXT_LENGTH_GPT4,
             },
         );
 
@@ -41,7 +62,7 @@ impl ModelManager {
                 provider: "anthropic".to_string(),
                 endpoint: None,
                 capabilities: vec!["chat".to_string(), "code".to_string(), "vision".to_string()],
-                context_length: 200000,
+                context_length: CONTEXT_LENGTH_CLAUDE3,
             },
         );
 
@@ -52,7 +73,7 @@ impl ModelManager {
                 provider: "ollama".to_string(),
                 endpoint: Some("http://localhost:11434".to_string()),
                 capabilities: vec!["chat".to_string()],
-                context_length: 4096,
+                context_length: CONTEXT_LENGTH_LLAMA3,
             },
         );
 
