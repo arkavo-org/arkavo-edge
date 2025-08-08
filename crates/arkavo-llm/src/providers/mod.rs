@@ -11,7 +11,7 @@ pub mod openai;
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
 #[cfg(feature = "llm-remote")]
 pub use factory::{
-    AnthropicProviderFactory, OpenAIProviderFactory, OllamaProviderFactory, ProviderConfig,
+    AnthropicProviderFactory, OllamaProviderFactory, OpenAIProviderFactory, ProviderConfig,
     ProviderFactory, ProviderFactoryRegistry, ProviderType,
 };
 #[cfg(feature = "llm-remote")]

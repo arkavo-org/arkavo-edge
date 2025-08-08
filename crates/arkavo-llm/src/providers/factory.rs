@@ -352,7 +352,7 @@ impl ProviderFactory for LocalProviderFactory {
             .map(std::string::ToString::to_string);
 
         // Create local provider
-        let provider = arkavo_llm::local::LocalProvider::new(model_name, model_path)?;
+        let provider = crate::local::LocalProvider::new(model_name, model_path)?;
 
         // Initialize the provider (load model)
         provider

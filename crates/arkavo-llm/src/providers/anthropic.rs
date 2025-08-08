@@ -373,11 +373,7 @@ impl Provider for AnthropicProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<
-        Box<
-            dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>>
-                + Send
-                + Unpin,
-        >,
+        Box<dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>> + Send + Unpin>,
         crate::Error,
     > {
         let (system_content, api_messages) = self.convert_messages(messages);
@@ -480,9 +476,7 @@ impl Provider for AnthropicProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx
-                            .send(Err(crate::Error::Provider(e.to_string())))
-                            .await;
+                        let _ = tx.send(Err(crate::Error::Provider(e.to_string()))).await;
                         break;
                     }
                 }

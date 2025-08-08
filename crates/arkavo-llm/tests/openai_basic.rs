@@ -1,7 +1,5 @@
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
-use arkavo_llm::providers::{
-    ProviderConfig, ProviderFactoryRegistry, ProviderType,
-};
+use arkavo_llm::providers::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
 use arkavo_llm::{Message, Provider, Role};
 
 #[path = "common/mod.rs"]
