@@ -46,8 +46,8 @@ impl MemoryIntegration {
 
         let storage = Arc::new(MemoryStorage::new().await?);
         log::info!(
-            "Memory storage initialized at: {:?}",
-            MemoryStorage::get_data_directory()?
+            "Memory storage initialized at: {}",
+            MemoryStorage::get_data_directory()?.display()
         );
 
         Ok(Self { storage })

@@ -359,12 +359,16 @@ Full repository details (available via @build_repository_context):
         }
 
         if print_mode {
-            runtime.block_on(process_message_print(&client, &messages, &mcp_client))?;
+            runtime.block_on(process_message_print(
+                &client,
+                &messages,
+                mcp_client.as_ref(),
+            ))?;
         } else {
             runtime.block_on(process_message(
                 &client,
                 &messages,
-                &mcp_client,
+                mcp_client.as_ref(),
                 &conversation_manager,
             ))?;
         }
@@ -567,7 +571,7 @@ Full repository details (available via @build_repository_context):
         // Check for slash commands
         if let Some(command_input) = input.strip_prefix('/')
             && let Some(command_response) =
-                handle_command(command_input, &mcp_client, client.provider_name())
+                handle_command(command_input, mcp_client.as_ref(), client.provider_name())
         {
             println!("{command_response}");
             println!();
@@ -636,7 +640,7 @@ Full repository details (available via @build_repository_context):
         match runtime.block_on(process_message(
             &client,
             &messages,
-            &mcp_client,
+            mcp_client.as_ref(),
             &conversation_manager,
         )) {
             Ok(response) => {
@@ -664,7 +668,7 @@ Full repository details (available via @build_repository_context):
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
@@ -753,7 +757,7 @@ async fn process_message(
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use streaming but only print content
     let mut stream = client.stream(messages.to_vec()).await?;
@@ -816,7 +820,7 @@ fn get_current_directory() -> String {
 
 fn handle_command(
     input: &str,
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
     llm_provider: &str,
 ) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
@@ -936,8 +940,8 @@ fn handle_command(
                         } else {
                             let mut output = "Available MCP tools:\n\n".to_string();
                             for tool in tools {
-                                output
-                                    .push_str(&format!("  {} - {}\n", tool.name, tool.description));
+                                use std::fmt::Write;
+                                let _ = write!(output, "  {} - {}\n", tool.name, tool.description);
                             }
                             Some(output)
                         }
@@ -1097,11 +1101,13 @@ fn list_files(path: &str) -> Option<String> {
             let mut result = format!("Contents of {}:\n\n", path.display());
 
             for dir in &dirs {
-                result.push_str(&format!("  {dir}\n"));
+                use std::fmt::Write;
+                let _ = write!(result, "  {dir}\n");
             }
 
             for file in &files {
-                result.push_str(&format!("  {file}\n"));
+                use std::fmt::Write;
+                let _ = write!(result, "  {file}\n");
             }
 
             if dirs.is_empty() && files.is_empty() {

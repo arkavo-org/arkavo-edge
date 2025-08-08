@@ -36,6 +36,7 @@ impl McpProcessManager {
     }
 
     /// Register an externally spawned process for tracking
+    #[allow(clippy::missing_panics_doc)]
     pub fn register_process(&self, name: String, pid: u32) {
         self.processes
             .lock()
@@ -44,6 +45,7 @@ impl McpProcessManager {
     }
 
     /// Spawn a new MCP server process
+    #[allow(clippy::missing_panics_doc)]
     pub fn spawn_mcp_server(
         &self,
         name: String,
@@ -85,14 +87,10 @@ impl McpProcessManager {
             let name_clone = name.clone();
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        // Only show stderr in debug mode
-                        if std::env::var("ARKAVO_DEBUG").is_ok() {
-                            eprintln!(
-                                "[DEBUG] mcp.server.stderr name={name_clone} line=\"{line}\""
-                            );
-                        }
+                for line in reader.lines().flatten() {
+                    // Only show stderr in debug mode
+                    if std::env::var("ARKAVO_DEBUG").is_ok() {
+                        eprintln!("[DEBUG] mcp.server.stderr name={name_clone} line=\"{line}\"");
                     }
                 }
             });
@@ -118,6 +116,7 @@ impl McpProcessManager {
     }
 
     /// Shutdown all managed processes gracefully with timeout
+    #[allow(clippy::missing_panics_doc)]
     pub fn shutdown_all(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::thread;
         use std::time::Duration;

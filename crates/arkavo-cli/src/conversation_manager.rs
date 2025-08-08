@@ -78,6 +78,10 @@ impl ConversationManager {
         Ok(session_id)
     }
 
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn restore_last_session(&mut self) -> anyhow::Result<Option<Uuid>> {
         let progress = ProgressBar::new_spinner();
         progress.set_style(
@@ -150,6 +154,10 @@ impl ConversationManager {
     }
 
     #[cfg(feature = "local")]
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn get_context_messages(
         &self,
         system_message: Option<arkavo_llm::Message>,
@@ -242,6 +250,10 @@ impl ConversationManager {
     }
 
     #[cfg(feature = "local")]
+    #[allow(
+        clippy::missing_panics_doc,
+        clippy::literal_string_with_formatting_args
+    )]
     pub async fn create_summary(
         &self,
         client: &LlmClient,
@@ -262,7 +274,13 @@ impl ConversationManager {
         );
 
         for msg in &messages_to_summarize {
-            summary_prompt.push_str(&format!("{}: {}\n\n", msg.role.to_uppercase(), msg.content));
+            use std::fmt::Write;
+            let _ = write!(
+                summary_prompt,
+                "{}: {}\n\n",
+                msg.role.to_uppercase(),
+                msg.content
+            );
         }
 
         let messages = vec![

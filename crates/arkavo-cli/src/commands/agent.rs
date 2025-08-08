@@ -120,6 +120,7 @@ listen:  0.0.0.0:8342
     Ok(())
 }
 
+#[allow(clippy::disallowed_methods)]
 fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
     use std::env;

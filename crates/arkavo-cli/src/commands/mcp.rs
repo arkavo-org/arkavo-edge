@@ -226,6 +226,7 @@ fn error_response(
     })
 }
 
+#[allow(clippy::missing_panics_doc)]
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize schemas
     init_schemas();

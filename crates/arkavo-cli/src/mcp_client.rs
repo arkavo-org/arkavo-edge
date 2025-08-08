@@ -182,6 +182,7 @@ impl McpClient {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
     pub fn call_tool(
         &self,
         tool_name: &str,
@@ -234,6 +235,7 @@ impl McpClient {
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     fn send_request(
         &self,
         method: &str,
