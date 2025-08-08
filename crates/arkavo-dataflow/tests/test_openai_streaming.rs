@@ -311,9 +311,9 @@ async fn test_openai_streaming_concurrent() {
             Ok(Ok(content)) => {
                 println!("Stream {} response: {}", i + 1, content);
                 assert!(
-                    content.contains("Stream") || 
-                    content.contains("OK") || 
-                    content.contains(&(i + 1).to_string()),
+                    content.contains("Stream")
+                        || content.contains("OK")
+                        || content.contains(&(i + 1).to_string()),
                     "Response should reference stream number or OK, got: '{}'",
                     content
                 );
