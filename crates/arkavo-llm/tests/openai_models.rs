@@ -1,8 +1,8 @@
-use arkavo_dataflow::nodes::openai_provider::{OpenAIConfig, OpenAIProvider};
+use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
 use std::time::Instant;
 
-#[path = "mod.rs"]
+#[path = "common/mod.rs"]
 mod common;
 use common::ensure_api_key;
 

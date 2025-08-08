@@ -1,6 +1,6 @@
-use super::http_client::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
-use super::provider_error::{ProviderError, ProviderResult};
-use arkavo_llm::{Message, Provider, Role, StreamResponse};
+use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
+use crate::common::{ProviderError, ProviderResult};
+use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -235,7 +235,7 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl Provider for OpenAIProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String, arkavo_llm::Error> {
+    async fn complete(&self, messages: Vec<Message>) -> Result<String, crate::Error> {
         let api_messages = self.convert_messages(messages);
 
         // GPT-5 only supports default temperature (1.0)
@@ -301,7 +301,7 @@ impl Provider for OpenAIProvider {
                 })
             })
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         Ok(response)
     }
@@ -311,11 +311,11 @@ impl Provider for OpenAIProvider {
         messages: Vec<Message>,
     ) -> Result<
         Box<
-            dyn tokio_stream::Stream<Item = Result<StreamResponse, arkavo_llm::Error>>
+            dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>>
                 + Send
                 + Unpin,
         >,
-        arkavo_llm::Error,
+        crate::Error,
     > {
         let api_messages = self.convert_messages(messages);
 
@@ -355,11 +355,11 @@ impl Provider for OpenAIProvider {
         let response = req
             .send()
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         if !response.status().is_success() {
             let error = self.handle_error_response(response).await;
-            return Err(arkavo_llm::Error::Provider(error.to_string()));
+            return Err(crate::Error::Provider(error.to_string()));
         }
 
         // Convert response body to stream of parsed events
@@ -421,7 +421,7 @@ impl Provider for OpenAIProvider {
                     }
                     Err(e) => {
                         let _ = tx
-                            .send(Err(arkavo_llm::Error::Provider(e.to_string())))
+                            .send(Err(crate::Error::Provider(e.to_string())))
                             .await;
                         break;
                     }

@@ -1,9 +1,6 @@
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
-pub mod anthropic_provider;
 pub mod auth_manager;
 #[cfg(test)]
 mod auth_manager_test;
-pub mod http_client;
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 pub mod llm;
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
@@ -12,14 +9,6 @@ pub mod llm_config;
 pub mod llm_discovery;
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 pub mod model_registry;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
-pub mod openai_provider;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
-pub mod provider_error;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
-pub mod provider_factory;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
-pub mod provider_health;
 pub mod sink;
 pub mod source;
 pub mod transform;

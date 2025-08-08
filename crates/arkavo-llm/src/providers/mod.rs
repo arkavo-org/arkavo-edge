@@ -1,0 +1,20 @@
+#[cfg(feature = "llm-remote")]
+pub mod anthropic;
+#[cfg(feature = "llm-remote")]
+pub mod factory;
+#[cfg(feature = "llm-remote")]
+pub mod health;
+#[cfg(feature = "llm-remote")]
+pub mod openai;
+
+#[cfg(feature = "llm-remote")]
+pub use anthropic::{AnthropicConfig, AnthropicProvider};
+#[cfg(feature = "llm-remote")]
+pub use factory::{
+    AnthropicProviderFactory, OpenAIProviderFactory, OllamaProviderFactory, ProviderConfig,
+    ProviderFactory, ProviderFactoryRegistry, ProviderType,
+};
+#[cfg(feature = "llm-remote")]
+pub use health::{HealthCheckResult, HealthStatus, ProviderHealthMonitor, ProviderMetrics};
+#[cfg(feature = "llm-remote")]
+pub use openai::{OpenAIConfig, OpenAIProvider};

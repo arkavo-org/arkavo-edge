@@ -398,8 +398,10 @@ dependencies = [
  "futures",
  "hf-hub",
  "indicatif",
+ "keyring",
  "rand 0.8.5",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "serial_test",
@@ -411,6 +413,7 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tracing",
+ "url",
  "uuid",
 ]
 

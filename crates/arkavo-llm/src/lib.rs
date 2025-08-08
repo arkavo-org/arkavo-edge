@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod client;
+pub mod common;
 pub mod error;
 pub mod image;
 #[cfg(feature = "llm-local")]
@@ -8,6 +9,8 @@ pub mod message;
 #[cfg(feature = "llm-remote")]
 pub mod ollama;
 pub mod provider;
+#[cfg(feature = "llm-remote")]
+pub mod providers;
 pub mod stream;
 pub mod stream_adapter;
 pub mod stream_model;

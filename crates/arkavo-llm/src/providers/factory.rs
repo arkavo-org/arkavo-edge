@@ -1,10 +1,8 @@
-use super::anthropic_provider::{AnthropicConfig, AnthropicProvider};
-use super::auth_manager::AuthManager;
-use super::openai_provider::{OpenAIConfig, OpenAIProvider};
+use super::anthropic::{AnthropicConfig, AnthropicProvider};
+use super::openai::{OpenAIConfig, OpenAIProvider};
+use crate::ollama::OllamaClient;
+use crate::provider::Provider;
 use anyhow::Result;
-#[cfg(feature = "llm-remote")]
-use arkavo_llm::ollama::OllamaClient;
-use arkavo_llm::provider::Provider;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -198,32 +196,14 @@ impl ProviderFactory for OpenAIProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
-            // Try to get from auth manager
-            match AuthManager::new().await {
-                Ok(auth_manager) => {
-                    match auth_manager.get_credential(auth_ref).await {
-                        Ok(cred) => cred.value,
-                        Err(_) => {
-                            // Fall back to environment variable
-                            std::env::var(auth_ref).map_err(|_| {
-                                anyhow::anyhow!(
-                                    "Credential '{}' not found in auth manager or environment",
-                                    auth_ref.chars().take(8).collect::<String>() + "..."
-                                )
-                            })?
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Fall back to environment variable if auth manager fails
-                    std::env::var(auth_ref).map_err(|_| {
-                        anyhow::anyhow!(
-                            "Auth manager unavailable and credential '{}' not found in environment",
-                            auth_ref.chars().take(8).collect::<String>() + "..."
-                        )
-                    })?
-                }
-            }
+            // TODO: Re-enable AuthManager when available in arkavo-llm
+            // For now, try environment variable
+            std::env::var(auth_ref).map_err(|_| {
+                anyhow::anyhow!(
+                    "Credential '{}' not found in environment",
+                    auth_ref.chars().take(8).collect::<String>() + "..."
+                )
+            })?
         } else {
             return Err(anyhow::anyhow!(
                 "API key required for OpenAI provider. Set auth_ref in the node configuration or provide OPENAI_API_KEY environment variable"
@@ -290,32 +270,14 @@ impl ProviderFactory for AnthropicProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
-            // Try to get from auth manager
-            match AuthManager::new().await {
-                Ok(auth_manager) => {
-                    match auth_manager.get_credential(auth_ref).await {
-                        Ok(cred) => cred.value,
-                        Err(_) => {
-                            // Fall back to environment variable
-                            std::env::var(auth_ref).map_err(|_| {
-                                anyhow::anyhow!(
-                                    "Credential '{}' not found in auth manager or environment",
-                                    auth_ref.chars().take(8).collect::<String>() + "..."
-                                )
-                            })?
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Fall back to environment variable if auth manager fails
-                    std::env::var(auth_ref).map_err(|_| {
-                        anyhow::anyhow!(
-                            "Auth manager unavailable and credential '{}' not found in environment",
-                            auth_ref.chars().take(8).collect::<String>() + "..."
-                        )
-                    })?
-                }
-            }
+            // TODO: Re-enable AuthManager when available in arkavo-llm
+            // For now, try environment variable
+            std::env::var(auth_ref).map_err(|_| {
+                anyhow::anyhow!(
+                    "Credential '{}' not found in environment",
+                    auth_ref.chars().take(8).collect::<String>() + "..."
+                )
+            })?
         } else {
             return Err(anyhow::anyhow!(
                 "API key required for Anthropic provider. Set auth_ref in the node configuration or provide ANTHROPIC_API_KEY environment variable"
