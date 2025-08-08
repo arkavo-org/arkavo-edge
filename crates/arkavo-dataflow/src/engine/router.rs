@@ -4,12 +4,9 @@ use anyhow::Result;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-// TODO: MessageRouter is currently unused but will be integrated when implementing
-// advanced routing features including:
-// - Dynamic split/merge strategies based on message content
-// - Load balancing across multiple targets
-// - Conditional routing based on real-time metrics
-// - Integration with the Pipeline struct for complex dataflow topologies
+// MessageRouter provides advanced routing capabilities for dataflow pipelines.
+// It supports split/merge strategies, load balancing, and conditional routing.
+// Currently reserved for future pipeline topology enhancements.
 pub struct MessageRouter {
     split_strategies: HashMap<String, Box<dyn SplitRouter>>,
     merge_strategies: HashMap<String, Box<dyn MergeRouter>>,

@@ -429,6 +429,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         idle_timeout_seconds: 300,
         rate_limit: RateLimitConfig::default(),
         task_store_path: Some(task_store_path.to_string_lossy().to_string()),
+        metrics_enabled: true,
     };
 
     let server = A2aServer::new(server_config);

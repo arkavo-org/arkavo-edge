@@ -163,7 +163,53 @@ impl DeviceManager {
             }
         }
 
-        // TODO: Try devicectl for newer Xcode versions
+        // Try devicectl for newer Xcode versions (Xcode 15+)
+        let devicectl_output = Command::new("xcrun")
+            .args(["devicectl", "list", "devices", "--json"])
+            .output();
+
+        if let Ok(output) = devicectl_output {
+            if output.status.success() {
+                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                    // Parse devicectl JSON format
+                    if let Some(devices_array) = json.get("devices").and_then(|d| d.as_array()) {
+                        let devices: Vec<IOSDevice> = devices_array
+                            .iter()
+                            .filter_map(|device| {
+                                let udid = device.get("identifier")?.as_str()?;
+                                let name = device.get("name")?.as_str()?;
+                                let state = device.get("state")?.as_str()?;
+                                let device_type = device.get("deviceType")?.as_str()?;
+
+                                // Only include booted devices
+                                if state != "Booted" {
+                                    return None;
+                                }
+
+                                Some(IOSDevice {
+                                    id: udid.to_string(),
+                                    name: name.to_string(),
+                                    state: DeviceState::Booted, // We already filtered for Booted state
+                                    device_type: device_type.to_string(),
+                                    runtime: device
+                                        .get("runtime")
+                                        .and_then(|r| r.as_str())
+                                        .unwrap_or("Unknown")
+                                        .to_string(),
+                                    is_physical: false, // Simulators are not physical devices
+                                })
+                            })
+                            .collect();
+
+                        if !devices.is_empty() {
+                            return Ok(devices);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If devicectl failed or returned no devices, return empty list
         Ok(vec![])
     }
 

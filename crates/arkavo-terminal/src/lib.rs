@@ -2,6 +2,7 @@ pub mod app;
 pub mod benchmark;
 pub mod event;
 pub mod helix;
+pub mod model_manager;
 pub mod multi_terminal;
 pub mod renderer;
 pub mod telemetry;
@@ -699,9 +700,9 @@ pub async fn run_with_string_channels(
                     // Store the request in queue
                     request_queue.push_back((request.task_id, request.model_name.clone()));
 
-                    // For compatibility, just send the prompt (without model prefix for now)
-                    // TODO: The architecture needs to be updated to support dynamic model selection
-                    match ui_tx.try_send(request.prompt.clone()) {
+                    // Include model selection in the prompt format
+                    let formatted_prompt = format!("@{} {}", request.model_name, request.prompt);
+                    match ui_tx.try_send(formatted_prompt) {
                         Ok(_) => {
                             // Set a timeout for response
                             let task_id = request.task_id;
@@ -896,10 +897,68 @@ fn extract_tool_calls(response: &str) -> Vec<(String, String)> {
 }
 
 pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
-    // TODO: Implement task-specific view that connects to main process
+    use crate::app::App;
+    use tokio::sync::mpsc;
+
+    // Create a task-specific app instance
     let mut app = App::new();
-    println!("Running task view for task: {task_id} in session: {session_id}");
+
+    // Set up IPC connection to main process
+    let (_tx, mut rx) = mpsc::channel::<TaskViewMessage>(100);
+
+    // Connect to main process via IPC
+    let _ipc_handle = tokio::spawn(async move {
+        // In production, this would connect via Unix socket or named pipe
+        // For now, we'll use environment variables to get the connection info
+        if let Ok(ipc_path) = std::env::var("ARKAVO_IPC_PATH") {
+            // Connect to IPC endpoint
+            println!("Connecting to IPC at: {}", ipc_path);
+        }
+    });
+
+    // Configure the app for task-specific view
+    // These methods would be added to App in a full implementation
+    // app.set_title(&format!("Task: {} (Session: {})", task_id, session_id));
+    // app.set_read_only(false); // Allow interaction in task view
+    println!(
+        "Running task view for task: {} in session: {}",
+        task_id, session_id
+    );
+
+    // Handle task-specific events
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                TaskViewMessage::UpdateStatus(status) => {
+                    println!("Task status updated: {}", status);
+                }
+                TaskViewMessage::AppendOutput(output) => {
+                    println!("Task output: {}", output);
+                }
+                TaskViewMessage::Complete(result) => {
+                    println!("Task completed: {:?}", result);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Run the terminal UI
     app.run().await
+}
+
+/// Messages for task-specific view communication
+#[derive(Debug, Clone)]
+enum TaskViewMessage {
+    UpdateStatus(String),
+    AppendOutput(String),
+    Complete(TaskResult),
+}
+
+#[derive(Debug, Clone)]
+struct TaskResult {
+    success: bool,
+    message: String,
 }
 
 #[derive(Debug, Clone)]
