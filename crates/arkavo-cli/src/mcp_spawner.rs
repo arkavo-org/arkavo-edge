@@ -87,7 +87,7 @@ impl McpProcessManager {
             let name_clone = name.clone();
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     // Only show stderr in debug mode
                     if std::env::var("ARKAVO_DEBUG").is_ok() {
                         eprintln!("[DEBUG] mcp.server.stderr name={name_clone} line=\"{line}\"");
@@ -230,6 +230,7 @@ impl McpProcessManager {
         }
 
         processes.clear();
+        drop(processes);
         Ok(())
     }
 }

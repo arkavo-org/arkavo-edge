@@ -941,7 +941,7 @@ fn handle_command(
                             let mut output = "Available MCP tools:\n\n".to_string();
                             for tool in tools {
                                 use std::fmt::Write;
-                                let _ = write!(output, "  {} - {}\n", tool.name, tool.description);
+                                let _ = writeln!(output, "  {} - {}", tool.name, tool.description);
                             }
                             Some(output)
                         }
@@ -1102,12 +1102,12 @@ fn list_files(path: &str) -> Option<String> {
 
             for dir in &dirs {
                 use std::fmt::Write;
-                let _ = write!(result, "  {dir}\n");
+                let _ = writeln!(result, "  {dir}");
             }
 
             for file in &files {
                 use std::fmt::Write;
-                let _ = write!(result, "  {file}\n");
+                let _ = writeln!(result, "  {file}");
             }
 
             if dirs.is_empty() && files.is_empty() {
