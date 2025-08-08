@@ -100,9 +100,10 @@ impl DeviceManager {
 
         // Set active device if none is set and we have booted devices
         if self.active_device_id.lock().unwrap().is_none()
-            && let Some(booted_device) = devices.iter().find(|d| d.state == DeviceState::Booted) {
-                *self.active_device_id.lock().unwrap() = Some(booted_device.id.clone());
-            }
+            && let Some(booted_device) = devices.iter().find(|d| d.state == DeviceState::Booted)
+        {
+            *self.active_device_id.lock().unwrap() = Some(booted_device.id.clone());
+        }
 
         Ok(devices)
     }
@@ -143,23 +144,24 @@ impl DeviceManager {
     fn list_physical_devices(&self) -> Result<Vec<IOSDevice>> {
         // Try using idevice_id if available
         if let Ok(output) = Command::new("idevice_id").arg("-l").output()
-            && output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let devices: Vec<IOSDevice> = stdout
-                    .lines()
-                    .filter(|line| !line.is_empty())
-                    .enumerate()
-                    .map(|(i, udid)| IOSDevice {
-                        id: udid.to_string(),
-                        name: format!("Physical Device {}", i + 1),
-                        device_type: "Physical".to_string(),
-                        runtime: "iOS".to_string(),
-                        state: DeviceState::Booted,
-                        is_physical: true,
-                    })
-                    .collect();
-                return Ok(devices);
-            }
+            && output.status.success()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let devices: Vec<IOSDevice> = stdout
+                .lines()
+                .filter(|line| !line.is_empty())
+                .enumerate()
+                .map(|(i, udid)| IOSDevice {
+                    id: udid.to_string(),
+                    name: format!("Physical Device {}", i + 1),
+                    device_type: "Physical".to_string(),
+                    runtime: "iOS".to_string(),
+                    state: DeviceState::Booted,
+                    is_physical: true,
+                })
+                .collect();
+            return Ok(devices);
+        }
 
         // Try devicectl for newer Xcode versions (Xcode 15+)
         let devicectl_output = Command::new("xcrun")
@@ -168,42 +170,43 @@ impl DeviceManager {
 
         if let Ok(output) = devicectl_output
             && output.status.success()
-                && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-                    // Parse devicectl JSON format
-                    if let Some(devices_array) = json.get("devices").and_then(|d| d.as_array()) {
-                        let devices: Vec<IOSDevice> = devices_array
-                            .iter()
-                            .filter_map(|device| {
-                                let udid = device.get("identifier")?.as_str()?;
-                                let name = device.get("name")?.as_str()?;
-                                let state = device.get("state")?.as_str()?;
-                                let device_type = device.get("deviceType")?.as_str()?;
+            && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+        {
+            // Parse devicectl JSON format
+            if let Some(devices_array) = json.get("devices").and_then(|d| d.as_array()) {
+                let devices: Vec<IOSDevice> = devices_array
+                    .iter()
+                    .filter_map(|device| {
+                        let udid = device.get("identifier")?.as_str()?;
+                        let name = device.get("name")?.as_str()?;
+                        let state = device.get("state")?.as_str()?;
+                        let device_type = device.get("deviceType")?.as_str()?;
 
-                                // Only include booted devices
-                                if state != "Booted" {
-                                    return None;
-                                }
-
-                                Some(IOSDevice {
-                                    id: udid.to_string(),
-                                    name: name.to_string(),
-                                    state: DeviceState::Booted, // We already filtered for Booted state
-                                    device_type: device_type.to_string(),
-                                    runtime: device
-                                        .get("runtime")
-                                        .and_then(|r| r.as_str())
-                                        .unwrap_or("Unknown")
-                                        .to_string(),
-                                    is_physical: false, // Simulators are not physical devices
-                                })
-                            })
-                            .collect();
-
-                        if !devices.is_empty() {
-                            return Ok(devices);
+                        // Only include booted devices
+                        if state != "Booted" {
+                            return None;
                         }
-                    }
+
+                        Some(IOSDevice {
+                            id: udid.to_string(),
+                            name: name.to_string(),
+                            state: DeviceState::Booted, // We already filtered for Booted state
+                            device_type: device_type.to_string(),
+                            runtime: device
+                                .get("runtime")
+                                .and_then(|r| r.as_str())
+                                .unwrap_or("Unknown")
+                                .to_string(),
+                            is_physical: false, // Simulators are not physical devices
+                        })
+                    })
+                    .collect();
+
+                if !devices.is_empty() {
+                    return Ok(devices);
                 }
+            }
+        }
 
         // If devicectl failed or returned no devices, return empty list
         Ok(vec![])

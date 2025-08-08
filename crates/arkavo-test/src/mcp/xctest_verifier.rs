@@ -192,11 +192,11 @@ impl XCTestVerifier {
                     for device in devices_array {
                         if let Some(state) = device.get("state").and_then(|s| s.as_str())
                             && state == "Booted"
-                                && let Some(device_id) = device.get("udid").and_then(|u| u.as_str())
-                                {
-                                    let status = Self::verify_device(device_id).await?;
-                                    return Ok(status.is_functional);
-                                }
+                            && let Some(device_id) = device.get("udid").and_then(|u| u.as_str())
+                        {
+                            let status = Self::verify_device(device_id).await?;
+                            return Ok(status.is_functional);
+                        }
                     }
                 }
             }

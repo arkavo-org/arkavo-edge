@@ -144,9 +144,10 @@ impl OAuth2Provider {
         }
 
         if let Some(redirect_uri) = &request.redirect_uri
-            && auth_code.redirect_uri != *redirect_uri {
-                return Err(A2aError::Auth("Redirect URI mismatch".to_string()));
-            }
+            && auth_code.redirect_uri != *redirect_uri
+        {
+            return Err(A2aError::Auth("Redirect URI mismatch".to_string()));
+        }
 
         self.generate_tokens(auth_code.user_id, auth_code.client_id, auth_code.scopes)
             .await
@@ -165,9 +166,10 @@ impl OAuth2Provider {
                 .ok_or_else(|| A2aError::Auth("Invalid refresh token".to_string()))?;
 
             if let Some(expires_at) = token_data.expires_at
-                && expires_at < Utc::now().timestamp() {
-                    return Err(A2aError::Auth("Refresh token expired".to_string()));
-                }
+                && expires_at < Utc::now().timestamp()
+            {
+                return Err(A2aError::Auth("Refresh token expired".to_string()));
+            }
 
             if token_data.client_id != request.client_id {
                 return Err(A2aError::Auth("Client ID mismatch".to_string()));

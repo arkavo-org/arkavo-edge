@@ -402,26 +402,27 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Filter based on query if provided
         if let Some(query) = query
-            && let Some(queries) = query.queries {
-                disclosures.retain(|disclosure| {
-                    queries.iter().any(|q| {
-                        if q.feature_type as i32 != disclosure.feature_type as i32 {
-                            return false;
-                        }
-                        if let Some(pattern) = &q.match_pattern {
-                            // Simple wildcard matching
-                            if pattern.contains('*') {
-                                let prefix = pattern.trim_end_matches('*');
-                                disclosure.id.starts_with(prefix)
-                            } else {
-                                disclosure.id == *pattern
-                            }
+            && let Some(queries) = query.queries
+        {
+            disclosures.retain(|disclosure| {
+                queries.iter().any(|q| {
+                    if q.feature_type as i32 != disclosure.feature_type as i32 {
+                        return false;
+                    }
+                    if let Some(pattern) = &q.match_pattern {
+                        // Simple wildcard matching
+                        if pattern.contains('*') {
+                            let prefix = pattern.trim_end_matches('*');
+                            disclosure.id.starts_with(prefix)
                         } else {
-                            true
+                            disclosure.id == *pattern
                         }
-                    })
-                });
-            }
+                    } else {
+                        true
+                    }
+                })
+            });
+        }
 
         timer.success();
         Ok(DiscoverFeaturesDisclose { disclosures })
@@ -791,9 +792,10 @@ impl A2aRpcServer for A2aRpcImpl {
             tokio::spawn(async move {
                 while let Some(delta) = delta_rx.recv().await {
                     if let Ok(msg) = SubscriptionMessage::from_json(&delta)
-                        && sink.send(msg).await.is_err() {
-                            break; // Client disconnected
-                        }
+                        && sink.send(msg).await.is_err()
+                    {
+                        break; // Client disconnected
+                    }
                 }
             });
 
@@ -897,9 +899,10 @@ impl A2aRpcServer for A2aRpcImpl {
 
                                     // Send the delta using the subscription sink
                                     if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
-                                        && sink.send(msg).await.is_err() {
-                                            break; // Client disconnected
-                                        }
+                                        && sink.send(msg).await.is_err()
+                                    {
+                                        break; // Client disconnected
+                                    }
                                 }
                                 Err(e) => {
                                     error!(error = %e, "Delta stream error");
@@ -1043,15 +1046,16 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Update agent metadata if this is a capability broadcast
         if matches!(broadcast.broadcast_type, BroadcastType::Capability)
-            && let Some(ref capabilities) = broadcast.capabilities {
-                // Store capabilities in metadata for future reference
-                for capability in capabilities {
-                    info!(
-                        "Agent {} announced capability: {} - {:?}",
-                        broadcast.agent_id, capability.name, capability.description
-                    );
-                }
+            && let Some(ref capabilities) = broadcast.capabilities
+        {
+            // Store capabilities in metadata for future reference
+            for capability in capabilities {
+                info!(
+                    "Agent {} announced capability: {} - {:?}",
+                    broadcast.agent_id, capability.name, capability.description
+                );
             }
+        }
 
         // Handle different broadcast types
         match broadcast.broadcast_type {

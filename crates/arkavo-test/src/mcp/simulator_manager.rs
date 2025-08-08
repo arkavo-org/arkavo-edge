@@ -255,9 +255,10 @@ impl SimulatorManager {
         // Parse PID from output like: "com.arkavo.Arkavo: 12345"
         let output_str = String::from_utf8_lossy(&output.stdout);
         if let Some(pid_str) = output_str.trim().split(": ").nth(1)
-            && let Ok(pid) = pid_str.parse::<i32>() {
-                return Ok(pid);
-            }
+            && let Ok(pid) = pid_str.parse::<i32>()
+        {
+            return Ok(pid);
+        }
 
         // Return 0 if we can't parse PID but launch was successful
         Ok(0)

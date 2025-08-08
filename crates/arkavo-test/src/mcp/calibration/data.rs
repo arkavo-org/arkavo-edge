@@ -225,9 +225,10 @@ impl CalibrationDataStore {
                         .and_then(|s| s.to_str())
                         .is_some_and(|s| s.ends_with("_config"))
                     && let Ok(data) = fs::read_to_string(&path)
-                        && let Ok(config) = serde_json::from_str::<CalibrationConfig>(&data) {
-                            cache.insert(config.device_id.clone(), config);
-                        }
+                    && let Ok(config) = serde_json::from_str::<CalibrationConfig>(&data)
+                {
+                    cache.insert(config.device_id.clone(), config);
+                }
             }
         }
 
@@ -305,9 +306,9 @@ impl CalibrationCache {
                 .iter()
                 .min_by_key(|(_, cached)| cached.accessed_at)
                 .map(|(id, cached)| (id.clone(), cached.accessed_at))
-            {
-                cache.remove(&lru_id);
-            }
+        {
+            cache.remove(&lru_id);
+        }
 
         cache.insert(
             device_id,

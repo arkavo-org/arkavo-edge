@@ -120,11 +120,12 @@ impl IdbRecovery {
         let mut last_recovery = self.last_recovery.lock().await;
 
         if let Some(last_time) = *last_recovery
-            && last_time.elapsed() < Duration::from_secs(30) {
-                return Err(TestError::Mcp(
-                    "Recovery attempted too recently. Please wait 30 seconds.".to_string(),
-                ));
-            }
+            && last_time.elapsed() < Duration::from_secs(30)
+        {
+            return Err(TestError::Mcp(
+                "Recovery attempted too recently. Please wait 30 seconds.".to_string(),
+            ));
+        }
 
         eprintln!("[IdbRecovery] Starting IDB recovery process...");
 
@@ -289,9 +290,10 @@ impl IdbRecovery {
                         .ok();
 
                     if let Some(output) = port_connect
-                        && output.status.success() {
-                            eprintln!("[IdbRecovery] Connected successfully with explicit port");
-                        }
+                        && output.status.success()
+                    {
+                        eprintln!("[IdbRecovery] Connected successfully with explicit port");
+                    }
                 }
             }
 
@@ -341,53 +343,55 @@ impl IdbRecovery {
                 .ok();
 
             if let Some(output) = pgrep_output
-                && output.status.success() {
-                    let pids = String::from_utf8_lossy(&output.stdout);
-                    eprintln!("[IdbRecovery] Found IDB companion PIDs: {}", pids.trim());
+                && output.status.success()
+            {
+                let pids = String::from_utf8_lossy(&output.stdout);
+                eprintln!("[IdbRecovery] Found IDB companion PIDs: {}", pids.trim());
 
-                    // Step 3: Try to send SIGTERM first
-                    for pid in pids.lines() {
-                        if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                            eprintln!("[IdbRecovery] Sending SIGTERM to PID {pid_num}");
-                            let _ = Command::new("kill")
-                                .arg("-TERM")
-                                .arg(pid_num.to_string())
-                                .output();
-                        }
-                    }
-
-                    // Wait for graceful shutdown
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-
-                    // Step 4: Check if still running and force kill if needed
-                    if Self::is_companion_running().await {
-                        eprintln!("[IdbRecovery] IDB companion still running, force killing...");
-                        let _ = Command::new("pkill")
-                            .arg("-9")
-                            .arg("-f")
-                            .arg("idb_companion")
+                // Step 3: Try to send SIGTERM first
+                for pid in pids.lines() {
+                    if let Ok(pid_num) = pid.trim().parse::<i32>() {
+                        eprintln!("[IdbRecovery] Sending SIGTERM to PID {pid_num}");
+                        let _ = Command::new("kill")
+                            .arg("-TERM")
+                            .arg(pid_num.to_string())
                             .output();
-                        tokio::time::sleep(Duration::from_millis(500)).await;
                     }
                 }
+
+                // Wait for graceful shutdown
+                tokio::time::sleep(Duration::from_secs(2)).await;
+
+                // Step 4: Check if still running and force kill if needed
+                if Self::is_companion_running().await {
+                    eprintln!("[IdbRecovery] IDB companion still running, force killing...");
+                    let _ = Command::new("pkill")
+                        .arg("-9")
+                        .arg("-f")
+                        .arg("idb_companion")
+                        .output();
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
 
             // Step 5: Clear any port bindings by killing lsof processes holding the port
             eprintln!("[IdbRecovery] Clearing port bindings...");
             let lsof_output = Command::new("lsof").args(["-ti", ":10882"]).output().ok();
 
             if let Some(output) = lsof_output
-                && output.status.success() {
-                    let pids = String::from_utf8_lossy(&output.stdout);
-                    for pid in pids.lines() {
-                        if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                            eprintln!("[IdbRecovery] Killing process {pid_num} holding port 10882");
-                            let _ = Command::new("kill")
-                                .arg("-9")
-                                .arg(pid_num.to_string())
-                                .output();
-                        }
+                && output.status.success()
+            {
+                let pids = String::from_utf8_lossy(&output.stdout);
+                for pid in pids.lines() {
+                    if let Ok(pid_num) = pid.trim().parse::<i32>() {
+                        eprintln!("[IdbRecovery] Killing process {pid_num} holding port 10882");
+                        let _ = Command::new("kill")
+                            .arg("-9")
+                            .arg(pid_num.to_string())
+                            .output();
                     }
                 }
+            }
 
             // Step 6: Clear temp files and locks
             let temp_dir_str = env::temp_dir().display().to_string();

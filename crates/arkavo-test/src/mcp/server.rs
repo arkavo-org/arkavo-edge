@@ -1646,9 +1646,10 @@ impl TestExecutor {
 
                 // Apply filter if provided
                 if let Some(f) = filter
-                    && !test_name.contains(f) {
-                        continue;
-                    }
+                    && !test_name.contains(f)
+                {
+                    continue;
+                }
 
                 // Determine test type based on path/name
                 let test_info_type = if test_name.contains("bench") || line.ends_with(": bench") {
@@ -1719,14 +1720,15 @@ impl TestExecutor {
                 for line in stdout.lines() {
                     if let Some(test_name) = line.strip_prefix("Test Case '")
                         && let Some(test_name) = test_name.strip_suffix("' started")
-                            && filter.is_none_or(|f| test_name.contains(f)) {
-                                tests.push(TestInfo {
-                                    name: test_name.to_string(),
-                                    test_type: "unit".to_string(),
-                                    language: "swift".to_string(),
-                                    path: None,
-                                });
-                            }
+                        && filter.is_none_or(|f| test_name.contains(f))
+                    {
+                        tests.push(TestInfo {
+                            name: test_name.to_string(),
+                            test_type: "unit".to_string(),
+                            language: "swift".to_string(),
+                            path: None,
+                        });
+                    }
                 }
             }
         }
@@ -1784,69 +1786,71 @@ impl TestExecutor {
 
                         // Look for test classes and methods
                         for line in contents.lines() {
-                            if line.contains("class") && line.contains("XCTestCase")
-                                && let Some(class_name) = extract_swift_class_name(line) {
-                                    current_class = Some(class_name.clone());
+                            if line.contains("class")
+                                && line.contains("XCTestCase")
+                                && let Some(class_name) = extract_swift_class_name(line)
+                            {
+                                current_class = Some(class_name.clone());
 
-                                    // Determine test type based on class name
-                                    let class_test_type = if class_name.contains("UITest") {
-                                        "ui"
-                                    } else if class_name.contains("Integration") {
-                                        "integration"
-                                    } else if class_name.contains("Performance") {
-                                        "performance"
-                                    } else {
-                                        test_info_type
-                                    };
+                                // Determine test type based on class name
+                                let class_test_type = if class_name.contains("UITest") {
+                                    "ui"
+                                } else if class_name.contains("Integration") {
+                                    "integration"
+                                } else if class_name.contains("Performance") {
+                                    "performance"
+                                } else {
+                                    test_info_type
+                                };
 
-                                    if filter.is_none_or(|f| class_name.contains(f))
-                                        && (test_type == "all" || test_type == class_test_type)
-                                        && seen_tests.insert(class_name.clone())
-                                    {
-                                        tests.push(TestInfo {
-                                            name: class_name,
-                                            test_type: class_test_type.to_string(),
-                                            language: "swift".to_string(),
-                                            path: Some(path.to_string_lossy().to_string()),
-                                        });
-                                    }
+                                if filter.is_none_or(|f| class_name.contains(f))
+                                    && (test_type == "all" || test_type == class_test_type)
+                                    && seen_tests.insert(class_name.clone())
+                                {
+                                    tests.push(TestInfo {
+                                        name: class_name,
+                                        test_type: class_test_type.to_string(),
+                                        language: "swift".to_string(),
+                                        path: Some(path.to_string_lossy().to_string()),
+                                    });
                                 }
+                            }
 
                             // Look for test methods
                             if line.trim().starts_with("func test")
                                 && let (Some(class), Some(method_name)) =
                                     (&current_class, extract_swift_test_method_name(line))
-                                {
-                                    let full_test_name = format!("{class}.{method_name}");
+                            {
+                                let full_test_name = format!("{class}.{method_name}");
 
-                                    // Determine test type based on class and method names
-                                    let method_test_type =
-                                        if class.contains("UITest") || method_name.contains("UI") {
-                                            "ui"
-                                        } else if class.contains("Integration")
-                                            || method_name.contains("Integration")
-                                        {
-                                            "integration"
-                                        } else if class.contains("Performance")
-                                            || method_name.contains("Performance")
-                                        {
-                                            "performance"
-                                        } else {
-                                            test_info_type
-                                        };
-
-                                    if filter.is_none_or(|f| full_test_name.contains(f))
-                                        && (test_type == "all" || test_type == method_test_type)
-                                        && seen_tests.insert(full_test_name.clone())
+                                // Determine test type based on class and method names
+                                let method_test_type =
+                                    if class.contains("UITest") || method_name.contains("UI") {
+                                        "ui"
+                                    } else if class.contains("Integration")
+                                        || method_name.contains("Integration")
                                     {
-                                        tests.push(TestInfo {
-                                            name: full_test_name,
-                                            test_type: method_test_type.to_string(),
-                                            language: "swift".to_string(),
-                                            path: Some(path.to_string_lossy().to_string()),
-                                        });
-                                    }
+                                        "integration"
+                                    } else if class.contains("Performance")
+                                        || method_name.contains("Performance")
+                                    {
+                                        "performance"
+                                    } else {
+                                        test_info_type
+                                    };
+
+                                if filter.is_none_or(|f| full_test_name.contains(f))
+                                    && (test_type == "all" || test_type == method_test_type)
+                                    && seen_tests.insert(full_test_name.clone())
+                                {
+                                    tests.push(TestInfo {
+                                        name: full_test_name,
+                                        test_type: method_test_type.to_string(),
+                                        language: "swift".to_string(),
+                                        path: Some(path.to_string_lossy().to_string()),
+                                    });
                                 }
+                            }
                         }
                     }
                 }
@@ -1855,53 +1859,55 @@ impl TestExecutor {
 
         // If we have an xcworkspace or xcodeproj, try using xcodebuild
         if tests.is_empty()
-            && let Ok(entries) = fs::read_dir(&self.working_dir) {
-                for entry in entries.filter_map(std::result::Result::ok) {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension()
-                        && (ext == "xcworkspace" || ext == "xcodeproj") {
-                            // Try to list test targets using the wrapper
-                            let scheme_output =
-                                super::xcodebuild_wrapper::XcodebuildWrapper::try_execute(&[
-                                    "-list",
-                                    "-workspace",
-                                    &path.to_string_lossy(),
-                                ]);
+            && let Ok(entries) = fs::read_dir(&self.working_dir)
+        {
+            for entry in entries.filter_map(std::result::Result::ok) {
+                let path = entry.path();
+                if let Some(ext) = path.extension()
+                    && (ext == "xcworkspace" || ext == "xcodeproj")
+                {
+                    // Try to list test targets using the wrapper
+                    let scheme_output =
+                        super::xcodebuild_wrapper::XcodebuildWrapper::try_execute(&[
+                            "-list",
+                            "-workspace",
+                            &path.to_string_lossy(),
+                        ]);
 
-                            if let Some(output) = scheme_output {
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                // Parse schemes that contain "Test"
-                                let mut in_schemes = false;
-                                for line in stdout.lines() {
-                                    if line.trim() == "Schemes:" {
-                                        in_schemes = true;
-                                    } else if in_schemes && line.starts_with("        ") {
-                                        let scheme = line.trim();
-                                        if scheme.contains("Test")
-                                            && filter.is_none_or(|f| scheme.contains(f))
-                                        {
-                                            let test_info_type = if scheme.contains("UITest") {
-                                                "ui"
-                                            } else {
-                                                "unit"
-                                            };
+                    if let Some(output) = scheme_output {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        // Parse schemes that contain "Test"
+                        let mut in_schemes = false;
+                        for line in stdout.lines() {
+                            if line.trim() == "Schemes:" {
+                                in_schemes = true;
+                            } else if in_schemes && line.starts_with("        ") {
+                                let scheme = line.trim();
+                                if scheme.contains("Test")
+                                    && filter.is_none_or(|f| scheme.contains(f))
+                                {
+                                    let test_info_type = if scheme.contains("UITest") {
+                                        "ui"
+                                    } else {
+                                        "unit"
+                                    };
 
-                                            if test_type == "all" || test_type == test_info_type {
-                                                tests.push(TestInfo {
-                                                    name: scheme.to_string(),
-                                                    test_type: test_info_type.to_string(),
-                                                    language: "swift".to_string(),
-                                                    path: None,
-                                                });
-                                            }
-                                        }
+                                    if test_type == "all" || test_type == test_info_type {
+                                        tests.push(TestInfo {
+                                            name: scheme.to_string(),
+                                            test_type: test_info_type.to_string(),
+                                            language: "swift".to_string(),
+                                            path: None,
+                                        });
                                     }
                                 }
                             }
-                            break;
                         }
+                    }
+                    break;
                 }
             }
+        }
 
         Ok(tests)
     }

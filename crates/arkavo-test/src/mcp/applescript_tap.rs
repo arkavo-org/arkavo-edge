@@ -139,9 +139,10 @@ impl AppleScriptTap {
                 if let Some(devices_array) = device_list.as_array() {
                     for device in devices_array {
                         if device["udid"].as_str() == Some(device_id)
-                            && let Some(name) = device["name"].as_str() {
-                                return Ok(name.to_string());
-                            }
+                            && let Some(name) = device["name"].as_str()
+                        {
+                            return Ok(name.to_string());
+                        }
                     }
                 }
             }

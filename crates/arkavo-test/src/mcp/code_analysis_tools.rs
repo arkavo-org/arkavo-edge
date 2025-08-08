@@ -290,15 +290,16 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if let Ok(msg) = serde_json::from_str::<Value>(line)
                 && msg["reason"] == "compiler-message"
-                    && let Some(message) = msg.get("message") {
-                        bugs.push(serde_json::json!({
-                            "type": "clippy",
-                            "severity": message["level"],
-                            "message": message["message"],
-                            "file": message["spans"][0]["file_name"],
-                            "line": message["spans"][0]["line_start"]
-                        }));
-                    }
+                && let Some(message) = msg.get("message")
+            {
+                bugs.push(serde_json::json!({
+                    "type": "clippy",
+                    "severity": message["level"],
+                    "message": message["message"],
+                    "file": message["spans"][0]["file_name"],
+                    "line": message["spans"][0]["line_start"]
+                }));
+            }
         }
     }
 
@@ -318,15 +319,16 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
 
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if let Some((file_line, _)) = line.split_once(':')
-                && let Some((file, line_num)) = file_line.rsplit_once(':') {
-                    bugs.push(serde_json::json!({
-                        "type": "force_unwrap",
-                        "severity": "high",
-                        "message": "Force unwrapping detected - potential crash",
-                        "file": file,
-                        "line": line_num
-                    }));
-                }
+                && let Some((file, line_num)) = file_line.rsplit_once(':')
+            {
+                bugs.push(serde_json::json!({
+                    "type": "force_unwrap",
+                    "severity": "high",
+                    "message": "Force unwrapping detected - potential crash",
+                    "file": file,
+                    "line": line_num
+                }));
+            }
         }
     }
 

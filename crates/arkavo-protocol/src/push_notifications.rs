@@ -308,15 +308,17 @@ impl PushNotificationService {
             (Some(sub_filter), Some(target)) => {
                 if let (Some(sub_agents), Some(target_agents)) =
                     (&sub_filter.agent_ids, &target.agent_ids)
-                    && !sub_agents.iter().any(|a| target_agents.contains(a)) {
-                        return false;
-                    }
+                    && !sub_agents.iter().any(|a| target_agents.contains(a))
+                {
+                    return false;
+                }
 
                 if let (Some(sub_tasks), Some(target_tasks)) =
                     (&sub_filter.task_ids, &target.task_ids)
-                    && !sub_tasks.iter().any(|t| target_tasks.contains(t)) {
-                        return false;
-                    }
+                    && !sub_tasks.iter().any(|t| target_tasks.contains(t))
+                {
+                    return false;
+                }
 
                 true
             }

@@ -275,10 +275,9 @@ impl Tool for DeviceManagementKit {
                 eprintln!("[DeviceManagement] Running cleanup_unhealthy (dry_run: {dry_run})");
 
                 // First try the built-in simctl command
-                if !dry_run
-                    && let Err(e) = DeviceHealthManager::delete_unavailable_devices() {
-                        eprintln!("Warning: simctl delete unavailable failed: {e}");
-                    }
+                if !dry_run && let Err(e) = DeviceHealthManager::delete_unavailable_devices() {
+                    eprintln!("Warning: simctl delete unavailable failed: {e}");
+                }
 
                 // Then do our own cleanup
                 let deleted_devices = DeviceHealthManager::delete_unhealthy_devices(dry_run)?;

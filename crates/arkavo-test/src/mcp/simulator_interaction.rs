@@ -116,10 +116,11 @@ impl SimulatorInteraction {
     /// Send text input to the simulator
     pub async fn send_text(&self, device_id: &str, text: &str) -> Result<serde_json::Value> {
         if let Some(version) = &self.xcode_version
-            && version.supports_enhanced_ui_interaction() {
-                // Xcode 26+ might have better text input methods
-                return self.send_text_enhanced(device_id, text).await;
-            }
+            && version.supports_enhanced_ui_interaction()
+        {
+            // Xcode 26+ might have better text input methods
+            return self.send_text_enhanced(device_id, text).await;
+        }
 
         // Use standard pasteboard approach
         self.send_text_pasteboard(device_id, text).await

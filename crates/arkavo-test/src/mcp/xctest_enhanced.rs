@@ -178,8 +178,9 @@ impl Drop for XCTestEnhanced {
     fn drop(&mut self) {
         // Best effort cleanup - can't be async in Drop
         if let Ok(mut guard) = self.test_process.try_lock()
-            && let Some(mut child) = guard.take() {
-                let _ = child.kill();
-            }
+            && let Some(mut child) = guard.take()
+        {
+            let _ = child.kill();
+        }
     }
 }
