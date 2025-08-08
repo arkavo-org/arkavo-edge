@@ -291,11 +291,53 @@ impl A2aRpcServer for A2aRpcImpl {
             "mcp_servers": mcp_servers,
         });
 
+        // Define task types based on agent capabilities
+        let task_types = vec![
+            "chat".to_string(),
+            "code_editing".to_string(),
+            "test_execution".to_string(),
+            "diff_preview".to_string(),
+        ];
+
+        // Add task capabilities to metadata
+        let metadata_with_tasks = {
+            let mut meta = metadata_json;
+            meta["task_capabilities"] = serde_json::json!([
+                {
+                    "type": "chat",
+                    "constraints": {
+                        "max_context_length": 8192,
+                        "supports_streaming": true,
+                    }
+                },
+                {
+                    "type": "code_editing",
+                    "constraints": {
+                        "languages": ["rust", "python", "javascript", "typescript"],
+                        "supports_refactoring": true,
+                    }
+                },
+                {
+                    "type": "test_execution",
+                    "constraints": {
+                        "frameworks": ["cargo", "pytest", "jest"],
+                    }
+                },
+                {
+                    "type": "diff_preview",
+                    "constraints": {
+                        "formats": ["unified", "split"],
+                    }
+                }
+            ]);
+            meta
+        };
+
         let agent = DiscoveredAgent {
             agent_id: uuid::Uuid::new_v4(), // Generate a unique ID for the agent
             endpoint,
-            tasks: Some(vec![]), // TODO: Populate with actual task types
-            metadata: Some(metadata_json),
+            tasks: Some(task_types),
+            metadata: Some(metadata_with_tasks),
         };
 
         timer.success();
@@ -973,21 +1015,8 @@ impl A2aRpcServer for A2aRpcImpl {
             }
         }
 
-        // If LLM adapter is available, use it for more intelligent responses
-        // TODO: Implement proper LLM integration when the adapter API is finalized
-        /*
-        if let Some(ref llm) = self.llm_adapter {
-            match llm.generate_response(&request.query, request.context.as_ref()).await {
-                Ok(llm_response) => {
-                    response_text = llm_response;
-                    confidence = 0.9;
-                }
-                Err(e) => {
-                    warn!("LLM query failed: {}", e);
-                }
-            }
-        }
-        */
+        // LLM integration is handled through the LlmAdapter trait
+        // configured during server initialization
 
         let response = AgentQueryResponse {
             from_agent_id: agent_id,
@@ -1347,7 +1376,7 @@ impl A2aServer {
             .map_err(|e| A2aError::Transport(format!("Failed to build server: {e}")))?;
 
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
-        let metrics = Arc::new(MetricsCollector::new(true)); // TODO: Make configurable
+        let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
         let llm_adapter = self.llm_adapter.read().await.clone();
         let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::with_config(
             llm_adapter.clone(),

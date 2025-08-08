@@ -101,10 +101,31 @@ impl Tool for OllamaConfigTool {
                 }))
             }
             "remove" => {
-                // TODO: Implement removal by marking as CLEARED
+                // Extract server name from URL or use default
+                let server_url = config_params.server_url.as_deref().unwrap_or("default");
+                let server_name = if server_url.contains("://") {
+                    // Parse URL to get host as name
+                    server_url
+                        .split("://")
+                        .nth(1)
+                        .and_then(|s| s.split(':').next())
+                        .unwrap_or("default")
+                } else {
+                    "default"
+                };
+
+                // Mark the server as CLEARED in environment
+                let server_key = format!(
+                    "OLLAMA_SERVER_{}",
+                    server_name.to_uppercase().replace('.', "_")
+                );
+                unsafe {
+                    std::env::set_var(&server_key, "CLEARED");
+                }
+
                 Ok(json!({
-                    "success": false,
-                    "error": "Remove action not yet implemented",
+                    "success": true,
+                    "message": format!("Server '{}' marked as removed", server_name),
                 }))
             }
             _ => Ok(json!({

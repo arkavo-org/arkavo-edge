@@ -121,27 +121,110 @@ fn generate_openrpc_schema(schemas_dir: &Path, check: bool) -> Result<()> {
     Ok(())
 }
 
-fn generate_config_schemas(_schemas_dir: &Path, check: bool) -> Result<()> {
+fn generate_config_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
     println!("Generating config schemas...");
 
-    // This would generate schemas for ServerConfig, RateLimitConfig, etc.
-    // For now, we'll create a placeholder
+    use schemars::{schema_for, JsonSchema};
+
+    // Generate schema for ServerConfig
+    #[derive(JsonSchema)]
+    struct ServerConfigSchema {
+        enabled: bool,
+        bind_address: String,
+        port: u16,
+        max_connections: usize,
+        idle_timeout_seconds: u64,
+        metrics_enabled: bool,
+        rate_limit: RateLimitConfigSchema,
+        task_store_path: Option<String>,
+    }
+
+    #[derive(JsonSchema)]
+    struct RateLimitConfigSchema {
+        max_requests_per_second: u32,
+        burst_size: u32,
+        enabled: bool,
+    }
+
+    let server_schema = schema_for!(ServerConfigSchema);
+    let server_schema_json = serde_json::to_string_pretty(&server_schema)?;
+    let server_schema_path = schemas_dir.join("config/server_config.json");
+
     if !check {
-        println!("⚠️  Config schema generation not yet implemented");
-        println!("TODO: Export JSON schemas for config structs");
+        fs::write(&server_schema_path, server_schema_json)?;
+        println!("✅ Wrote ServerConfig schema to {server_schema_path:?}");
     }
 
     Ok(())
 }
 
-fn generate_wire_schemas(_schemas_dir: &Path, check: bool) -> Result<()> {
+fn generate_wire_schemas(schemas_dir: &Path, check: bool) -> Result<()> {
     println!("Generating wire protocol schemas...");
 
-    // This would generate schemas for all wire protocol types
-    // For now, we'll create a placeholder
+    use schemars::{schema_for, JsonSchema};
+    use serde::{Deserialize, Serialize};
+
+    // Define simplified wire protocol types for schema generation
+    #[derive(JsonSchema, Serialize, Deserialize)]
+    struct PromiseRequest {
+        promise_id: String,
+        request_type: String,
+        payload: serde_json::Value,
+    }
+
+    #[derive(JsonSchema, Serialize, Deserialize)]
+    struct PromiseResponse {
+        promise_id: String,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+    }
+
+    #[derive(JsonSchema, Serialize, Deserialize)]
+    struct TaskRequest {
+        task_id: String,
+        task_type: String,
+        parameters: serde_json::Value,
+    }
+
+    #[derive(JsonSchema, Serialize, Deserialize)]
+    struct TaskResponse {
+        task_id: String,
+        status: String,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+    }
+
+    // Generate schemas
+    let promise_req_schema = schema_for!(PromiseRequest);
+    let promise_resp_schema = schema_for!(PromiseResponse);
+    let task_req_schema = schema_for!(TaskRequest);
+    let task_resp_schema = schema_for!(TaskResponse);
+
     if !check {
-        println!("⚠️  Wire protocol schema generation not yet implemented");
-        println!("TODO: Export JSON schemas for PromiseRequest, PromiseResponse, etc.");
+        // Write schemas to files
+        let wire_dir = schemas_dir.join("wire/v1");
+
+        fs::write(
+            wire_dir.join("promise_request.json"),
+            serde_json::to_string_pretty(&promise_req_schema)?,
+        )?;
+
+        fs::write(
+            wire_dir.join("promise_response.json"),
+            serde_json::to_string_pretty(&promise_resp_schema)?,
+        )?;
+
+        fs::write(
+            wire_dir.join("task_request.json"),
+            serde_json::to_string_pretty(&task_req_schema)?,
+        )?;
+
+        fs::write(
+            wire_dir.join("task_response.json"),
+            serde_json::to_string_pretty(&task_resp_schema)?,
+        )?;
+
+        println!("✅ Wrote wire protocol schemas to {wire_dir:?}");
     }
 
     Ok(())

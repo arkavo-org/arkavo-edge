@@ -13,6 +13,8 @@ pub struct DebugHandler {
     event_writer: Arc<EventWriter>,
     subscriptions: Arc<RwLock<Vec<DebugSubscription>>>,
     session_manager: Arc<SessionManager>,
+    agent_attachments: Arc<RwLock<std::collections::HashMap<String, String>>>, // agent_id -> session_id
+    recording_sessions: Arc<RwLock<std::collections::HashSet<String>>>,
 }
 
 struct DebugSubscription {
@@ -48,6 +50,8 @@ impl DebugHandler {
             event_writer: Arc::new(event_writer),
             subscriptions: Arc::new(RwLock::new(Vec::new())),
             session_manager: Arc::new(SessionManager::new()),
+            agent_attachments: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            recording_sessions: Arc::new(RwLock::new(std::collections::HashSet::new())),
         }
     }
 
@@ -131,6 +135,68 @@ impl DebugHandler {
     /// Get active sessions from SessionManager
     pub async fn get_active_sessions(&self) -> Vec<arkavo_debugger::SessionInfo> {
         self.session_manager.get_active_sessions().await
+    }
+
+    /// Unsubscribe from a session
+    pub async fn unsubscribe_session(&self, session_id: &str) {
+        let mut subs = self.subscriptions.write().await;
+        subs.retain(|sub| sub.session_id != session_id);
+    }
+
+    /// Attach to an agent's event stream
+    pub async fn attach_to_agent(&self, agent_id: String, session_id: String) {
+        let mut attachments = self.agent_attachments.write().await;
+        attachments.insert(agent_id, session_id);
+    }
+
+    /// Detach from an agent's event stream
+    pub async fn detach_from_agent(&self, agent_id: &str) {
+        let mut attachments = self.agent_attachments.write().await;
+        attachments.remove(agent_id);
+    }
+
+    /// Start recording events for a session
+    pub async fn start_recording(&self, session_id: String) {
+        let mut recording = self.recording_sessions.write().await;
+        recording.insert(session_id);
+    }
+
+    /// Stop recording events for a session
+    pub async fn stop_recording(&self, session_id: &str) {
+        let mut recording = self.recording_sessions.write().await;
+        recording.remove(session_id);
+    }
+
+    /// Get events for a specific session
+    pub async fn get_session_events(
+        &self,
+        session_id: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<Event>, anyhow::Error> {
+        let stored_events = self.storage.get_session_events(session_id, limit).await?;
+
+        // Convert stored events to Event type
+        let mut events = Vec::new();
+        for stored in stored_events {
+            let payload = serde_json::from_slice(&stored.payload)?;
+            let event = Event {
+                id: stored.id.parse()?,
+                session_id: stored.session_id,
+                sequence: stored.sequence as u64,
+                timestamp: chrono::DateTime::parse_from_rfc3339(&stored.timestamp)?
+                    .with_timezone(&chrono::Utc),
+                metadata: arkavo_events::EventMetadata {
+                    agent_id: stored.agent_id,
+                    schema_version: stored.schema_version,
+                    parent_event_id: None,
+                    correlation_id: None,
+                },
+                payload,
+            };
+            events.push(event);
+        }
+
+        Ok(events)
     }
 
     /// Get recent sessions with event counts

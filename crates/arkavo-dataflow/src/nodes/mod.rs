@@ -1,6 +1,8 @@
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 pub mod anthropic_provider;
 pub mod auth_manager;
+#[cfg(test)]
+mod auth_manager_test;
 pub mod http_client;
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 pub mod llm;

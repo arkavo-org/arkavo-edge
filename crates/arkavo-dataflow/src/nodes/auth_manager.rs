@@ -310,6 +310,9 @@ impl AuthManager {
     async fn store_secure_data(&self, credential_id: &str, value: &str) -> Result<()> {
         use base64::Engine;
 
+        // PBKDF2 iteration count for key derivation
+        const PBKDF2_ITERATIONS: u32 = 100_000;
+
         // Generate salt for key derivation
         let mut salt = [0u8; 32];
         self.rng
@@ -321,7 +324,7 @@ impl AuthManager {
         let mut derived_key = [0u8; 32];
         pbkdf2::derive(
             pbkdf2::PBKDF2_HMAC_SHA256,
-            std::num::NonZeroU32::new(100_000).unwrap(),
+            std::num::NonZeroU32::new(PBKDF2_ITERATIONS).expect("PBKDF2_ITERATIONS is non-zero"),
             &salt,
             master_key.as_bytes(),
             &mut derived_key,
@@ -411,12 +414,16 @@ impl AuthManager {
                 base64::engine::general_purpose::STANDARD.decode(&secure_data.nonce)?;
             let salt = base64::engine::general_purpose::STANDARD.decode(&secure_data.salt)?;
 
+            // PBKDF2 iteration count for key derivation
+            const PBKDF2_ITERATIONS: u32 = 100_000;
+
             // Derive key from master key
             let master_key = self.get_or_create_master_key()?;
             let mut derived_key = [0u8; 32];
             pbkdf2::derive(
                 pbkdf2::PBKDF2_HMAC_SHA256,
-                std::num::NonZeroU32::new(100_000).unwrap(),
+                std::num::NonZeroU32::new(PBKDF2_ITERATIONS)
+                    .expect("PBKDF2_ITERATIONS is non-zero"),
                 &salt,
                 master_key.as_bytes(),
                 &mut derived_key,
@@ -465,11 +472,52 @@ impl AuthManager {
             ));
         }
 
-        // TODO: Add OS keychain integration in follow-up PR
-        // For now, require explicit key setting
+        // Try OS keychain
+        let entry = keyring::Entry::new("arkavo", "master_key")
+            .map_err(|e| anyhow::anyhow!("Failed to access keychain: {}", e))?;
+
+        // Try to get existing key from keychain
+        match entry.get_password() {
+            Ok(key) => {
+                if key.len() >= 32 {
+                    return Ok(key);
+                }
+                // Key exists but is too short, delete it
+                let _ = entry.delete_credential();
+            }
+            Err(keyring::Error::NoEntry) => {
+                // Key doesn't exist, generate a new one
+                let new_key = self.generate_secure_key();
+
+                // Store in keychain
+                entry
+                    .set_password(&new_key)
+                    .map_err(|e| anyhow::anyhow!("Failed to store key in keychain: {}", e))?;
+
+                return Ok(new_key);
+            }
+            Err(e) => {
+                // Keychain access failed, fall back to requiring environment variable
+                tracing::warn!(
+                    "Keychain access failed: {}. Falling back to environment variable.",
+                    e
+                );
+            }
+        }
+
         Err(anyhow::anyhow!(
-            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars)"
+            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars) or allow keychain access"
         ))
+    }
+
+    /// Generate a secure random key
+    fn generate_secure_key(&self) -> String {
+        use rand::RngCore;
+        let mut rng = rand::thread_rng();
+        let mut key = vec![0u8; 32];
+        rng.fill_bytes(&mut key);
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(&key)
     }
 }
 

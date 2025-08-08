@@ -100,7 +100,7 @@ impl CodeView {
         ratatui_style
     }
 
-    fn highlight_lines(&self) -> Vec<Line> {
+    fn highlight_lines(&self) -> Vec<Line<'_>> {
         let mut highlighted_lines = Vec::new();
 
         let syntax = self

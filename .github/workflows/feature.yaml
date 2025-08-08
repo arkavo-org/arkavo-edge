@@ -156,6 +156,16 @@ jobs:
           cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
           # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
           # Note: arkavo-llm integration tests excluded as they require local feature
+      
+      # Regression tests for PR #200 bug fixes
+      - name: Run regression tests
+        run: |
+          # Test auth manager uses proper constants (no magic numbers)
+          cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
+          # Test auth manager error handling
+          cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
+          # Test auth manager keychain fallback
+          cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
 
   test-kimi-feature:
     name: Test Kimi Feature
