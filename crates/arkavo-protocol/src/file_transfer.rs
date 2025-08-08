@@ -272,9 +272,16 @@ impl FileTransferManager {
         if let Some(session) = uploads.get(file_id) {
             let chunks_transferred = session.chunks.len();
             let total_chunks = session.metadata.chunks_total;
-            let bytes_transferred = chunks_transferred as u64 * CHUNK_SIZE as u64;
+            // Calculate actual bytes transferred (sum of chunk sizes)
+            let bytes_transferred: u64 = session.chunks.values()
+                .map(|chunk| chunk.len() as u64)
+                .sum();
             let total_bytes = session.metadata.size;
-            let percentage = (bytes_transferred as f32 / total_bytes as f32) * 100.0;
+            let percentage = if total_bytes > 0 {
+                ((bytes_transferred as f32 / total_bytes as f32) * 100.0).min(99.99)
+            } else {
+                0.0
+            };
 
             return Ok(FileTransferProgress {
                 file_id: file_id.to_string(),
@@ -310,7 +317,7 @@ impl FileTransferManager {
 
         uploads.retain(|id, session| {
             let age = (now - session.created_at).num_seconds();
-            if age > max_age_seconds {
+            if age >= max_age_seconds {
                 warn!("Removing stale upload: {id}");
                 removed += 1;
                 false

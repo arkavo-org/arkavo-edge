@@ -337,6 +337,7 @@ impl PushNotificationService {
             sub_ids
                 .iter()
                 .filter_map(|id| subscriptions.get(id).cloned())
+                .filter(|sub| sub.active) // Only return active subscriptions
                 .collect()
         } else {
             Vec::new()
