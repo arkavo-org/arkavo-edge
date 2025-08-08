@@ -27,7 +27,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.25.6"
+version = "0.25.7"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -110,7 +110,7 @@ zeroconf = "0.14"
 
 # LLM and ML
 tokenizers = { version = "0.21.2", default-features = false, features = ["fancy-regex"] }
-hf-hub = { version = "0.4.3", features = ["tokio"] }
+hf-hub = { version = "0.4.3", default-features = false, features = ["tokio", "rustls-tls"] }
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
