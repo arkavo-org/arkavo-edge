@@ -41,6 +41,7 @@ pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(feature = "local")]
+#[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Terminal UI is now the default, use --no-tui to disable it
     let use_tui = !args.contains(&"--no-tui".to_string());
@@ -75,8 +76,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
 
     // Initialize conversation manager
-    let mut conversation_manager =
-        runtime.block_on(ConversationManager::new(memory_storage.clone()))?;
+    let mut conversation_manager = ConversationManager::new(memory_storage.clone())?;
 
     // Initialize repository context manager
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;
@@ -359,12 +359,16 @@ Full repository details (available via @build_repository_context):
         }
 
         if print_mode {
-            runtime.block_on(process_message_print(&client, &messages, &mcp_client))?;
+            runtime.block_on(process_message_print(
+                &client,
+                &messages,
+                mcp_client.as_ref(),
+            ))?;
         } else {
             runtime.block_on(process_message(
                 &client,
                 &messages,
-                &mcp_client,
+                mcp_client.as_ref(),
                 &conversation_manager,
             ))?;
         }
@@ -565,14 +569,13 @@ Full repository details (available via @build_repository_context):
         }
 
         // Check for slash commands
-        if let Some(command_input) = input.strip_prefix('/') {
-            if let Some(command_response) =
-                handle_command(command_input, &mcp_client, client.provider_name())
-            {
-                println!("{command_response}");
-                println!();
-                continue;
-            }
+        if let Some(command_input) = input.strip_prefix('/')
+            && let Some(command_response) =
+                handle_command(command_input, mcp_client.as_ref(), client.provider_name())
+        {
+            println!("{command_response}");
+            println!();
+            continue;
         }
 
         // Check for @screenshot command without arguments
@@ -620,13 +623,12 @@ Full repository details (available via @build_repository_context):
             if img_path.is_empty() {
                 eprintln!("Usage: analyze_screenshot on <path>");
                 continue;
-            } else {
-                // Convert to "@analyze_screenshot path" syntax
-                let converted_input = format!("@analyze_screenshot {img_path}");
-                let msg = Message::user(&converted_input);
-                runtime.block_on(conversation_manager.add_message(&msg))?;
-                messages.push(msg);
             }
+            // Convert to "@analyze_screenshot path" syntax
+            let converted_input = format!("@analyze_screenshot {img_path}");
+            let msg = Message::user(&converted_input);
+            runtime.block_on(conversation_manager.add_message(&msg))?;
+            messages.push(msg);
         } else {
             // Add regular user message
             let msg = Message::user(input);
@@ -638,7 +640,7 @@ Full repository details (available via @build_repository_context):
         match runtime.block_on(process_message(
             &client,
             &messages,
-            &mcp_client,
+            mcp_client.as_ref(),
             &conversation_manager,
         )) {
             Ok(response) => {
@@ -666,7 +668,7 @@ Full repository details (available via @build_repository_context):
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
     print!("Assistant: ");
@@ -755,7 +757,7 @@ async fn process_message(
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Use streaming but only print content
     let mut stream = client.stream(messages.to_vec()).await?;
@@ -818,7 +820,7 @@ fn get_current_directory() -> String {
 
 fn handle_command(
     input: &str,
-    mcp_client: &Option<McpConnection>,
+    mcp_client: Option<&McpConnection>,
     llm_provider: &str,
 ) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
@@ -938,8 +940,8 @@ fn handle_command(
                         } else {
                             let mut output = "Available MCP tools:\n\n".to_string();
                             for tool in tools {
-                                output
-                                    .push_str(&format!("  {} - {}\n", tool.name, tool.description));
+                                use std::fmt::Write;
+                                let _ = writeln!(output, "  {} - {}", tool.name, tool.description);
                             }
                             Some(output)
                         }
@@ -1099,11 +1101,13 @@ fn list_files(path: &str) -> Option<String> {
             let mut result = format!("Contents of {}:\n\n", path.display());
 
             for dir in &dirs {
-                result.push_str(&format!("  {dir}\n"));
+                use std::fmt::Write;
+                let _ = writeln!(result, "  {dir}");
             }
 
             for file in &files {
-                result.push_str(&format!("  {file}\n"));
+                use std::fmt::Write;
+                let _ = writeln!(result, "  {file}");
             }
 
             if dirs.is_empty() && files.is_empty() {
@@ -1133,22 +1137,22 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         .find(|c| c.memory.content != "CLEARED");
 
     // First priority: Try saved Ollama server if configured
-    if let Some(provider_config) = &saved_provider {
-        if provider_config.memory.content.starts_with("http") {
-            // Ollama server
-            let server_url = &provider_config.memory.content;
-            unsafe {
-                std::env::set_var("OLLAMA_BASE_URL", server_url);
-            }
+    if let Some(provider_config) = &saved_provider
+        && provider_config.memory.content.starts_with("http")
+    {
+        // Ollama server
+        let server_url = &provider_config.memory.content;
+        unsafe {
+            std::env::set_var("OLLAMA_BASE_URL", server_url);
+        }
 
-            if let Ok(client) = LlmClient::from_env() {
-                let test_message = vec![Message::user("ping")];
-                if client.complete(test_message).await.is_ok() {
-                    if !print_mode {
-                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
-                    }
-                    return Ok(client);
+        if let Ok(client) = LlmClient::from_env() {
+            let test_message = vec![Message::user("ping")];
+            if client.complete(test_message).await.is_ok() {
+                if !print_mode {
+                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 }
+                return Ok(client);
             }
         }
     }
@@ -1180,16 +1184,16 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     }
 
     // Third priority: Check if previously selected local model is still available
-    if let Some(provider_config) = &saved_provider {
-        if provider_config.memory.content.starts_with("local:") {
-            let model_name = provider_config
-                .memory
-                .content
-                .strip_prefix("local:")
-                .unwrap();
-            if !print_mode {
-                eprintln!("Checking for previously used local model: {model_name}");
-            }
+    if let Some(provider_config) = &saved_provider
+        && provider_config.memory.content.starts_with("local:")
+    {
+        let model_name = provider_config
+            .memory
+            .content
+            .strip_prefix("local:")
+            .unwrap();
+        if !print_mode {
+            eprintln!("Checking for previously used local model: {model_name}");
         }
     }
 
@@ -1369,6 +1373,7 @@ async fn prompt_for_remote_ollama(
 }
 
 #[cfg(feature = "local")]
+#[allow(clippy::disallowed_methods)]
 fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
     // The UI will handle its own initialization

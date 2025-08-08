@@ -4,6 +4,7 @@ use arkavo_test::reporting::business_report::{BusinessReporter, OutputFormat};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check for intelligent test generation modes
     if args.contains(&"--explore".to_string()) {
@@ -42,6 +43,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
 
     let runner = TestRunner::new();
 
+    #[allow(clippy::disallowed_methods)]
     let results = match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
             handle.block_on(async { runner.run_parallel_scenarios(feature.scenarios).await })?
@@ -236,6 +238,7 @@ fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::erro
         Ok::<(), Box<dyn std::error::Error>>(())
     };
 
+    #[allow(clippy::disallowed_methods)]
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => handle.block_on(run_async),
         Err(_) => {

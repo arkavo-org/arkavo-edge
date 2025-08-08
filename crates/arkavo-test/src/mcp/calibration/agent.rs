@@ -226,28 +226,28 @@ impl CalibrationAgentImpl {
         for (_runtime, device_list) in devices_json["devices"].as_object()? {
             if let Some(devices) = device_list.as_array() {
                 for device in devices {
-                    if device["udid"].as_str() == Some(&self.device_id) {
-                        if let Some(device_type_id) = device["deviceTypeIdentifier"].as_str() {
-                            // Get device type info
-                            let types_output = Command::new("xcrun")
-                                .args(["simctl", "list", "devicetypes", "--json"])
-                                .output()
-                                .ok()?;
+                    if device["udid"].as_str() == Some(&self.device_id)
+                        && let Some(device_type_id) = device["deviceTypeIdentifier"].as_str()
+                    {
+                        // Get device type info
+                        let types_output = Command::new("xcrun")
+                            .args(["simctl", "list", "devicetypes", "--json"])
+                            .output()
+                            .ok()?;
 
-                            if types_output.status.success() {
-                                let types_json: serde_json::Value =
-                                    serde_json::from_slice(&types_output.stdout).ok()?;
+                        if types_output.status.success() {
+                            let types_json: serde_json::Value =
+                                serde_json::from_slice(&types_output.stdout).ok()?;
 
-                                if let Some(device_types) = types_json["devicetypes"].as_array() {
-                                    for dtype in device_types {
-                                        if dtype["identifier"].as_str() == Some(device_type_id) {
-                                            if let (Some(width), Some(height)) = (
-                                                dtype["screenWidth"].as_f64(),
-                                                dtype["screenHeight"].as_f64(),
-                                            ) {
-                                                return Some((width, height));
-                                            }
-                                        }
+                            if let Some(device_types) = types_json["devicetypes"].as_array() {
+                                for dtype in device_types {
+                                    if dtype["identifier"].as_str() == Some(device_type_id)
+                                        && let (Some(width), Some(height)) = (
+                                            dtype["screenWidth"].as_f64(),
+                                            dtype["screenHeight"].as_f64(),
+                                        )
+                                    {
+                                        return Some((width, height));
                                     }
                                 }
                             }

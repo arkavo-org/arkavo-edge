@@ -22,23 +22,23 @@ jsonrpsee = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 
 # WebSocket with TLS support
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
-rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
-rustls-pemfile = { version = "2.0" }
-webpki-roots = { version = "0.26" }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true, features = ["std", "tls12"] }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
 
 # Server dependencies
-governor = { version = "0.6", features = ["std", "jitter"] }
-dashmap = { version = "5.5" }
-crossbeam-queue = "0.3"
+governor = { workspace = true, features = ["std", "jitter"] }
+dashmap = { workspace = true }
+crossbeam-queue = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 # JWT authentication
-jsonwebtoken = { version = "9.3" }
-urlencoding = { version = "2.1" }
+jsonwebtoken = { workspace = true }
+urlencoding = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
@@ -67,21 +67,21 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 
 # Schema generation
-schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+schemars = { workspace = true }
 
 # Demo dependencies
 clap = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 # mDNS dependencies
-gethostname = { version = "0.5", optional = true }
+gethostname = { workspace = true, optional = true }
 
 # Network interface detection
-get_if_addrs = { version = "0.5", optional = true }
+get_if_addrs = { workspace = true, optional = true }
 
 # Metrics dependencies
-metrics = { version = "0.23", optional = true }
-metrics-exporter-prometheus = { version = "0.15", optional = true }
+metrics = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
 
 [features]
 demo = ["clap", "tracing-subscriber"]
@@ -91,7 +91,7 @@ metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 
 [dev-dependencies]
 # For integration tests
-jsonrpsee = { version = "0.24", features = ["server", "macros"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 # For examples
 tracing-subscriber = { workspace = true }
 # For tests

@@ -278,10 +278,10 @@ async fn handle_websocket(
         let mut ws_tx = ws_sink;
 
         while let Some(event) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&event) {
-                if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
-                    break; // WebSocket closed
-                }
+            if let Ok(json) = serde_json::to_string(&event)
+                && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
+            {
+                break; // WebSocket closed
             }
         }
     });
@@ -583,10 +583,10 @@ async fn handle_telemetry_websocket(
 
     // Forward telemetry events to WebSocket
     while let Some(event) = rx.recv().await {
-        if let Ok(json) = serde_json::to_string(&event) {
-            if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
-                break;
-            }
+        if let Ok(json) = serde_json::to_string(&event)
+            && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
+        {
+            break;
         }
     }
 
@@ -608,10 +608,10 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         let forward_task = tokio::spawn(async move {
             let mut ws_tx = ws_sink;
             while let Some(event) = rx.recv().await {
-                if let Ok(json) = serde_json::to_string(&event) {
-                    if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
-                        break;
-                    }
+                if let Ok(json) = serde_json::to_string(&event)
+                    && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
+                {
+                    break;
                 }
             }
         });
@@ -620,128 +620,115 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         while let Some(result) = ws_stream.next().await {
             match result {
                 Ok(msg) => {
-                    if let Ok(text) = msg.to_str() {
-                        if let Ok(cmd) = serde_json::from_str::<DebugCommand>(text) {
-                            match cmd {
-                                DebugCommand::SubscribeSession { session_id } => {
-                                    let _ =
-                                        handler.subscribe_to_session(session_id, tx.clone()).await;
-                                }
-                                DebugCommand::UnsubscribeSession { session_id } => {
-                                    handler.unsubscribe_session(&session_id).await;
+                    if let Ok(text) = msg.to_str()
+                        && let Ok(cmd) = serde_json::from_str::<DebugCommand>(text)
+                    {
+                        match cmd {
+                            DebugCommand::SubscribeSession { session_id } => {
+                                let _ = handler.subscribe_to_session(session_id, tx.clone()).await;
+                            }
+                            DebugCommand::UnsubscribeSession { session_id } => {
+                                handler.unsubscribe_session(&session_id).await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Add {
+                                        path: "/unsubscribed".to_string(),
+                                        value: serde_json::Value::String(session_id.clone()),
+                                    }],
+                                    event_id: format!("unsubscribed-{session_id}"),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::GetRecentSessions { limit } => {
+                                if let Ok(sessions) = handler.get_recent_sessions(limit).await {
                                     let event = AgUiEvent::StateDelta {
                                         patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/unsubscribed".to_string(),
-                                            value: serde_json::Value::String(session_id.clone()),
-                                        }],
-                                        event_id: format!("unsubscribed-{session_id}"),
-                                    };
-                                    let _ = tx.send(event).await;
-                                }
-                                DebugCommand::GetRecentSessions { limit } => {
-                                    if let Ok(sessions) = handler.get_recent_sessions(limit).await {
-                                        let event = AgUiEvent::StateDelta {
-                                            patch: vec![crate::types::JsonPatch::Add {
-                                                path: "/sessions".to_string(),
-                                                value: serde_json::to_value(sessions)
-                                                    .unwrap_or(serde_json::Value::Null),
-                                            }],
-                                            event_id: format!("sessions-{}", uuid::Uuid::new_v4()),
-                                        };
-                                        let _ = tx.send(event).await;
-                                    }
-                                }
-                                DebugCommand::GetActiveSessions => {
-                                    let sessions = handler.get_active_sessions().await;
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/active_sessions".to_string(),
+                                            path: "/sessions".to_string(),
                                             value: serde_json::to_value(sessions)
                                                 .unwrap_or(serde_json::Value::Null),
                                         }],
-                                        event_id: format!(
-                                            "active-sessions-{}",
-                                            uuid::Uuid::new_v4()
-                                        ),
+                                        event_id: format!("sessions-{}", uuid::Uuid::new_v4()),
                                     };
                                     let _ = tx.send(event).await;
                                 }
-                                DebugCommand::AttachToAgent { agent_id } => {
-                                    let session_id = uuid::Uuid::new_v4().to_string();
-                                    handler.attach_to_agent(agent_id.clone(), session_id).await;
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/attached_agent".to_string(),
-                                            value: serde_json::Value::String(agent_id),
-                                        }],
-                                        event_id: format!("attached-{}", uuid::Uuid::new_v4()),
-                                    };
-                                    let _ = tx.send(event).await;
-                                }
-                                DebugCommand::DetachFromAgent { agent_id } => {
-                                    handler.detach_from_agent(&agent_id).await;
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Remove {
-                                            path: format!("/attached_agent/{agent_id}"),
-                                        }],
-                                        event_id: format!("detached-{}", uuid::Uuid::new_v4()),
-                                    };
-                                    let _ = tx.send(event).await;
-                                }
-                                DebugCommand::StartRecording { session_id } => {
-                                    handler.start_recording(session_id.clone()).await;
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/recording".to_string(),
-                                            value: serde_json::json!({ "session_id": session_id, "status": "started" }),
-                                        }],
-                                        event_id: format!(
-                                            "recording-started-{}",
-                                            uuid::Uuid::new_v4()
-                                        ),
-                                    };
-                                    let _ = tx.send(event).await;
-                                }
-                                DebugCommand::StopRecording { session_id } => {
-                                    handler.stop_recording(&session_id).await;
-                                    let event = AgUiEvent::StateDelta {
-                                        patch: vec![crate::types::JsonPatch::Add {
-                                            path: "/recording".to_string(),
-                                            value: serde_json::json!({ "session_id": session_id, "status": "stopped" }),
-                                        }],
-                                        event_id: format!(
-                                            "recording-stopped-{}",
-                                            uuid::Uuid::new_v4()
-                                        ),
-                                    };
-                                    let _ = tx.send(event).await;
-                                }
-                                DebugCommand::GetSessionEvents { session_id, limit } => {
-                                    match handler.get_session_events(&session_id, limit).await {
-                                        Ok(events) => {
-                                            let event = AgUiEvent::StateDelta {
-                                                patch: vec![crate::types::JsonPatch::Add {
-                                                    path: "/session_events".to_string(),
-                                                    value: serde_json::json!({
-                                                        "session_id": session_id,
-                                                        "events": events,
-                                                        "count": events.len()
-                                                    }),
-                                                }],
-                                                event_id: format!(
-                                                    "events-{}",
-                                                    uuid::Uuid::new_v4()
-                                                ),
-                                            };
-                                            let _ = tx.send(event).await;
-                                        }
-                                        Err(e) => {
-                                            let error = AgUiEvent::Error {
-                                                code: "EVENT_FETCH_FAILED".to_string(),
-                                                message: format!("Failed to fetch events: {e}"),
-                                            };
-                                            let _ = tx.send(error).await;
-                                        }
+                            }
+                            DebugCommand::GetActiveSessions => {
+                                let sessions = handler.get_active_sessions().await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Add {
+                                        path: "/active_sessions".to_string(),
+                                        value: serde_json::to_value(sessions)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    }],
+                                    event_id: format!("active-sessions-{}", uuid::Uuid::new_v4()),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::AttachToAgent { agent_id } => {
+                                let session_id = uuid::Uuid::new_v4().to_string();
+                                handler.attach_to_agent(agent_id.clone(), session_id).await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Add {
+                                        path: "/attached_agent".to_string(),
+                                        value: serde_json::Value::String(agent_id),
+                                    }],
+                                    event_id: format!("attached-{}", uuid::Uuid::new_v4()),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::DetachFromAgent { agent_id } => {
+                                handler.detach_from_agent(&agent_id).await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Remove {
+                                        path: format!("/attached_agent/{agent_id}"),
+                                    }],
+                                    event_id: format!("detached-{}", uuid::Uuid::new_v4()),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::StartRecording { session_id } => {
+                                handler.start_recording(session_id.clone()).await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Add {
+                                        path: "/recording".to_string(),
+                                        value: serde_json::json!({ "session_id": session_id, "status": "started" }),
+                                    }],
+                                    event_id: format!("recording-started-{}", uuid::Uuid::new_v4()),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::StopRecording { session_id } => {
+                                handler.stop_recording(&session_id).await;
+                                let event = AgUiEvent::StateDelta {
+                                    patch: vec![crate::types::JsonPatch::Add {
+                                        path: "/recording".to_string(),
+                                        value: serde_json::json!({ "session_id": session_id, "status": "stopped" }),
+                                    }],
+                                    event_id: format!("recording-stopped-{}", uuid::Uuid::new_v4()),
+                                };
+                                let _ = tx.send(event).await;
+                            }
+                            DebugCommand::GetSessionEvents { session_id, limit } => {
+                                match handler.get_session_events(&session_id, limit).await {
+                                    Ok(events) => {
+                                        let event = AgUiEvent::StateDelta {
+                                            patch: vec![crate::types::JsonPatch::Add {
+                                                path: "/session_events".to_string(),
+                                                value: serde_json::json!({
+                                                    "session_id": session_id,
+                                                    "events": events,
+                                                    "count": events.len()
+                                                }),
+                                            }],
+                                            event_id: format!("events-{}", uuid::Uuid::new_v4()),
+                                        };
+                                        let _ = tx.send(event).await;
+                                    }
+                                    Err(e) => {
+                                        let error = AgUiEvent::Error {
+                                            code: "EVENT_FETCH_FAILED".to_string(),
+                                            message: format!("Failed to fetch events: {e}"),
+                                        };
+                                        let _ = tx.send(error).await;
                                     }
                                 }
                             }

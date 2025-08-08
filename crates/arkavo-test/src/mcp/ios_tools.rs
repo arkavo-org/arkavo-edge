@@ -95,11 +95,11 @@ impl UiInteractionKit {
         // Check cache first
         {
             let cache = self.axp_socket_cache.lock().await;
-            if let Some((cached_device_id, socket_path)) = cache.as_ref() {
-                if cached_device_id == &device_id {
-                    eprintln!("[AXP] Using cached socket for device {device_id}: {socket_path}");
-                    return Some((socket_path.clone(), true));
-                }
+            if let Some((cached_device_id, socket_path)) = cache.as_ref()
+                && cached_device_id == &device_id
+            {
+                eprintln!("[AXP] Using cached socket for device {device_id}: {socket_path}");
+                return Some((socket_path.clone(), true));
             }
         }
 
@@ -1056,23 +1056,23 @@ impl Tool for UiInteractionKit {
                             ])
                             .output();
 
-                        if let Ok(output) = simctl_output {
-                            if output.status.success() {
-                                eprintln!(
-                                    "UI tap via simctl io succeeded at ({adjusted_x}, {adjusted_y})"
-                                );
-                                return Ok(serde_json::json!({
-                                    "success": true,
-                                    "action": "tap",
-                                    "method": "simctl_io",
-                                    "coordinates": {"x": adjusted_x, "y": adjusted_y},
-                                    "original_coordinates": {"x": x, "y": y},
-                                    "device_id": device_id,
-                                    "device_type": device_type,
-                                    "logical_resolution": {"width": max_x, "height": max_y},
-                                    "confidence": "medium"
-                                }));
-                            }
+                        if let Ok(output) = simctl_output
+                            && output.status.success()
+                        {
+                            eprintln!(
+                                "UI tap via simctl io succeeded at ({adjusted_x}, {adjusted_y})"
+                            );
+                            return Ok(serde_json::json!({
+                                "success": true,
+                                "action": "tap",
+                                "method": "simctl_io",
+                                "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                                "original_coordinates": {"x": x, "y": y},
+                                "device_id": device_id,
+                                "device_type": device_type,
+                                "logical_resolution": {"width": max_x, "height": max_y},
+                                "confidence": "medium"
+                            }));
                         }
 
                         // Method 3: Try Accessibility/AppleScript approach
@@ -1098,43 +1098,43 @@ impl Tool for UiInteractionKit {
                             .arg(&applescript)
                             .output();
 
-                        if let Ok(output) = applescript_output {
-                            if output.status.success() {
-                                eprintln!(
-                                    "UI tap via AppleScript/Accessibility succeeded at ({adjusted_x}, {adjusted_y})"
-                                );
-                                return Ok(serde_json::json!({
-                                    "success": true,
-                                    "action": "tap",
-                                    "method": "accessibility_applescript",
-                                    "coordinates": {"x": adjusted_x, "y": adjusted_y},
-                                    "original_coordinates": {"x": x, "y": y},
-                                    "device_id": device_id,
-                                    "device_type": device_type,
-                                    "logical_resolution": {"width": max_x, "height": max_y},
-                                    "confidence": "low",
-                                    "warning": if axp_available.is_none() {
-                                        "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!"
-                                    } else {
-                                        "Using fallback method - AXP harness was found but tap failed"
-                                    },
-                                    "optimization": if axp_available.is_none() {
-                                        serde_json::json!({
-                                            "suggestion": "Build AXP harness for fast touch injection",
-                                            "tool": "build_test_harness",
-                                            "required_params": {
-                                                "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
-                                            },
-                                            "benefit": "Taps will be <30ms instead of 300ms+",
-                                            "note": "Run this ONCE per app for permanent speed boost"
-                                        })
-                                    } else {
-                                        serde_json::json!({
-                                            "note": "AXP harness detected but failed - check simulator state"
-                                        })
-                                    }
-                                }));
-                            }
+                        if let Ok(output) = applescript_output
+                            && output.status.success()
+                        {
+                            eprintln!(
+                                "UI tap via AppleScript/Accessibility succeeded at ({adjusted_x}, {adjusted_y})"
+                            );
+                            return Ok(serde_json::json!({
+                                "success": true,
+                                "action": "tap",
+                                "method": "accessibility_applescript",
+                                "coordinates": {"x": adjusted_x, "y": adjusted_y},
+                                "original_coordinates": {"x": x, "y": y},
+                                "device_id": device_id,
+                                "device_type": device_type,
+                                "logical_resolution": {"width": max_x, "height": max_y},
+                                "confidence": "low",
+                                "warning": if axp_available.is_none() {
+                                    "Using SLOW fallback method (300ms+ per tap). For 10x faster taps, run build_test_harness first!"
+                                } else {
+                                    "Using fallback method - AXP harness was found but tap failed"
+                                },
+                                "optimization": if axp_available.is_none() {
+                                    serde_json::json!({
+                                        "suggestion": "Build AXP harness for fast touch injection",
+                                        "tool": "build_test_harness",
+                                        "required_params": {
+                                            "app_bundle_id": "Your app's bundle ID (e.g., com.example.app)"
+                                        },
+                                        "benefit": "Taps will be <30ms instead of 300ms+",
+                                        "note": "Run this ONCE per app for permanent speed boost"
+                                    })
+                                } else {
+                                    serde_json::json!({
+                                        "note": "AXP harness detected but failed - check simulator state"
+                                    })
+                                }
+                            }));
                         }
 
                         // If all methods fail, report what we tried
@@ -2155,12 +2155,13 @@ fn get_active_device_id() -> Result<String> {
 
     // Parse device ID from output
     for line in stdout.lines() {
-        if line.contains('(') && line.contains(')') && line.contains("Booted") {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.find(')') {
-                    return Ok(line[start + 1..end].to_string());
-                }
-            }
+        if line.contains('(')
+            && line.contains(')')
+            && line.contains("Booted")
+            && let Some(start) = line.find('(')
+            && let Some(end) = line.find(')')
+        {
+            return Ok(line[start + 1..end].to_string());
         }
     }
 
@@ -2173,15 +2174,16 @@ fn get_active_device_id() -> Result<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
-        if line.contains("iPhone") && line.contains('(') && line.contains(')') {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.find(')') {
-                    let device_id = line[start + 1..end].to_string();
-                    if device_id.len() == 36 {
-                        // UUID length
-                        return Ok(device_id);
-                    }
-                }
+        if line.contains("iPhone")
+            && line.contains('(')
+            && line.contains(')')
+            && let Some(start) = line.find('(')
+            && let Some(end) = line.find(')')
+        {
+            let device_id = line[start + 1..end].to_string();
+            if device_id.len() == 36 {
+                // UUID length
+                return Ok(device_id);
             }
         }
     }

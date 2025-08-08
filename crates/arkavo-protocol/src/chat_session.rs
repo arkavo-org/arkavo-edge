@@ -579,13 +579,12 @@ impl ChatSessionManager {
         }
 
         // Mark session as zombie if it still exists (cleanup needed)
-        if let Some(session_state) = sessions.read().await.get(&session_id) {
-            if session_state.state != SessionState::Closing {
-                if let Some(metrics) = session_metrics.write().await.get_mut(&session_id) {
-                    metrics.set_state(SessionState::Zombie);
-                    warn!("Session marked as zombie - cleanup needed");
-                }
-            }
+        if let Some(session_state) = sessions.read().await.get(&session_id)
+            && session_state.state != SessionState::Closing
+            && let Some(metrics) = session_metrics.write().await.get_mut(&session_id)
+        {
+            metrics.set_state(SessionState::Zombie);
+            warn!("Session marked as zombie - cleanup needed");
         }
 
         info!("Session handler exited");

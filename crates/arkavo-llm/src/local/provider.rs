@@ -67,15 +67,15 @@ impl LocalProvider {
         guard.model_loader.load_model()?;
 
         // If it's a non-quantized model, create the worker
-        if let Some(Model::QuantizedLlama(_model)) = guard.model_loader.get_model() {
-            if let Some(_config) = guard.model_loader.get_config() {
-                let _device = guard.model_loader.device().clone();
-                // We need to move the model out temporarily
-                // This is a limitation we'll need to work around
-                tracing::warn!(
-                    "Non-quantized model detected. Worker pattern not yet fully integrated."
-                );
-            }
+        if let Some(Model::QuantizedLlama(_model)) = guard.model_loader.get_model()
+            && let Some(_config) = guard.model_loader.get_config()
+        {
+            let _device = guard.model_loader.device().clone();
+            // We need to move the model out temporarily
+            // This is a limitation we'll need to work around
+            tracing::warn!(
+                "Non-quantized model detected. Worker pattern not yet fully integrated."
+            );
         }
 
         Ok(())

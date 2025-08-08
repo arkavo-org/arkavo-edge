@@ -182,6 +182,7 @@ impl McpClient {
         }
     }
 
+    #[allow(clippy::missing_panics_doc)]
     pub fn call_tool(
         &self,
         tool_name: &str,
@@ -222,12 +223,11 @@ impl McpClient {
 
         // Extract the text content from the MCP response format
         if let Some(result) = response.result {
-            if let Some(content_array) = result.get("content").and_then(|c| c.as_array()) {
-                if let Some(first_content) = content_array.first() {
-                    if let Some(text) = first_content.get("text").and_then(|t| t.as_str()) {
-                        return Ok(json!({ "result": text }));
-                    }
-                }
+            if let Some(content_array) = result.get("content").and_then(|c| c.as_array())
+                && let Some(first_content) = content_array.first()
+                && let Some(text) = first_content.get("text").and_then(|t| t.as_str())
+            {
+                return Ok(json!({ "result": text }));
             }
             Ok(result)
         } else {
@@ -235,6 +235,7 @@ impl McpClient {
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     fn send_request(
         &self,
         method: &str,

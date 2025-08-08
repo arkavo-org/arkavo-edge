@@ -36,11 +36,11 @@ jsonrpsee = { workspace = true, features = ["ws-client"] }
 # UUID for event IDs
 uuid = { workspace = true }
 chrono = { workspace = true }
-rand = "0.8"
+rand = { workspace = true }
 
 # mDNS discovery
-zeroconf = { version = "0.14", optional = true }
-bincode = "1.3"
+zeroconf = { workspace = true, optional = true }
+bincode = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }

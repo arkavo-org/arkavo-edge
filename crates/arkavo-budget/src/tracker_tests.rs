@@ -28,16 +28,20 @@ mod tests {
         let tracker = BudgetTracker::new(config).await.unwrap();
 
         // Should be able to afford $5
-        assert!(tracker
-            .can_afford("test-agent", TokenCost::from_dollars(5.0))
-            .await
-            .unwrap());
+        assert!(
+            tracker
+                .can_afford("test-agent", TokenCost::from_dollars(5.0))
+                .await
+                .unwrap()
+        );
 
         // Should not be able to afford $15
-        assert!(!tracker
-            .can_afford("test-agent", TokenCost::from_dollars(15.0))
-            .await
-            .unwrap());
+        assert!(
+            !tracker
+                .can_afford("test-agent", TokenCost::from_dollars(15.0))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -134,16 +138,20 @@ mod tests {
         let tracker = Arc::new(BudgetTracker::new(config).await.unwrap());
 
         // Check agent can afford within its limit
-        assert!(tracker
-            .can_afford("limited-agent", TokenCost::from_cents(25))
-            .await
-            .unwrap());
+        assert!(
+            tracker
+                .can_afford("limited-agent", TokenCost::from_cents(25))
+                .await
+                .unwrap()
+        );
 
         // Check agent cannot afford beyond its limit
-        assert!(!tracker
-            .can_afford("limited-agent", TokenCost::from_dollars(1.0))
-            .await
-            .unwrap());
+        assert!(
+            !tracker
+                .can_afford("limited-agent", TokenCost::from_dollars(1.0))
+                .await
+                .unwrap()
+        );
 
         // Record spending for the agent
         use crate::cost::TokenUsage;
@@ -235,10 +243,12 @@ mod tests {
             .unwrap();
 
         // Should not be able to afford anything more
-        assert!(!tracker
-            .can_afford("agent1", TokenCost::from_cents(1))
-            .await
-            .unwrap());
+        assert!(
+            !tracker
+                .can_afford("agent1", TokenCost::from_cents(1))
+                .await
+                .unwrap()
+        );
 
         // Check for exhausted alert
         let mut found_exhausted = false;

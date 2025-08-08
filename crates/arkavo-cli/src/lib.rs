@@ -6,6 +6,7 @@ pub mod mcp_integration;
 pub mod mcp_spawner;
 pub mod memory_integration;
 
+#[allow(clippy::disallowed_methods)]
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if args.is_empty() {
         // No command provided, default to agent run

@@ -123,14 +123,13 @@ impl GitBackend for Git2Backend {
                 } else if s.contains(Status::WT_DELETED) || s.contains(Status::INDEX_DELETED) {
                     status.deleted.push(path.to_string());
                 } else if s.contains(Status::WT_RENAMED) || s.contains(Status::INDEX_RENAMED) {
-                    if let Some(delta) = entry.head_to_index() {
-                        if let (Some(old), Some(new)) =
+                    if let Some(delta) = entry.head_to_index()
+                        && let (Some(old), Some(new)) =
                             (delta.old_file().path(), delta.new_file().path())
-                        {
-                            status
-                                .renamed
-                                .push((old.display().to_string(), new.display().to_string()));
-                        }
+                    {
+                        status
+                            .renamed
+                            .push((old.display().to_string(), new.display().to_string()));
                     }
                 } else if s.contains(Status::CONFLICTED) {
                     status.conflicted.push(path.to_string());
@@ -227,16 +226,14 @@ impl GitBackend for Git2Backend {
 
     fn fetch(&self, repo: &Repository, remote: &str) -> Result<()> {
         // Check if we need to use fallback for HTTPS
-        if let Ok(remote_obj) = repo.find_remote(remote) {
-            if let Some(url) = remote_obj.url() {
-                if crate::remote_fallback::is_https_url(url)
-                    || crate::remote_fallback::is_ssh_url(url)
-                {
-                    // Use system git for HTTPS/SSH operations
-                    if let Some(workdir) = repo.workdir() {
-                        return crate::remote_fallback::git_fallback_fetch(workdir, remote);
-                    }
-                }
+        if let Ok(remote_obj) = repo.find_remote(remote)
+            && let Some(url) = remote_obj.url()
+            && (crate::remote_fallback::is_https_url(url)
+                || crate::remote_fallback::is_ssh_url(url))
+        {
+            // Use system git for HTTPS/SSH operations
+            if let Some(workdir) = repo.workdir() {
+                return crate::remote_fallback::git_fallback_fetch(workdir, remote);
             }
         }
 
@@ -248,16 +245,14 @@ impl GitBackend for Git2Backend {
 
     fn push(&self, repo: &Repository, remote: &str, branch: &str) -> Result<()> {
         // Check if we need to use fallback for HTTPS
-        if let Ok(remote_obj) = repo.find_remote(remote) {
-            if let Some(url) = remote_obj.url() {
-                if crate::remote_fallback::is_https_url(url)
-                    || crate::remote_fallback::is_ssh_url(url)
-                {
-                    // Use system git for HTTPS/SSH operations
-                    if let Some(workdir) = repo.workdir() {
-                        return crate::remote_fallback::git_fallback_push(workdir, remote, branch);
-                    }
-                }
+        if let Ok(remote_obj) = repo.find_remote(remote)
+            && let Some(url) = remote_obj.url()
+            && (crate::remote_fallback::is_https_url(url)
+                || crate::remote_fallback::is_ssh_url(url))
+        {
+            // Use system git for HTTPS/SSH operations
+            if let Some(workdir) = repo.workdir() {
+                return crate::remote_fallback::git_fallback_push(workdir, remote, branch);
             }
         }
 
@@ -269,16 +264,14 @@ impl GitBackend for Git2Backend {
 
     fn pull(&self, repo: &Repository, remote: &str, branch: &str) -> Result<()> {
         // Check if we need to use fallback for HTTPS
-        if let Ok(remote_obj) = repo.find_remote(remote) {
-            if let Some(url) = remote_obj.url() {
-                if crate::remote_fallback::is_https_url(url)
-                    || crate::remote_fallback::is_ssh_url(url)
-                {
-                    // Use system git for HTTPS/SSH operations
-                    if let Some(workdir) = repo.workdir() {
-                        return crate::remote_fallback::git_fallback_pull(workdir, remote, branch);
-                    }
-                }
+        if let Ok(remote_obj) = repo.find_remote(remote)
+            && let Some(url) = remote_obj.url()
+            && (crate::remote_fallback::is_https_url(url)
+                || crate::remote_fallback::is_ssh_url(url))
+        {
+            // Use system git for HTTPS/SSH operations
+            if let Some(workdir) = repo.workdir() {
+                return crate::remote_fallback::git_fallback_pull(workdir, remote, branch);
             }
         }
 

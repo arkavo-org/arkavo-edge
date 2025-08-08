@@ -438,15 +438,14 @@ impl AgentConnection {
                                 let _ = broadcast_tx.send(ordered_delta);
 
                                 // Send MetricsAck for back-pressure management
-                                if pending_acks >= ACK_WINDOW {
-                                    if let Some(client) = &*client_for_ack.read().await {
+                                if pending_acks >= ACK_WINDOW
+                                    && let Some(client) = &*client_for_ack.read().await {
                                         let _ = client.request::<(), _>(
                                             "chat_metrics_ack",
                                             rpc_params![session_id_for_ack.clone(), last_sequence]
                                         ).await;
                                         pending_acks = 0;
                                     }
-                                }
 
                                 // Send telemetry
                                 let _ = telemetry_tx
@@ -479,15 +478,15 @@ impl AgentConnection {
             }
 
             // Send final MetricsAck if we have pending acks
-            if pending_acks > 0 {
-                if let Some(client) = &*client_for_ack.read().await {
-                    let _ = client
-                        .request::<(), _>(
-                            "chat_metrics_ack",
-                            rpc_params![session_id_for_ack.clone(), last_sequence],
-                        )
-                        .await;
-                }
+            if pending_acks > 0
+                && let Some(client) = &*client_for_ack.read().await
+            {
+                let _ = client
+                    .request::<(), _>(
+                        "chat_metrics_ack",
+                        rpc_params![session_id_for_ack.clone(), last_sequence],
+                    )
+                    .await;
             }
 
             // Cleanup
@@ -495,10 +494,10 @@ impl AgentConnection {
 
             // Remove broadcast channel if no more subscribers
             let mut broadcasts = chat_broadcasts.write().await;
-            if let Some(tx) = broadcasts.get(&agent_id_for_task) {
-                if tx.receiver_count() == 0 {
-                    broadcasts.remove(&agent_id_for_task);
-                }
+            if let Some(tx) = broadcasts.get(&agent_id_for_task)
+                && tx.receiver_count() == 0
+            {
+                broadcasts.remove(&agent_id_for_task);
             }
         });
 

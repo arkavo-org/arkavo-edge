@@ -20,15 +20,15 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 
 # For retry logic
-rand = "0.8"
+rand = { workspace = true }
 
 # For stream parsing
-bytes = "1.8"
+bytes = { workspace = true }
 
 # Note: arkavo-llm dependency removed to avoid circular dependency
 # The provider.rs file exports a type that implements arkavo_llm::Provider
@@ -37,7 +37,7 @@ bytes = "1.8"
 [dev-dependencies]
 wiremock = "0.6"
 tokio-test = "0.4"
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [[bench]]

@@ -111,21 +111,21 @@ impl CalibrationValidator {
         }
 
         // Validate coordinates if available
-        if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates {
-            if let Some(expected_coords) = test_result.expected_coordinates {
-                let distance = (actual_x - expected_coords.0).hypot(actual_y - expected_coords.1);
+        if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates
+            && let Some(expected_coords) = test_result.expected_coordinates
+        {
+            let distance = (actual_x - expected_coords.0).hypot(actual_y - expected_coords.1);
 
-                if distance > self.tolerance.coordinate_tolerance_pixels {
-                    return ValidationOutcome::Failure(ValidationIssue {
-                        element_id: test_result.element_id.clone(),
-                        expected_result: format!(
-                            "Coordinates within {} pixels",
-                            self.tolerance.coordinate_tolerance_pixels
-                        ),
-                        actual_result: format!("Distance: {distance:.2} pixels"),
-                        severity: IssueSeverity::Minor,
-                    });
-                }
+            if distance > self.tolerance.coordinate_tolerance_pixels {
+                return ValidationOutcome::Failure(ValidationIssue {
+                    element_id: test_result.element_id.clone(),
+                    expected_result: format!(
+                        "Coordinates within {} pixels",
+                        self.tolerance.coordinate_tolerance_pixels
+                    ),
+                    actual_result: format!("Distance: {distance:.2} pixels"),
+                    severity: IssueSeverity::Minor,
+                });
             }
         }
 

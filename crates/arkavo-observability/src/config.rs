@@ -191,11 +191,11 @@ impl SecureConfigProvider {
         // Controlled environment variable fallback (if enabled)
         if self.allow_env_fallback {
             // Only allow specific, known-safe environment variables
-            if self.is_safe_env_key(key) {
-                if let Ok(env_value) = std::env::var(key) {
-                    warn!(key = %key, "Using environment variable fallback");
-                    return Ok(Some(env_value));
-                }
+            if self.is_safe_env_key(key)
+                && let Ok(env_value) = std::env::var(key)
+            {
+                warn!(key = %key, "Using environment variable fallback");
+                return Ok(Some(env_value));
             }
         }
 
@@ -216,24 +216,24 @@ impl SecureConfigProvider {
     /// Validate a configuration value against its validator
     fn validate_value(&self, key: &str, value: &str, validator: &ConfigValidator) -> Result<()> {
         // Check length constraints
-        if let Some(min_length) = validator.min_length {
-            if value.len() < min_length {
-                return Err(anyhow::anyhow!(
-                    "Configuration key '{}' value too short (minimum {} characters)",
-                    key,
-                    min_length
-                ));
-            }
+        if let Some(min_length) = validator.min_length
+            && value.len() < min_length
+        {
+            return Err(anyhow::anyhow!(
+                "Configuration key '{}' value too short (minimum {} characters)",
+                key,
+                min_length
+            ));
         }
 
-        if let Some(max_length) = validator.max_length {
-            if value.len() > max_length {
-                return Err(anyhow::anyhow!(
-                    "Configuration key '{}' value too long (maximum {} characters)",
-                    key,
-                    max_length
-                ));
-            }
+        if let Some(max_length) = validator.max_length
+            && value.len() > max_length
+        {
+            return Err(anyhow::anyhow!(
+                "Configuration key '{}' value too long (maximum {} characters)",
+                key,
+                max_length
+            ));
         }
 
         // Check pattern if specified

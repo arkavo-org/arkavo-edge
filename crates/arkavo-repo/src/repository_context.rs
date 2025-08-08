@@ -397,10 +397,11 @@ impl RepositoryContextManager {
             if line.trim().starts_with('[') {
                 in_deps = false;
             }
-            if in_deps && line.contains('=') {
-                if let Some(dep_name) = line.split('=').next() {
-                    deps.push(dep_name.trim().to_string());
-                }
+            if in_deps
+                && line.contains('=')
+                && let Some(dep_name) = line.split('=').next()
+            {
+                deps.push(dep_name.trim().to_string());
             }
         }
 

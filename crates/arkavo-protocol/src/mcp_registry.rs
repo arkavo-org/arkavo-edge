@@ -111,7 +111,7 @@ impl McpRegistry {
                     Ok(tools) => format!("healthy ({} tools available)", tools.len()),
                     Err(e) => {
                         error!("Health check failed for {}: {}", name, e);
-                        format!("unhealthy: {}", e)
+                        format!("unhealthy: {e}")
                     }
                 };
                 status.insert(name.clone(), health_status);

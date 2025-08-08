@@ -23,28 +23,28 @@ impl HelixEditor {
 
     fn find_helix_binary() -> Option<PathBuf> {
         // First check if helix is bundled with arkavo
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                let bundled_helix = exe_dir.join("helix").join("hx");
-                if bundled_helix.exists() {
-                    return Some(bundled_helix);
-                }
+        if let Ok(exe_path) = std::env::current_exe()
+            && let Some(exe_dir) = exe_path.parent()
+        {
+            let bundled_helix = exe_dir.join("helix").join("hx");
+            if bundled_helix.exists() {
+                return Some(bundled_helix);
+            }
 
-                // Also check direct binary
-                let bundled_hx = exe_dir.join("hx");
-                if bundled_hx.exists() {
-                    return Some(bundled_hx);
-                }
+            // Also check direct binary
+            let bundled_hx = exe_dir.join("hx");
+            if bundled_hx.exists() {
+                return Some(bundled_hx);
             }
         }
 
         // Check if helix is in PATH
-        if let Ok(output) = Command::new("which").arg("hx").output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Some(PathBuf::from(path));
-                }
+        if let Ok(output) = Command::new("which").arg("hx").output()
+            && output.status.success()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
             }
         }
 

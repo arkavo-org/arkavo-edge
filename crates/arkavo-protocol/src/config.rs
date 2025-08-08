@@ -195,32 +195,32 @@ impl A2aConfig {
         }
 
         // Load buffer sizes with validation
-        if let Some(size_str) = config_provider.get_config("A2A_CHAT_DELTA_BUFFER_SIZE")? {
-            if let Ok(size) = size_str.parse::<usize>() {
-                config.buffers.chat_delta_buffer_size = size;
-                info!(size = size, "Chat delta buffer size configured");
-            }
+        if let Some(size_str) = config_provider.get_config("A2A_CHAT_DELTA_BUFFER_SIZE")?
+            && let Ok(size) = size_str.parse::<usize>()
+        {
+            config.buffers.chat_delta_buffer_size = size;
+            info!(size = size, "Chat delta buffer size configured");
         }
 
-        if let Some(size_str) = config_provider.get_config("A2A_METRICS_BROADCAST_BUFFER_SIZE")? {
-            if let Ok(size) = size_str.parse::<usize>() {
-                config.buffers.metrics_broadcast_buffer_size = size;
-                info!(size = size, "Metrics broadcast buffer size configured");
-            }
+        if let Some(size_str) = config_provider.get_config("A2A_METRICS_BROADCAST_BUFFER_SIZE")?
+            && let Ok(size) = size_str.parse::<usize>()
+        {
+            config.buffers.metrics_broadcast_buffer_size = size;
+            info!(size = size, "Metrics broadcast buffer size configured");
         }
 
-        if let Some(size_str) = config_provider.get_config("A2A_TELEMETRY_CHANNEL_BUFFER_SIZE")? {
-            if let Ok(size) = size_str.parse::<usize>() {
-                config.buffers.telemetry_channel_buffer_size = size;
-                info!(size = size, "Telemetry channel buffer size configured");
-            }
+        if let Some(size_str) = config_provider.get_config("A2A_TELEMETRY_CHANNEL_BUFFER_SIZE")?
+            && let Ok(size) = size_str.parse::<usize>()
+        {
+            config.buffers.telemetry_channel_buffer_size = size;
+            info!(size = size, "Telemetry channel buffer size configured");
         }
 
-        if let Some(size_str) = config_provider.get_config("A2A_AGUI_BROADCAST_BUFFER_SIZE")? {
-            if let Ok(size) = size_str.parse::<usize>() {
-                config.buffers.agui_broadcast_buffer_size = size;
-                info!(size = size, "AG-UI broadcast buffer size configured");
-            }
+        if let Some(size_str) = config_provider.get_config("A2A_AGUI_BROADCAST_BUFFER_SIZE")?
+            && let Ok(size) = size_str.parse::<usize>()
+        {
+            config.buffers.agui_broadcast_buffer_size = size;
+            info!(size = size, "AG-UI broadcast buffer size configured");
         }
 
         info!(
