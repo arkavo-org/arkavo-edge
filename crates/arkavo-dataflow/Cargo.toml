@@ -40,8 +40,8 @@ base64 = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 rand = "0.8"
 ring = "0.17"
-url = "2.5.4"
 keyring = "3.0"
+url = "2.5.4"
 
 [dev-dependencies]
 

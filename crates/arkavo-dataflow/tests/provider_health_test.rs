@@ -1,4 +1,4 @@
-use arkavo_dataflow::nodes::provider_health::{CircuitBreaker, ProviderHealthMonitor};
+use arkavo_llm::providers::{CircuitBreaker, ProviderHealthMonitor};
 use tokio::time::{Duration, sleep};
 
 #[tokio::test]
