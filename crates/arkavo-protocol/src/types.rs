@@ -320,6 +320,22 @@ pub struct AgentQueryResponse {
     pub evidence: Option<serde_json::Value>,
 }
 
+/// Agent status enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    /// Agent is online and available
+    Online,
+    /// Agent is offline
+    Offline,
+    /// Agent is busy with tasks
+    Busy,
+    /// Agent is in maintenance mode
+    Maintenance,
+    /// Seeking collaboration
+    SeekingCollaboration,
+}
+
 /// Broadcast message for agent capabilities
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentBroadcast {
@@ -330,7 +346,16 @@ pub struct AgentBroadcast {
     pub broadcast_type: BroadcastType,
 
     /// Capabilities or specializations
-    pub capabilities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<AgentCapability>>,
+
+    /// Optional status update
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AgentStatus>,
+
+    /// Whether the agent is accepting new tasks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepting_tasks: Option<bool>,
 
     /// Additional metadata
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -341,14 +366,16 @@ pub struct AgentBroadcast {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BroadcastType {
-    /// Announcing availability
-    Available,
-    /// Updating capabilities
-    CapabilityUpdate,
-    /// Going offline
-    Offline,
-    /// Seeking collaboration
-    SeekingCollaboration,
+    /// Status update broadcast
+    Status,
+    /// Capability announcement
+    Capability,
+    /// Availability change
+    Availability,
+    /// Agent shutdown notification
+    Shutdown,
+    /// Custom broadcast type
+    Custom(String),
 }
 
 /// Interaction mode supported by the agent

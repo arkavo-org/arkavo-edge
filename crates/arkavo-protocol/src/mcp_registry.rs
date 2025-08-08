@@ -1,10 +1,11 @@
+use crate::types::{AgentCard, AgentStatus};
 use arkavo_mcp_core::ToolSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::error;
+use tracing::{error, info};
 
 /// Tool information structure matching MCP protocol
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -29,12 +30,16 @@ pub trait McpConnectionTrait: Send + Sync {
 /// Registry to manage multiple MCP server connections
 pub struct McpRegistry {
     connections: Arc<RwLock<HashMap<String, Box<dyn McpConnectionTrait>>>>,
+    agents: Arc<RwLock<HashMap<String, AgentCard>>>,
+    agent_status: Arc<RwLock<HashMap<String, AgentStatus>>>,
 }
 
 impl McpRegistry {
     pub fn new() -> Self {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),
+            agents: Arc::new(RwLock::new(HashMap::new())),
+            agent_status: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -100,9 +105,16 @@ impl McpRegistry {
 
         {
             let connections = self.connections.read().await;
-            for (name, _connection) in connections.iter() {
-                // TODO: Add actual connection health check
-                status.insert(name.clone(), "connected".to_string());
+            for (name, connection) in connections.iter() {
+                // Perform health check by attempting to list tools
+                let health_status = match connection.list_tools() {
+                    Ok(tools) => format!("healthy ({} tools available)", tools.len()),
+                    Err(e) => {
+                        error!("Health check failed for {}: {}", name, e);
+                        format!("unhealthy: {}", e)
+                    }
+                };
+                status.insert(name.clone(), health_status);
             }
         }
 
@@ -138,6 +150,49 @@ impl McpRegistry {
         } else {
             Err(format!("MCP server '{server_name}' not found").into())
         }
+    }
+
+    /// Register an agent with its card
+    pub async fn register_agent(&self, agent_card: AgentCard) {
+        let agent_id = agent_card.identity.id.clone();
+        let mut agents = self.agents.write().await;
+        agents.insert(agent_id.clone(), agent_card);
+
+        // Set initial status
+        let mut status = self.agent_status.write().await;
+        status.insert(agent_id.clone(), AgentStatus::Online);
+
+        info!("Registered agent: {}", agent_id);
+    }
+
+    /// Unregister an agent
+    pub async fn unregister_agent(&self, agent_id: &str) {
+        let mut agents = self.agents.write().await;
+        agents.remove(agent_id);
+
+        let mut status = self.agent_status.write().await;
+        status.remove(agent_id);
+
+        info!("Unregistered agent: {}", agent_id);
+    }
+
+    /// List all registered agents
+    pub async fn list_agents(&self) -> Vec<AgentCard> {
+        let agents = self.agents.read().await;
+        agents.values().cloned().collect()
+    }
+
+    /// Update agent status
+    pub async fn update_agent_status(&self, agent_id: &str, new_status: AgentStatus) {
+        let mut status = self.agent_status.write().await;
+        status.insert(agent_id.to_string(), new_status.clone());
+        info!("Updated agent {} status to {:?}", agent_id, new_status);
+    }
+
+    /// Get agent status
+    pub async fn get_agent_status(&self, agent_id: &str) -> Option<AgentStatus> {
+        let status = self.agent_status.read().await;
+        status.get(agent_id).cloned()
     }
 }
 

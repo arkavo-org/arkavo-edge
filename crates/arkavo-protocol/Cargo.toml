@@ -38,6 +38,7 @@ serde_json = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = { version = "9.3" }
+urlencoding = { version = "2.1" }
 
 # Error handling
 anyhow = { workspace = true }
