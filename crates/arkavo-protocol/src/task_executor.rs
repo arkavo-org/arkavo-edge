@@ -40,6 +40,8 @@ pub struct TaskExecutorConfig {
     pub task_timeout_seconds: u64,
     /// Interval for checking pending tasks
     pub poll_interval_ms: u64,
+    /// Whether to enable metrics collection
+    pub enable_metrics: bool,
 }
 
 impl Default for TaskExecutorConfig {
@@ -48,6 +50,7 @@ impl Default for TaskExecutorConfig {
             max_concurrent_tasks: 10,
             task_timeout_seconds: 300, // 5 minutes
             poll_interval_ms: 1000,    // 1 second
+            enable_metrics: true,      // Metrics enabled by default
         }
     }
 }
@@ -67,6 +70,7 @@ impl TaskExecutor {
     pub fn new(store: Arc<dyn TaskStore>, config: TaskExecutorConfig) -> Self {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (shutdown_tx, _) = broadcast::channel(1);
+        let enable_metrics = config.enable_metrics;
 
         Self {
             store,
@@ -74,7 +78,7 @@ impl TaskExecutor {
             event_tx,
             event_rx: Arc::new(RwLock::new(Some(event_rx))),
             shutdown_tx,
-            metrics: Arc::new(MetricsCollector::new(true)), // TODO: Make configurable
+            metrics: Arc::new(MetricsCollector::new(enable_metrics)),
             task_start_times: Arc::new(RwLock::new(HashMap::new())),
         }
     }
