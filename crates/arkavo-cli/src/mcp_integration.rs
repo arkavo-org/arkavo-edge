@@ -14,6 +14,7 @@ pub enum McpConnection {
 }
 
 impl McpConnection {
+    #[allow(clippy::disallowed_methods)]
     pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize memory tools first
         eprintln!("Initializing memory tools...");

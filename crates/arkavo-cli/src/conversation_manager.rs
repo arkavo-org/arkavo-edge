@@ -93,17 +93,16 @@ impl ConversationManager {
             .search("conversation_session", 10, Some("conversation"))
             .await?;
 
-        if let Some(latest_session) = sessions.first() {
-            if let Ok(session) =
+        if let Some(latest_session) = sessions.first()
+            && let Ok(session) =
                 serde_json::from_str::<ConversationSession>(&latest_session.memory.content)
-            {
-                self.current_session_id = Some(session.id);
-                progress.finish_with_message(format!(
-                    "Restored session from {}",
-                    session.created_at.format("%Y-%m-%d %H:%M")
-                ));
-                return Ok(Some(session.id));
-            }
+        {
+            self.current_session_id = Some(session.id);
+            progress.finish_with_message(format!(
+                "Restored session from {}",
+                session.created_at.format("%Y-%m-%d %H:%M")
+            ));
+            return Ok(Some(session.id));
         }
 
         progress.finish_and_clear();

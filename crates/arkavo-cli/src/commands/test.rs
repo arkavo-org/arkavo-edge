@@ -4,6 +4,7 @@ use arkavo_test::reporting::business_report::{BusinessReporter, OutputFormat};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Check for intelligent test generation modes
     if args.contains(&"--explore".to_string()) {

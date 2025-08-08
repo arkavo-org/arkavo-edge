@@ -564,14 +564,13 @@ Full repository details (available via @build_repository_context):
         }
 
         // Check for slash commands
-        if let Some(command_input) = input.strip_prefix('/') {
-            if let Some(command_response) =
+        if let Some(command_input) = input.strip_prefix('/')
+            && let Some(command_response) =
                 handle_command(command_input, &mcp_client, client.provider_name())
-            {
-                println!("{command_response}");
-                println!();
-                continue;
-            }
+        {
+            println!("{command_response}");
+            println!();
+            continue;
         }
 
         // Check for @screenshot command without arguments
@@ -619,13 +618,12 @@ Full repository details (available via @build_repository_context):
             if img_path.is_empty() {
                 eprintln!("Usage: analyze_screenshot on <path>");
                 continue;
-            } else {
-                // Convert to "@analyze_screenshot path" syntax
-                let converted_input = format!("@analyze_screenshot {img_path}");
-                let msg = Message::user(&converted_input);
-                runtime.block_on(conversation_manager.add_message(&msg))?;
-                messages.push(msg);
             }
+            // Convert to "@analyze_screenshot path" syntax
+            let converted_input = format!("@analyze_screenshot {img_path}");
+            let msg = Message::user(&converted_input);
+            runtime.block_on(conversation_manager.add_message(&msg))?;
+            messages.push(msg);
         } else {
             // Add regular user message
             let msg = Message::user(input);
@@ -1132,22 +1130,22 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         .find(|c| c.memory.content != "CLEARED");
 
     // First priority: Try saved Ollama server if configured
-    if let Some(provider_config) = &saved_provider {
-        if provider_config.memory.content.starts_with("http") {
-            // Ollama server
-            let server_url = &provider_config.memory.content;
-            unsafe {
-                std::env::set_var("OLLAMA_BASE_URL", server_url);
-            }
+    if let Some(provider_config) = &saved_provider
+        && provider_config.memory.content.starts_with("http")
+    {
+        // Ollama server
+        let server_url = &provider_config.memory.content;
+        unsafe {
+            std::env::set_var("OLLAMA_BASE_URL", server_url);
+        }
 
-            if let Ok(client) = LlmClient::from_env() {
-                let test_message = vec![Message::user("ping")];
-                if client.complete(test_message).await.is_ok() {
-                    if !print_mode {
-                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
-                    }
-                    return Ok(client);
+        if let Ok(client) = LlmClient::from_env() {
+            let test_message = vec![Message::user("ping")];
+            if client.complete(test_message).await.is_ok() {
+                if !print_mode {
+                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
                 }
+                return Ok(client);
             }
         }
     }
@@ -1179,16 +1177,16 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     }
 
     // Third priority: Check if previously selected local model is still available
-    if let Some(provider_config) = &saved_provider {
-        if provider_config.memory.content.starts_with("local:") {
-            let model_name = provider_config
-                .memory
-                .content
-                .strip_prefix("local:")
-                .unwrap();
-            if !print_mode {
-                eprintln!("Checking for previously used local model: {model_name}");
-            }
+    if let Some(provider_config) = &saved_provider
+        && provider_config.memory.content.starts_with("local:")
+    {
+        let model_name = provider_config
+            .memory
+            .content
+            .strip_prefix("local:")
+            .unwrap();
+        if !print_mode {
+            eprintln!("Checking for previously used local model: {model_name}");
         }
     }
 

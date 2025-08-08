@@ -181,17 +181,16 @@ impl McpProcessManager {
                                 .arg("-0")
                                 .arg(tracked.pid.to_string())
                                 .output()
+                                && check.status.success()
                             {
-                                if check.status.success() {
-                                    eprintln!(
-                                        "MCP server '{}' (PID: {}) did not shut down gracefully, forcing termination",
-                                        tracked.name, tracked.pid
-                                    );
-                                    let _ = std::process::Command::new("kill")
-                                        .arg("-KILL")
-                                        .arg(tracked.pid.to_string())
-                                        .output();
-                                }
+                                eprintln!(
+                                    "MCP server '{}' (PID: {}) did not shut down gracefully, forcing termination",
+                                    tracked.name, tracked.pid
+                                );
+                                let _ = std::process::Command::new("kill")
+                                    .arg("-KILL")
+                                    .arg(tracked.pid.to_string())
+                                    .output();
                             }
                         }
                     }
