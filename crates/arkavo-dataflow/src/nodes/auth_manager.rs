@@ -465,11 +465,52 @@ impl AuthManager {
             ));
         }
 
-        // TODO: Add OS keychain integration in follow-up PR
-        // For now, require explicit key setting
+        // Try OS keychain
+        let entry = keyring::Entry::new("arkavo", "master_key")
+            .map_err(|e| anyhow::anyhow!("Failed to access keychain: {}", e))?;
+
+        // Try to get existing key from keychain
+        match entry.get_password() {
+            Ok(key) => {
+                if key.len() >= 32 {
+                    return Ok(key);
+                }
+                // Key exists but is too short, delete it
+                let _ = entry.delete_credential();
+            }
+            Err(keyring::Error::NoEntry) => {
+                // Key doesn't exist, generate a new one
+                let new_key = self.generate_secure_key();
+
+                // Store in keychain
+                entry
+                    .set_password(&new_key)
+                    .map_err(|e| anyhow::anyhow!("Failed to store key in keychain: {}", e))?;
+
+                return Ok(new_key);
+            }
+            Err(e) => {
+                // Keychain access failed, fall back to requiring environment variable
+                tracing::warn!(
+                    "Keychain access failed: {}. Falling back to environment variable.",
+                    e
+                );
+            }
+        }
+
         Err(anyhow::anyhow!(
-            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars)"
+            "Master key required: set ARKAVO_MASTER_KEY environment variable (min 32 chars) or allow keychain access"
         ))
+    }
+
+    /// Generate a secure random key
+    fn generate_secure_key(&self) -> String {
+        use rand::RngCore;
+        let mut rng = rand::thread_rng();
+        let mut key = vec![0u8; 32];
+        rng.fill_bytes(&mut key);
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(&key)
     }
 }
 
