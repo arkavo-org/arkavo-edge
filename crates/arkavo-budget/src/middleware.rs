@@ -1,6 +1,6 @@
-use crate::tracker::BudgetTracker;
 use crate::TokenCost;
-use anyhow::{anyhow, Result};
+use crate::tracker::BudgetTracker;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio_stream::{Stream, StreamExt};

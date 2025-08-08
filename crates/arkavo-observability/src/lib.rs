@@ -59,15 +59,15 @@ pub fn init_observability(config: ObservabilityConfig) -> Result<ObservabilityHa
     }
 
     // OpenTelemetry layer - agent will auto-detect and configure
-    if config.enable_otlp {
-        if let Some(endpoint) = &config.otlp_endpoint {
-            tracing::info!(
-                otlp_endpoint = %endpoint,
-                "OTLP export auto-detected and configured by agent"
-            );
-            // Agent detected OTLP collector availability
-            // Full integration deferred until OpenTelemetry API stabilizes
-        }
+    if config.enable_otlp
+        && let Some(endpoint) = &config.otlp_endpoint
+    {
+        tracing::info!(
+            otlp_endpoint = %endpoint,
+            "OTLP export auto-detected and configured by agent"
+        );
+        // Agent detected OTLP collector availability
+        // Full integration deferred until OpenTelemetry API stabilizes
     }
 
     // Build and set subscriber

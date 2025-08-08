@@ -27,7 +27,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.25.4"
+version = "0.25.5"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -56,9 +56,27 @@ regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 
+# Common utilities
+log = "0.4"
+url = "2.5"
+lru = "0.12"
+async-stream = "0.3"
+tower = "0.5"
+semver = { version = "1.0", features = ["serde"] }
+bytemuck = "1.20"
+cfg-if = "1.0"
+sha2 = "0.10"
+dirs = "5.0"
+toml = "0.8"
+rand = "0.8"
+bincode = "1.3"
+bytes = "1.8"
+
 # Terminal and UI
 ratatui = "0.29.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
+syntect = { version = "5.2", default-features = false }
+indicatif = "0.17"
 
 # Git and filesystem
 git2 = { version = "0.20.2", default-features = false }
@@ -71,6 +89,24 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "uu
 # HTTP and networking
 warp = { version = "0.3.7", features = ["tls"] }
 jsonrpsee = { version = "0.24.9", features = ["client", "server", "ws-client", "macros"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false }
+rustls-pemfile = "2.0"
+webpki-roots = "0.26"
+governor = "0.6"
+dashmap = "5.5"
+crossbeam-queue = "0.3"
+jsonwebtoken = "9.3"
+urlencoding = "2.1"
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+gethostname = "0.5"
+get_if_addrs = "0.5"
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+zeroconf = "0.14"
 
 # LLM and ML
 tokenizers = { version = "0.21.2", default-features = false, features = ["fancy-regex"] }
@@ -78,6 +114,14 @@ hf-hub = { version = "0.4.3", features = ["tokio"] }
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
+fastembed = "4"
+hnsw_rs = "0.3"
+tiktoken-rs = "0.6"
+
+# Dev dependencies
+criterion = { version = "0.5", features = ["async_tokio"] }
+tonic = "0.12"
+prost = "0.13"
 
 # Build optimization
 [profile.release]

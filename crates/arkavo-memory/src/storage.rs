@@ -455,10 +455,10 @@ impl MemoryStorage {
                 Err(_) => continue,
             };
 
-            if let Some(cat) = category {
-                if memory.category.as_ref() != Some(&cat.to_string()) {
-                    continue;
-                }
+            if let Some(cat) = category
+                && memory.category.as_ref() != Some(&cat.to_string())
+            {
+                continue;
             }
 
             let score = 1.0 - distance;

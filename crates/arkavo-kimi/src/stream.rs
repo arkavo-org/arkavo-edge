@@ -61,15 +61,15 @@ impl SseParser {
                                             let delta = &choice.delta;
 
                                             // Handle content delta
-                                            if let Some(content) = &delta.content {
-                                                if !content.is_empty() {
-                                                    let _ = tx
-                                                        .send(Ok(StreamResponse {
-                                                            content: content.clone(),
-                                                            done: false,
-                                                        }))
-                                                        .await;
-                                                }
+                                            if let Some(content) = &delta.content
+                                                && !content.is_empty()
+                                            {
+                                                let _ = tx
+                                                    .send(Ok(StreamResponse {
+                                                        content: content.clone(),
+                                                        done: false,
+                                                    }))
+                                                    .await;
                                             }
 
                                             // Handle tool calls delta
