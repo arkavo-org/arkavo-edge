@@ -98,11 +98,10 @@ impl BudgetTracker {
         ];
 
         for (limit, spent) in global_checks {
-            if let Some(limit_value) = limit {
-                if spent + estimated_cost > limit_value {
+            if let Some(limit_value) = limit
+                && spent + estimated_cost > limit_value {
                     return Ok(false);
                 }
-            }
         }
 
         if let Some(agent_budget) = config.agent_budgets.get(agent_id) {
@@ -116,11 +115,10 @@ impl BudgetTracker {
             ];
 
             for (limit, spent) in agent_checks {
-                if let Some(limit_value) = limit {
-                    if spent + estimated_cost > limit_value {
+                if let Some(limit_value) = limit
+                    && spent + estimated_cost > limit_value {
                         return Ok(false);
                     }
-                }
             }
         }
 

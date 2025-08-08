@@ -184,8 +184,8 @@ impl SimulatorStateVerifier {
             .output()
             .map_err(|e| TestError::Mcp(format!("Failed to list apps: {e}")))?;
 
-        if let Ok(apps) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
-            if let Some(app_array) = apps.as_array() {
+        if let Ok(apps) = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            && let Some(app_array) = apps.as_array() {
                 for app in app_array {
                     if app["CFBundleIdentifier"].as_str() == Some(bundle_id) {
                         // Check if app is installed
@@ -194,7 +194,6 @@ impl SimulatorStateVerifier {
                     }
                 }
             }
-        }
 
         Ok(false)
     }
@@ -257,8 +256,8 @@ impl SimulatorStateVerifier {
         }
 
         // 3. Launch app if needed and not in foreground
-        if let Some(bundle_id) = app_bundle_id {
-            if !state.app_is_foreground {
+        if let Some(bundle_id) = app_bundle_id
+            && !state.app_is_foreground {
                 eprintln!("[SimulatorStateVerifier] Launching app {bundle_id}");
                 let _ = Command::new("xcrun")
                     .args(["simctl", "launch", device_id, bundle_id])
@@ -266,7 +265,6 @@ impl SimulatorStateVerifier {
 
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
-        }
 
         // 4. Focus simulator window
         #[cfg(target_os = "macos")]

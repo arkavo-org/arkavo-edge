@@ -111,8 +111,8 @@ impl CalibrationValidator {
         }
 
         // Validate coordinates if available
-        if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates {
-            if let Some(expected_coords) = test_result.expected_coordinates {
+        if let Some((actual_x, actual_y)) = test_result.interaction_result.actual_coordinates
+            && let Some(expected_coords) = test_result.expected_coordinates {
                 let distance = (actual_x - expected_coords.0).hypot(actual_y - expected_coords.1);
 
                 if distance > self.tolerance.coordinate_tolerance_pixels {
@@ -127,7 +127,6 @@ impl CalibrationValidator {
                     });
                 }
             }
-        }
 
         // Validate response time
         if test_result.interaction_result.response_time_ms > self.tolerance.timing_tolerance_ms {

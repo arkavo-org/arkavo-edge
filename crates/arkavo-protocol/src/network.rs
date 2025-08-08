@@ -89,7 +89,7 @@ pub fn get_network_ip() -> Result<Ipv4Addr, NetworkError> {
 /// Returns 127.0.0.1 as a last resort for local testing
 pub fn get_fallback_ip() -> Ipv4Addr {
     warn!("Using fallback IP address 127.0.0.1");
-    Ipv4Addr::new(127, 0, 0, 1)
+    Ipv4Addr::LOCALHOST
 }
 
 /// Get the best available IP address for service registration

@@ -95,12 +95,11 @@ impl HarnessCompiler {
             .output()
             .ok();
 
-        if let Some(output) = sdk_list_output {
-            if output.status.success() {
+        if let Some(output) = sdk_list_output
+            && output.status.success() {
                 eprintln!("[AxpHarnessBuilder] Available runtimes:");
                 eprintln!("{}", String::from_utf8_lossy(&output.stdout));
             }
-        }
 
         // Get SDK path
         let sdk_output = Command::new("xcrun")

@@ -119,13 +119,12 @@ impl IdbRecovery {
         // Check if we've attempted recovery recently
         let mut last_recovery = self.last_recovery.lock().await;
 
-        if let Some(last_time) = *last_recovery {
-            if last_time.elapsed() < Duration::from_secs(30) {
+        if let Some(last_time) = *last_recovery
+            && last_time.elapsed() < Duration::from_secs(30) {
                 return Err(TestError::Mcp(
                     "Recovery attempted too recently. Please wait 30 seconds.".to_string(),
                 ));
             }
-        }
 
         eprintln!("[IdbRecovery] Starting IDB recovery process...");
 
@@ -289,11 +288,10 @@ impl IdbRecovery {
                         .output()
                         .ok();
 
-                    if let Some(output) = port_connect {
-                        if output.status.success() {
+                    if let Some(output) = port_connect
+                        && output.status.success() {
                             eprintln!("[IdbRecovery] Connected successfully with explicit port");
                         }
-                    }
                 }
             }
 
@@ -342,8 +340,8 @@ impl IdbRecovery {
                 .output()
                 .ok();
 
-            if let Some(output) = pgrep_output {
-                if output.status.success() {
+            if let Some(output) = pgrep_output
+                && output.status.success() {
                     let pids = String::from_utf8_lossy(&output.stdout);
                     eprintln!("[IdbRecovery] Found IDB companion PIDs: {}", pids.trim());
 
@@ -372,14 +370,13 @@ impl IdbRecovery {
                         tokio::time::sleep(Duration::from_millis(500)).await;
                     }
                 }
-            }
 
             // Step 5: Clear any port bindings by killing lsof processes holding the port
             eprintln!("[IdbRecovery] Clearing port bindings...");
             let lsof_output = Command::new("lsof").args(["-ti", ":10882"]).output().ok();
 
-            if let Some(output) = lsof_output {
-                if output.status.success() {
+            if let Some(output) = lsof_output
+                && output.status.success() {
                     let pids = String::from_utf8_lossy(&output.stdout);
                     for pid in pids.lines() {
                         if let Ok(pid_num) = pid.trim().parse::<i32>() {
@@ -391,7 +388,6 @@ impl IdbRecovery {
                         }
                     }
                 }
-            }
 
             // Step 6: Clear temp files and locks
             let temp_dir_str = env::temp_dir().display().to_string();

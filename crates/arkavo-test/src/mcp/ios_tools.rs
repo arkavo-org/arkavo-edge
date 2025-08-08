@@ -95,12 +95,11 @@ impl UiInteractionKit {
         // Check cache first
         {
             let cache = self.axp_socket_cache.lock().await;
-            if let Some((cached_device_id, socket_path)) = cache.as_ref() {
-                if cached_device_id == &device_id {
+            if let Some((cached_device_id, socket_path)) = cache.as_ref()
+                && cached_device_id == &device_id {
                     eprintln!("[AXP] Using cached socket for device {device_id}: {socket_path}");
                     return Some((socket_path.clone(), true));
                 }
-            }
         }
 
         // Try to find AXP socket for this specific device
@@ -1056,8 +1055,8 @@ impl Tool for UiInteractionKit {
                             ])
                             .output();
 
-                        if let Ok(output) = simctl_output {
-                            if output.status.success() {
+                        if let Ok(output) = simctl_output
+                            && output.status.success() {
                                 eprintln!(
                                     "UI tap via simctl io succeeded at ({adjusted_x}, {adjusted_y})"
                                 );
@@ -1073,7 +1072,6 @@ impl Tool for UiInteractionKit {
                                     "confidence": "medium"
                                 }));
                             }
-                        }
 
                         // Method 3: Try Accessibility/AppleScript approach
                         let applescript = format!(
@@ -1098,8 +1096,8 @@ impl Tool for UiInteractionKit {
                             .arg(&applescript)
                             .output();
 
-                        if let Ok(output) = applescript_output {
-                            if output.status.success() {
+                        if let Ok(output) = applescript_output
+                            && output.status.success() {
                                 eprintln!(
                                     "UI tap via AppleScript/Accessibility succeeded at ({adjusted_x}, {adjusted_y})"
                                 );
@@ -1135,7 +1133,6 @@ impl Tool for UiInteractionKit {
                                     }
                                 }));
                             }
-                        }
 
                         // If all methods fail, report what we tried
                         return Ok(serde_json::json!({
@@ -2155,13 +2152,11 @@ fn get_active_device_id() -> Result<String> {
 
     // Parse device ID from output
     for line in stdout.lines() {
-        if line.contains('(') && line.contains(')') && line.contains("Booted") {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.find(')') {
+        if line.contains('(') && line.contains(')') && line.contains("Booted")
+            && let Some(start) = line.find('(')
+                && let Some(end) = line.find(')') {
                     return Ok(line[start + 1..end].to_string());
                 }
-            }
-        }
     }
 
     // Fallback: try to get any iPhone device
@@ -2173,17 +2168,15 @@ fn get_active_device_id() -> Result<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
-        if line.contains("iPhone") && line.contains('(') && line.contains(')') {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.find(')') {
+        if line.contains("iPhone") && line.contains('(') && line.contains(')')
+            && let Some(start) = line.find('(')
+                && let Some(end) = line.find(')') {
                     let device_id = line[start + 1..end].to_string();
                     if device_id.len() == 36 {
                         // UUID length
                         return Ok(device_id);
                     }
                 }
-            }
-        }
     }
 
     // Ultimate fallback: return a placeholder ID

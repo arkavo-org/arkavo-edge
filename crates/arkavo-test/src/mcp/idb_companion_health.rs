@@ -70,13 +70,12 @@ impl IdbCompanionHealth {
                 .or_insert_with(|| CompanionHealthMetrics::new(device_id.to_string()));
 
             // Check if companion process is running
-            if let Some(pid) = metrics.companion_pid {
-                if !Self::is_process_running(pid) {
+            if let Some(pid) = metrics.companion_pid
+                && !Self::is_process_running(pid) {
                     eprintln!("[IdbCompanionHealth] Companion process {pid} is not running");
                     metrics.companion_pid = None;
                     is_healthy = false;
                 }
-            }
 
             (
                 metrics.companion_pid,
@@ -120,12 +119,11 @@ impl IdbCompanionHealth {
                 }
 
                 // Check if companion is responsive
-                if let Some(last_success) = last_successful_tap {
-                    if last_success.elapsed() > Duration::from_secs(300) {
+                if let Some(last_success) = last_successful_tap
+                    && last_success.elapsed() > Duration::from_secs(300) {
                         eprintln!("[IdbCompanionHealth] No successful taps in last 5 minutes");
                         metrics.is_responsive = false;
                     }
-                }
 
                 metrics.last_health_check = Instant::now();
                 metrics.is_responsive = is_healthy;

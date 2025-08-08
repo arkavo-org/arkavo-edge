@@ -538,8 +538,8 @@ impl Tool for TuiTestHarness {
 impl Drop for TuiTestHarness {
     fn drop(&mut self) {
         // Clean up any remaining sessions
-        if let Ok(sessions) = self.sessions.lock() {
-            if !sessions.is_empty() {
+        if let Ok(sessions) = self.sessions.lock()
+            && !sessions.is_empty() {
                 eprintln!(
                     "[TuiTestHarness] Warning: {} sessions still active during drop",
                     sessions.len()
@@ -547,7 +547,6 @@ impl Drop for TuiTestHarness {
                 // Note: We don't force kill here as it might affect the parent terminal
                 // The processes should be cleaned up by the OS when they lose their parent
             }
-        }
     }
 }
 

@@ -129,11 +129,10 @@ impl LogStreamKit {
                 }
 
                 // Parse JSON log entry if possible
-                if let Ok(log_entry) = serde_json::from_str::<Value>(&line) {
-                    if let Some(message) = log_entry.get("eventMessage").and_then(|m| m.as_str()) {
+                if let Ok(log_entry) = serde_json::from_str::<Value>(&line)
+                    && let Some(message) = log_entry.get("eventMessage").and_then(|m| m.as_str()) {
                         eprintln!("[LOG:{stream_id_clone}] {message}");
                     }
-                }
             }
         });
 

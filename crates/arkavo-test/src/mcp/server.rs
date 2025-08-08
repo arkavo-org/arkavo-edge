@@ -1645,11 +1645,10 @@ impl TestExecutor {
                 let test_name = line.split(": ").next().unwrap_or("").trim();
 
                 // Apply filter if provided
-                if let Some(f) = filter {
-                    if !test_name.contains(f) {
+                if let Some(f) = filter
+                    && !test_name.contains(f) {
                         continue;
                     }
-                }
 
                 // Determine test type based on path/name
                 let test_info_type = if test_name.contains("bench") || line.ends_with(": bench") {
@@ -1718,9 +1717,9 @@ impl TestExecutor {
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 for line in stdout.lines() {
-                    if let Some(test_name) = line.strip_prefix("Test Case '") {
-                        if let Some(test_name) = test_name.strip_suffix("' started") {
-                            if filter.is_none_or(|f| test_name.contains(f)) {
+                    if let Some(test_name) = line.strip_prefix("Test Case '")
+                        && let Some(test_name) = test_name.strip_suffix("' started")
+                            && filter.is_none_or(|f| test_name.contains(f)) {
                                 tests.push(TestInfo {
                                     name: test_name.to_string(),
                                     test_type: "unit".to_string(),
@@ -1728,8 +1727,6 @@ impl TestExecutor {
                                     path: None,
                                 });
                             }
-                        }
-                    }
                 }
             }
         }
@@ -1787,8 +1784,8 @@ impl TestExecutor {
 
                         // Look for test classes and methods
                         for line in contents.lines() {
-                            if line.contains("class") && line.contains("XCTestCase") {
-                                if let Some(class_name) = extract_swift_class_name(line) {
+                            if line.contains("class") && line.contains("XCTestCase")
+                                && let Some(class_name) = extract_swift_class_name(line) {
                                     current_class = Some(class_name.clone());
 
                                     // Determine test type based on class name
@@ -1814,11 +1811,10 @@ impl TestExecutor {
                                         });
                                     }
                                 }
-                            }
 
                             // Look for test methods
-                            if line.trim().starts_with("func test") {
-                                if let (Some(class), Some(method_name)) =
+                            if line.trim().starts_with("func test")
+                                && let (Some(class), Some(method_name)) =
                                     (&current_class, extract_swift_test_method_name(line))
                                 {
                                     let full_test_name = format!("{class}.{method_name}");
@@ -1851,7 +1847,6 @@ impl TestExecutor {
                                         });
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -1859,12 +1854,12 @@ impl TestExecutor {
         }
 
         // If we have an xcworkspace or xcodeproj, try using xcodebuild
-        if tests.is_empty() {
-            if let Ok(entries) = fs::read_dir(&self.working_dir) {
+        if tests.is_empty()
+            && let Ok(entries) = fs::read_dir(&self.working_dir) {
                 for entry in entries.filter_map(std::result::Result::ok) {
                     let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext == "xcworkspace" || ext == "xcodeproj" {
+                    if let Some(ext) = path.extension()
+                        && (ext == "xcworkspace" || ext == "xcodeproj") {
                             // Try to list test targets using the wrapper
                             let scheme_output =
                                 super::xcodebuild_wrapper::XcodebuildWrapper::try_execute(&[
@@ -1905,10 +1900,8 @@ impl TestExecutor {
                             }
                             break;
                         }
-                    }
                 }
             }
-        }
 
         Ok(tests)
     }

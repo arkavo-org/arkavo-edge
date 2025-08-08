@@ -288,9 +288,9 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
 
         // Parse clippy output
         for line in String::from_utf8_lossy(&output.stdout).lines() {
-            if let Ok(msg) = serde_json::from_str::<Value>(line) {
-                if msg["reason"] == "compiler-message" {
-                    if let Some(message) = msg.get("message") {
+            if let Ok(msg) = serde_json::from_str::<Value>(line)
+                && msg["reason"] == "compiler-message"
+                    && let Some(message) = msg.get("message") {
                         bugs.push(serde_json::json!({
                             "type": "clippy",
                             "severity": message["level"],
@@ -299,8 +299,6 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
                             "line": message["spans"][0]["line_start"]
                         }));
                     }
-                }
-            }
         }
     }
 
@@ -319,8 +317,8 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
             .map_err(|e| TestError::Mcp(format!("Failed to search for patterns: {e}")))?;
 
         for line in String::from_utf8_lossy(&output.stdout).lines() {
-            if let Some((file_line, _)) = line.split_once(':') {
-                if let Some((file, line_num)) = file_line.rsplit_once(':') {
+            if let Some((file_line, _)) = line.split_once(':')
+                && let Some((file, line_num)) = file_line.rsplit_once(':') {
                     bugs.push(serde_json::json!({
                         "type": "force_unwrap",
                         "severity": "high",
@@ -329,7 +327,6 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
                         "line": line_num
                     }));
                 }
-            }
         }
     }
 

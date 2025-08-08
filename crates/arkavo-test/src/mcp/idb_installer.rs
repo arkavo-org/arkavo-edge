@@ -16,20 +16,18 @@ impl IdbInstaller {
         for path in &standard_paths {
             if std::path::Path::new(path).exists() {
                 // Verify it can run
-                if let Ok(output) = Command::new(path).arg("--help").output() {
-                    if output.status.success() {
+                if let Ok(output) = Command::new(path).arg("--help").output()
+                    && output.status.success() {
                         return true;
                     }
-                }
             }
         }
 
         // Check if available via PATH
-        if let Ok(output) = Command::new("which").arg("idb_companion").output() {
-            if output.status.success() {
+        if let Ok(output) = Command::new("which").arg("idb_companion").output()
+            && output.status.success() {
                 return true;
             }
-        }
 
         false
     }
@@ -45,21 +43,20 @@ impl IdbInstaller {
             let path = PathBuf::from(path_str);
             if path.exists() {
                 // Verify it can run
-                if let Ok(output) = Command::new(&path).arg("--help").output() {
-                    if output.status.success() {
+                if let Ok(output) = Command::new(&path).arg("--help").output()
+                    && output.status.success() {
                         eprintln!(
                             "[IdbInstaller] Found working idb_companion at: {}",
                             path.display()
                         );
                         return Some(path);
                     }
-                }
             }
         }
 
         // Check PATH for idb_companion
-        if let Ok(output) = Command::new("which").arg("idb_companion").output() {
-            if output.status.success() {
+        if let Ok(output) = Command::new("which").arg("idb_companion").output()
+            && output.status.success() {
                 let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path_str.is_empty() {
                     let path = PathBuf::from(path_str);
@@ -70,7 +67,6 @@ impl IdbInstaller {
                     return Some(path);
                 }
             }
-        }
 
         // Fall back to Python idb CLI if available
         let idb_paths = ["/usr/local/bin/idb", "/opt/homebrew/bin/idb"];
@@ -79,21 +75,20 @@ impl IdbInstaller {
             let path = PathBuf::from(path_str);
             if path.exists() {
                 // Verify it's the Facebook IDB
-                if let Ok(output) = Command::new(&path).arg("--help").output() {
-                    if output.status.success() {
+                if let Ok(output) = Command::new(&path).arg("--help").output()
+                    && output.status.success() {
                         let help_text = String::from_utf8_lossy(&output.stdout);
                         if help_text.contains("iOS Simulators and Devices") {
                             eprintln!("[IdbInstaller] Found Python idb CLI at: {}", path.display());
                             return Some(path);
                         }
                     }
-                }
             }
         }
 
         // Check PATH for Python idb
-        if let Ok(output) = Command::new("which").arg("idb").output() {
-            if output.status.success() {
+        if let Ok(output) = Command::new("which").arg("idb").output()
+            && output.status.success() {
                 let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !path_str.is_empty() {
                     let path = PathBuf::from(path_str);
@@ -110,7 +105,6 @@ impl IdbInstaller {
                     }
                 }
             }
-        }
 
         None
     }

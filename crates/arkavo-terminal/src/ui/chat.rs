@@ -113,13 +113,12 @@ impl ChatView {
     }
 
     pub fn append_to_streaming(&mut self, text: &str) {
-        if let Some(last_msg) = self.messages.back_mut() {
-            if last_msg.is_streaming {
+        if let Some(last_msg) = self.messages.back_mut()
+            && last_msg.is_streaming {
                 last_msg.content.push_str(text);
                 self.needs_redraw = true;
                 self.scroll_to_bottom(); // Auto-scroll to show new content
             }
-        }
     }
 
     pub fn finish_streaming(&mut self) {

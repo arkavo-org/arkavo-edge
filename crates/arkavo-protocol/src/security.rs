@@ -109,21 +109,19 @@ impl SecurityConfig {
             ));
         }
 
-        if let Some(cert_path) = &self.tls.client_cert_path {
-            if !Path::new(cert_path).exists() {
+        if let Some(cert_path) = &self.tls.client_cert_path
+            && !Path::new(cert_path).exists() {
                 return Err(crate::error::A2aError::Tls(format!(
                     "Client certificate file not found: {cert_path}"
                 )));
             }
-        }
 
-        if let Some(key_path) = &self.tls.client_key_path {
-            if !Path::new(key_path).exists() {
+        if let Some(key_path) = &self.tls.client_key_path
+            && !Path::new(key_path).exists() {
                 return Err(crate::error::A2aError::Tls(format!(
                     "Client key file not found: {key_path}"
                 )));
             }
-        }
 
         Ok(())
     }

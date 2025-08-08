@@ -108,8 +108,7 @@ impl Tool for CalibrationTool {
                     if let Some(success) = install_result
                         .get("success")
                         .and_then(serde_json::Value::as_bool)
-                    {
-                        if !success {
+                        && !success {
                             return Ok(json!({
                                 "success": false,
                                 "error": {
@@ -120,7 +119,6 @@ impl Tool for CalibrationTool {
                                 }
                             }));
                         }
-                    }
 
                     eprintln!(
                         "[CalibrationTool] ArkavoReference app installed successfully. Proceeding with calibration."

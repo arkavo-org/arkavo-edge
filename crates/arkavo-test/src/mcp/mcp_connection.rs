@@ -260,11 +260,10 @@ impl Drop for InProcessMcp {
         if let Some(runtime) = self.owned_runtime.take() {
             eprintln!("[McpConnection] Shutting down owned runtime");
             // If we're in an async context, use shutdown_background to avoid blocking
-            if Handle::try_current().is_ok() {
-                if let Ok(rt) = Arc::try_unwrap(runtime) {
+            if Handle::try_current().is_ok()
+                && let Ok(rt) = Arc::try_unwrap(runtime) {
                     rt.shutdown_background();
                 }
-            }
             // If not in async context, the runtime will shut down normally on drop
         }
     }

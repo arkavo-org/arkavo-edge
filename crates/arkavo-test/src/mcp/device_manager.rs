@@ -99,11 +99,10 @@ impl DeviceManager {
         }
 
         // Set active device if none is set and we have booted devices
-        if self.active_device_id.lock().unwrap().is_none() {
-            if let Some(booted_device) = devices.iter().find(|d| d.state == DeviceState::Booted) {
+        if self.active_device_id.lock().unwrap().is_none()
+            && let Some(booted_device) = devices.iter().find(|d| d.state == DeviceState::Booted) {
                 *self.active_device_id.lock().unwrap() = Some(booted_device.id.clone());
             }
-        }
 
         Ok(devices)
     }
@@ -143,8 +142,8 @@ impl DeviceManager {
 
     fn list_physical_devices(&self) -> Result<Vec<IOSDevice>> {
         // Try using idevice_id if available
-        if let Ok(output) = Command::new("idevice_id").arg("-l").output() {
-            if output.status.success() {
+        if let Ok(output) = Command::new("idevice_id").arg("-l").output()
+            && output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let devices: Vec<IOSDevice> = stdout
                     .lines()
@@ -161,16 +160,15 @@ impl DeviceManager {
                     .collect();
                 return Ok(devices);
             }
-        }
 
         // Try devicectl for newer Xcode versions (Xcode 15+)
         let devicectl_output = Command::new("xcrun")
             .args(["devicectl", "list", "devices", "--json"])
             .output();
 
-        if let Ok(output) = devicectl_output {
-            if output.status.success() {
-                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+        if let Ok(output) = devicectl_output
+            && output.status.success()
+                && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
                     // Parse devicectl JSON format
                     if let Some(devices_array) = json.get("devices").and_then(|d| d.as_array()) {
                         let devices: Vec<IOSDevice> = devices_array
@@ -206,8 +204,6 @@ impl DeviceManager {
                         }
                     }
                 }
-            }
-        }
 
         // If devicectl failed or returned no devices, return empty list
         Ok(vec![])
