@@ -273,7 +273,9 @@ impl FileTransferManager {
             let chunks_transferred = session.chunks.len();
             let total_chunks = session.metadata.chunks_total;
             // Calculate actual bytes transferred (sum of chunk sizes)
-            let bytes_transferred: u64 = session.chunks.values()
+            let bytes_transferred: u64 = session
+                .chunks
+                .values()
                 .map(|chunk| chunk.len() as u64)
                 .sum();
             let total_bytes = session.metadata.size;
