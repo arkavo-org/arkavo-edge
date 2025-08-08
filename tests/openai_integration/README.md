@@ -1,6 +1,6 @@
 # OpenAI Integration Test Suite
 
-This directory contains comprehensive tests for OpenAI integration with Arkavo Edge.
+This directory contains comprehensive tests for OpenAI integration with Arkavo Edge, including support for the newly released GPT-5 model.
 
 ## Prerequisites
 
@@ -96,10 +96,12 @@ chmod +x tests/openai_integration/test_openai_e2e.sh
 - Provider factory validation
 
 ### 2. Model-Specific Tests (`test_openai_models.rs`)
-- **GPT-3.5-turbo**: Basic completions, cost-effective testing
-- **GPT-4-turbo**: Advanced reasoning, 128K context window
-- **GPT-4o**: Latest model capabilities
-- Performance comparison between models
+- **GPT-5**: Latest generation model with unique characteristics
+  - Temperature must be default (1.0) - custom values rejected
+  - Requires organization verification for streaming
+  - Response time: 3-6 seconds (non-streaming)
+  - More concise responses than previous models
+- Performance comparison between model variants
 - JSON mode responses
 - Model fallback handling
 
@@ -111,10 +113,10 @@ chmod +x tests/openai_integration/test_openai_e2e.sh
 - Error handling in streams
 
 ### 4. Vision Tests (`test_openai_vision.rs`)
-- Image analysis with GPT-4o
+- Image analysis with GPT-5 (vision capabilities)
 - Multiple image inputs
 - Image + text prompts
-- Vision streaming responses
+- Vision streaming responses (requires org verification)
 - Non-vision model behavior with images
 
 ### 5. Budget Tracking (`test_openai_budget.rs`)
@@ -130,6 +132,26 @@ chmod +x tests/openai_integration/test_openai_e2e.sh
 - Model switching
 - Multi-turn conversations
 - Error recovery
+
+## GPT-5 Specific Notes
+
+GPT-5 was released recently and has unique characteristics:
+
+### Requirements
+- **Organization Verification**: Required for streaming endpoints
+- **Temperature**: Only accepts default (1.0), custom values are rejected
+- **API Access**: Standard OpenAI API key with GPT-5 access
+
+### Performance Characteristics
+- **Response Time**: 3-6 seconds for non-streaming
+- **Streaming**: ~5 seconds to first token (when org verified)
+- **Response Style**: More concise than GPT-4 models
+- **Context**: Handles long contexts but with different behavior
+
+### Known Limitations
+- No custom temperature support
+- Streaming requires verified organization
+- Different response patterns may affect some tests
 
 ## Configuration
 
