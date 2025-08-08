@@ -22,8 +22,7 @@ async fn test_gpt4o_vision_basic() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider for GPT-5");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     // Create a simple test image (base64 encoded 1x1 red pixel PNG)
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -34,15 +33,16 @@ async fn test_gpt4o_vision_basic() {
         images: Some(vec![test_image_base64.to_string()]),
     }];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from GPT-5 with image");
 
     println!("GPT-5 vision response: {}", response);
-    
+
     // The test image is a red pixel
     assert!(
-        response.to_lowercase().contains("red") || 
-        response.to_lowercase().contains("pink"),
+        response.to_lowercase().contains("red") || response.to_lowercase().contains("pink"),
         "Response should identify the red color: {}",
         response
     );
@@ -62,8 +62,7 @@ async fn test_gpt4o_vision_with_text() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     // Create a test image with text (base64 encoded image with "TEST" text)
     // This is a simplified example - in production you'd generate or load a real image
@@ -82,7 +81,9 @@ async fn test_gpt4o_vision_with_text() {
         },
     ];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to analyze image with text");
 
     println!("Image analysis response: {}", response);
@@ -103,8 +104,7 @@ async fn test_gpt4o_multiple_images() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     // Create two different colored pixels
     let red_pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -112,17 +112,20 @@ async fn test_gpt4o_multiple_images() {
 
     let messages = vec![Message {
         role: Role::User,
-        content: "I'm showing you two images. Are they the same color? Reply with just 'yes' or 'no'.".to_string(),
+        content:
+            "I'm showing you two images. Are they the same color? Reply with just 'yes' or 'no'."
+                .to_string(),
         images: Some(vec![red_pixel.to_string(), blue_pixel.to_string()]),
     }];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to compare multiple images");
 
     println!("Multiple image comparison: {}", response);
     assert!(
-        response.to_lowercase().contains("no") || 
-        response.to_lowercase().contains("different"),
+        response.to_lowercase().contains("no") || response.to_lowercase().contains("different"),
         "Should identify that colors are different: {}",
         response
     );
@@ -142,19 +145,22 @@ async fn test_gpt4o_vision_streaming() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     let messages = vec![Message {
         role: Role::User,
-        content: "Describe this image in detail, mentioning its color, size, and any patterns you see.".to_string(),
+        content:
+            "Describe this image in detail, mentioning its color, size, and any patterns you see."
+                .to_string(),
         images: Some(vec![test_image_base64.to_string()]),
     }];
 
     use futures::StreamExt;
-    let mut stream = provider.stream(messages).await
+    let mut stream = provider
+        .stream(messages)
+        .await
         .expect("Failed to create vision stream");
 
     let mut full_response = String::new();
@@ -165,7 +171,7 @@ async fn test_gpt4o_vision_streaming() {
             Ok(response) => {
                 full_response.push_str(&response.content);
                 chunk_count += 1;
-                
+
                 if response.done {
                     break;
                 }
@@ -176,7 +182,10 @@ async fn test_gpt4o_vision_streaming() {
         }
     }
 
-    println!("Vision streaming response ({} chunks): {}", chunk_count, full_response);
+    println!(
+        "Vision streaming response ({} chunks): {}",
+        chunk_count, full_response
+    );
     assert!(chunk_count > 1, "Should receive multiple chunks");
     assert!(!full_response.is_empty());
 }
@@ -195,8 +204,7 @@ async fn test_non_vision_model_with_image_fails() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let test_image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
@@ -207,18 +215,18 @@ async fn test_non_vision_model_with_image_fails() {
     }];
 
     let result = provider.complete(messages).await;
-    
+
     // GPT-5 doesn't support images, so this should either fail or ignore the image
     match result {
         Ok(response) => {
             println!("Non-vision model response: {}", response);
             // Model might acknowledge it can't see images
             assert!(
-                response.to_lowercase().contains("can't") ||
-                response.to_lowercase().contains("cannot") ||
-                response.to_lowercase().contains("unable") ||
-                response.to_lowercase().contains("don't") ||
-                response.to_lowercase().contains("text")
+                response.to_lowercase().contains("can't")
+                    || response.to_lowercase().contains("cannot")
+                    || response.to_lowercase().contains("unable")
+                    || response.to_lowercase().contains("don't")
+                    || response.to_lowercase().contains("text")
             );
         }
         Err(e) => {
@@ -249,13 +257,11 @@ async fn test_gpt4o_with_local_image_file() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     // Read and encode the image
-    let image_data = fs::read(test_image_path)
-        .expect("Failed to read test image");
-    
+    let image_data = fs::read(test_image_path).expect("Failed to read test image");
+
     let base64_engine = base64::engine::general_purpose::STANDARD;
     let encoded_image = base64_engine.encode(&image_data);
 
@@ -265,7 +271,9 @@ async fn test_gpt4o_with_local_image_file() {
         images: Some(vec![encoded_image]),
     }];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to analyze local image");
 
     println!("Local image analysis: {}", response);

@@ -20,8 +20,7 @@ async fn test_gpt_4o_model() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider for GPT-5");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
         role: Role::User,
@@ -30,13 +29,15 @@ async fn test_gpt_4o_model() {
     }];
 
     let start = Instant::now();
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
     println!("GPT-5 response time: {:?}", duration);
     println!("GPT-5 response: {}", response);
-    
+
     assert!(!response.is_empty());
     assert!(response.to_lowercase().contains("gpt") || response.contains("4o"));
 }
@@ -55,8 +56,7 @@ async fn test_gpt_4_turbo_model() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider for GPT-5");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
         role: Role::User,
@@ -65,13 +65,15 @@ async fn test_gpt_4_turbo_model() {
     }];
 
     let start = Instant::now();
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
     println!("GPT-5 response time: {:?}", duration);
     println!("GPT-5 haiku:\n{}", response);
-    
+
     assert!(!response.is_empty());
     let lines: Vec<&str> = response.trim().lines().collect();
     assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
@@ -91,8 +93,7 @@ async fn test_gpt_35_turbo_model() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider for GPT-5");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider for GPT-5");
 
     let messages = vec![Message {
         role: Role::User,
@@ -101,13 +102,15 @@ async fn test_gpt_35_turbo_model() {
     }];
 
     let start = Instant::now();
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
     println!("GPT-5 response time: {:?}", duration);
     println!("GPT-5 response: {}", response);
-    
+
     assert!(response.contains("4"));
 }
 
@@ -180,12 +183,11 @@ async fn test_context_window_handling() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     // Create a long context
     let long_text = "The quick brown fox jumps over the lazy dog. ".repeat(100);
-    
+
     let messages = vec![
         Message {
             role: Role::System,
@@ -194,12 +196,16 @@ async fn test_context_window_handling() {
         },
         Message {
             role: Role::User,
-            content: "How many times does the word 'fox' appear in the text I asked you to remember?".to_string(),
+            content:
+                "How many times does the word 'fox' appear in the text I asked you to remember?"
+                    .to_string(),
             images: None,
         },
     ];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response with long context");
 
     assert!(response.contains("100") || response.to_lowercase().contains("hundred"));
@@ -219,8 +225,7 @@ async fn test_json_mode_response() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![
         Message {
@@ -235,13 +240,19 @@ async fn test_json_mode_response() {
         },
     ];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get JSON response");
 
     // Try to parse as JSON
     let json_result: Result<serde_json::Value, _> = serde_json::from_str(&response);
-    assert!(json_result.is_ok(), "Response should be valid JSON: {}", response);
-    
+    assert!(
+        json_result.is_ok(),
+        "Response should be valid JSON: {}",
+        response
+    );
+
     let json = json_result.unwrap();
     assert!(json.get("name").is_some());
     assert!(json.get("age").is_some());
@@ -263,8 +274,7 @@ async fn test_model_fallback() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Provider creation should succeed");
+    let provider = OpenAIProvider::new(config).expect("Provider creation should succeed");
 
     let messages = vec![Message {
         role: Role::User,
@@ -287,10 +297,12 @@ async fn test_model_fallback() {
         is_azure: false,
     };
 
-    let fallback_provider = OpenAIProvider::new(fallback_config)
-        .expect("Failed to create fallback provider");
+    let fallback_provider =
+        OpenAIProvider::new(fallback_config).expect("Failed to create fallback provider");
 
-    let response = fallback_provider.complete(messages).await
+    let response = fallback_provider
+        .complete(messages)
+        .await
         .expect("Fallback model should work");
 
     assert!(!response.is_empty());

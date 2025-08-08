@@ -21,8 +21,7 @@ async fn test_openai_streaming_basic() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
         role: Role::User,
@@ -30,18 +29,20 @@ async fn test_openai_streaming_basic() {
         images: None,
     }];
 
-    let mut stream = provider.stream(messages).await
+    let mut stream = provider
+        .stream(messages)
+        .await
         .expect("Failed to create stream");
 
     let mut chunks = Vec::new();
     let mut chunk_count = 0;
-    
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(response) => {
                 chunk_count += 1;
                 chunks.push(response.content.clone());
-                
+
                 if response.done {
                     break;
                 }
@@ -75,8 +76,7 @@ async fn test_openai_streaming_performance() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
         role: Role::User,
@@ -85,7 +85,9 @@ async fn test_openai_streaming_performance() {
     }];
 
     let start = Instant::now();
-    let mut stream = provider.stream(messages).await
+    let mut stream = provider
+        .stream(messages)
+        .await
         .expect("Failed to create stream");
 
     let mut first_chunk_time = None;
@@ -98,10 +100,10 @@ async fn test_openai_streaming_performance() {
                 if first_chunk_time.is_none() && !response.content.is_empty() {
                     first_chunk_time = Some(start.elapsed());
                 }
-                
+
                 content.push_str(&response.content);
                 total_chunks += 1;
-                
+
                 if response.done {
                     break;
                 }
@@ -113,13 +115,16 @@ async fn test_openai_streaming_performance() {
     }
 
     let total_time = start.elapsed();
-    
+
     println!("First chunk received in: {:?}", first_chunk_time.unwrap());
     println!("Total streaming time: {:?}", total_time);
     println!("Total chunks: {}", total_chunks);
     println!("Content length: {} chars", content.len());
 
-    assert!(first_chunk_time.unwrap().as_millis() < 5000, "First chunk should arrive within 5 seconds");
+    assert!(
+        first_chunk_time.unwrap().as_millis() < 5000,
+        "First chunk should arrive within 5 seconds"
+    );
     assert!(total_chunks > 1, "Should receive multiple chunks");
     assert!(!content.is_empty(), "Should receive content");
 }
@@ -138,8 +143,7 @@ async fn test_openai_streaming_interruption() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
         role: Role::User,
@@ -147,7 +151,9 @@ async fn test_openai_streaming_interruption() {
         images: None,
     }];
 
-    let mut stream = provider.stream(messages).await
+    let mut stream = provider
+        .stream(messages)
+        .await
         .expect("Failed to create stream");
 
     let mut chunks_received = 0;
@@ -157,7 +163,7 @@ async fn test_openai_streaming_interruption() {
         match result {
             Ok(_response) => {
                 chunks_received += 1;
-                
+
                 if chunks_received >= MAX_CHUNKS {
                     println!("Interrupting stream after {} chunks", chunks_received);
                     break; // Simulate interruption
@@ -186,8 +192,7 @@ async fn test_openai_streaming_with_system_message() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![
         Message {
@@ -202,16 +207,18 @@ async fn test_openai_streaming_with_system_message() {
         },
     ];
 
-    let mut stream = provider.stream(messages).await
+    let mut stream = provider
+        .stream(messages)
+        .await
         .expect("Failed to create stream");
 
     let mut full_response = String::new();
-    
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(response) => {
                 full_response.push_str(&response.content);
-                
+
                 if response.done {
                     break;
                 }
@@ -223,7 +230,7 @@ async fn test_openai_streaming_with_system_message() {
     }
 
     println!("Haiku response:\n{}", full_response);
-    
+
     let lines: Vec<&str> = full_response.trim().lines().collect();
     assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
 }
@@ -245,7 +252,7 @@ async fn test_openai_streaming_concurrent() {
     for prompt in prompts {
         let api_key_clone = api_key.clone();
         let prompt_owned = prompt.to_string();
-        
+
         let handle = tokio::spawn(async move {
             // Create a new provider for each concurrent request
             let config = OpenAIConfig {
@@ -256,21 +263,22 @@ async fn test_openai_streaming_concurrent() {
                 api_version: None,
                 is_azure: false,
             };
-            
-            let provider = OpenAIProvider::new(config)
-                .expect("Failed to create OpenAI provider");
-            
+
+            let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
+
             let messages = vec![Message {
                 role: Role::User,
                 content: prompt_owned.clone(),
                 images: None,
             }];
 
-            let mut stream = provider.stream(messages).await
+            let mut stream = provider
+                .stream(messages)
+                .await
                 .expect("Failed to create stream");
 
             let mut content = String::new();
-            
+
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(response) => {
@@ -298,8 +306,7 @@ async fn test_openai_streaming_concurrent() {
         match result {
             Ok(Ok(content)) => {
                 println!("Stream {} response: {}", i + 1, content);
-                assert!(content.contains(&format!("Stream {}", i + 1)) || 
-                        content.contains("OK"));
+                assert!(content.contains(&format!("Stream {}", i + 1)) || content.contains("OK"));
             }
             _ => panic!("Stream {} failed", i + 1),
         }
@@ -321,8 +328,7 @@ async fn test_openai_streaming_error_handling() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Provider creation should succeed");
+    let provider = OpenAIProvider::new(config).expect("Provider creation should succeed");
 
     let messages = vec![Message {
         role: Role::User,
@@ -331,11 +337,13 @@ async fn test_openai_streaming_error_handling() {
     }];
 
     let result = provider.stream(messages).await;
-    
+
     match result {
         Err(e) => {
             let error = e.to_string();
-            assert!(error.contains("404") || error.contains("model") || error.contains("not found"));
+            assert!(
+                error.contains("404") || error.contains("model") || error.contains("not found")
+            );
         }
         Ok(_) => panic!("Should fail with invalid model"),
     }

@@ -240,7 +240,7 @@ impl Provider for OpenAIProvider {
 
         // GPT-5 only supports default temperature (1.0)
         let temperature = if self.config.model == "gpt-5" {
-            None  // Use default
+            None // Use default
         } else {
             Some(0.7)
         };
@@ -321,7 +321,7 @@ impl Provider for OpenAIProvider {
 
         // GPT-5 only supports default temperature (1.0)
         let temperature = if self.config.model == "gpt-5" {
-            None  // Use default
+            None // Use default
         } else {
             Some(0.7)
         };

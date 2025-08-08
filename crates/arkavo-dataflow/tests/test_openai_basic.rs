@@ -1,5 +1,7 @@
 use arkavo_dataflow::nodes::openai_provider::{OpenAIConfig, OpenAIProvider};
-use arkavo_dataflow::nodes::provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
+use arkavo_dataflow::nodes::provider_factory::{
+    ProviderConfig, ProviderFactoryRegistry, ProviderType,
+};
 use arkavo_llm::{Message, Provider, Role};
 
 #[path = "mod.rs"]
@@ -20,8 +22,7 @@ async fn test_openai_basic_connectivity() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![Message {
         role: Role::User,
@@ -29,7 +30,9 @@ async fn test_openai_basic_connectivity() {
         images: None,
     }];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from OpenAI");
 
     assert!(response.to_lowercase().contains("test successful"));
@@ -48,8 +51,8 @@ async fn test_openai_authentication_error() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Provider creation should succeed with invalid key");
+    let provider =
+        OpenAIProvider::new(config).expect("Provider creation should succeed with invalid key");
 
     let messages = vec![Message {
         role: Role::User,
@@ -59,9 +62,13 @@ async fn test_openai_authentication_error() {
 
     let result = provider.complete(messages).await;
     assert!(result.is_err());
-    
+
     let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("401") || error_msg.contains("Unauthorized") || error_msg.contains("Invalid"));
+    assert!(
+        error_msg.contains("401")
+            || error_msg.contains("Unauthorized")
+            || error_msg.contains("Invalid")
+    );
 }
 
 #[tokio::test]
@@ -70,7 +77,7 @@ async fn test_openai_rate_limiting() {
     let api_key = ensure_api_key();
 
     let mut tasks = vec![];
-    
+
     for i in 0..5 {
         let api_key_clone = api_key.clone();
         let task = tokio::spawn(async move {
@@ -82,10 +89,9 @@ async fn test_openai_rate_limiting() {
                 api_version: None,
                 is_azure: false,
             };
-            
-            let provider = OpenAIProvider::new(config)
-                .expect("Failed to create OpenAI provider");
-            
+
+            let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
+
             let messages = vec![Message {
                 role: Role::User,
                 content: format!("Count to {} and respond with just the numbers", i),
@@ -97,10 +103,10 @@ async fn test_openai_rate_limiting() {
     }
 
     let results = futures::future::join_all(tasks).await;
-    
+
     let mut success_count = 0;
     let mut rate_limit_count = 0;
-    
+
     for result in results {
         match result {
             Ok(Ok(_)) => success_count += 1,
@@ -110,15 +116,18 @@ async fn test_openai_rate_limiting() {
             _ => {}
         }
     }
-    
+
     assert!(success_count > 0, "At least some requests should succeed");
-    println!("Success: {}, Rate limited: {}", success_count, rate_limit_count);
+    println!(
+        "Success: {}, Rate limited: {}",
+        success_count, rate_limit_count
+    );
 }
 
 #[tokio::test]
 async fn test_openai_provider_factory() {
     let registry = ProviderFactoryRegistry::new();
-    
+
     let config = ProviderConfig {
         provider_type: ProviderType::OpenAI,
         base_url: "https://api.openai.com/v1".to_string(),
@@ -133,12 +142,18 @@ async fn test_openai_provider_factory() {
         metadata: None,
     };
 
-    let factory = registry.get_factory(&ProviderType::OpenAI)
+    let factory = registry
+        .get_factory(&ProviderType::OpenAI)
         .expect("OpenAI factory should be registered");
-    
+
     let validation_result = factory.validate_config(&config).await;
     assert!(validation_result.is_err());
-    assert!(validation_result.unwrap_err().to_string().contains("API key required"));
+    assert!(
+        validation_result
+            .unwrap_err()
+            .to_string()
+            .contains("API key required")
+    );
 }
 
 #[tokio::test]
@@ -155,8 +170,7 @@ async fn test_openai_system_message() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![
         Message {
@@ -171,15 +185,17 @@ async fn test_openai_system_message() {
         },
     ];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from OpenAI");
 
     assert!(
-        response.contains("ahoy") || 
-        response.contains("matey") || 
-        response.contains("arr") ||
-        response.contains("Ahoy") ||
-        response.contains("Arr"),
+        response.contains("ahoy")
+            || response.contains("matey")
+            || response.contains("arr")
+            || response.contains("Ahoy")
+            || response.contains("Arr"),
         "Response should contain pirate speak: {}",
         response
     );
@@ -199,8 +215,7 @@ async fn test_openai_multi_turn_conversation() {
         is_azure: false,
     };
 
-    let provider = OpenAIProvider::new(config)
-        .expect("Failed to create OpenAI provider");
+    let provider = OpenAIProvider::new(config).expect("Failed to create OpenAI provider");
 
     let messages = vec![
         Message {
@@ -220,7 +235,9 @@ async fn test_openai_multi_turn_conversation() {
         },
     ];
 
-    let response = provider.complete(messages).await
+    let response = provider
+        .complete(messages)
+        .await
         .expect("Failed to get response from OpenAI");
 
     assert!(
