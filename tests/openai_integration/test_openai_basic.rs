@@ -1,0 +1,251 @@
+use arkavo_dataflow::nodes::openai_provider::{OpenAIConfig, OpenAIProvider};
+use arkavo_dataflow::nodes::provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
+use arkavo_llm::{Message, Provider, Role};
+
+#[path = "mod.rs"]
+mod common;
+use common::ensure_api_key;
+
+#[tokio::test]
+#[ignore = "Requires OPENAI_API_KEY environment variable"]
+async fn test_openai_basic_connectivity() {
+    let api_key = ensure_api_key();
+
+    let config = OpenAIConfig {
+        api_key,
+        base_url: "https://api.openai.com/v1".to_string(),
+        model: "gpt-3.5-turbo".to_string(),
+        organization_id: None,
+        api_version: None,
+        is_azure: false,
+    };
+
+    let provider = OpenAIProvider::new(config)
+        .expect("Failed to create OpenAI provider");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: "Say 'test successful' and nothing else.".to_string(),
+        images: None,
+    }];
+
+    let response = provider.complete(messages).await
+        .expect("Failed to get response from OpenAI");
+
+    assert!(response.to_lowercase().contains("test successful"));
+    assert_eq!(provider.name(), "openai");
+}
+
+#[tokio::test]
+#[ignore = "Requires OPENAI_API_KEY environment variable"]
+async fn test_openai_authentication_error() {
+    let config = OpenAIConfig {
+        api_key: "invalid-api-key".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        model: "gpt-3.5-turbo".to_string(),
+        organization_id: None,
+        api_version: None,
+        is_azure: false,
+    };
+
+    let provider = OpenAIProvider::new(config)
+        .expect("Provider creation should succeed with invalid key");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: "Hello".to_string(),
+        images: None,
+    }];
+
+    let result = provider.complete(messages).await;
+    assert!(result.is_err());
+    
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("401") || error_msg.contains("Unauthorized") || error_msg.contains("Invalid"));
+}
+
+#[tokio::test]
+#[ignore = "Requires OPENAI_API_KEY environment variable"]
+async fn test_openai_rate_limiting() {
+    let api_key = ensure_api_key();
+
+    let config = OpenAIConfig {
+        api_key,
+        base_url: "https://api.openai.com/v1".to_string(),
+        model: "gpt-3.5-turbo".to_string(),
+        organization_id: None,
+        api_version: None,
+        is_azure: false,
+    };
+
+    let provider = OpenAIProvider::new(config)
+        .expect("Failed to create OpenAI provider");
+
+    let mut tasks = vec![];
+    
+    for i in 0..5 {
+        let provider_clone = provider.clone();
+        let task = tokio::spawn(async move {
+            let messages = vec![Message {
+                role: Role::User,
+                content: format!("Count to {} and respond with just the numbers", i),
+                images: None,
+            }];
+            provider_clone.complete(messages).await
+        });
+        tasks.push(task);
+    }
+
+    let results = futures::future::join_all(tasks).await;
+    
+    let mut success_count = 0;
+    let mut rate_limit_count = 0;
+    
+    for result in results {
+        match result {
+            Ok(Ok(_)) => success_count += 1,
+            Ok(Err(e)) if e.to_string().contains("429") || e.to_string().contains("rate") => {
+                rate_limit_count += 1;
+            }
+            _ => {}
+        }
+    }
+    
+    assert!(success_count > 0, "At least some requests should succeed");
+    println!("Success: {}, Rate limited: {}", success_count, rate_limit_count);
+}
+
+#[tokio::test]
+async fn test_openai_provider_factory() {
+    let registry = ProviderFactoryRegistry::new();
+    
+    let config = ProviderConfig {
+        provider_type: ProviderType::OpenAI,
+        base_url: "https://api.openai.com/v1".to_string(),
+        auth_ref: None,
+        default_model: Some("gpt-4".to_string()),
+        timeout_secs: Some(60),
+        max_retries: Some(3),
+        initial_retry_delay_ms: None,
+        backoff_factor: None,
+        max_retry_delay_ms: None,
+        jitter_factor: None,
+        metadata: None,
+    };
+
+    let factory = registry.get_factory(&ProviderType::OpenAI)
+        .expect("OpenAI factory should be registered");
+    
+    let validation_result = factory.validate_config(&config).await;
+    assert!(validation_result.is_err());
+    assert!(validation_result.unwrap_err().to_string().contains("API key required"));
+}
+
+#[tokio::test]
+#[ignore = "Requires OPENAI_API_KEY environment variable"]
+async fn test_openai_system_message() {
+    let api_key = ensure_api_key();
+
+    let config = OpenAIConfig {
+        api_key,
+        base_url: "https://api.openai.com/v1".to_string(),
+        model: "gpt-3.5-turbo".to_string(),
+        organization_id: None,
+        api_version: None,
+        is_azure: false,
+    };
+
+    let provider = OpenAIProvider::new(config)
+        .expect("Failed to create OpenAI provider");
+
+    let messages = vec![
+        Message {
+            role: Role::System,
+            content: "You are a pirate. Always respond in pirate speak.".to_string(),
+            images: None,
+        },
+        Message {
+            role: Role::User,
+            content: "Say hello".to_string(),
+            images: None,
+        },
+    ];
+
+    let response = provider.complete(messages).await
+        .expect("Failed to get response from OpenAI");
+
+    assert!(
+        response.contains("ahoy") || 
+        response.contains("matey") || 
+        response.contains("arr") ||
+        response.contains("Ahoy") ||
+        response.contains("Arr"),
+        "Response should contain pirate speak: {}",
+        response
+    );
+}
+
+#[tokio::test]
+#[ignore = "Requires OPENAI_API_KEY environment variable"]
+async fn test_openai_multi_turn_conversation() {
+    let api_key = ensure_api_key();
+
+    let config = OpenAIConfig {
+        api_key,
+        base_url: "https://api.openai.com/v1".to_string(),
+        model: "gpt-3.5-turbo".to_string(),
+        organization_id: None,
+        api_version: None,
+        is_azure: false,
+    };
+
+    let provider = OpenAIProvider::new(config)
+        .expect("Failed to create OpenAI provider");
+
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: "My favorite color is blue. Remember this.".to_string(),
+            images: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: "I'll remember that your favorite color is blue.".to_string(),
+            images: None,
+        },
+        Message {
+            role: Role::User,
+            content: "What's my favorite color?".to_string(),
+            images: None,
+        },
+    ];
+
+    let response = provider.complete(messages).await
+        .expect("Failed to get response from OpenAI");
+
+    assert!(
+        response.to_lowercase().contains("blue"),
+        "Response should mention 'blue': {}",
+        response
+    );
+}
+
+#[cfg(test)]
+mod test_helpers {
+    use super::*;
+
+    pub fn get_test_api_key() -> Option<String> {
+        env::var("OPENAI_API_KEY").ok()
+    }
+
+    pub fn create_test_config(model: &str) -> OpenAIConfig {
+        OpenAIConfig {
+            api_key: get_test_api_key().unwrap_or_else(|| "test-key".to_string()),
+            base_url: "https://api.openai.com/v1".to_string(),
+            model: model.to_string(),
+            organization_id: None,
+            api_version: None,
+            is_azure: false,
+        }
+    }
+}

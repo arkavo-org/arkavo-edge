@@ -1,0 +1,148 @@
+# OpenAI Test Model Configuration
+# This file defines the OpenAI models and their settings for testing
+
+models:
+  # GPT-3.5 Turbo - Fast and cost-effective
+  - id: gpt-3.5-turbo
+    provider: openai
+    name: "GPT-3.5 Turbo"
+    description: "Fast, cost-effective model for general tasks"
+    context_window: 16385
+    max_output_tokens: 4096
+    supports_vision: false
+    supports_functions: true
+    cost:
+      input_per_1k_tokens: 0.0005  # $0.50 per 1M tokens
+      output_per_1k_tokens: 0.0015 # $1.50 per 1M tokens
+    test_prompts:
+      basic: "Say hello"
+      math: "What is 2+2?"
+      json: "Return a JSON object with status: ok"
+      
+  # GPT-4 Turbo - Advanced reasoning with large context
+  - id: gpt-4-turbo
+    provider: openai
+    name: "GPT-4 Turbo"
+    description: "Advanced model with 128K context window"
+    context_window: 128000
+    max_output_tokens: 4096
+    supports_vision: false
+    supports_functions: true
+    cost:
+      input_per_1k_tokens: 0.01   # $10.00 per 1M tokens
+      output_per_1k_tokens: 0.03  # $30.00 per 1M tokens
+    test_prompts:
+      basic: "Explain quantum computing in one sentence"
+      reasoning: "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?"
+      code: "Write a Python function to calculate factorial"
+      
+  # GPT-4o - Multimodal with vision support
+  - id: gpt-4o
+    provider: openai
+    name: "GPT-4o (Omni)"
+    description: "Latest multimodal model with vision capabilities"
+    context_window: 128000
+    max_output_tokens: 4096
+    supports_vision: true
+    supports_functions: true
+    cost:
+      input_per_1k_tokens: 0.005  # $5.00 per 1M tokens
+      output_per_1k_tokens: 0.015 # $15.00 per 1M tokens
+    test_prompts:
+      basic: "What model are you?"
+      vision: "Describe this image"
+      analysis: "Analyze the sentiment of: 'I love sunny days but hate rain'"
+
+# Test configurations
+test_config:
+  # API endpoints
+  endpoints:
+    openai: "https://api.openai.com/v1"
+    azure: "https://{instance}.openai.azure.com"
+    
+  # Retry settings
+  retry:
+    max_attempts: 3
+    initial_delay_ms: 1000
+    backoff_factor: 2.0
+    max_delay_ms: 30000
+    
+  # Timeout settings
+  timeouts:
+    connection_timeout_secs: 10
+    request_timeout_secs: 60
+    streaming_timeout_secs: 120
+    
+  # Rate limiting
+  rate_limits:
+    requests_per_minute: 60
+    tokens_per_minute: 90000
+    concurrent_requests: 5
+    
+  # Budget limits for testing
+  budget:
+    max_cost_per_test: 0.10      # $0.10
+    max_cost_per_suite: 1.00     # $1.00
+    warning_threshold: 0.80       # Warn at 80% of budget
+
+# Test scenarios
+test_scenarios:
+  - name: "Basic Connectivity"
+    description: "Test basic API connectivity and authentication"
+    models: ["gpt-3.5-turbo"]
+    tests:
+      - verify_authentication
+      - simple_completion
+      - error_handling
+      
+  - name: "Model Capabilities"
+    description: "Test specific capabilities of each model"
+    models: ["gpt-3.5-turbo", "gpt-4-turbo", "gpt-4o"]
+    tests:
+      - text_generation
+      - json_mode
+      - system_messages
+      - multi_turn_conversation
+      
+  - name: "Streaming"
+    description: "Test streaming responses"
+    models: ["gpt-3.5-turbo", "gpt-4-turbo"]
+    tests:
+      - stream_basic
+      - stream_interruption
+      - stream_performance
+      
+  - name: "Vision"
+    description: "Test vision capabilities"
+    models: ["gpt-4o"]
+    tests:
+      - image_description
+      - multiple_images
+      - image_with_text
+      
+  - name: "Performance"
+    description: "Test performance and latency"
+    models: ["gpt-3.5-turbo", "gpt-4-turbo", "gpt-4o"]
+    tests:
+      - response_time
+      - throughput
+      - concurrent_requests
+      
+  - name: "Cost Tracking"
+    description: "Test token usage and cost tracking"
+    models: ["gpt-3.5-turbo", "gpt-4-turbo"]
+    tests:
+      - token_counting
+      - cost_calculation
+      - budget_enforcement
+
+# Environment variables required
+required_env_vars:
+  - OPENAI_API_KEY
+  
+optional_env_vars:
+  - OPENAI_ORG_ID
+  - AZURE_OPENAI_API_KEY
+  - AZURE_OPENAI_ENDPOINT
+  - TEST_BUDGET_LIMIT_USD
+  - TEST_TIMEOUT_SECS
