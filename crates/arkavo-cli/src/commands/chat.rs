@@ -76,7 +76,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize conversation manager
     let mut conversation_manager =
-        runtime.block_on(ConversationManager::new(memory_storage.clone()))?;
+        ConversationManager::new(memory_storage.clone())?;
 
     // Initialize repository context manager
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;

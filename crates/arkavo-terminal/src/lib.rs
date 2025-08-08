@@ -945,6 +945,7 @@ pub async fn run_task_view(task_id: &str, session_id: &str) -> Result<()> {
 }
 
 /// Messages for task-specific view communication
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum TaskViewMessage {
     UpdateStatus(String),
@@ -952,10 +953,11 @@ enum TaskViewMessage {
     Complete(TaskResult),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct TaskResult {
-    success: bool,
-    message: String,
+    pub success: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]

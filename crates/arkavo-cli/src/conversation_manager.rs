@@ -40,7 +40,7 @@ pub struct ConversationManager {
 }
 
 impl ConversationManager {
-    pub async fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
+    pub fn new(memory_storage: Arc<MemoryStorage>) -> anyhow::Result<Self> {
         Ok(Self {
             memory_storage,
             token_encoder: cl100k_base()?,

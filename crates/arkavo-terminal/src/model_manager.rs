@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 
 // Default context lengths for various models
 const CONTEXT_LENGTH_GPT4: usize = 8192;
-const CONTEXT_LENGTH_CLAUDE3: usize = 200000;
+const CONTEXT_LENGTH_CLAUDE3: usize = 200_000;
 const CONTEXT_LENGTH_LLAMA3: usize = 4096;
 
 /// Model information

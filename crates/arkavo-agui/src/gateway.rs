@@ -278,11 +278,10 @@ async fn handle_websocket(
         let mut ws_tx = ws_sink;
 
         while let Some(event) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&event) {
-                if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
+            if let Ok(json) = serde_json::to_string(&event)
+                && ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
                     break; // WebSocket closed
                 }
-            }
         }
     });
 
@@ -583,11 +582,10 @@ async fn handle_telemetry_websocket(
 
     // Forward telemetry events to WebSocket
     while let Some(event) = rx.recv().await {
-        if let Ok(json) = serde_json::to_string(&event) {
-            if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
+        if let Ok(json) = serde_json::to_string(&event)
+            && ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
                 break;
             }
-        }
     }
 
     println!("Telemetry WebSocket connection closed");
@@ -608,11 +606,10 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         let forward_task = tokio::spawn(async move {
             let mut ws_tx = ws_sink;
             while let Some(event) = rx.recv().await {
-                if let Ok(json) = serde_json::to_string(&event) {
-                    if ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
+                if let Ok(json) = serde_json::to_string(&event)
+                    && ws_tx.send(warp::ws::Message::text(json)).await.is_err() {
                         break;
                     }
-                }
             }
         });
 
@@ -620,8 +617,8 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         while let Some(result) = ws_stream.next().await {
             match result {
                 Ok(msg) => {
-                    if let Ok(text) = msg.to_str() {
-                        if let Ok(cmd) = serde_json::from_str::<DebugCommand>(text) {
+                    if let Ok(text) = msg.to_str()
+                        && let Ok(cmd) = serde_json::from_str::<DebugCommand>(text) {
                             match cmd {
                                 DebugCommand::SubscribeSession { session_id } => {
                                     let _ =
@@ -746,7 +743,6 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                                 }
                             }
                         }
-                    }
                 }
                 Err(_) => break,
             }
