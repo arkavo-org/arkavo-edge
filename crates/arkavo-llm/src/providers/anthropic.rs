@@ -1,6 +1,6 @@
-use super::http_client::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
-use super::provider_error::{ProviderError, ProviderResult};
-use arkavo_llm::{Message, Provider, Role, StreamResponse};
+use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
+use crate::common::{ProviderError, ProviderResult};
+use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -307,7 +307,7 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String, arkavo_llm::Error> {
+    async fn complete(&self, messages: Vec<Message>) -> Result<String, crate::Error> {
         let (system_content, api_messages) = self.convert_messages(messages);
 
         let request = CreateMessageRequest {
@@ -364,7 +364,7 @@ impl Provider for AnthropicProvider {
                 })
             })
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         Ok(response)
     }
@@ -373,12 +373,8 @@ impl Provider for AnthropicProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<
-        Box<
-            dyn tokio_stream::Stream<Item = Result<StreamResponse, arkavo_llm::Error>>
-                + Send
-                + Unpin,
-        >,
-        arkavo_llm::Error,
+        Box<dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>> + Send + Unpin>,
+        crate::Error,
     > {
         let (system_content, api_messages) = self.convert_messages(messages);
 
@@ -403,11 +399,11 @@ impl Provider for AnthropicProvider {
             .json(&request)
             .send()
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         if !response.status().is_success() {
             let error = self.handle_error_response(response).await;
-            return Err(arkavo_llm::Error::Provider(error.to_string()));
+            return Err(crate::Error::Provider(error.to_string()));
         }
 
         // Convert response body to stream of parsed events
@@ -430,46 +426,45 @@ impl Provider for AnthropicProvider {
                             .collect();
 
                         for line in &lines {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
-                                    match event {
-                                        StreamEvent::ContentBlockDelta { delta, .. } => {
-                                            if let Some(text) = delta.text {
-                                                if tx
-                                                    .send(Ok(StreamResponse {
-                                                        content: text,
-                                                        done: false,
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    break; // Receiver dropped
-                                                }
-                                            }
-                                        }
-                                        StreamEvent::MessageStop => {
-                                            if tx
+                            if let Some(data) = line.strip_prefix("data: ")
+                                && let Ok(event) = serde_json::from_str::<StreamEvent>(data)
+                            {
+                                match event {
+                                    StreamEvent::ContentBlockDelta { delta, .. } => {
+                                        if let Some(text) = delta.text
+                                            && tx
                                                 .send(Ok(StreamResponse {
-                                                    content: String::new(),
-                                                    done: true,
+                                                    content: text,
+                                                    done: false,
                                                 }))
                                                 .await
                                                 .is_err()
-                                            {
-                                                break; // Receiver dropped
-                                            }
+                                        {
+                                            break; // Receiver dropped
                                         }
-                                        StreamEvent::Error { error } => {
-                                            let _ = tx
-                                                .send(Err(arkavo_llm::Error::Provider(format!(
-                                                    "Stream error: {}",
-                                                    error.message
-                                                ))))
-                                                .await;
-                                            break;
-                                        }
-                                        _ => {} // Ignore other event types
                                     }
+                                    StreamEvent::MessageStop => {
+                                        if tx
+                                            .send(Ok(StreamResponse {
+                                                content: String::new(),
+                                                done: true,
+                                            }))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break; // Receiver dropped
+                                        }
+                                    }
+                                    StreamEvent::Error { error } => {
+                                        let _ = tx
+                                            .send(Err(crate::Error::Provider(format!(
+                                                "Stream error: {}",
+                                                error.message
+                                            ))))
+                                            .await;
+                                        break;
+                                    }
+                                    _ => {} // Ignore other event types
                                 }
                             }
                         }
@@ -480,9 +475,7 @@ impl Provider for AnthropicProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx
-                            .send(Err(arkavo_llm::Error::Provider(e.to_string())))
-                            .await;
+                        let _ = tx.send(Err(crate::Error::Provider(e.to_string()))).await;
                         break;
                     }
                 }

@@ -1,10 +1,10 @@
 use super::{
     NodeProcessor,
     llm_config::{LlmConfiguration, load_llm_config},
-    provider_factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType},
 };
 use anyhow::Result;
 use arkavo_llm::ollama::OllamaClient;
+use arkavo_llm::providers::factory::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
 use arkavo_llm::{Message, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;

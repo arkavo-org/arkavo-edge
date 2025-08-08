@@ -56,3 +56,4 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 # Fuzzing artifacts
 **/fuzz/artifacts/
 **/fuzz/corpus/**/
+/.test.env

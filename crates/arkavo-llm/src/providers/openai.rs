@@ -1,6 +1,6 @@
-use super::http_client::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
-use super::provider_error::{ProviderError, ProviderResult};
-use arkavo_llm::{Message, Provider, Role, StreamResponse};
+use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
+use crate::common::{ProviderError, ProviderResult};
+use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -235,13 +235,20 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl Provider for OpenAIProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String, arkavo_llm::Error> {
+    async fn complete(&self, messages: Vec<Message>) -> Result<String, crate::Error> {
         let api_messages = self.convert_messages(messages);
+
+        // GPT-5 only supports default temperature (1.0)
+        let temperature = if self.config.model == "gpt-5" {
+            None // Use default
+        } else {
+            Some(0.7)
+        };
 
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
             messages: api_messages,
-            temperature: Some(0.7),
+            temperature,
             max_tokens: None,
             stream: Some(false),
             n: Some(1),
@@ -294,7 +301,7 @@ impl Provider for OpenAIProvider {
                 })
             })
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         Ok(response)
     }
@@ -303,19 +310,22 @@ impl Provider for OpenAIProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<
-        Box<
-            dyn tokio_stream::Stream<Item = Result<StreamResponse, arkavo_llm::Error>>
-                + Send
-                + Unpin,
-        >,
-        arkavo_llm::Error,
+        Box<dyn tokio_stream::Stream<Item = Result<StreamResponse, crate::Error>> + Send + Unpin>,
+        crate::Error,
     > {
         let api_messages = self.convert_messages(messages);
+
+        // GPT-5 only supports default temperature (1.0)
+        let temperature = if self.config.model == "gpt-5" {
+            None // Use default
+        } else {
+            Some(0.7)
+        };
 
         let request = ChatCompletionRequest {
             model: self.config.model.clone(),
             messages: api_messages,
-            temperature: Some(0.7),
+            temperature,
             max_tokens: None,
             stream: Some(true),
             n: Some(1),
@@ -341,11 +351,11 @@ impl Provider for OpenAIProvider {
         let response = req
             .send()
             .await
-            .map_err(|e| arkavo_llm::Error::Provider(e.to_string()))?;
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
 
         if !response.status().is_success() {
             let error = self.handle_error_response(response).await;
-            return Err(arkavo_llm::Error::Provider(error.to_string()));
+            return Err(crate::Error::Provider(error.to_string()));
         }
 
         // Convert response body to stream of parsed events
@@ -381,21 +391,17 @@ impl Provider for OpenAIProvider {
                                         break; // Receiver dropped
                                     }
                                 } else if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data)
+                                    && let Some(choice) = chunk.choices.first()
+                                    && let Some(content) = &choice.delta.content
+                                    && tx
+                                        .send(Ok(StreamResponse {
+                                            content: content.clone(),
+                                            done: choice.finish_reason.is_some(),
+                                        }))
+                                        .await
+                                        .is_err()
                                 {
-                                    if let Some(choice) = chunk.choices.first() {
-                                        if let Some(content) = &choice.delta.content {
-                                            if tx
-                                                .send(Ok(StreamResponse {
-                                                    content: content.clone(),
-                                                    done: choice.finish_reason.is_some(),
-                                                }))
-                                                .await
-                                                .is_err()
-                                            {
-                                                break; // Receiver dropped
-                                            }
-                                        }
-                                    }
+                                    break; // Receiver dropped
                                 }
                             }
                         }
@@ -406,9 +412,7 @@ impl Provider for OpenAIProvider {
                         }
                     }
                     Err(e) => {
-                        let _ = tx
-                            .send(Err(arkavo_llm::Error::Provider(e.to_string())))
-                            .await;
+                        let _ = tx.send(Err(crate::Error::Provider(e.to_string()))).await;
                         break;
                     }
                 }

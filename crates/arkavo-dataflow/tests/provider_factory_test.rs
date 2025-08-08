@@ -1,4 +1,4 @@
-use arkavo_dataflow::nodes::provider_factory::{
+use arkavo_llm::providers::{
     OllamaProviderFactory, ProviderConfig, ProviderFactory, ProviderFactoryRegistry, ProviderType,
 };
 
