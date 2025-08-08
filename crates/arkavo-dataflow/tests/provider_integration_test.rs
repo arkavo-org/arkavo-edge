@@ -1,6 +1,6 @@
 mod common;
 
-use arkavo_dataflow::nodes::provider_factory::{
+use arkavo_llm::providers::{
     ProviderConfig, ProviderFactoryRegistry, ProviderType,
 };
 use arkavo_llm::{Message, Role};
@@ -198,7 +198,7 @@ async fn test_mock_provider() {
 
 #[tokio::test]
 async fn test_provider_error_handling() {
-    use arkavo_dataflow::nodes::provider_error::ProviderError;
+    use arkavo_llm::common::ProviderError;
     use std::time::Duration;
 
     // Test rate limit error
@@ -229,7 +229,7 @@ async fn test_provider_error_handling() {
 
 #[tokio::test]
 async fn test_http_client_retry() {
-    use arkavo_dataflow::nodes::http_client::{HttpClientBuilder, HttpClientConfig};
+    use arkavo_llm::common::{HttpClientBuilder, HttpClientConfig};
 
     let config = HttpClientConfig {
         initial_retry_delay_ms: 100,

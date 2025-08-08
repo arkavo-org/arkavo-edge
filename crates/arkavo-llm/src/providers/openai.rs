@@ -391,21 +391,17 @@ impl Provider for OpenAIProvider {
                                         break; // Receiver dropped
                                     }
                                 } else if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data)
+                                    && let Some(choice) = chunk.choices.first()
+                                    && let Some(content) = &choice.delta.content
+                                    && tx
+                                        .send(Ok(StreamResponse {
+                                            content: content.clone(),
+                                            done: choice.finish_reason.is_some(),
+                                        }))
+                                        .await
+                                        .is_err()
                                 {
-                                    if let Some(choice) = chunk.choices.first() {
-                                        if let Some(content) = &choice.delta.content {
-                                            if tx
-                                                .send(Ok(StreamResponse {
-                                                    content: content.clone(),
-                                                    done: choice.finish_reason.is_some(),
-                                                }))
-                                                .await
-                                                .is_err()
-                                            {
-                                                break; // Receiver dropped
-                                            }
-                                        }
-                                    }
+                                    break; // Receiver dropped
                                 }
                             }
                         }

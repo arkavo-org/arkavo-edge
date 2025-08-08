@@ -426,21 +426,21 @@ impl Provider for AnthropicProvider {
                             .collect();
 
                         for line in &lines {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
+                            if let Some(data) = line.strip_prefix("data: ")
+                                && let Ok(event) = serde_json::from_str::<StreamEvent>(data)
+                            {
                                     match event {
                                         StreamEvent::ContentBlockDelta { delta, .. } => {
-                                            if let Some(text) = delta.text {
-                                                if tx
+                                            if let Some(text) = delta.text
+                                                && tx
                                                     .send(Ok(StreamResponse {
                                                         content: text,
                                                         done: false,
                                                     }))
                                                     .await
                                                     .is_err()
-                                                {
-                                                    break; // Receiver dropped
-                                                }
+                                            {
+                                                break; // Receiver dropped
                                             }
                                         }
                                         StreamEvent::MessageStop => {
@@ -466,7 +466,6 @@ impl Provider for AnthropicProvider {
                                         }
                                         _ => {} // Ignore other event types
                                     }
-                                }
                             }
                         }
 

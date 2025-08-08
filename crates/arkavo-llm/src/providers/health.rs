@@ -244,22 +244,22 @@ impl ProviderHealthMonitor {
         let mut best_provider: Option<(String, f64)> = None;
 
         for provider_name in providers {
-            if let Some(health) = statuses.get(provider_name) {
-                if matches!(
+            if let Some(health) = statuses.get(provider_name)
+                && matches!(
                     health.status,
                     HealthStatus::Healthy | HealthStatus::Degraded
-                ) {
-                    // Calculate provider score based on uptime and latency
-                    let provider_metrics = metrics.get(provider_name);
-                    let uptime = provider_metrics.map_or(50.0, |m| m.uptime_percentage);
-                    let avg_latency = provider_metrics.map_or(1000.0, |m| m.average_latency_ms);
+                )
+            {
+                // Calculate provider score based on uptime and latency
+                let provider_metrics = metrics.get(provider_name);
+                let uptime = provider_metrics.map_or(50.0, |m| m.uptime_percentage);
+                let avg_latency = provider_metrics.map_or(1000.0, |m| m.average_latency_ms);
 
-                    // Score: higher uptime is better, lower latency is better
-                    let score = uptime / (1.0 + avg_latency / 100.0);
+                // Score: higher uptime is better, lower latency is better
+                let score = uptime / (1.0 + avg_latency / 100.0);
 
-                    if best_provider.is_none() || score > best_provider.as_ref().unwrap().1 {
-                        best_provider = Some((provider_name.clone(), score));
-                    }
+                if best_provider.is_none() || score > best_provider.as_ref().unwrap().1 {
+                    best_provider = Some((provider_name.clone(), score));
                 }
             }
         }
@@ -374,11 +374,10 @@ impl CircuitBreaker {
         // Check if circuit should be closed after recovery timeout
         if state.is_open
             && let Some(last_failure) = state.last_failure
+            && Utc::now() - last_failure > self.recovery_timeout
         {
-            if Utc::now() - last_failure > self.recovery_timeout {
-                state.is_open = false;
-                state.consecutive_failures = 0;
-            }
+            state.is_open = false;
+            state.consecutive_failures = 0;
         }
 
         let is_open = state.is_open;

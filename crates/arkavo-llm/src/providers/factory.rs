@@ -196,7 +196,7 @@ impl ProviderFactory for OpenAIProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
-            // TODO: Re-enable AuthManager when available in arkavo-llm
+            // TODO(#204): Re-enable AuthManager when available in arkavo-llm
             // For now, try environment variable
             std::env::var(auth_ref).map_err(|_| {
                 anyhow::anyhow!(
@@ -270,7 +270,7 @@ impl ProviderFactory for AnthropicProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
         // Get API key from auth manager if auth_ref is provided
         let api_key = if let Some(ref auth_ref) = config.auth_ref {
-            // TODO: Re-enable AuthManager when available in arkavo-llm
+            // TODO(#204): Re-enable AuthManager when available in arkavo-llm
             // For now, try environment variable
             std::env::var(auth_ref).map_err(|_| {
                 anyhow::anyhow!(
