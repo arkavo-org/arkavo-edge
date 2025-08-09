@@ -85,25 +85,25 @@ Major areas still requiring testing:
 
 ## Critical Issues Analysis
 
-### 1. Database Permission Error (Blocking)
+### 1. Database Permission Error (Blocking) - [Issue #205](https://github.com/arkavo-org/arkavo-edge/issues/205)
 **Location:** Agent initialization  
 **Error:** `(code: 14) unable to open database file`  
 **Impact:** Completely blocks agent functionality  
 **Root Cause:** SQLite database path or permission issue  
 **Suggested Fix:** Check database directory creation and permissions
 
-### 2. Server Mode Panic
+### 2. Server Mode Panic - [Issue #206](https://github.com/arkavo-org/arkavo-edge/issues/206)
 **Location:** MCP server startup  
 **Error:** Tokio runtime panic  
 **Impact:** MCP server cannot start  
 **Suggested Fix:** Debug tokio runtime initialization
 
-### 3. Chat Timeout Issue
+### 3. Chat Timeout Issue - [Issue #207](https://github.com/arkavo-org/arkavo-edge/issues/207)
 **Symptoms:** Chat loads model but times out before responding  
 **Impact:** Chat feature partially broken  
 **Suggested Fix:** Investigate response generation after model load
 
-### 4. File Size Violations
+### 4. File Size Violations - [Issue #208](https://github.com/arkavo-org/arkavo-edge/issues/208)
 **Scale:** 86 files exceed 400 LoC requirement  
 **Largest:** Some files over 1300 lines  
 **Impact:** Maintainability and code quality  
