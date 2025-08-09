@@ -91,7 +91,7 @@ The project follows these quality standards:
 
 - No warnings with `cargo clippy -- -D warnings`
 - Test coverage target of ≥85%
-- Binary size ≤4 GB
+- Binary size ≤50 MB
 - All files under 400 LoC
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render
