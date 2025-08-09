@@ -759,56 +759,121 @@ async fn process_message_print(
     messages: &[Message],
     mcp_client: Option<&McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    use std::time::Instant;
+    
+    let start_time = Instant::now();
+    eprintln!("[DEBUG] Starting process_message_print at {:?}", start_time);
+    eprintln!("[DEBUG] Messages count: {}", messages.len());
+    eprintln!("[DEBUG] Provider: {}", client.provider_name());
+    
     // Use streaming but only print content
-    let mut stream = client.stream(messages.to_vec()).await?;
-    let mut full_response = String::new();
+    eprintln!("[DEBUG] Calling client.stream() to get response stream...");
+    let stream_result = client.stream(messages.to_vec()).await;
+    
+    match stream_result {
+        Ok(mut stream) => {
+            eprintln!("[DEBUG] Stream created successfully, waiting for chunks...");
+            let mut full_response = String::new();
+            let mut chunk_count = 0;
+            let mut total_chars = 0;
+            
+            loop {
+                eprintln!("[DEBUG] Polling for next chunk (chunk #{}, elapsed: {:?})...", 
+                    chunk_count + 1, start_time.elapsed());
+                    
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    stream.next()
+                ).await {
+                    Ok(Some(chunk)) => {
+                        chunk_count += 1;
+                        eprintln!("[DEBUG] Received chunk #{} after {:?}", 
+                            chunk_count, start_time.elapsed());
+                            
+                        match chunk {
+                            Ok(response) => {
+                                let chunk_size = response.content.len();
+                                eprintln!("[DEBUG] Chunk #{}: {} chars, done={}", 
+                                    chunk_count, chunk_size, response.done);
+                                    
+                                print!("{}", response.content);
+                                io::stdout().flush()?;
+                                full_response.push_str(&response.content);
+                                total_chars += chunk_size;
 
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(response) => {
-                print!("{}", response.content);
-                io::stdout().flush()?;
-                full_response.push_str(&response.content);
-
-                if response.done {
-                    break;
-                }
-            }
-            Err(e) => {
-                return Err(format!("Stream error: {e}").into());
-            }
-        }
-    }
-
-    println!(); // New line at end
-
-    // Check if the response contains @tool calls and execute them
-    if let Some(mcp) = mcp_client {
-        let (response_text, tool_results) =
-            handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
-
-        // If we executed tools, print them
-        if !tool_results.is_empty() {
-            for (tool_name, result) in tool_results {
-                println!("\n[Tool Result - {tool_name}]:");
-
-                // Pretty print the result if it's JSON
-                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
-                    if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
-                        println!("{pretty}");
-                    } else {
-                        println!("{result}");
+                                if response.done {
+                                    eprintln!("[DEBUG] Stream marked as done, breaking loop");
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[ERROR] Stream error at chunk #{}: {}", chunk_count, e);
+                                return Err(format!("Stream error: {e}").into());
+                            }
+                        }
                     }
-                } else {
-                    println!("{result}");
+                    Ok(None) => {
+                        eprintln!("[DEBUG] Stream ended naturally after {} chunks", chunk_count);
+                        break;
+                    }
+                    Err(_) => {
+                        eprintln!("[ERROR] Timeout waiting for chunk #{} after {:?}", 
+                            chunk_count + 1, start_time.elapsed());
+                        eprintln!("[ERROR] Received {} chunks totaling {} chars before timeout", 
+                            chunk_count, total_chars);
+                        
+                        if total_chars == 0 {
+                            eprintln!("[ERROR] No response data received from model");
+                            eprintln!("[ERROR] This suggests the model loaded but is not generating tokens");
+                        }
+                        
+                        return Err("Stream timeout: No response received within 30 seconds".into());
+                    }
                 }
             }
-            io::stdout().flush()?;
-            return Ok(response_text);
+            
+            eprintln!("[DEBUG] Stream completed: {} chunks, {} total chars, elapsed: {:?}", 
+                chunk_count, total_chars, start_time.elapsed());
+            
+            println!(); // New line at end
+
+            // Check if the response contains @tool calls and execute them
+            if let Some(mcp) = mcp_client {
+                eprintln!("[DEBUG] Checking for MCP tool calls in response...");
+                let (response_text, tool_results) =
+                    handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
+
+                // If we executed tools, print them
+                if !tool_results.is_empty() {
+                    eprintln!("[DEBUG] Executed {} MCP tools", tool_results.len());
+                    for (tool_name, result) in tool_results {
+                        println!("\n[Tool Result - {tool_name}]:");
+
+                        // Pretty print the result if it's JSON
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&result) {
+                            if let Ok(pretty) = serde_json::to_string_pretty(&json_val) {
+                                println!("{pretty}");
+                            } else {
+                                println!("{result}");
+                            }
+                        } else {
+                            println!("{result}");
+                        }
+                    }
+                    io::stdout().flush()?;
+                    return Ok(response_text);
+                }
+            }
+            
+            eprintln!("[DEBUG] Response processing complete, total time: {:?}", start_time.elapsed());
+            Ok(full_response)
+        }
+        Err(e) => {
+            eprintln!("[ERROR] Failed to create stream: {}", e);
+            eprintln!("[ERROR] This may indicate a connection problem or model initialization issue");
+            Err(format!("Failed to create stream: {e}").into())
         }
     }
-
-    Ok(full_response)
 }
 
 fn get_current_directory() -> String {
@@ -1126,15 +1191,27 @@ fn list_files(path: &str) -> Option<String> {
 
 #[cfg(feature = "local")]
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
+    use std::time::Instant;
+    
+    let init_start = Instant::now();
+    eprintln!("[DEBUG] Starting LLM client initialization, print_mode={}", print_mode);
+    
     // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
 
     // Check for previously selected provider
+    eprintln!("[DEBUG] Checking for saved provider configuration...");
     let saved_provider = storage
         .search("llm_provider", 1, Some("llm_provider"))
         .await?
         .into_iter()
         .find(|c| c.memory.content != "CLEARED");
+
+    if let Some(ref provider) = saved_provider {
+        eprintln!("[DEBUG] Found saved provider: {}", provider.memory.content);
+    } else {
+        eprintln!("[DEBUG] No saved provider found");
+    }
 
     // First priority: Try saved Ollama server if configured
     if let Some(provider_config) = &saved_provider
@@ -1142,34 +1219,54 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     {
         // Ollama server
         let server_url = &provider_config.memory.content;
+        eprintln!("[DEBUG] Attempting connection to saved Ollama server: {}", server_url);
         unsafe {
             std::env::set_var("OLLAMA_BASE_URL", server_url);
         }
 
         if let Ok(client) = LlmClient::from_env() {
+            eprintln!("[DEBUG] Client created, testing connection with ping...");
             let test_message = vec![Message::user("ping")];
-            if client.complete(test_message).await.is_ok() {
-                if !print_mode {
-                    eprintln!("✓ Connected to saved Ollama server at {server_url}");
+            let test_start = Instant::now();
+            
+            match client.complete(test_message).await {
+                Ok(_) => {
+                    eprintln!("[DEBUG] Connection test successful (took {:?})", test_start.elapsed());
+                    if !print_mode {
+                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
+                    }
+                    eprintln!("[DEBUG] Total initialization time: {:?}", init_start.elapsed());
+                    return Ok(client);
                 }
-                return Ok(client);
+                Err(e) => {
+                    eprintln!("[DEBUG] Connection test failed after {:?}: {}", test_start.elapsed(), e);
+                }
             }
+        } else {
+            eprintln!("[DEBUG] Failed to create client from saved URL");
         }
     }
 
     // Second priority: Try default localhost Ollama
+    eprintln!("[DEBUG] Attempting connection to localhost:11434...");
     match LlmClient::from_env() {
         Ok(client) => {
+            eprintln!("[DEBUG] Local client created, testing connection...");
             // Test if the client can connect by trying a minimal request
             let test_message = vec![Message::user("ping")];
+            let test_start = Instant::now();
+            
             match client.complete(test_message).await {
                 Ok(_) => {
+                    eprintln!("[DEBUG] Local connection test successful (took {:?})", test_start.elapsed());
                     if !print_mode {
                         eprintln!("✓ Connected to Ollama at localhost:11434");
                     }
+                    eprintln!("[DEBUG] Total initialization time: {:?}", init_start.elapsed());
                     return Ok(client);
                 }
                 Err(e) => {
+                    eprintln!("[DEBUG] Local connection test failed after {:?}: {}", test_start.elapsed(), e);
                     if !print_mode {
                         eprintln!("Could not connect to Ollama at localhost:11434: {e}");
                     }
@@ -1177,6 +1274,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
             }
         }
         Err(e) => {
+            eprintln!("[DEBUG] Failed to create local client: {}", e);
             if !print_mode {
                 eprintln!("Ollama not available: {e}");
             }
@@ -1192,6 +1290,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
             .content
             .strip_prefix("local:")
             .unwrap();
+        eprintln!("[DEBUG] Found saved local model preference: {}", model_name);
         if !print_mode {
             eprintln!("Checking for previously used local model: {model_name}");
         }
@@ -1202,65 +1301,98 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     {
         use arkavo_llm::local::{ModelDownloader, ModelManifest};
 
+        eprintln!("[DEBUG] Checking for local models in HuggingFace cache...");
         if !print_mode {
             eprintln!("Checking for local models in HuggingFace cache...");
         }
 
         // Load manifest and try models in priority order
-        if let Ok(manifest) = ModelManifest::load() {
-            // Priority order: Phi-2 first (since it's the one mentioned in the issue)
-            let model_priorities = [
-                "phi-2-q4k",          // Phi-2 as primary
-                "tinyllama-110m-f16", // Smallest model for testing
-                "gemma3-1b-it-qat",   // Gemma 3 1B
-                "tinyllama-1b-chat-q2",
-                "tinyllama-1b-chat-q3",
-                "tinyllama-1b-chat",
-                "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
-            ];
+        match ModelManifest::load() {
+            Ok(manifest) => {
+                eprintln!("[DEBUG] Model manifest loaded successfully");
+                
+                // Priority order: Phi-2 first (since it's the one mentioned in the issue)
+                let model_priorities = [
+                    "phi-2-q4k",          // Phi-2 as primary
+                    "tinyllama-110m-f16", // Smallest model for testing
+                    "gemma3-1b-it-qat",   // Gemma 3 1B
+                    "tinyllama-1b-chat-q2",
+                    "tinyllama-1b-chat-q3",
+                    "tinyllama-1b-chat",
+                    "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
+                ];
 
-            for model_name in &model_priorities {
-                if let Some(spec) = manifest.find(model_name) {
-                    // Create downloader to check cache
-                    if let Ok(downloader) = ModelDownloader::new() {
-                        // This will return cached path if already downloaded
-                        match downloader.get_model_path(spec).await {
-                            Ok(model_path) => {
-                                if !print_mode {
-                                    eprintln!(
-                                        "Found cached model: {} at {}",
-                                        spec.name,
-                                        model_path.display()
-                                    );
-                                }
-                                match LlmClient::from_local_model(
-                                    &spec.name,
-                                    model_path.to_string_lossy().to_string(),
-                                )
-                                .await
-                                {
-                                    Ok(client) => {
-                                        if !print_mode {
-                                            eprintln!("✓ Using local model: {}", spec.name);
-                                        }
-                                        return Ok(client);
-                                    }
-                                    Err(e) => {
+                eprintln!("[DEBUG] Trying models in priority order: {:?}", model_priorities);
+                
+                for model_name in &model_priorities {
+                    eprintln!("[DEBUG] Checking for model: {}", model_name);
+                    
+                    if let Some(spec) = manifest.find(model_name) {
+                        eprintln!("[DEBUG] Found model spec for: {}", model_name);
+                        
+                        // Create downloader to check cache
+                        match ModelDownloader::new() {
+                            Ok(downloader) => {
+                                eprintln!("[DEBUG] Model downloader created, checking cache...");
+                                
+                                // This will return cached path if already downloaded
+                                match downloader.get_model_path(spec).await {
+                                    Ok(model_path) => {
+                                        eprintln!("[DEBUG] Model found in cache at: {}", model_path.display());
+                                        
                                         if !print_mode {
                                             eprintln!(
-                                                "Failed to initialize local model {}: {}",
-                                                spec.name, e
+                                                "Found cached model: {} at {}",
+                                                spec.name,
+                                                model_path.display()
                                             );
                                         }
+                                        
+                                        eprintln!("[DEBUG] Initializing local model: {}", spec.name);
+                                        let load_start = Instant::now();
+                                        
+                                        match LlmClient::from_local_model(
+                                            &spec.name,
+                                            model_path.to_string_lossy().to_string(),
+                                        )
+                                        .await
+                                        {
+                                            Ok(client) => {
+                                                eprintln!("[DEBUG] Model loaded successfully in {:?}", load_start.elapsed());
+                                                if !print_mode {
+                                                    eprintln!("✓ Using local model: {}", spec.name);
+                                                }
+                                                eprintln!("[DEBUG] Total initialization time: {:?}", init_start.elapsed());
+                                                return Ok(client);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("[ERROR] Failed to initialize model {} after {:?}: {}", 
+                                                    spec.name, load_start.elapsed(), e);
+                                                if !print_mode {
+                                                    eprintln!(
+                                                        "Failed to initialize local model {}: {}",
+                                                        spec.name, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[DEBUG] Model {} not in cache: {}", model_name, e);
                                     }
                                 }
                             }
-                            Err(_) => {
-                                // Model not in cache, continue
+                            Err(e) => {
+                                eprintln!("[ERROR] Failed to create model downloader: {}", e);
                             }
                         }
+                    } else {
+                        eprintln!("[DEBUG] Model {} not found in manifest", model_name);
                     }
                 }
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to load model manifest: {}", e);
             }
         }
     }
