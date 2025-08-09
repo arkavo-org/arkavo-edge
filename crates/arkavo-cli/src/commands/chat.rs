@@ -819,9 +819,7 @@ async fn process_message_print(
                         }
                     }
                     Ok(None) => {
-                        eprintln!(
-                            "[DEBUG] Stream ended naturally after {chunk_count} chunks"
-                        );
+                        eprintln!("[DEBUG] Stream ended naturally after {chunk_count} chunks");
                         break;
                     }
                     Err(_) => {
@@ -1217,9 +1215,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     use std::time::Instant;
 
     let init_start = Instant::now();
-    eprintln!(
-        "[DEBUG] Starting LLM client initialization, print_mode={print_mode}"
-    );
+    eprintln!("[DEBUG] Starting LLM client initialization, print_mode={print_mode}");
 
     // Initialize memory storage
     let storage = Arc::new(MemoryStorage::new().await?);
@@ -1244,9 +1240,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     {
         // Ollama server
         let server_url = &provider_config.memory.content;
-        eprintln!(
-            "[DEBUG] Attempting connection to saved Ollama server: {server_url}"
-        );
+        eprintln!("[DEBUG] Attempting connection to saved Ollama server: {server_url}");
         unsafe {
             std::env::set_var("OLLAMA_BASE_URL", server_url);
         }
@@ -1273,9 +1267,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 }
                 Err(e) => {
                     let elapsed = test_start.elapsed();
-                    eprintln!(
-                        "[DEBUG] Connection test failed after {elapsed:?}: {e}"
-                    );
+                    eprintln!("[DEBUG] Connection test failed after {elapsed:?}: {e}");
                 }
             }
         } else {
@@ -1309,9 +1301,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 }
                 Err(e) => {
                     let elapsed = test_start.elapsed();
-                    eprintln!(
-                        "[DEBUG] Local connection test failed after {elapsed:?}: {e}"
-                    );
+                    eprintln!("[DEBUG] Local connection test failed after {elapsed:?}: {e}");
                     if !print_mode {
                         eprintln!("Could not connect to Ollama at localhost:11434: {e}");
                     }
@@ -1367,9 +1357,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                     "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
                 ];
 
-                eprintln!(
-                    "[DEBUG] Trying models in priority order: {model_priorities:?}"
-                );
+                eprintln!("[DEBUG] Trying models in priority order: {model_priorities:?}");
 
                 for model_name in &model_priorities {
                     eprintln!("[DEBUG] Checking for model: {model_name}");
@@ -1441,9 +1429,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!(
-                                            "[DEBUG] Model {model_name} not in cache: {e}"
-                                        );
+                                        eprintln!("[DEBUG] Model {model_name} not in cache: {e}");
                                     }
                                 }
                             }
