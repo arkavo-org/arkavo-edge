@@ -762,7 +762,7 @@ async fn process_message_print(
     use std::time::Instant;
 
     let start_time = Instant::now();
-    eprintln!("[DEBUG] Starting process_message_print at {:?}", start_time);
+    eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
     eprintln!("[DEBUG] Messages count: {}", messages.len());
     eprintln!("[DEBUG] Provider: {}", client.provider_name());
 
@@ -813,27 +813,25 @@ async fn process_message_print(
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[ERROR] Stream error at chunk #{}: {}", chunk_count, e);
+                                eprintln!("[ERROR] Stream error at chunk #{chunk_count}: {e}");
                                 return Err(format!("Stream error: {e}").into());
                             }
                         }
                     }
                     Ok(None) => {
                         eprintln!(
-                            "[DEBUG] Stream ended naturally after {} chunks",
-                            chunk_count
+                            "[DEBUG] Stream ended naturally after {chunk_count} chunks"
                         );
                         break;
                     }
                     Err(_) => {
+                        let next_chunk = chunk_count + 1;
+                        let elapsed = start_time.elapsed();
                         eprintln!(
-                            "[ERROR] Timeout waiting for chunk #{} after {:?}",
-                            chunk_count + 1,
-                            start_time.elapsed()
+                            "[ERROR] Timeout waiting for chunk #{next_chunk} after {elapsed:?}"
                         );
                         eprintln!(
-                            "[ERROR] Received {} chunks totaling {} chars before timeout",
-                            chunk_count, total_chars
+                            "[ERROR] Received {chunk_count} chunks totaling {total_chars} chars before timeout"
                         );
 
                         if total_chars == 0 {
@@ -892,7 +890,7 @@ async fn process_message_print(
             Ok(full_response)
         }
         Err(e) => {
-            eprintln!("[ERROR] Failed to create stream: {}", e);
+            eprintln!("[ERROR] Failed to create stream: {e}");
             eprintln!(
                 "[ERROR] This may indicate a connection problem or model initialization issue"
             );
@@ -1220,8 +1218,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
 
     let init_start = Instant::now();
     eprintln!(
-        "[DEBUG] Starting LLM client initialization, print_mode={}",
-        print_mode
+        "[DEBUG] Starting LLM client initialization, print_mode={print_mode}"
     );
 
     // Initialize memory storage
@@ -1248,8 +1245,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         // Ollama server
         let server_url = &provider_config.memory.content;
         eprintln!(
-            "[DEBUG] Attempting connection to saved Ollama server: {}",
-            server_url
+            "[DEBUG] Attempting connection to saved Ollama server: {server_url}"
         );
         unsafe {
             std::env::set_var("OLLAMA_BASE_URL", server_url);
@@ -1276,10 +1272,9 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                     return Ok(client);
                 }
                 Err(e) => {
+                    let elapsed = test_start.elapsed();
                     eprintln!(
-                        "[DEBUG] Connection test failed after {:?}: {}",
-                        test_start.elapsed(),
-                        e
+                        "[DEBUG] Connection test failed after {elapsed:?}: {e}"
                     );
                 }
             }
@@ -1313,10 +1308,9 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                     return Ok(client);
                 }
                 Err(e) => {
+                    let elapsed = test_start.elapsed();
                     eprintln!(
-                        "[DEBUG] Local connection test failed after {:?}: {}",
-                        test_start.elapsed(),
-                        e
+                        "[DEBUG] Local connection test failed after {elapsed:?}: {e}"
                     );
                     if !print_mode {
                         eprintln!("Could not connect to Ollama at localhost:11434: {e}");
@@ -1325,7 +1319,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
             }
         }
         Err(e) => {
-            eprintln!("[DEBUG] Failed to create local client: {}", e);
+            eprintln!("[DEBUG] Failed to create local client: {e}");
             if !print_mode {
                 eprintln!("Ollama not available: {e}");
             }
@@ -1341,7 +1335,7 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
             .content
             .strip_prefix("local:")
             .unwrap();
-        eprintln!("[DEBUG] Found saved local model preference: {}", model_name);
+        eprintln!("[DEBUG] Found saved local model preference: {model_name}");
         if !print_mode {
             eprintln!("Checking for previously used local model: {model_name}");
         }
@@ -1374,15 +1368,14 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                 ];
 
                 eprintln!(
-                    "[DEBUG] Trying models in priority order: {:?}",
-                    model_priorities
+                    "[DEBUG] Trying models in priority order: {model_priorities:?}"
                 );
 
                 for model_name in &model_priorities {
-                    eprintln!("[DEBUG] Checking for model: {}", model_name);
+                    eprintln!("[DEBUG] Checking for model: {model_name}");
 
                     if let Some(spec) = manifest.find(model_name) {
-                        eprintln!("[DEBUG] Found model spec for: {}", model_name);
+                        eprintln!("[DEBUG] Found model spec for: {model_name}");
 
                         // Create downloader to check cache
                         match ModelDownloader::new() {
@@ -1449,23 +1442,22 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
                                     }
                                     Err(e) => {
                                         eprintln!(
-                                            "[DEBUG] Model {} not in cache: {}",
-                                            model_name, e
+                                            "[DEBUG] Model {model_name} not in cache: {e}"
                                         );
                                     }
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[ERROR] Failed to create model downloader: {}", e);
+                                eprintln!("[ERROR] Failed to create model downloader: {e}");
                             }
                         }
                     } else {
-                        eprintln!("[DEBUG] Model {} not found in manifest", model_name);
+                        eprintln!("[DEBUG] Model {model_name} not found in manifest");
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[ERROR] Failed to load model manifest: {}", e);
+                eprintln!("[ERROR] Failed to load model manifest: {e}");
             }
         }
     }
