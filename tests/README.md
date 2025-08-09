@@ -67,16 +67,21 @@ The test suite includes 91 total tests covering:
 
 ## Known Issues
 
-### Terminal Relaunch Bug
-**Critical**: The Arkavo binary automatically relaunches in Terminal.app when not in a TTY context, blocking automated testing of most CLI commands.
+### Terminal Relaunch Bug (FIXED)
+**Status**: Fixed in commit [pending]
 
-**Location**: `crates/arkavo/src/main.rs:40-77`
+**Previous Issue**: The Arkavo binary automatically relaunched in Terminal.app when not in a TTY context, blocking automated testing.
 
-**Workaround**: None currently available. Fix requires adding environment variable check:
-```rust
-if std::env::var("ARKAVO_NO_TERMINAL_RELAUNCH").is_ok() {
-    return; // Skip terminal relaunch
-}
+**Solution**: Added `ARKAVO_NO_TERMINAL_RELAUNCH` environment variable to disable terminal relaunch for testing/automation.
+
+**Usage**:
+```bash
+# For automated testing
+export ARKAVO_NO_TERMINAL_RELAUNCH=1
+./target/release/arkavo --help
+
+# Or inline
+ARKAVO_NO_TERMINAL_RELAUNCH=1 ./target/release/arkavo chat --prompt "test"
 ```
 
 ## Test Results

@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+# Disable terminal relaunch for automated testing
+export ARKAVO_NO_TERMINAL_RELAUNCH=1
+
 # Configuration
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 BINARY="${BINARY:-$PROJECT_ROOT/target/release/arkavo}"
