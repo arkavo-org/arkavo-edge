@@ -95,15 +95,21 @@ impl Provider for LocalProvider {
 
         #[cfg(feature = "llm-local")]
         {
-            tracing::info!("[LocalProvider::complete] Starting completion for {} messages", messages.len());
-            
+            tracing::info!(
+                "[LocalProvider::complete] Starting completion for {} messages",
+                messages.len()
+            );
+
             let prompt = messages
                 .iter()
                 .map(|m| m.content.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            
-            tracing::debug!("[LocalProvider::complete] Combined prompt: {} chars", prompt.len());
+
+            tracing::debug!(
+                "[LocalProvider::complete] Combined prompt: {} chars",
+                prompt.len()
+            );
 
             // First, get tokenizer and encode the prompt (clone tokenizer for safety)
             let (mut ids, eos_token_ids, tokenizer, _is_gemma) = {
@@ -130,7 +136,10 @@ impl Provider for LocalProvider {
                 };
 
                 // Debug log the formatted prompt
-                tracing::debug!("[LocalProvider::complete] Formatted prompt: {:?}", formatted_prompt);
+                tracing::debug!(
+                    "[LocalProvider::complete] Formatted prompt: {:?}",
+                    formatted_prompt
+                );
 
                 let encoding = tokenizer
                     .encode(formatted_prompt.as_str(), true)
@@ -145,8 +154,13 @@ impl Provider for LocalProvider {
                 };
 
                 // Debug log tokenizer info
-                tracing::info!("[LocalProvider::complete] Model: {}, Is Gemma: {}, Prompt tokens: {}, EOS tokens: {:?}", 
-                    self.model_name, is_gemma, ids.len(), eos_ids);
+                tracing::info!(
+                    "[LocalProvider::complete] Model: {}, Is Gemma: {}, Prompt tokens: {}, EOS tokens: {:?}",
+                    self.model_name,
+                    is_gemma,
+                    ids.len(),
+                    eos_ids
+                );
                 tracing::debug!("Is Gemma model: {}", is_gemma);
                 tracing::debug!("EOS token IDs: {:?}", eos_ids);
                 tracing::debug!("Prompt token count: {}", ids.len());
@@ -214,21 +228,28 @@ impl Provider for LocalProvider {
 
             for index in 0..max_tokens {
                 let token_start = std::time::Instant::now();
-                
+
                 // Lock for forward pass
                 let next = {
                     let mut guard = self.inner.lock().await;
 
                     if index % 10 == 0 || index < 3 {
-                        tracing::info!("[LocalProvider::complete] Generation step {}/{}, total time: {:?}", 
-                            index, max_tokens, start_time.elapsed());
+                        tracing::info!(
+                            "[LocalProvider::complete] Generation step {}/{}, total time: {:?}",
+                            index,
+                            max_tokens,
+                            start_time.elapsed()
+                        );
                     }
 
                     // On first iteration (index=0), process the entire prompt
                     // On subsequent iterations, only process the last generated token
                     let (input_tokens, position) = if index == 0 {
                         // First pass: process entire prompt
-                        tracing::debug!("[LocalProvider::complete] Processing full prompt: {} tokens", ids.len());
+                        tracing::debug!(
+                            "[LocalProvider::complete] Processing full prompt: {} tokens",
+                            ids.len()
+                        );
                         (ids.as_slice(), 0)
                     } else {
                         // Subsequent passes: only the last token
@@ -236,8 +257,11 @@ impl Provider for LocalProvider {
                     };
 
                     // Forward pass based on model architecture
-                    tracing::debug!("[LocalProvider::complete] Running forward pass at position {}", position);
-                    
+                    tracing::debug!(
+                        "[LocalProvider::complete] Running forward pass at position {}",
+                        position
+                    );
+
                     let mut logits = match guard.model_loader.get_model_mut() {
                         Some(Model::QuantizedGemma3(model)) => {
                             // Gemma3 expects batch dimension
@@ -305,18 +329,26 @@ impl Provider for LocalProvider {
                         &ids[start_len..], // Only apply repetition penalty to generated tokens
                     )?
                 };
-                
+
                 let token_time = token_start.elapsed();
                 if index < 5 || index % 20 == 0 {
-                    tracing::info!("[LocalProvider::complete] Token {} generated: id={}, time={:?}", 
-                        index, next, token_time);
+                    tracing::info!(
+                        "[LocalProvider::complete] Token {} generated: id={}, time={:?}",
+                        index,
+                        next,
+                        token_time
+                    );
                 }
 
                 ids.push(next);
 
                 // Early stop on any EOS token
                 if eos_token_ids.contains(&next) {
-                    tracing::info!("[LocalProvider::complete] Hit EOS token {} at position {}", next, index);
+                    tracing::info!(
+                        "[LocalProvider::complete] Hit EOS token {} at position {}",
+                        next,
+                        index
+                    );
                     break;
                 }
             }
@@ -368,17 +400,23 @@ impl Provider for LocalProvider {
         #[cfg(feature = "llm-local")]
         {
             use std::time::Instant;
-            
+
             let stream_start = Instant::now();
-            tracing::info!("[LocalProvider::stream] Starting stream for {} messages", _messages.len());
-            
+            tracing::info!(
+                "[LocalProvider::stream] Starting stream for {} messages",
+                _messages.len()
+            );
+
             let prompt = _messages
                 .iter()
                 .map(|m| m.content.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            
-            tracing::debug!("[LocalProvider::stream] Prompt length: {} chars", prompt.len());
+
+            tracing::debug!(
+                "[LocalProvider::stream] Prompt length: {} chars",
+                prompt.len()
+            );
 
             // Lock once to check model type and get necessary data
             let guard = self.inner.lock().await;
@@ -396,8 +434,11 @@ impl Provider for LocalProvider {
                 .encode(prompt.as_str(), true)
                 .map_err(|e| Error::Model(format!("Failed to encode prompt: {e}")))?;
             let _ids: Vec<u32> = encoding.get_ids().to_vec();
-            
-            tracing::debug!("[LocalProvider::stream] Encoded prompt to {} tokens", _ids.len());
+
+            tracing::debug!(
+                "[LocalProvider::stream] Encoded prompt to {} tokens",
+                _ids.len()
+            );
 
             // Get EOS token
             let _eos_id = guard
@@ -413,17 +454,25 @@ impl Provider for LocalProvider {
             drop(guard); // Release lock before streaming
 
             if has_model {
-                tracing::info!("[LocalProvider::stream] Model {} loaded, falling back to complete() for streaming", model_name);
-                
+                tracing::info!(
+                    "[LocalProvider::stream] Model {} loaded, falling back to complete() for streaming",
+                    model_name
+                );
+
                 // Fall back to non-streaming for now - but with timeout protection
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(30),
-                    self.complete(_messages)
-                ).await {
+                    self.complete(_messages),
+                )
+                .await
+                {
                     Ok(Ok(response)) => {
-                        tracing::info!("[LocalProvider::stream] Complete() returned {} chars after {:?}", 
-                            response.len(), stream_start.elapsed());
-                        
+                        tracing::info!(
+                            "[LocalProvider::stream] Complete() returned {} chars after {:?}",
+                            response.len(),
+                            stream_start.elapsed()
+                        );
+
                         let items = vec![Ok(StreamResponse {
                             content: response,
                             done: true,
@@ -441,7 +490,7 @@ impl Provider for LocalProvider {
                     Err(_) => {
                         tracing::error!("[LocalProvider::stream] Complete() timed out after 30s");
                         Err(Error::Model(format!(
-                            "Model {} timed out generating response after 30 seconds", 
+                            "Model {} timed out generating response after 30 seconds",
                             model_name
                         )))
                     }
