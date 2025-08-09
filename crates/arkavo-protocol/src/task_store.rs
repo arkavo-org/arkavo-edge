@@ -66,7 +66,8 @@ impl SqliteTaskStore {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        let db_url = format!("sqlite:{}", db_path.display());
+        // Use mode=rwc to create the database if it doesn't exist
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&db_url)
