@@ -284,6 +284,7 @@ impl McpTestServer {
             );
 
             // Add screenshot analyzer tool
+            #[cfg(feature = "memory")]
             tools.insert(
                 "analyze_screenshot".to_string(),
                 Arc::new(ScreenshotAnalyzer::new()),
