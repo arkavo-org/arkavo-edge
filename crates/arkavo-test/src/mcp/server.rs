@@ -20,7 +20,6 @@ use super::ios_biometric_tools::{BiometricKit, SystemDialogKit};
 use super::ios_tools::{ScreenCaptureKit, UiInteractionKit, UiQueryKit};
 use super::passkey_dialog_handler::PasskeyDialogHandler;
 #[cfg(feature = "memory")]
-use super::repository_context_tool::RepositoryContextTool;
 use super::screenshot_analyzer::ScreenshotAnalyzer;
 use super::simulator_advanced_tools::SimulatorAdvancedKit;
 use super::simulator_tools::{AppManagement, FileOperations, SimulatorControl};
@@ -103,79 +102,10 @@ impl McpTestServer {
         // Initialize device manager
         let device_manager = Arc::new(DeviceManager::new());
 
-        // Initialize memory tools if embeddings feature is enabled
+        // Memory tools initialization deferred - will be done asynchronously if needed
         #[cfg(feature = "embeddings")]
         {
-            eprintln!("[McpTestServer] Initializing memory tools...");
-
-            // Check if we're already in a runtime
-            let memory_storage = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                // Already in a runtime, use it
-                handle.block_on(async {
-                    match arkavo_memory::storage::MemoryStorage::new().await {
-                        Ok(storage) => {
-                            eprintln!("[McpTestServer] Memory storage initialized successfully");
-                            Some(Arc::new(storage))
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
-                            );
-                            eprintln!("[McpTestServer] Memory tools will not be available");
-                            None
-                        }
-                    }
-                })
-            } else {
-                // Not in a runtime, create a temporary one
-                let runtime = tokio::runtime::Runtime::new()?;
-                runtime.block_on(async {
-                    match arkavo_memory::storage::MemoryStorage::new().await {
-                        Ok(storage) => {
-                            eprintln!("[McpTestServer] Memory storage initialized successfully");
-                            Some(Arc::new(storage))
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "[McpTestServer] Warning: Failed to initialize memory storage: {e}"
-                            );
-                            eprintln!("[McpTestServer] Memory tools will not be available");
-                            None
-                        }
-                    }
-                })
-            };
-
-            // Add memory tools if storage is available
-            if let Some(storage) = memory_storage {
-                tools.insert(
-                    "store_memory".to_string(),
-                    Arc::new(McpToolAdapter::new(
-                        arkavo_memory::mcp_tools::StoreMemoryTool::new(storage.clone()),
-                    )),
-                );
-                tools.insert(
-                    "search_memory".to_string(),
-                    Arc::new(McpToolAdapter::new(
-                        arkavo_memory::mcp_tools::SearchMemoryTool::new(storage.clone()),
-                    )),
-                );
-                tools.insert(
-                    "get_memory".to_string(),
-                    Arc::new(McpToolAdapter::new(
-                        arkavo_memory::mcp_tools::GetMemoryTool::new(storage.clone()),
-                    )),
-                );
-                tools.insert(
-                    "categorize_memory".to_string(),
-                    Arc::new(McpToolAdapter::new(
-                        arkavo_memory::mcp_tools::CategorizeMemoryTool::new(storage.clone()),
-                    )),
-                );
-                eprintln!(
-                    "[McpTestServer] Memory tools registered: store_memory, search_memory, get_memory, categorize_memory"
-                );
-            }
+            eprintln!("[McpTestServer] Memory tools initialization deferred");
         }
 
         #[cfg(not(feature = "embeddings"))]
@@ -476,19 +406,10 @@ impl McpTestServer {
             Arc::new(super::git_tools::GitRemoteKit::new()),
         );
 
-        // Add Repository Context tool
+        // Repository Context tool initialization deferred
         #[cfg(feature = "memory")]
         {
-            let runtime = tokio::runtime::Runtime::new()?;
-            #[allow(clippy::disallowed_methods)]
-            runtime.block_on(async {
-                if let Ok(repo_context_tool) = RepositoryContextTool::new().await {
-                    tools.insert(
-                        "build_repository_context".to_string(),
-                        Arc::new(repo_context_tool),
-                    );
-                }
-            });
+            eprintln!("[McpTestServer] Repository context tool initialization deferred");
         }
 
         // Add TUI testing tools

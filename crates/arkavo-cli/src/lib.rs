@@ -81,18 +81,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "serve" | "mcp" => {
-            // Check if we're already in a runtime context
-            match tokio::runtime::Handle::try_current() {
-                Ok(handle) => {
-                    // Already in a runtime, use the existing handle
-                    handle.block_on(async { commands::mcp::run().await })
-                }
-                Err(_) => {
-                    // Not in a runtime, create one
-                    let runtime = tokio::runtime::Runtime::new()?;
-                    runtime.block_on(async { commands::mcp::run().await })
-                }
-            }
+            // Always create a new runtime for the MCP server
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { commands::mcp::run().await })
         }
         "help" => {
             print_usage();
