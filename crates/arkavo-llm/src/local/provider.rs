@@ -490,8 +490,7 @@ impl Provider for LocalProvider {
                     Err(_) => {
                         tracing::error!("[LocalProvider::stream] Complete() timed out after 30s");
                         Err(Error::Model(format!(
-                            "Model {} timed out generating response after 30 seconds",
-                            model_name
+                            "Model {model_name} timed out generating response after 30 seconds"
                         )))
                     }
                 }
