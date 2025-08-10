@@ -42,6 +42,11 @@ fn maybe_relaunch_in_terminal() {
     use std::io::IsTerminal;
     use std::process::Command;
 
+    // Check if terminal relaunch is disabled via environment variable (for testing/automation)
+    if env::var("ARKAVO_NO_TERMINAL_RELAUNCH").is_ok() {
+        return; // Skip terminal relaunch for automation/testing
+    }
+
     // Check if we're already in a TTY
     if std::io::stdout().is_terminal() {
         return; // Already in terminal

@@ -1,0 +1,78 @@
+[
+  {
+    "test_id": "CLI-01",
+    "name": "Help flag",
+    "result": "fail",
+    "exit_code": 1,
+    "timestamp": "2025-08-09T11:30:01-04:00"
+  },
+  {
+    "test_id": "CLI-05",
+    "name": "Non-interactive chat",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:03-04:00"
+  },
+  {
+    "test_id": "ERR-01",
+    "name": "Invalid command handling",
+    "result": "fail",
+    "exit_code": 1,
+    "timestamp": "2025-08-09T11:30:03-04:00"
+  },
+  {
+    "test_id": "CLAUDE-01",
+    "name": "CLAUDE.md validity",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:03-04:00"
+  },
+  {
+    "test_id": "SETUP-03",
+    "name": "No OpenSSL dependency",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:04-04:00"
+  },
+  {
+    "test_id": "CODE-02",
+    "name": "Crate organization",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:04-04:00"
+  },
+  {
+    "test_id": "PERF-01",
+    "name": "Binary size check",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:04-04:00"
+  },
+  {
+    "test_id": "DOC-02",
+    "name": "Doc generation",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:04-04:00"
+  },
+  {
+    "test_id": "DOC-01",
+    "name": "README validity",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:04-04:00"
+  },
+  {
+    "test_id": "ERR-02",
+    "name": "Offline execution",
+    "result": "fail",
+    "exit_code": 1,
+    "timestamp": "2025-08-09T11:30:09-04:00"
+  },
+  {
+    "test_id": "GIT-03",
+    "name": "GitHub CLI available",
+    "result": "pass",
+    "timestamp": "2025-08-09T11:30:10-04:00"
+  },
+  {
+    "test_id": "CLI-04",
+    "name": "UI server startup",
+    "result": "fail",
+    "exit_code": 1,
+    "timestamp": "2025-08-09T11:30:13-04:00"
+  }
+]

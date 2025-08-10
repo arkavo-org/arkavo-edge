@@ -144,7 +144,7 @@ fn test_no_system_prompt_simulation() {
 #[test]
 fn test_plugin_loading_error_handling() {
     // Test that plugin loading errors are handled gracefully
-    use XcodebuildWrapper;
+    use arkavo_test::mcp::xcodebuild_wrapper::XcodebuildWrapper;
 
     // If xcodebuild is available but misconfigured (missing Command Line Tools),
     // it should return a proper error without triggering prompts
