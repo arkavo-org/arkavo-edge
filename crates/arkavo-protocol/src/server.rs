@@ -1221,53 +1221,52 @@ impl A2aRpcServer for A2aRpcImpl {
             let mut backup_list = Vec::new();
 
             if backup_dir.exists()
-                && let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {
-                    while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(metadata) = entry.metadata().await
-                            && metadata.is_file() {
-                                let filename = entry.file_name().to_string_lossy().to_string();
-                                if filename.starts_with("AGENTS.md.")
-                                    && filename.ends_with(".backup")
-                                {
-                                    // Extract timestamp from filename
-                                    let timestamp_str = filename
-                                        .strip_prefix("AGENTS.md.")
-                                        .and_then(|s| s.strip_suffix(".backup"))
-                                        .unwrap_or("");
+                && let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await
+            {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    if let Ok(metadata) = entry.metadata().await
+                        && metadata.is_file()
+                    {
+                        let filename = entry.file_name().to_string_lossy().to_string();
+                        if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                            // Extract timestamp from filename
+                            let timestamp_str = filename
+                                .strip_prefix("AGENTS.md.")
+                                .and_then(|s| s.strip_suffix(".backup"))
+                                .unwrap_or("");
 
-                                    let timestamp = chrono::NaiveDateTime::parse_from_str(
-                                        timestamp_str,
-                                        "%Y-%m-%d-%H%M%S",
-                                    )
-                                    .ok()
-                                    .map(|dt| {
-                                        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-                                            dt,
-                                            chrono::Utc,
-                                        )
-                                    })
-                                    .unwrap_or_else(chrono::Utc::now);
+                            let timestamp = chrono::NaiveDateTime::parse_from_str(
+                                timestamp_str,
+                                "%Y-%m-%d-%H%M%S",
+                            )
+                            .ok()
+                            .map(|dt| {
+                                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                                    dt,
+                                    chrono::Utc,
+                                )
+                            })
+                            .unwrap_or_else(chrono::Utc::now);
 
-                                    // Calculate backup version
-                                    if let Ok(backup_content) =
-                                        tokio::fs::read_to_string(entry.path()).await
-                                    {
-                                        let mut backup_hasher = Sha256::new();
-                                        backup_hasher.update(backup_content.as_bytes());
-                                        let backup_version =
-                                            format!("{:x}", backup_hasher.finalize());
+                            // Calculate backup version
+                            if let Ok(backup_content) =
+                                tokio::fs::read_to_string(entry.path()).await
+                            {
+                                let mut backup_hasher = Sha256::new();
+                                backup_hasher.update(backup_content.as_bytes());
+                                let backup_version = format!("{:x}", backup_hasher.finalize());
 
-                                        backup_list.push(crate::types::ConfigBackup {
-                                            filename,
-                                            timestamp,
-                                            size: metadata.len(),
-                                            version: backup_version,
-                                        });
-                                    }
-                                }
+                                backup_list.push(crate::types::ConfigBackup {
+                                    filename,
+                                    timestamp,
+                                    size: metadata.len(),
+                                    version: backup_version,
+                                });
                             }
+                        }
                     }
                 }
+            }
 
             // Sort by timestamp, newest first
             backup_list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -1308,23 +1307,24 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Check expected version for optimistic locking
         if let Some(expected_version) = &request.expected_version
-            && let Ok(current_content) = tokio::fs::read_to_string(&config_path).await {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(current_content.as_bytes());
-                let current_version = format!("{:x}", hasher.finalize());
+            && let Ok(current_content) = tokio::fs::read_to_string(&config_path).await
+        {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(current_content.as_bytes());
+            let current_version = format!("{:x}", hasher.finalize());
 
-                if &current_version != expected_version {
-                    timer.error();
-                    return Ok(AgentConfigUpdateResponse {
-                        success: false,
-                        new_version: None,
-                        backup_path: None,
-                        error: Some(ConfigError::Conflict { current_version }),
-                        reload_required: false,
-                    });
-                }
+            if &current_version != expected_version {
+                timer.error();
+                return Ok(AgentConfigUpdateResponse {
+                    success: false,
+                    new_version: None,
+                    backup_path: None,
+                    error: Some(ConfigError::Conflict { current_version }),
+                    reload_required: false,
+                });
             }
+        }
 
         // Validate the new configuration
         if let Err(validation_error) = validate_agent_config(&request.content) {
@@ -1345,9 +1345,10 @@ impl A2aRpcServer for A2aRpcImpl {
             // Create backup directory if it doesn't exist
             let backup_dir = std::path::Path::new(".agents.md.backup");
             if !backup_dir.exists()
-                && let Err(e) = tokio::fs::create_dir_all(backup_dir).await {
-                    warn!("Failed to create backup directory: {}", e);
-                }
+                && let Err(e) = tokio::fs::create_dir_all(backup_dir).await
+            {
+                warn!("Failed to create backup directory: {}", e);
+            }
 
             // Create backup with timestamp
             let timestamp = chrono::Utc::now().format("%Y-%m-%d-%H%M%S");
@@ -1477,12 +1478,13 @@ impl A2aRpcServer for A2aRpcImpl {
 
                         // Validate listen address format
                         if !agent.listen.is_empty()
-                            && agent.listen.parse::<std::net::SocketAddr>().is_err() {
-                                errors.push(format!(
-                                    "Agent '{}' has invalid listen address: {}",
-                                    agent.name, agent.listen
-                                ));
-                            }
+                            && agent.listen.parse::<std::net::SocketAddr>().is_err()
+                        {
+                            errors.push(format!(
+                                "Agent '{}' has invalid listen address: {}",
+                                agent.name, agent.listen
+                            ));
+                        }
 
                         // Validate model format
                         if !agent.model.is_empty() && !agent.model.contains("://") {
@@ -1615,9 +1617,8 @@ impl A2aRpcImpl {
         }
 
         // Parse the new configuration
-        let agents = parse_agents_config(content).map_err(|e| {
-            A2aError::Configuration(format!("Failed to parse configuration: {e}"))
-        })?;
+        let agents = parse_agents_config(content)
+            .map_err(|e| A2aError::Configuration(format!("Failed to parse configuration: {e}")))?;
 
         if agents.is_empty() {
             return Err(A2aError::Configuration(
@@ -1677,19 +1678,18 @@ impl A2aRpcImpl {
         }
 
         // If model changed, recreate LLM adapter
-        if new_config.model != old_model
-            && self.llm_adapter.is_some() {
-                // Note: In a real implementation, we'd need to recreate the adapter
-                // This would require access to the LLM client creation logic
-                warn!(
-                    "Model change detected from '{}' to '{}', but LLM adapter recreation not yet implemented",
-                    old_model, new_config.model
-                );
+        if new_config.model != old_model && self.llm_adapter.is_some() {
+            // Note: In a real implementation, we'd need to recreate the adapter
+            // This would require access to the LLM client creation logic
+            warn!(
+                "Model change detected from '{}' to '{}', but LLM adapter recreation not yet implemented",
+                old_model, new_config.model
+            );
 
-                // Update the model in metadata for now
-                let mut metadata = self.agent_metadata.write().await;
-                metadata.model.clone_from(&new_config.model);
-            }
+            // Update the model in metadata for now
+            let mut metadata = self.agent_metadata.write().await;
+            metadata.model.clone_from(&new_config.model);
+        }
 
         // Handle MCP server changes
         if !new_config.mcp_servers.is_empty() {
@@ -1892,12 +1892,13 @@ async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             if let Ok(metadata) = entry.metadata().await
-                && metadata.is_file() {
-                    let filename = entry.file_name().to_string_lossy().to_string();
-                    if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
-                        backups.push((entry.path(), metadata.modified().ok()));
-                    }
+                && metadata.is_file()
+            {
+                let filename = entry.file_name().to_string_lossy().to_string();
+                if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                    backups.push((entry.path(), metadata.modified().ok()));
                 }
+            }
         }
 
         // Sort by modification time, newest first
