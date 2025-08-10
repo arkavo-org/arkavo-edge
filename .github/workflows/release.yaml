@@ -50,9 +50,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
           draft: false
           prerelease: true
+          make_latest: false  # Don't mark as latest until smoke tests pass
           generate_release_notes: true
           body: |
             ## Arkavo Edge ${{ steps.version.outputs.version }}
@@ -359,19 +360,25 @@ jobs:
         run: |
           VERSION="${{ needs.release.outputs.version }}"
           
-          # Trigger workflow in homebrew-arkavo repo to update formula
-          # This assumes the tap repo has a workflow that listens for repository_dispatch events
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/arkavo-org/homebrew-arkavo/dispatches \
-            -d "{\"event_type\": \"update-formula\", \"client_payload\": {\"version\": \"${VERSION}\"}}" || \
-            echo "Note: Homebrew tap repository not yet created or dispatch failed"
+          # Use PAT if available, otherwise fall back to manual trigger
+          if [ -n "${{ secrets.HOMEBREW_UPDATE_TOKEN }}" ]; then
+            echo "Using HOMEBREW_UPDATE_TOKEN to trigger workflow"
+            curl -X POST \
+              -H "Authorization: token ${{ secrets.HOMEBREW_UPDATE_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/arkavo-org/homebrew-arkavo/dispatches \
+              -d "{\"event_type\": \"update-formula\", \"client_payload\": {\"version\": \"${VERSION}\"}}"
+          else
+            echo "⚠️ HOMEBREW_UPDATE_TOKEN not configured. Please manually trigger the Homebrew formula update."
+            echo "To fix: Add a Personal Access Token with 'repo' scope as HOMEBREW_UPDATE_TOKEN secret"
+            echo "Manual trigger: gh workflow run 'Update Formula' --repo arkavo-org/homebrew-arkavo -f version=${VERSION}"
+          fi
 
-      - name: Update release to published
+      - name: Update release to published and latest
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           prerelease: false
+          make_latest: true  # Mark as latest after all tests pass
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
