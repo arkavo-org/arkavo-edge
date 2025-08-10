@@ -3,11 +3,15 @@
 Instant, secure orchestration for AI agents—launch, mesh, and monitor in real time.
 
 ## Quick Start
-```bash
-# Install (macOS arm64):
-curl -L https://github.com/arkavo-org/arkavo-edge/releases/latest/download/arkavo-macos-aarch64.tar.gz | tar -xz
-sudo mv arkavo /usr/local/bin
 
+### Install via Homebrew
+```bash
+brew tap arkavo-org/arkavo-edge
+brew install arkavo
+```
+
+### Launch
+```bash
 # Launch agent (auto-configures on first run)
 arkavo
 
