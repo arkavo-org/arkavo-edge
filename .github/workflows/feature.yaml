@@ -95,6 +95,7 @@ jobs:
 
           echo "✅ Version format is valid: $VERSION"
 
+
   # Quick checks that can run in parallel
   format:
     name: Format Check

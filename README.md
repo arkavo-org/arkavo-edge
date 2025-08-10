@@ -6,7 +6,7 @@ Instant, secure orchestration for AI agents—launch, mesh, and monitor in real 
 
 ### Install via Homebrew
 ```bash
-brew tap arkavo-org/arkavo-edge
+brew tap arkavo-org/homebrew-arkavo
 brew install arkavo
 ```
 
