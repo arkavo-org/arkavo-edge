@@ -1,6 +1,7 @@
 use arkavo_budget::config::{AgentBudget, BudgetAlert};
 use arkavo_budget::tracker::{BudgetStatus, SpendingRecord};
 use arkavo_budget::{BudgetConfig, TokenCost};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -103,6 +104,66 @@ pub enum AgUiEvent {
     Error {
         code: String,
         message: String,
+    },
+
+    // Configuration management events
+    GetAgentConfig {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "includeBackups", default)]
+        include_backups: bool,
+    },
+    AgentConfigSnapshot {
+        content: String,
+        version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        backups: Option<Vec<ConfigBackupInfo>>,
+        writable: bool,
+    },
+    UpdateAgentConfig {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        content: String,
+        #[serde(rename = "expectedVersion", skip_serializing_if = "Option::is_none")]
+        expected_version: Option<String>,
+        #[serde(rename = "createBackup", default = "default_true")]
+        create_backup: bool,
+    },
+    ConfigUpdateResult {
+        success: bool,
+        #[serde(rename = "newVersion", skip_serializing_if = "Option::is_none")]
+        new_version: Option<String>,
+        #[serde(rename = "backupPath", skip_serializing_if = "Option::is_none")]
+        backup_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<ConfigErrorInfo>,
+        #[serde(rename = "reloadRequired", default)]
+        reload_required: bool,
+    },
+    ValidateAgentConfig {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        content: String,
+    },
+    ConfigValidationResult {
+        valid: bool,
+        #[serde(default)]
+        errors: Vec<String>,
+        #[serde(default)]
+        warnings: Vec<String>,
+    },
+    RestoreAgentConfig {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+        #[serde(rename = "backupFilename")]
+        backup_filename: String,
+    },
+    ConfigRestoreResult {
+        success: bool,
+        #[serde(rename = "newVersion", skip_serializing_if = "Option::is_none")]
+        new_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<ConfigErrorInfo>,
     },
 
     // Budget events
@@ -257,4 +318,28 @@ impl Drop for SubscriptionHandle {
     fn drop(&mut self) {
         self.cancel();
     }
+}
+
+/// Configuration backup information for AG-UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigBackupInfo {
+    pub filename: String,
+    pub timestamp: DateTime<Utc>,
+    pub size: u64,
+    pub version: String,
+}
+
+/// Configuration error information for AG-UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConfigErrorInfo {
+    AgentOffline,
+    ReadOnlyFilesystem,
+    ValidationFailed { details: String },
+    Conflict { current_version: String },
+    Unauthorized,
+}
+
+fn default_true() -> bool {
+    true
 }

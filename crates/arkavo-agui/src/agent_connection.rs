@@ -1,7 +1,10 @@
 use crate::streaming::{LatencyTracker, OrderedMessageDelta, StreamOrdering};
 use crate::types::{ChatRequest, SubscriptionHandle};
 use arkavo_protocol::types::{
-    ChatOpenRequest, ChatSession, MessageDelta, MessageDeltaContent, UserMessage,
+    AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigRestoreRequest,
+    AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
+    AgentConfigValidateRequest, AgentConfigValidateResponse, ChatOpenRequest, ChatSession,
+    MessageDelta, MessageDeltaContent, UserMessage,
 };
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
@@ -635,6 +638,98 @@ impl AgentConnection {
         self.chat_broadcasts.write().await.clear();
 
         // No local LLM streams to abort - all handled by agent's protocol server
+    }
+
+    /// Get agent configuration
+    pub async fn get_config(
+        &self,
+        include_backups: bool,
+    ) -> Result<AgentConfigGetResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let client = self
+            .get_connected_client()
+            .await
+            .ok_or("Not connected to agent")?;
+
+        let request = AgentConfigGetRequest {
+            agent_id: self.agent_id.clone(),
+            include_backups,
+        };
+
+        let response = client
+            .request::<AgentConfigGetResponse, _>("agent.config.get", vec![serde_json::to_value(request)?])
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Update agent configuration
+    pub async fn update_config(
+        &self,
+        content: String,
+        expected_version: Option<String>,
+        create_backup: bool,
+    ) -> Result<AgentConfigUpdateResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let client = self
+            .get_connected_client()
+            .await
+            .ok_or("Not connected to agent")?;
+
+        let request = AgentConfigUpdateRequest {
+            agent_id: self.agent_id.clone(),
+            content,
+            expected_version,
+            create_backup,
+        };
+
+        let response = client
+            .request::<AgentConfigUpdateResponse, _>("agent.config.update", vec![serde_json::to_value(request)?])
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Validate agent configuration
+    pub async fn validate_config(
+        &self,
+        content: String,
+    ) -> Result<AgentConfigValidateResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let client = self
+            .get_connected_client()
+            .await
+            .ok_or("Not connected to agent")?;
+
+        let request = AgentConfigValidateRequest {
+            agent_id: self.agent_id.clone(),
+            content,
+        };
+
+        let response = client
+            .request::<AgentConfigValidateResponse, _>("agent.config.validate", vec![serde_json::to_value(request)?])
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Restore agent configuration from backup
+    pub async fn restore_config(
+        &self,
+        backup_filename: String,
+    ) -> Result<AgentConfigRestoreResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let client = self
+            .get_connected_client()
+            .await
+            .ok_or("Not connected to agent")?;
+
+        let request = AgentConfigRestoreRequest {
+            agent_id: self.agent_id.clone(),
+            backup_filename,
+        };
+
+        let response = client
+            .request::<AgentConfigRestoreResponse, _>("agent.config.restore", vec![serde_json::to_value(request)?])
+            .await?;
+
+        Ok(response)
     }
 }
 
