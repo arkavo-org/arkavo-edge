@@ -4,6 +4,7 @@ use crate::dataflow_handler::DataflowHandler;
 use crate::debug_handler::DebugHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
+use arkavo_protocol::types::ConfigError;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -487,6 +488,174 @@ async fn handle_event(
         | AgUiEvent::ResetBudgetWindow { .. } => {
             let handler = budget_handler.read().await;
             handler.handle_event(&event, tx).await?;
+        }
+
+        // Configuration management events
+        AgUiEvent::GetAgentConfig {
+            agent_id,
+            include_backups,
+        } => {
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                match agent_conn.get_config(include_backups).await {
+                    Ok(response) => {
+                        let event = AgUiEvent::AgentConfigSnapshot {
+                            content: response.content,
+                            version: response.version,
+                            backups: response.backups.map(|backups| {
+                                backups
+                                    .into_iter()
+                                    .map(|b| ConfigBackupInfo {
+                                        filename: b.filename,
+                                        timestamp: b.timestamp,
+                                        size: b.size,
+                                        version: b.version,
+                                    })
+                                    .collect()
+                            }),
+                            writable: response.writable,
+                        };
+                        tx.send(event).await?;
+                    }
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "CONFIG_GET_FAILED".to_string(),
+                            message: format!("Failed to get configuration: {e}"),
+                        };
+                        tx.send(error).await?;
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {agent_id} is not connected"),
+                };
+                tx.send(error).await?;
+            }
+        }
+
+        AgUiEvent::UpdateAgentConfig {
+            agent_id,
+            content,
+            expected_version,
+            create_backup,
+        } => {
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                match agent_conn
+                    .update_config(content, expected_version, create_backup)
+                    .await
+                {
+                    Ok(response) => {
+                        let event = AgUiEvent::ConfigUpdateResult {
+                            success: response.success,
+                            new_version: response.new_version,
+                            backup_path: response.backup_path,
+                            error: response.error.map(|e| match e {
+                                ConfigError::AgentOffline => ConfigErrorInfo::AgentOffline,
+                                ConfigError::ReadOnlyFilesystem => {
+                                    ConfigErrorInfo::ReadOnlyFilesystem
+                                }
+                                ConfigError::ValidationFailed { details } => {
+                                    ConfigErrorInfo::ValidationFailed { details }
+                                }
+                                ConfigError::Conflict { current_version } => {
+                                    ConfigErrorInfo::Conflict { current_version }
+                                }
+                                ConfigError::Unauthorized => ConfigErrorInfo::Unauthorized,
+                            }),
+                            reload_required: response.reload_required,
+                        };
+                        tx.send(event).await?;
+                    }
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "CONFIG_UPDATE_FAILED".to_string(),
+                            message: format!("Failed to update configuration: {e}"),
+                        };
+                        tx.send(error).await?;
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {agent_id} is not connected"),
+                };
+                tx.send(error).await?;
+            }
+        }
+
+        AgUiEvent::ValidateAgentConfig { agent_id, content } => {
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                match agent_conn.validate_config(content).await {
+                    Ok(response) => {
+                        let event = AgUiEvent::ConfigValidationResult {
+                            valid: response.valid,
+                            errors: response.errors,
+                            warnings: response.warnings,
+                        };
+                        tx.send(event).await?;
+                    }
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "CONFIG_VALIDATE_FAILED".to_string(),
+                            message: format!("Failed to validate configuration: {e}"),
+                        };
+                        tx.send(error).await?;
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {agent_id} is not connected"),
+                };
+                tx.send(error).await?;
+            }
+        }
+
+        AgUiEvent::RestoreAgentConfig {
+            agent_id,
+            backup_filename,
+        } => {
+            let agent_conns = agent_connections.read().await;
+            if let Some(agent_conn) = agent_conns.get(&agent_id) {
+                match agent_conn.restore_config(backup_filename).await {
+                    Ok(response) => {
+                        let event = AgUiEvent::ConfigRestoreResult {
+                            success: response.success,
+                            new_version: response.new_version,
+                            error: response.error.map(|e| match e {
+                                ConfigError::AgentOffline => ConfigErrorInfo::AgentOffline,
+                                ConfigError::ReadOnlyFilesystem => {
+                                    ConfigErrorInfo::ReadOnlyFilesystem
+                                }
+                                ConfigError::ValidationFailed { details } => {
+                                    ConfigErrorInfo::ValidationFailed { details }
+                                }
+                                ConfigError::Conflict { current_version } => {
+                                    ConfigErrorInfo::Conflict { current_version }
+                                }
+                                ConfigError::Unauthorized => ConfigErrorInfo::Unauthorized,
+                            }),
+                        };
+                        tx.send(event).await?;
+                    }
+                    Err(e) => {
+                        let error = AgUiEvent::Error {
+                            code: "CONFIG_RESTORE_FAILED".to_string(),
+                            message: format!("Failed to restore configuration: {e}"),
+                        };
+                        tx.send(error).await?;
+                    }
+                }
+            } else {
+                let error = AgUiEvent::Error {
+                    code: "AGENT_NOT_CONNECTED".to_string(),
+                    message: format!("Agent {agent_id} is not connected"),
+                };
+                tx.send(error).await?;
+            }
         }
 
         _ => {

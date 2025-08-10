@@ -8,10 +8,13 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
-    AgentBroadcast, AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, BroadcastType,
-    ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
-    DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent,
-    MessageSendRequest, MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    AgentBroadcast, AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigRestoreRequest,
+    AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
+    AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter,
+    AgentQueryRequest, AgentQueryResponse, BroadcastType, ChatOpenRequest, ChatRequest,
+    ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
+    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
@@ -105,6 +108,34 @@ pub trait A2aRpc {
     /// Broadcast agent capabilities
     #[method(name = "agent_broadcast")]
     async fn agent_broadcast(&self, broadcast: AgentBroadcast) -> RpcResult<()>;
+
+    /// Get agent configuration
+    #[method(name = "agent.config.get")]
+    async fn agent_config_get(
+        &self,
+        request: AgentConfigGetRequest,
+    ) -> RpcResult<AgentConfigGetResponse>;
+
+    /// Update agent configuration
+    #[method(name = "agent.config.update")]
+    async fn agent_config_update(
+        &self,
+        request: AgentConfigUpdateRequest,
+    ) -> RpcResult<AgentConfigUpdateResponse>;
+
+    /// Validate agent configuration
+    #[method(name = "agent.config.validate")]
+    async fn agent_config_validate(
+        &self,
+        request: AgentConfigValidateRequest,
+    ) -> RpcResult<AgentConfigValidateResponse>;
+
+    /// Restore agent configuration from backup
+    #[method(name = "agent.config.restore")]
+    async fn agent_config_restore(
+        &self,
+        request: AgentConfigRestoreRequest,
+    ) -> RpcResult<AgentConfigRestoreResponse>;
 
     /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
@@ -1138,6 +1169,746 @@ impl A2aRpcServer for A2aRpcImpl {
         timer.success();
         Ok(())
     }
+
+    async fn agent_config_get(
+        &self,
+        request: AgentConfigGetRequest,
+    ) -> RpcResult<AgentConfigGetResponse> {
+        let timer = RpcTimer::new("agent_config_get".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        // Read AGENTS.md file
+        let config_path = std::path::Path::new("AGENTS.md");
+        let content = match tokio::fs::read_to_string(&config_path).await {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32002,
+                    "Configuration file not found",
+                    Some(serde_json::json!({
+                        "error": ConfigError::AgentOffline
+                    })),
+                ));
+            }
+            Err(e) => {
+                timer.error();
+                return Err(ErrorObjectOwned::owned(
+                    -32603,
+                    format!("Failed to read configuration: {e}"),
+                    Some(serde_json::json!({
+                        "error": ConfigError::ReadOnlyFilesystem
+                    })),
+                ));
+            }
+        };
+
+        // Calculate version hash
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let version = format!("{:x}", hasher.finalize());
+
+        // List backups if requested
+        let backups = if request.include_backups {
+            let backup_dir = std::path::Path::new(".agents.md.backup");
+            let mut backup_list = Vec::new();
+
+            if backup_dir.exists()
+                && let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await
+            {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    if let Ok(metadata) = entry.metadata().await
+                        && metadata.is_file()
+                    {
+                        let filename = entry.file_name().to_string_lossy().to_string();
+                        if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                            // Extract timestamp from filename
+                            let timestamp_str = filename
+                                .strip_prefix("AGENTS.md.")
+                                .and_then(|s| s.strip_suffix(".backup"))
+                                .unwrap_or("");
+
+                            let timestamp = chrono::NaiveDateTime::parse_from_str(
+                                timestamp_str,
+                                "%Y-%m-%d-%H%M%S",
+                            )
+                            .ok()
+                            .map(|dt| {
+                                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                                    dt,
+                                    chrono::Utc,
+                                )
+                            })
+                            .unwrap_or_else(chrono::Utc::now);
+
+                            // Calculate backup version
+                            if let Ok(backup_content) =
+                                tokio::fs::read_to_string(entry.path()).await
+                            {
+                                let mut backup_hasher = Sha256::new();
+                                backup_hasher.update(backup_content.as_bytes());
+                                let backup_version = format!("{:x}", backup_hasher.finalize());
+
+                                backup_list.push(crate::types::ConfigBackup {
+                                    filename,
+                                    timestamp,
+                                    size: metadata.len(),
+                                    version: backup_version,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sort by timestamp, newest first
+            backup_list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            Some(backup_list)
+        } else {
+            None
+        };
+
+        // Check if file is writable
+        let writable = config_path
+            .metadata()
+            .map(|m| !m.permissions().readonly())
+            .unwrap_or(false);
+
+        timer.success();
+        Ok(AgentConfigGetResponse {
+            content,
+            version,
+            backups,
+            writable,
+        })
+    }
+
+    async fn agent_config_update(
+        &self,
+        request: AgentConfigUpdateRequest,
+    ) -> RpcResult<AgentConfigUpdateResponse> {
+        let timer = RpcTimer::new("agent_config_update".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        let config_path = std::path::Path::new("AGENTS.md");
+
+        // Check expected version for optimistic locking
+        if let Some(expected_version) = &request.expected_version
+            && let Ok(current_content) = tokio::fs::read_to_string(&config_path).await
+        {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(current_content.as_bytes());
+            let current_version = format!("{:x}", hasher.finalize());
+
+            if &current_version != expected_version {
+                timer.error();
+                return Ok(AgentConfigUpdateResponse {
+                    success: false,
+                    new_version: None,
+                    backup_path: None,
+                    error: Some(ConfigError::Conflict { current_version }),
+                    reload_required: false,
+                });
+            }
+        }
+
+        // Validate the new configuration
+        if let Err(validation_error) = validate_agent_config(&request.content) {
+            timer.error();
+            return Ok(AgentConfigUpdateResponse {
+                success: false,
+                new_version: None,
+                backup_path: None,
+                error: Some(ConfigError::ValidationFailed {
+                    details: validation_error,
+                }),
+                reload_required: false,
+            });
+        }
+
+        // Create backup if requested
+        let backup_path = if request.create_backup {
+            // Create backup directory if it doesn't exist
+            let backup_dir = std::path::Path::new(".agents.md.backup");
+            if !backup_dir.exists()
+                && let Err(e) = tokio::fs::create_dir_all(backup_dir).await
+            {
+                warn!("Failed to create backup directory: {}", e);
+            }
+
+            // Create backup with timestamp
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d-%H%M%S");
+            let backup_filename = format!("AGENTS.md.{timestamp}.backup");
+            let backup_path = backup_dir.join(&backup_filename);
+
+            // Copy current file to backup
+            if config_path.exists() {
+                if let Err(e) = tokio::fs::copy(&config_path, &backup_path).await {
+                    warn!("Failed to create backup: {}", e);
+                    None
+                } else {
+                    // Keep only last 10 backups
+                    cleanup_old_backups(backup_dir, 10).await;
+                    Some(backup_path.to_string_lossy().to_string())
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Save last-known-good before update
+        let last_good_path = std::path::Path::new("AGENTS.md.last-known-good");
+        if config_path.exists() {
+            let _ = tokio::fs::copy(&config_path, &last_good_path).await;
+        }
+
+        // Write new configuration atomically
+        let temp_path = std::path::Path::new("AGENTS.md.tmp");
+        match tokio::fs::write(&temp_path, &request.content).await {
+            Ok(_) => {
+                // Atomic rename
+                if let Err(_e) = tokio::fs::rename(&temp_path, &config_path).await {
+                    timer.error();
+                    return Ok(AgentConfigUpdateResponse {
+                        success: false,
+                        new_version: None,
+                        backup_path,
+                        error: Some(ConfigError::ReadOnlyFilesystem),
+                        reload_required: false,
+                    });
+                }
+            }
+            Err(_e) => {
+                timer.error();
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                return Ok(AgentConfigUpdateResponse {
+                    success: false,
+                    new_version: None,
+                    backup_path,
+                    error: Some(ConfigError::ReadOnlyFilesystem),
+                    reload_required: false,
+                });
+            }
+        }
+
+        // Calculate new version
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(request.content.as_bytes());
+        let new_version = format!("{:x}", hasher.finalize());
+
+        // Reload configuration automatically
+        let reload_success = match self.reload_configuration(&request.content).await {
+            Ok(_) => {
+                info!("Configuration updated and reloaded successfully");
+                true
+            }
+            Err(e) => {
+                warn!(
+                    "Configuration saved but reload failed: {}. Agent restart may be required.",
+                    e
+                );
+                false
+            }
+        };
+
+        timer.success();
+        Ok(AgentConfigUpdateResponse {
+            success: true,
+            new_version: Some(new_version),
+            backup_path,
+            error: None,
+            reload_required: !reload_success, // Only require reload if auto-reload failed
+        })
+    }
+
+    async fn agent_config_validate(
+        &self,
+        request: AgentConfigValidateRequest,
+    ) -> RpcResult<AgentConfigValidateResponse> {
+        let timer = RpcTimer::new("agent_config_validate".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+
+        // Parse and validate the configuration
+        match parse_agents_config(&request.content) {
+            Ok(agents) => {
+                if agents.is_empty() {
+                    errors.push("No agent configurations found".to_string());
+                } else {
+                    for agent in agents {
+                        // Validate required fields
+                        if agent.name.is_empty() {
+                            errors.push("Agent name is required".to_string());
+                        }
+                        if agent.purpose.is_empty() {
+                            warnings.push(format!("Agent '{}' has no purpose defined", agent.name));
+                        }
+                        if agent.model.is_empty() {
+                            errors.push(format!("Agent '{}' requires a model", agent.name));
+                        }
+                        if agent.listen.is_empty() {
+                            errors
+                                .push(format!("Agent '{}' requires a listen address", agent.name));
+                        }
+
+                        // Validate listen address format
+                        if !agent.listen.is_empty()
+                            && agent.listen.parse::<std::net::SocketAddr>().is_err()
+                        {
+                            errors.push(format!(
+                                "Agent '{}' has invalid listen address: {}",
+                                agent.name, agent.listen
+                            ));
+                        }
+
+                        // Validate model format
+                        if !agent.model.is_empty() && !agent.model.contains("://") {
+                            warnings.push(format!(
+                                "Agent '{}' model should use protocol format (e.g., ollama://...)",
+                                agent.name
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                errors.push(format!("Configuration parse error: {e}"));
+            }
+        }
+
+        timer.success();
+        Ok(AgentConfigValidateResponse {
+            valid: errors.is_empty(),
+            errors,
+            warnings,
+        })
+    }
+
+    async fn agent_config_restore(
+        &self,
+        request: AgentConfigRestoreRequest,
+    ) -> RpcResult<AgentConfigRestoreResponse> {
+        let timer = RpcTimer::new("agent_config_restore".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(e);
+        }
+
+        let backup_dir = std::path::Path::new(".agents.md.backup");
+        let backup_path = backup_dir.join(&request.backup_filename);
+
+        // Check if backup exists
+        if !backup_path.exists() {
+            timer.error();
+            return Ok(AgentConfigRestoreResponse {
+                success: false,
+                new_version: None,
+                error: Some(ConfigError::ValidationFailed {
+                    details: format!("Backup file not found: {}", request.backup_filename),
+                }),
+            });
+        }
+
+        // Read backup content
+        let backup_content = match tokio::fs::read_to_string(&backup_path).await {
+            Ok(content) => content,
+            Err(_e) => {
+                timer.error();
+                return Ok(AgentConfigRestoreResponse {
+                    success: false,
+                    new_version: None,
+                    error: Some(ConfigError::ReadOnlyFilesystem),
+                });
+            }
+        };
+
+        // Validate backup content
+        if let Err(validation_error) = validate_agent_config(&backup_content) {
+            timer.error();
+            return Ok(AgentConfigRestoreResponse {
+                success: false,
+                new_version: None,
+                error: Some(ConfigError::ValidationFailed {
+                    details: format!("Backup validation failed: {validation_error}"),
+                }),
+            });
+        }
+
+        // Create a backup of current config before restoring
+        let config_path = std::path::Path::new("AGENTS.md");
+        if config_path.exists() {
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d-%H%M%S");
+            let pre_restore_backup =
+                backup_dir.join(format!("AGENTS.md.{timestamp}.pre-restore.backup"));
+            let _ = tokio::fs::copy(&config_path, &pre_restore_backup).await;
+        }
+
+        // Restore the backup
+        match tokio::fs::write(&config_path, &backup_content).await {
+            Ok(_) => {
+                // Calculate new version
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(backup_content.as_bytes());
+                let new_version = format!("{:x}", hasher.finalize());
+
+                info!(
+                    "Configuration restored from backup: {}",
+                    request.backup_filename
+                );
+
+                timer.success();
+                Ok(AgentConfigRestoreResponse {
+                    success: true,
+                    new_version: Some(new_version),
+                    error: None,
+                })
+            }
+            Err(_e) => {
+                timer.error();
+                Ok(AgentConfigRestoreResponse {
+                    success: false,
+                    new_version: None,
+                    error: Some(ConfigError::ReadOnlyFilesystem),
+                })
+            }
+        }
+    }
+}
+
+impl A2aRpcImpl {
+    /// Hot-reload configuration from new content
+    async fn reload_configuration(&self, content: &str) -> Result<()> {
+        use crate::agent_config::parse_agents_config;
+
+        // Validate configuration before applying
+        if content.trim().is_empty() {
+            return Err(A2aError::Configuration(
+                "Configuration file is empty".to_string(),
+            ));
+        }
+
+        // Parse the new configuration
+        let agents = parse_agents_config(content)
+            .map_err(|e| A2aError::Configuration(format!("Failed to parse configuration: {e}")))?;
+
+        if agents.is_empty() {
+            return Err(A2aError::Configuration(
+                "No agent configurations found".to_string(),
+            ));
+        }
+
+        // Find our agent's configuration
+        let agent_metadata = self.agent_metadata.read().await;
+        let our_agent_name = &agent_metadata.name;
+
+        let new_config = agents
+            .iter()
+            .find(|a| a.name == *our_agent_name)
+            .ok_or_else(|| {
+                A2aError::Configuration(format!(
+                    "Agent '{our_agent_name}' not found in new configuration"
+                ))
+            })?;
+
+        // Validate required fields
+        if new_config.purpose.is_empty() {
+            return Err(A2aError::Configuration(
+                "Agent purpose cannot be empty".to_string(),
+            ));
+        }
+        if new_config.model.is_empty() {
+            return Err(A2aError::Configuration(
+                "Agent model cannot be empty".to_string(),
+            ));
+        }
+
+        // Store model before releasing lock
+        let old_model = agent_metadata.model.clone();
+        drop(agent_metadata); // Release read lock
+
+        // Update metadata
+        {
+            let mut metadata = self.agent_metadata.write().await;
+            metadata.purpose.clone_from(&new_config.purpose);
+            // Note: listen address is stored in endpoint field
+            metadata.endpoint.clone_from(&new_config.listen);
+
+            // Update API keys in metadata and environment
+            metadata.api_keys.clone_from(&new_config.api_keys);
+            for (key, value) in &new_config.api_keys {
+                // SAFETY: We control the key and value from our config file
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+
+            info!("Updated agent metadata for '{}'", metadata.name);
+            info!("  Purpose: {}", metadata.purpose);
+            info!("  Endpoint: {}", metadata.endpoint);
+            info!("  API keys updated: {}", metadata.api_keys.len());
+        }
+
+        // If model changed, recreate LLM adapter
+        if new_config.model != old_model && self.llm_adapter.is_some() {
+            // Note: In a real implementation, we'd need to recreate the adapter
+            // This would require access to the LLM client creation logic
+            warn!(
+                "Model change detected from '{}' to '{}', but LLM adapter recreation not yet implemented",
+                old_model, new_config.model
+            );
+
+            // Update the model in metadata for now
+            let mut metadata = self.agent_metadata.write().await;
+            metadata.model.clone_from(&new_config.model);
+        }
+
+        // Handle MCP server changes
+        if !new_config.mcp_servers.is_empty() {
+            info!("MCP server configuration changed, clearing existing connections");
+
+            // Clear existing MCP connections
+            self.mcp_registry.clear_connections().await;
+
+            // Log the MCP servers that need to be restarted
+            for mcp_server in &new_config.mcp_servers {
+                info!("MCP server '{}' needs restart:", mcp_server.name);
+                if let Some(cmd) = &mcp_server.command {
+                    info!("  Command: {} {:?}", cmd, mcp_server.args);
+                } else if let Some(url) = &mcp_server.url {
+                    info!("  URL: {}", url);
+                }
+            }
+
+            warn!("MCP servers cleared. Manual restart of MCP servers required for full reload");
+            // Note: Full MCP process spawning would require CLI layer integration
+        }
+
+        info!("Configuration hot-reload completed successfully");
+        Ok(())
+    }
+}
+
+// Helper function to validate agent configuration
+fn validate_agent_config(content: &str) -> std::result::Result<(), String> {
+    // Basic validation - ensure it can be parsed
+    match parse_agents_config(content) {
+        Ok(agents) if agents.is_empty() => Err("No agent configurations found".to_string()),
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Parse error: {e}")),
+    }
+}
+
+// Simple agent configuration structure for validation
+#[derive(Debug)]
+struct SimpleAgentConfig {
+    name: String,
+    purpose: String,
+    model: String,
+    listen: String,
+}
+
+// Basic parser for agent configuration validation
+fn parse_agents_config(content: &str) -> std::result::Result<Vec<SimpleAgentConfig>, String> {
+    let mut agents = Vec::new();
+    let mut current_agent: Option<SimpleAgentConfig> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Check for agent section header
+        if trimmed.starts_with("## ") {
+            // Save previous agent if exists
+            if let Some(agent) = current_agent.take() {
+                agents.push(agent);
+            }
+
+            let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
+            current_agent = Some(SimpleAgentConfig {
+                name,
+                purpose: String::new(),
+                model: String::new(),
+                listen: String::new(),
+            });
+        } else if let Some(ref mut agent) = current_agent {
+            // Parse agent properties
+            if let Some((key, value)) = trimmed.split_once(':') {
+                let key = key.trim();
+                let value = value.trim();
+
+                match key {
+                    "purpose" => agent.purpose = value.to_string(),
+                    "model" => agent.model = value.to_string(),
+                    "listen" => agent.listen = value.to_string(),
+                    _ => {} // Ignore other fields for now
+                }
+            }
+        }
+    }
+
+    // Save last agent if exists
+    if let Some(agent) = current_agent {
+        agents.push(agent);
+    }
+
+    Ok(agents)
+}
+
+// Helper function for file watcher to reload configuration
+async fn reload_configuration_for_watcher(
+    content: &str,
+    agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
+    _llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
+    mcp_registry: Arc<McpRegistry>,
+) -> Result<()> {
+    use crate::agent_config::parse_agents_config;
+
+    // Validate configuration before applying
+    if content.trim().is_empty() {
+        return Err(A2aError::Configuration(
+            "Configuration file is empty".to_string(),
+        ));
+    }
+
+    // Parse the new configuration
+    let agents = parse_agents_config(content)
+        .map_err(|e| A2aError::Configuration(format!("Failed to parse configuration: {e}")))?;
+
+    if agents.is_empty() {
+        return Err(A2aError::Configuration(
+            "No agent configurations found".to_string(),
+        ));
+    }
+
+    // Find our agent's configuration
+    let our_agent_name = agent_metadata.read().await.name.clone();
+
+    let new_config = agents
+        .iter()
+        .find(|a| a.name == our_agent_name)
+        .ok_or_else(|| {
+            A2aError::Configuration(format!(
+                "Agent '{our_agent_name}' not found in new configuration"
+            ))
+        })?;
+
+    // Validate required fields
+    if new_config.purpose.is_empty() {
+        return Err(A2aError::Configuration(
+            "Agent purpose cannot be empty".to_string(),
+        ));
+    }
+    if new_config.model.is_empty() {
+        return Err(A2aError::Configuration(
+            "Agent model cannot be empty".to_string(),
+        ));
+    }
+
+    // Update metadata
+    {
+        let mut metadata = agent_metadata.write().await;
+        metadata.purpose.clone_from(&new_config.purpose);
+        metadata.endpoint.clone_from(&new_config.listen);
+        metadata.api_keys.clone_from(&new_config.api_keys);
+
+        // Update environment variables
+        for (key, value) in &new_config.api_keys {
+            // SAFETY: We control the key and value from our config file
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+
+        info!("Updated agent metadata for '{}'", metadata.name);
+        info!("  Purpose: {}", metadata.purpose);
+        info!("  Endpoint: {}", metadata.endpoint);
+        info!("  API keys updated: {}", metadata.api_keys.len());
+    }
+
+    // Handle model changes
+    if new_config.model != agent_metadata.read().await.model {
+        warn!("Model change detected, but LLM adapter recreation not yet implemented");
+        let mut metadata = agent_metadata.write().await;
+        metadata.model.clone_from(&new_config.model);
+    }
+
+    // Handle MCP server changes
+    if !new_config.mcp_servers.is_empty() {
+        info!("MCP server configuration changed, clearing existing connections");
+
+        // Clear existing MCP connections
+        mcp_registry.clear_connections().await;
+
+        // Log the MCP servers that need to be restarted
+        for mcp_server in &new_config.mcp_servers {
+            info!("MCP server '{}' needs restart:", mcp_server.name);
+            if let Some(cmd) = &mcp_server.command {
+                info!("  Command: {} {:?}", cmd, mcp_server.args);
+            } else if let Some(url) = &mcp_server.url {
+                info!("  URL: {}", url);
+            }
+        }
+
+        warn!(
+            "MCP servers cleared. Manual restart required or use agent restart for full MCP reload"
+        );
+    }
+
+    Ok(())
+}
+
+// Helper function to clean up old backups
+async fn cleanup_old_backups(backup_dir: &std::path::Path, keep_count: usize) {
+    if let Ok(mut entries) = tokio::fs::read_dir(backup_dir).await {
+        let mut backups = Vec::new();
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Ok(metadata) = entry.metadata().await
+                && metadata.is_file()
+            {
+                let filename = entry.file_name().to_string_lossy().to_string();
+                if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                    backups.push((entry.path(), metadata.modified().ok()));
+                }
+            }
+        }
+
+        // Sort by modification time, newest first
+        backups.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Remove old backups
+        for (path, _) in backups.iter().skip(keep_count) {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
 }
 
 pub struct A2aServer {
@@ -1149,6 +1920,10 @@ pub struct A2aServer {
     event_writer: Arc<tokio::sync::RwLock<Option<Arc<EventWriter>>>>,
     session_id: String,
     event_sequence: Arc<tokio::sync::RwLock<u64>>,
+    file_watcher_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    #[allow(dead_code)]
+    #[allow(clippy::type_complexity)]
+    mcp_reload_callback: Arc<tokio::sync::RwLock<Option<Arc<dyn Fn() + Send + Sync>>>>,
 }
 
 impl A2aServer {
@@ -1166,6 +1941,8 @@ impl A2aServer {
             event_writer: Arc::new(tokio::sync::RwLock::new(None)),
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
+            file_watcher_handle: Arc::new(tokio::sync::RwLock::new(None)),
+            mcp_reload_callback: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -1192,6 +1969,85 @@ impl A2aServer {
 
         // Recreate LLM adapter with new API keys
         self.recreate_llm_adapter().await;
+    }
+
+    /// Reload configuration from new content without restarting the server
+    #[allow(dead_code)]
+    async fn reload_configuration_from_content(&self, content: &str) -> Result<()> {
+        use crate::agent_config::parse_agents_config;
+
+        // Parse the new configuration
+        let configs = parse_agents_config(content)
+            .map_err(|e| A2aError::Configuration(format!("Failed to parse config: {e}")))?;
+
+        // Get current agent name to find matching config
+        let current_name = {
+            let metadata = self.agent_metadata.read().await;
+            metadata.name.clone()
+        };
+
+        // Find the configuration for this agent
+        let new_config = configs
+            .iter()
+            .find(|c| c.name == current_name)
+            .ok_or_else(|| {
+                A2aError::Configuration(format!(
+                    "Agent '{current_name}' not found in updated configuration"
+                ))
+            })?;
+
+        // Update agent metadata (name, purpose, model)
+        info!(
+            "Updating agent metadata: name={}, purpose={}, model={}",
+            new_config.name, new_config.purpose, new_config.model
+        );
+
+        // Check if model changed
+        let model_changed = {
+            let metadata = self.agent_metadata.read().await;
+            metadata.model != new_config.model
+        };
+
+        // Update metadata
+        self.set_agent_metadata(
+            new_config.name.clone(),
+            new_config.purpose.clone(),
+            new_config.model.clone(),
+        )
+        .await;
+
+        // Update API keys if present
+        if !new_config.api_keys.is_empty() {
+            info!("Updating API keys");
+            self.set_api_keys(new_config.api_keys.clone()).await;
+        }
+
+        // If model changed, LLM adapter was already recreated by set_agent_metadata
+        if model_changed {
+            info!("Model changed, LLM adapter recreated");
+        }
+
+        // TODO: Handle MCP server updates in Phase 3
+        // This will require access to McpProcessManager and careful state management
+        if !new_config.mcp_servers.is_empty() {
+            warn!(
+                "MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3."
+            );
+            warn!("For now, MCP server changes require agent restart to take effect.");
+        }
+
+        // TODO: Handle listen address changes
+        // Changing the listen address would require rebinding the server socket
+        let current_listen = format!("{}:{}", self.config.bind_address, self.config.port);
+        if new_config.listen != current_listen && new_config.listen != "0.0.0.0:0" {
+            warn!(
+                "Listen address changes require agent restart to take effect (current: {}, new: {})",
+                current_listen, new_config.listen
+            );
+        }
+
+        info!("Configuration reloaded successfully");
+        Ok(())
     }
 
     /// Initialize the event writer for debugging
@@ -1361,6 +2217,111 @@ impl A2aServer {
         }
     }
 
+    /// Start file watcher for AGENTS.md hot-reload
+    pub async fn start_file_watcher(&self) -> Result<()> {
+        use notify::{Event, EventKind, RecursiveMode, Watcher};
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+
+        // Stop any existing watcher
+        self.stop_file_watcher().await;
+
+        let config_path = std::path::Path::new("AGENTS.md");
+        if !config_path.exists() {
+            info!("AGENTS.md not found, skipping file watcher setup");
+            return Ok(());
+        }
+
+        let (tx, rx) = channel();
+        let mut watcher = notify::recommended_watcher(tx)
+            .map_err(|e| A2aError::Internal(format!("Failed to create file watcher: {e}")))?;
+
+        // Watch the AGENTS.md file
+        watcher
+            .watch(config_path, RecursiveMode::NonRecursive)
+            .map_err(|e| A2aError::Internal(format!("Failed to watch AGENTS.md: {e}")))?;
+
+        info!("File watcher started for AGENTS.md");
+
+        // Clone the necessary components for hot-reload
+        let agent_metadata = self.agent_metadata.clone();
+        let llm_adapter = self.llm_adapter.clone();
+        let mcp_registry = self.mcp_registry.clone();
+
+        // Spawn watcher task with blocking recv
+        let handle = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            let mut last_reload = std::time::Instant::now();
+            let _watcher = watcher; // Keep watcher alive
+
+            loop {
+                match rx.recv_timeout(Duration::from_secs(1)) {
+                    Ok(Ok(Event {
+                        kind: EventKind::Modify(_),
+                        ..
+                    })) => {
+                        // Debounce: only reload if at least 1 second has passed
+                        if last_reload.elapsed() > Duration::from_secs(1) {
+                            info!("AGENTS.md modified, triggering hot-reload");
+
+                            // Read the new content and reload in async context
+                            let agent_metadata_clone = agent_metadata.clone();
+                            let llm_adapter_clone = llm_adapter.clone();
+                            let mcp_registry_clone = mcp_registry.clone();
+                            #[allow(clippy::disallowed_methods)]
+                            rt.block_on(async move {
+                                match tokio::fs::read_to_string("AGENTS.md").await {
+                                    Ok(content) => {
+                                        // Perform hot-reload directly here
+                                        match reload_configuration_for_watcher(
+                                            &content,
+                                            agent_metadata_clone,
+                                            llm_adapter_clone,
+                                            mcp_registry_clone
+                                        ).await {
+                                            Ok(_) => {
+                                                info!("Configuration hot-reload completed successfully");
+                                            }
+                                            Err(e) => {
+                                                error!("Configuration hot-reload failed: {}", e);
+                                                error!("Agent will continue with existing configuration");
+                                                // Could trigger recovery mechanism here
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to read AGENTS.md for hot-reload: {}", e);
+                                    }
+                                }
+                            });
+                            last_reload = std::time::Instant::now();
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        warn!("File watcher error: {}", e);
+                    }
+                    Err(_) => {
+                        // Timeout, continue loop
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // Store the handle
+        *self.file_watcher_handle.write().await = Some(handle);
+
+        Ok(())
+    }
+
+    /// Stop the file watcher
+    pub async fn stop_file_watcher(&self) {
+        if let Some(handle) = self.file_watcher_handle.write().await.take() {
+            handle.abort();
+            info!("File watcher stopped");
+        }
+    }
+
     pub async fn start(&self) -> Result<ServerHandle> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind_address, self.config.port)
             .parse()
@@ -1424,6 +2385,13 @@ impl A2aServer {
             event_sequence: self.event_sequence.clone(),
             auth_backend: Arc::new(NoOpAuthBackend),
         };
+
+        // Start file watcher for hot-reload
+        if let Err(e) = self.start_file_watcher().await {
+            warn!("Failed to start file watcher: {}", e);
+            // Continue without file watcher - not a critical failure
+        }
+
         let handle = server.start(rpc_impl.into_rpc());
 
         info!("A2A server started successfully on {}", addr);

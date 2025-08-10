@@ -741,3 +741,138 @@ pub struct TaskCancelResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
+
+/// Configuration management error types
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigError {
+    /// Agent is offline or unreachable
+    AgentOffline,
+    /// Filesystem is read-only or write protected
+    ReadOnlyFilesystem,
+    /// Configuration validation failed
+    ValidationFailed { details: String },
+    /// Concurrent modification conflict
+    Conflict { current_version: String },
+    /// Unauthorized to modify configuration
+    Unauthorized,
+}
+
+/// Request to get agent configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigGetRequest {
+    /// Agent ID requesting the configuration
+    pub agent_id: String,
+    /// Include backup versions
+    #[serde(default)]
+    pub include_backups: bool,
+}
+
+/// Response with agent configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigGetResponse {
+    /// Current AGENTS.md content
+    pub content: String,
+    /// Configuration version/hash
+    pub version: String,
+    /// Available backup versions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backups: Option<Vec<ConfigBackup>>,
+    /// Whether configuration is writable
+    pub writable: bool,
+}
+
+/// Configuration backup information
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ConfigBackup {
+    /// Backup filename
+    pub filename: String,
+    /// Timestamp when backup was created
+    pub timestamp: DateTime<Utc>,
+    /// Size in bytes
+    pub size: u64,
+    /// Version/hash of this backup
+    pub version: String,
+}
+
+/// Request to update agent configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigUpdateRequest {
+    /// Agent ID requesting the update
+    pub agent_id: String,
+    /// New AGENTS.md content
+    pub content: String,
+    /// Expected version for optimistic locking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_version: Option<String>,
+    /// Whether to create a backup
+    #[serde(default = "default_create_backup")]
+    pub create_backup: bool,
+}
+
+fn default_create_backup() -> bool {
+    true
+}
+
+/// Response to configuration update
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigUpdateResponse {
+    /// Whether update was successful
+    pub success: bool,
+    /// New configuration version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_version: Option<String>,
+    /// Path to backup if created
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<String>,
+    /// Error if update failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ConfigError>,
+    /// Whether agent reload is required
+    #[serde(default)]
+    pub reload_required: bool,
+}
+
+/// Request to validate configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigValidateRequest {
+    /// Agent ID requesting validation
+    pub agent_id: String,
+    /// Configuration content to validate
+    pub content: String,
+}
+
+/// Response to configuration validation
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigValidateResponse {
+    /// Whether configuration is valid
+    pub valid: bool,
+    /// Validation errors if any
+    #[serde(default)]
+    pub errors: Vec<String>,
+    /// Validation warnings
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+/// Request to restore configuration from backup
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigRestoreRequest {
+    /// Agent ID requesting restore
+    pub agent_id: String,
+    /// Backup filename to restore
+    pub backup_filename: String,
+}
+
+/// Response to configuration restore
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AgentConfigRestoreResponse {
+    /// Whether restore was successful
+    pub success: bool,
+    /// New configuration version after restore
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_version: Option<String>,
+    /// Error if restore failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ConfigError>,
+}

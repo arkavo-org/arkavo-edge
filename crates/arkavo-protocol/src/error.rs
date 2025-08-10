@@ -26,6 +26,9 @@ pub enum A2aError {
     #[error("Protocol error: {0}")]
     Protocol(String),
 
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
@@ -93,6 +96,7 @@ impl A2aError {
             Self::Auth(_) => crate::transport::error_codes::AUTHENTICATION_ERROR,
             Self::InvalidEndpoint(_) => crate::transport::error_codes::INVALID_REQUEST,
             Self::Protocol(_) => crate::transport::error_codes::INVALID_REQUEST,
+            Self::Configuration(_) => crate::transport::error_codes::INVALID_REQUEST,
             Self::Serialization(_) => crate::transport::error_codes::PARSE_ERROR,
             Self::WebSocket(_) => crate::transport::error_codes::TRANSPORT_ERROR,
             Self::Http(_) => crate::transport::error_codes::TRANSPORT_ERROR,
