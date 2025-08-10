@@ -98,7 +98,7 @@ impl McpRegistry {
             Err(format!("MCP server '{server_name}' not found").into())
         }
     }
-    
+
     /// Clear all MCP connections (for hot-reload)
     pub async fn clear_connections(&self) {
         let mut connections = self.connections.write().await;
@@ -108,7 +108,7 @@ impl McpRegistry {
             info!("Cleared {} MCP server connections for hot-reload", count);
         }
     }
-    
+
     /// Remove a specific MCP connection
     pub async fn unregister(&self, name: &str) -> bool {
         let mut connections = self.connections.write().await;
