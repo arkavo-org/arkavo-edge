@@ -91,7 +91,7 @@ The project follows these quality standards:
 
 - No warnings with `cargo clippy -- -D warnings`
 - Test coverage target of ≥85%
-- Binary size ≤4 GB
+- Binary size ≤50 MB
 - All files under 400 LoC
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render
@@ -166,3 +166,11 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - **Maximum Events**: 100,000 events per session (configurable via `ARKAVO_MAX_EVENTS_PER_SESSION`)
 - **Storage Limits**: Automatic cleanup when database exceeds 1GB
 - **Pruning Strategy**: Keep most recent events when limits are reached
+
+## Environment Variables
+
+- **ARKAVO_NO_TERMINAL_RELAUNCH**: Disables automatic terminal relaunch on macOS (for testing/automation)
+- **ARKAVO_EVENT_RETENTION_HOURS**: Sets event retention period (default: 24)
+- **ARKAVO_MAX_EVENTS_PER_SESSION**: Maximum events per session (default: 100000)
+- **ARKAVO_DEBUG**: Enables debug logging
+- **ARKAVO_MASTER_KEY**: Sets master encryption key
