@@ -560,6 +560,7 @@
                 <div class="detail-tabs">
                     <button class="tab-button active" onclick="switchTab('overview')">Overview</button>
                     <button class="tab-button" onclick="switchTab('capabilities')">Capabilities</button>
+                    <button class="tab-button" onclick="switchTab('configuration')">Configuration</button>
                     <button class="tab-button" onclick="switchTab('chat')">Chat</button>
                 </div>
                 <div class="detail-content">
@@ -576,6 +577,53 @@
                             <div class="section-title">Features</div>
                             <div id="featuresDetails">
                                 <div class="loading-message">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-content" id="configurationTab" style="display: none;">
+                        <div class="config-container" style="padding: 20px; height: 100%; display: flex; flex-direction: column;">
+                            <div class="config-header" style="margin-bottom: 20px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <div style="font-size: 14px; color: var(--text-secondary);">
+                                        <span>Version: </span>
+                                        <span id="configVersion" style="font-family: monospace; color: var(--text-primary);">Loading...</span>
+                                    </div>
+                                    <div id="configWritableStatus" style="padding: 4px 8px; border-radius: 4px; font-size: 12px; background: var(--success-color); color: white;">
+                                        Writable
+                                    </div>
+                                </div>
+                                <div id="configStatus" style="padding: 10px; border-radius: 4px; font-size: 14px; display: none;"></div>
+                            </div>
+                            
+                            <div class="config-editor-section" style="flex: 1; display: flex; flex-direction: column; margin-bottom: 20px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                                    <label style="font-size: 14px; font-weight: 600; color: var(--text-secondary);">AGENTS.md Content</label>
+                                    <button onclick="refreshConfig()" style="padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; font-size: 13px;">
+                                        Refresh
+                                    </button>
+                                </div>
+                                <textarea id="configEditor" style="flex: 1; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'Monaco', 'Consolas', monospace; font-size: 13px; resize: none; border-radius: 4px;"></textarea>
+                            </div>
+                            
+                            <div class="config-backup-section" style="margin-bottom: 20px;">
+                                <label style="font-size: 14px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 10px;">Backup History</label>
+                                <div style="display: flex; gap: 10px;">
+                                    <select id="backupSelect" style="flex: 1; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
+                                        <option value="">No backups available</option>
+                                    </select>
+                                    <button onclick="restoreBackup()" style="padding: 8px 16px; background: var(--warning-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                                        Restore
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="config-actions" style="display: flex; gap: 10px;">
+                                <button onclick="validateConfig()" style="padding: 10px 20px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                    Validate
+                                </button>
+                                <button onclick="saveConfig()" style="flex: 1; padding: 10px 20px; background: var(--info-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                    Save Configuration
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1052,11 +1100,143 @@
                 case 'messageDelta':
                     handleMessageDelta(msg);
                     break;
+                case 'agentConfigSnapshot':
+                    handleConfigSnapshot(msg);
+                    break;
+                case 'configUpdateResult':
+                    handleConfigUpdateResult(msg);
+                    break;
+                case 'configValidationResult':
+                    handleConfigValidationResult(msg);
+                    break;
+                case 'configRestoreResult':
+                    handleConfigRestoreResult(msg);
+                    break;
                 case 'error':
                     console.error('AG-UI Error:', msg.code, msg.message);
+                    // Show error in config status if it's config-related
+                    if (msg.code && msg.code.startsWith('CONFIG_')) {
+                        showConfigStatus(msg.message, 'error');
+                    }
                     break;
                 default:
                     console.log('Unhandled AG-UI message:', msg);
+            }
+        }
+        
+        function handleConfigSnapshot(msg) {
+            // Update configuration state
+            configState.currentVersion = msg.version;
+            configState.originalContent = msg.content;
+            
+            // Update UI
+            document.getElementById('configVersion').textContent = msg.version.substring(0, 12) + '...';
+            document.getElementById('configEditor').value = msg.content;
+            document.getElementById('configEditor').disabled = !msg.writable;
+            
+            // Update writable status
+            const writableStatus = document.getElementById('configWritableStatus');
+            if (msg.writable) {
+                writableStatus.textContent = 'Writable';
+                writableStatus.style.background = 'var(--success-color)';
+            } else {
+                writableStatus.textContent = 'Read-only';
+                writableStatus.style.background = 'var(--error-color)';
+            }
+            
+            // Update backup list
+            const backupSelect = document.getElementById('backupSelect');
+            if (msg.backups && msg.backups.length > 0) {
+                backupSelect.innerHTML = msg.backups.map(backup => {
+                    const date = new Date(backup.timestamp);
+                    const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                    return `<option value="${backup.filename}">${backup.filename} (${dateStr}, ${(backup.size / 1024).toFixed(1)} KB)</option>`;
+                }).join('');
+            } else {
+                backupSelect.innerHTML = '<option value="">No backups available</option>';
+            }
+        }
+        
+        function handleConfigUpdateResult(msg) {
+            if (msg.success) {
+                showConfigStatus('Configuration saved successfully!', 'success');
+                // Update version
+                if (msg.newVersion) {
+                    configState.currentVersion = msg.newVersion;
+                    configState.originalContent = document.getElementById('configEditor').value;
+                    document.getElementById('configVersion').textContent = msg.newVersion.substring(0, 12) + '...';
+                }
+                // Show appropriate message based on reload status
+                if (msg.reloadRequired) {
+                    showConfigStatus('Configuration saved. Agent restart required for some changes.', 'warning');
+                } else {
+                    // Configuration was hot-reloaded successfully
+                    showConfigStatus('Configuration applied successfully!', 'success');
+                }
+            } else {
+                // Handle specific errors
+                if (msg.error) {
+                    switch(msg.error.type) {
+                        case 'agent_offline':
+                            showConfigStatus('Failed to save: Agent is offline', 'error');
+                            break;
+                        case 'read_only_filesystem':
+                            showConfigStatus('Failed to save: Filesystem is read-only', 'error');
+                            break;
+                        case 'validation_failed':
+                            showConfigStatus(`Validation failed: ${msg.error.details || 'Invalid configuration'}`, 'error');
+                            break;
+                        case 'conflict':
+                            showConfigStatus(`Version conflict: Configuration was modified by another user. Please refresh.`, 'error');
+                            break;
+                        case 'unauthorized':
+                            showConfigStatus('Failed to save: Unauthorized', 'error');
+                            break;
+                        default:
+                            showConfigStatus('Failed to save configuration', 'error');
+                    }
+                } else {
+                    showConfigStatus('Failed to save configuration', 'error');
+                }
+            }
+        }
+        
+        function handleConfigValidationResult(msg) {
+            if (msg.valid) {
+                if (msg.warnings && msg.warnings.length > 0) {
+                    showConfigStatus(`Valid with warnings: ${msg.warnings.join(', ')}`, 'warning');
+                } else {
+                    showConfigStatus('Configuration is valid', 'success');
+                }
+            } else {
+                const errors = msg.errors && msg.errors.length > 0 ? msg.errors.join(', ') : 'Invalid configuration';
+                showConfigStatus(`Validation failed: ${errors}`, 'error');
+            }
+        }
+        
+        function handleConfigRestoreResult(msg) {
+            if (msg.success) {
+                showConfigStatus('Configuration restored successfully!', 'success');
+                // Reload configuration to show restored content
+                if (configState.agentId) {
+                    loadAgentConfig(configState.agentId);
+                }
+            } else {
+                // Handle specific errors
+                if (msg.error) {
+                    switch(msg.error.type) {
+                        case 'agent_offline':
+                            showConfigStatus('Failed to restore: Agent is offline', 'error');
+                            break;
+                        case 'read_only_filesystem':
+                            showConfigStatus('Failed to restore: Filesystem is read-only', 'error');
+                            break;
+                        default:
+                            showConfigStatus('Failed to restore configuration', 'error');
+                    }
+                } else {
+                    showConfigStatus('Failed to restore configuration', 'error');
+                }
             }
         }
         
@@ -1143,6 +1323,11 @@
                 openChat(currentAgent.id);
             } else if (tabName !== 'chat' && chatState.activeAgentId) {
                 closeChat();
+            }
+            
+            // Special handling for configuration tab
+            if (tabName === 'configuration' && currentAgent) {
+                loadAgentConfig(currentAgent.id);
             }
         }
         
@@ -1259,6 +1444,144 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // Configuration management functions
+        let configState = {
+            currentVersion: null,
+            originalContent: null,
+            agentId: null
+        };
+        
+        function loadAgentConfig(agentId) {
+            configState.agentId = agentId;
+            
+            // Reset UI
+            document.getElementById('configStatus').style.display = 'none';
+            document.getElementById('configVersion').textContent = 'Loading...';
+            document.getElementById('configEditor').value = 'Loading configuration...';
+            document.getElementById('configEditor').disabled = true;
+            document.getElementById('backupSelect').innerHTML = '<option value="">Loading backups...</option>';
+            
+            // Send request to get configuration
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'getAgentConfig',
+                    agentId: agentId,
+                    includeBackups: true
+                }));
+            }
+        }
+        
+        function refreshConfig() {
+            if (configState.agentId) {
+                loadAgentConfig(configState.agentId);
+            }
+        }
+        
+        function validateConfig() {
+            const content = document.getElementById('configEditor').value;
+            
+            if (!configState.agentId) {
+                showConfigStatus('No agent selected', 'error');
+                return;
+            }
+            
+            // Send validation request
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'validateAgentConfig',
+                    agentId: configState.agentId,
+                    content: content
+                }));
+                showConfigStatus('Validating configuration...', 'info');
+            }
+        }
+        
+        function saveConfig() {
+            const content = document.getElementById('configEditor').value;
+            
+            if (!configState.agentId) {
+                showConfigStatus('No agent selected', 'error');
+                return;
+            }
+            
+            // Check if content changed
+            if (content === configState.originalContent) {
+                showConfigStatus('No changes to save', 'info');
+                return;
+            }
+            
+            // Send save request with version for optimistic locking
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'updateAgentConfig',
+                    agentId: configState.agentId,
+                    content: content,
+                    expectedVersion: configState.currentVersion,
+                    createBackup: true
+                }));
+                showConfigStatus('Saving configuration...', 'info');
+            }
+        }
+        
+        function restoreBackup() {
+            const backupSelect = document.getElementById('backupSelect');
+            const selectedBackup = backupSelect.value;
+            
+            if (!selectedBackup) {
+                showConfigStatus('Please select a backup to restore', 'error');
+                return;
+            }
+            
+            if (!configState.agentId) {
+                showConfigStatus('No agent selected', 'error');
+                return;
+            }
+            
+            if (confirm(`Are you sure you want to restore from backup: ${selectedBackup}?`)) {
+                // Send restore request
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'restoreAgentConfig',
+                        agentId: configState.agentId,
+                        backupFilename: selectedBackup
+                    }));
+                    showConfigStatus('Restoring from backup...', 'info');
+                }
+            }
+        }
+        
+        function showConfigStatus(message, type) {
+            const statusEl = document.getElementById('configStatus');
+            statusEl.textContent = message;
+            statusEl.style.display = 'block';
+            
+            // Set background color based on type
+            if (type === 'error') {
+                statusEl.style.background = 'rgba(231, 76, 60, 0.2)';
+                statusEl.style.color = 'var(--error-color)';
+                statusEl.style.border = '1px solid var(--error-color)';
+            } else if (type === 'success') {
+                statusEl.style.background = 'rgba(46, 204, 113, 0.2)';
+                statusEl.style.color = 'var(--success-color)';
+                statusEl.style.border = '1px solid var(--success-color)';
+            } else if (type === 'warning') {
+                statusEl.style.background = 'rgba(243, 156, 18, 0.2)';
+                statusEl.style.color = 'var(--warning-color)';
+                statusEl.style.border = '1px solid var(--warning-color)';
+            } else {
+                statusEl.style.background = 'rgba(52, 152, 219, 0.2)';
+                statusEl.style.color = 'var(--info-color)';
+                statusEl.style.border = '1px solid var(--info-color)';
+            }
+            
+            // Auto-hide after 5 seconds for success messages
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 5000);
+            }
         }
         
         // ESC key handler

@@ -1,25 +1,25 @@
 # AGENTS.md
 
-## documentation-agent
-purpose: Generate API documentation and README files
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
-listen:  0.0.0.0:8347
+## architecture-agent
+purpose: Design system architecture and scalability patterns
+model:   ollama://127.0.0.1:11434/qwen:0.6b
+listen:  0.0.0.0:8351
 
-# The documentation agent specializes in:
-# - Generating API documentation
-# - Creating README files
-# - Writing code comments
-# - Documenting architecture decisions
-# - Creating user guides
+# The architecture agent specializes in:
+# - System design patterns
+# - Microservices architecture
+# - Scalability strategies
+# - Design pattern recommendations
+# - Architecture documentation
 
-# MCP servers for documentation generation
+# MCP servers for analysis
 # Note: External MCP servers are optional npm packages that can be installed separately
 # To install: npm install -g @modelcontextprotocol/server-filesystem
 # Uncomment the following lines if you have these servers installed:
 # mcp_servers:
 #   - name: filesystem
 #     command: mcp-filesystem
-#     args: ["--allow-write"]
+#     args: ["--read-only"]
 #   - name: git
 #     command: mcp-git
 #     args: ["--read-only"]

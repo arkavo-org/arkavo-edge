@@ -56,7 +56,7 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 ## {name}
 purpose: Describe what this agent does
-model:   ollama://127.0.0.1:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen3:0.6b
 listen:  0.0.0.0:8342
 
 # MCP servers provide additional tools and capabilities to the agent
@@ -152,7 +152,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
 
 ## {agent_name}
 purpose: AI agent for {dir_name} development
-model:   ollama://127.0.0.1:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen3:0.6b
 listen:  0.0.0.0:8342
 "#
         );

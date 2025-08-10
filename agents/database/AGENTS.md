@@ -2,7 +2,7 @@
 
 ## database-agent
 purpose: Optimize SQL queries and design database schemas
-model:   ollama://127.0.0.1:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen3:0.6b
 listen:  0.0.0.0:8345
 
 # The database agent specializes in:

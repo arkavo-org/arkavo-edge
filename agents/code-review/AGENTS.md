@@ -2,7 +2,7 @@
 
 ## code-review-agent
 purpose: Review code quality, patterns, and suggest improvements
-model:   ollama://127.0.0.1:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen3:0.6b
 listen:  0.0.0.0:8344
 
 # The code review agent specializes in:

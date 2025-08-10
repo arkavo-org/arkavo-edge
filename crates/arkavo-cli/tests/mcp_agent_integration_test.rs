@@ -8,7 +8,7 @@ mod mcp_agent_tests {
 
 ## test-agent
 purpose: Test agent with MCP servers
-model:   ollama://127.0.0.1:11434/qwen:0.6b
+model:   ollama://127.0.0.1:11434/qwen3:0.6b
 listen:  0.0.0.0:8342
 mcp_servers:
   - name: filesystem
@@ -33,7 +33,7 @@ listen:  0.0.0.0:8343
         let agent1 = &agents[0];
         assert_eq!(agent1.name, "test-agent");
         assert_eq!(agent1.purpose, "Test agent with MCP servers");
-        assert_eq!(agent1.model, "ollama://127.0.0.1:11434/qwen:0.6b");
+        assert_eq!(agent1.model, "ollama://127.0.0.1:11434/qwen3:0.6b");
         assert_eq!(agent1.listen, "0.0.0.0:8342");
         assert_eq!(agent1.mcp_servers.len(), 3);
 
