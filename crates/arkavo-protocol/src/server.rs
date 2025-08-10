@@ -8,11 +8,14 @@ use crate::rate_limit::RateLimiter;
 use crate::task_executor::{TaskExecutor, TaskExecutorConfig};
 use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
-    AgentBroadcast, AgentDiscoverFilter, AgentQueryRequest, AgentQueryResponse, BroadcastType,
-    ChatOpenRequest, ChatRequest, ChatSession, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
-    DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent,
-    MessageSendRequest, MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
-    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
+    AgentBroadcast, AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigRestoreRequest,
+    AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
+    AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter, AgentQueryRequest,
+    AgentQueryResponse, BroadcastType, ChatOpenRequest, ChatRequest, ChatSession, ConfigError,
+    DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure, FeatureType,
+    Message, MessageDelta, MessageDeltaContent, MessageSendRequest, MessageSendResponse,
+    TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
+    TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
@@ -105,6 +108,22 @@ pub trait A2aRpc {
     /// Broadcast agent capabilities
     #[method(name = "agent_broadcast")]
     async fn agent_broadcast(&self, broadcast: AgentBroadcast) -> RpcResult<()>;
+
+    /// Get agent configuration
+    #[method(name = "agent.config.get")]
+    async fn agent_config_get(&self, request: AgentConfigGetRequest) -> RpcResult<AgentConfigGetResponse>;
+
+    /// Update agent configuration
+    #[method(name = "agent.config.update")]
+    async fn agent_config_update(&self, request: AgentConfigUpdateRequest) -> RpcResult<AgentConfigUpdateResponse>;
+
+    /// Validate agent configuration
+    #[method(name = "agent.config.validate")]
+    async fn agent_config_validate(&self, request: AgentConfigValidateRequest) -> RpcResult<AgentConfigValidateResponse>;
+
+    /// Restore agent configuration from backup
+    #[method(name = "agent.config.restore")]
+    async fn agent_config_restore(&self, request: AgentConfigRestoreRequest) -> RpcResult<AgentConfigRestoreResponse>;
 
     /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
