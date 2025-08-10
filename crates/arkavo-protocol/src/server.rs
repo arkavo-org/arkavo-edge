@@ -12,9 +12,9 @@ use crate::types::{
     AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
     AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter,
     AgentQueryRequest, AgentQueryResponse, BroadcastType, ChatOpenRequest, ChatRequest,
-    ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
-    DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent,
-    MessageSendRequest, MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent,
+    FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest,
+    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
