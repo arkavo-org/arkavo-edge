@@ -645,10 +645,8 @@ impl AgentConnection {
         &self,
         include_backups: bool,
     ) -> Result<AgentConfigGetResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let client = self
-            .get_connected_client()
-            .await
-            .ok_or("Not connected to agent")?;
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
 
         let request = AgentConfigGetRequest {
             agent_id: self.agent_id.clone(),
@@ -656,7 +654,10 @@ impl AgentConnection {
         };
 
         let response = client
-            .request::<AgentConfigGetResponse, _>("agent.config.get", vec![serde_json::to_value(request)?])
+            .request::<AgentConfigGetResponse, _>(
+                "agent.config.get",
+                vec![serde_json::to_value(request)?],
+            )
             .await?;
 
         Ok(response)
@@ -669,10 +670,8 @@ impl AgentConnection {
         expected_version: Option<String>,
         create_backup: bool,
     ) -> Result<AgentConfigUpdateResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let client = self
-            .get_connected_client()
-            .await
-            .ok_or("Not connected to agent")?;
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
 
         let request = AgentConfigUpdateRequest {
             agent_id: self.agent_id.clone(),
@@ -682,7 +681,10 @@ impl AgentConnection {
         };
 
         let response = client
-            .request::<AgentConfigUpdateResponse, _>("agent.config.update", vec![serde_json::to_value(request)?])
+            .request::<AgentConfigUpdateResponse, _>(
+                "agent.config.update",
+                vec![serde_json::to_value(request)?],
+            )
             .await?;
 
         Ok(response)
@@ -693,10 +695,8 @@ impl AgentConnection {
         &self,
         content: String,
     ) -> Result<AgentConfigValidateResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let client = self
-            .get_connected_client()
-            .await
-            .ok_or("Not connected to agent")?;
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
 
         let request = AgentConfigValidateRequest {
             agent_id: self.agent_id.clone(),
@@ -704,7 +704,10 @@ impl AgentConnection {
         };
 
         let response = client
-            .request::<AgentConfigValidateResponse, _>("agent.config.validate", vec![serde_json::to_value(request)?])
+            .request::<AgentConfigValidateResponse, _>(
+                "agent.config.validate",
+                vec![serde_json::to_value(request)?],
+            )
             .await?;
 
         Ok(response)
@@ -715,10 +718,8 @@ impl AgentConnection {
         &self,
         backup_filename: String,
     ) -> Result<AgentConfigRestoreResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let client = self
-            .get_connected_client()
-            .await
-            .ok_or("Not connected to agent")?;
+        let client_guard = self.client.read().await;
+        let client = client_guard.as_ref().ok_or("Not connected to agent")?;
 
         let request = AgentConfigRestoreRequest {
             agent_id: self.agent_id.clone(),
@@ -726,7 +727,10 @@ impl AgentConnection {
         };
 
         let response = client
-            .request::<AgentConfigRestoreResponse, _>("agent.config.restore", vec![serde_json::to_value(request)?])
+            .request::<AgentConfigRestoreResponse, _>(
+                "agent.config.restore",
+                vec![serde_json::to_value(request)?],
+            )
             .await?;
 
         Ok(response)

@@ -10,12 +10,12 @@ use crate::task_store::{SqliteTaskStore, TaskStore};
 use crate::types::{
     AgentBroadcast, AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigRestoreRequest,
     AgentConfigRestoreResponse, AgentConfigUpdateRequest, AgentConfigUpdateResponse,
-    AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter, AgentQueryRequest,
-    AgentQueryResponse, BroadcastType, ChatOpenRequest, ChatRequest, ChatSession, ConfigBackup,
-    ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery, DiscoveredAgent, FeatureDisclosure,
-    FeatureType, Message, MessageDelta, MessageDeltaContent, MessageSendRequest, MessageSendResponse,
-    TaskCancelRequest, TaskCancelResponse, TaskCapability, TaskDeclareResponse, TaskGetRequest,
-    TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
+    AgentConfigValidateRequest, AgentConfigValidateResponse, AgentDiscoverFilter,
+    AgentQueryRequest, AgentQueryResponse, BroadcastType, ChatOpenRequest, ChatRequest,
+    ChatSession, ConfigError, DiscoverFeaturesDisclose, DiscoverFeaturesQuery,
+    DiscoveredAgent, FeatureDisclosure, FeatureType, Message, MessageDelta, MessageDeltaContent,
+    MessageSendRequest, MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
 use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
@@ -111,19 +111,31 @@ pub trait A2aRpc {
 
     /// Get agent configuration
     #[method(name = "agent.config.get")]
-    async fn agent_config_get(&self, request: AgentConfigGetRequest) -> RpcResult<AgentConfigGetResponse>;
+    async fn agent_config_get(
+        &self,
+        request: AgentConfigGetRequest,
+    ) -> RpcResult<AgentConfigGetResponse>;
 
     /// Update agent configuration
     #[method(name = "agent.config.update")]
-    async fn agent_config_update(&self, request: AgentConfigUpdateRequest) -> RpcResult<AgentConfigUpdateResponse>;
+    async fn agent_config_update(
+        &self,
+        request: AgentConfigUpdateRequest,
+    ) -> RpcResult<AgentConfigUpdateResponse>;
 
     /// Validate agent configuration
     #[method(name = "agent.config.validate")]
-    async fn agent_config_validate(&self, request: AgentConfigValidateRequest) -> RpcResult<AgentConfigValidateResponse>;
+    async fn agent_config_validate(
+        &self,
+        request: AgentConfigValidateRequest,
+    ) -> RpcResult<AgentConfigValidateResponse>;
 
     /// Restore agent configuration from backup
     #[method(name = "agent.config.restore")]
-    async fn agent_config_restore(&self, request: AgentConfigRestoreRequest) -> RpcResult<AgentConfigRestoreResponse>;
+    async fn agent_config_restore(
+        &self,
+        request: AgentConfigRestoreRequest,
+    ) -> RpcResult<AgentConfigRestoreResponse>;
 
     /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
@@ -461,7 +473,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.success();
                 Ok(value)
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32603,
@@ -495,7 +507,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.success();
                 Ok(response)
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32603,
@@ -562,7 +574,7 @@ impl A2aRpcServer for A2aRpcImpl {
                     Some(format!("No task found with ID: {}", request.task_id)),
                 ))
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32603,
@@ -613,7 +625,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.success();
                 Ok(response)
             }
-            Err(_e) => {
+            Err(e) => {
                 // Get the current task status
                 let current_status = self
                     .task_store
@@ -715,7 +727,7 @@ impl A2aRpcServer for A2aRpcImpl {
         let auth = if let Some(token) = _request.token {
             match self.auth_backend.validate_token(&token).await {
                 Ok(auth) => Some(auth),
-                Err(_e) => {
+                Err(e) => {
                     timer.error();
                     return Err(ErrorObjectOwned::owned(
                         -32004,
@@ -751,7 +763,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.success();
                 Ok(())
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     e.to_json_rpc_code(),
@@ -771,7 +783,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.success();
                 Ok(())
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     e.to_json_rpc_code(),
@@ -923,14 +935,14 @@ impl A2aRpcServer for A2aRpcImpl {
                                         break; // Client disconnected
                                     }
                                 }
-                                Err(_e) => {
+                                Err(e) => {
                                     error!(error = %e, "Delta stream error");
                                     break;
                                 }
                             }
                         }
                     }
-                    Err(_e) => {
+                    Err(e) => {
                         error!(error = %e, "Failed to start LLM stream");
                         let error_delta = MessageDelta {
                             session_id: request.session_id.clone().unwrap_or_default(),
@@ -1185,7 +1197,7 @@ impl A2aRpcServer for A2aRpcImpl {
                     })),
                 ));
             }
-            Err(_e) => {
+            Err(e) => {
                 timer.error();
                 return Err(ErrorObjectOwned::owned(
                     -32603,
@@ -1214,7 +1226,9 @@ impl A2aRpcServer for A2aRpcImpl {
                         if let Ok(metadata) = entry.metadata().await {
                             if metadata.is_file() {
                                 let filename = entry.file_name().to_string_lossy().to_string();
-                                if filename.starts_with("AGENTS.md.") && filename.ends_with(".backup") {
+                                if filename.starts_with("AGENTS.md.")
+                                    && filename.ends_with(".backup")
+                                {
                                     // Extract timestamp from filename
                                     let timestamp_str = filename
                                         .strip_prefix("AGENTS.md.")
@@ -1226,14 +1240,22 @@ impl A2aRpcServer for A2aRpcImpl {
                                         "%Y-%m-%d-%H%M%S",
                                     )
                                     .ok()
-                                    .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc))
+                                    .map(|dt| {
+                                        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                                            dt,
+                                            chrono::Utc,
+                                        )
+                                    })
                                     .unwrap_or_else(chrono::Utc::now);
 
                                     // Calculate backup version
-                                    if let Ok(backup_content) = tokio::fs::read_to_string(entry.path()).await {
+                                    if let Ok(backup_content) =
+                                        tokio::fs::read_to_string(entry.path()).await
+                                    {
                                         let mut backup_hasher = Sha256::new();
                                         backup_hasher.update(backup_content.as_bytes());
-                                        let backup_version = format!("{:x}", backup_hasher.finalize());
+                                        let backup_version =
+                                            format!("{:x}", backup_hasher.finalize());
 
                                         backup_list.push(crate::types::ConfigBackup {
                                             filename,
@@ -1300,9 +1322,7 @@ impl A2aRpcServer for A2aRpcImpl {
                         success: false,
                         new_version: None,
                         backup_path: None,
-                        error: Some(ConfigError::Conflict {
-                            current_version,
-                        }),
+                        error: Some(ConfigError::Conflict { current_version }),
                         reload_required: false,
                     });
                 }
@@ -1366,7 +1386,7 @@ impl A2aRpcServer for A2aRpcImpl {
         match tokio::fs::write(&temp_path, &request.content).await {
             Ok(_) => {
                 // Atomic rename
-                if let Err(e) = tokio::fs::rename(&temp_path, &config_path).await {
+                if let Err(_e) = tokio::fs::rename(&temp_path, &config_path).await {
                     timer.error();
                     return Ok(AgentConfigUpdateResponse {
                         success: false,
@@ -1443,7 +1463,8 @@ impl A2aRpcServer for A2aRpcImpl {
                             errors.push(format!("Agent '{}' requires a model", agent.name));
                         }
                         if agent.listen.is_empty() {
-                            errors.push(format!("Agent '{}' requires a listen address", agent.name));
+                            errors
+                                .push(format!("Agent '{}' requires a listen address", agent.name));
                         }
 
                         // Validate listen address format
@@ -1466,7 +1487,7 @@ impl A2aRpcServer for A2aRpcImpl {
                     }
                 }
             }
-            Err(_e) => {
+            Err(e) => {
                 errors.push(format!("Configuration parse error: {}", e));
             }
         }
@@ -1536,7 +1557,8 @@ impl A2aRpcServer for A2aRpcImpl {
         let config_path = std::path::Path::new("AGENTS.md");
         if config_path.exists() {
             let timestamp = chrono::Utc::now().format("%Y-%m-%d-%H%M%S");
-            let pre_restore_backup = backup_dir.join(format!("AGENTS.md.{}.pre-restore.backup", timestamp));
+            let pre_restore_backup =
+                backup_dir.join(format!("AGENTS.md.{}.pre-restore.backup", timestamp));
             let _ = tokio::fs::copy(&config_path, &pre_restore_backup).await;
         }
 
@@ -1549,7 +1571,10 @@ impl A2aRpcServer for A2aRpcImpl {
                 hasher.update(backup_content.as_bytes());
                 let new_version = format!("{:x}", hasher.finalize());
 
-                info!("Configuration restored from backup: {}", request.backup_filename);
+                info!(
+                    "Configuration restored from backup: {}",
+                    request.backup_filename
+                );
 
                 timer.success();
                 Ok(AgentConfigRestoreResponse {
@@ -1571,7 +1596,7 @@ impl A2aRpcServer for A2aRpcImpl {
 }
 
 // Helper function to validate agent configuration
-fn validate_agent_config(content: &str) -> Result<(), String> {
+fn validate_agent_config(content: &str) -> std::result::Result<(), String> {
     // Basic validation - ensure it can be parsed
     match parse_agents_config(content) {
         Ok(agents) if agents.is_empty() => Err("No agent configurations found".to_string()),
@@ -1590,20 +1615,20 @@ struct SimpleAgentConfig {
 }
 
 // Basic parser for agent configuration validation
-fn parse_agents_config(content: &str) -> Result<Vec<SimpleAgentConfig>, String> {
+fn parse_agents_config(content: &str) -> std::result::Result<Vec<SimpleAgentConfig>, String> {
     let mut agents = Vec::new();
     let mut current_agent: Option<SimpleAgentConfig> = None;
-    
+
     for line in content.lines() {
         let trimmed = line.trim();
-        
+
         // Check for agent section header
         if trimmed.starts_with("## ") {
             // Save previous agent if exists
             if let Some(agent) = current_agent.take() {
                 agents.push(agent);
             }
-            
+
             let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
             current_agent = Some(SimpleAgentConfig {
                 name,
@@ -1616,7 +1641,7 @@ fn parse_agents_config(content: &str) -> Result<Vec<SimpleAgentConfig>, String> 
             if let Some((key, value)) = trimmed.split_once(':') {
                 let key = key.trim();
                 let value = value.trim();
-                
+
                 match key {
                     "purpose" => agent.purpose = value.to_string(),
                     "model" => agent.model = value.to_string(),
@@ -1626,12 +1651,12 @@ fn parse_agents_config(content: &str) -> Result<Vec<SimpleAgentConfig>, String> 
             }
         }
     }
-    
+
     // Save last agent if exists
     if let Some(agent) = current_agent {
         agents.push(agent);
     }
-    
+
     Ok(agents)
 }
 
