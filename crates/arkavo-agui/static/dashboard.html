@@ -1166,9 +1166,12 @@
                     configState.originalContent = document.getElementById('configEditor').value;
                     document.getElementById('configVersion').textContent = msg.newVersion.substring(0, 12) + '...';
                 }
-                // Reload backups if needed
+                // Show appropriate message based on reload status
                 if (msg.reloadRequired) {
-                    showConfigStatus('Configuration saved. Agent reload may be required.', 'warning');
+                    showConfigStatus('Configuration saved. Agent restart required for some changes.', 'warning');
+                } else {
+                    // Configuration was hot-reloaded successfully
+                    showConfigStatus('Configuration applied successfully!', 'success');
                 }
             } else {
                 // Handle specific errors

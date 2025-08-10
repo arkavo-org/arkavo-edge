@@ -65,6 +65,7 @@ tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }
 bytemuck = "1.20"
 cfg-if = "1.0"
+notify = "7.0"
 sha2 = "0.10"
 dirs = "5.0"
 toml = "0.8"

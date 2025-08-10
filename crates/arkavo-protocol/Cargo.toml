@@ -51,6 +51,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 sha2 = { workspace = true }
+notify = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
