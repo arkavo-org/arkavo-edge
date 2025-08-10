@@ -1416,8 +1416,17 @@ impl A2aRpcServer for A2aRpcImpl {
         hasher.update(request.content.as_bytes());
         let new_version = format!("{:x}", hasher.finalize());
 
-        // Trigger reload notification (actual reload would be handled by the agent runtime)
-        info!("Configuration updated, reload may be required");
+        // Reload configuration automatically
+        let reload_success = match self.reload_configuration_from_content(&request.content).await {
+            Ok(_) => {
+                info!("Configuration updated and reloaded successfully");
+                true
+            }
+            Err(e) => {
+                warn!("Configuration saved but reload failed: {}. Agent restart may be required.", e);
+                false
+            }
+        };
 
         timer.success();
         Ok(AgentConfigUpdateResponse {
@@ -1425,7 +1434,7 @@ impl A2aRpcServer for A2aRpcImpl {
             new_version: Some(new_version),
             backup_path,
             error: None,
-            reload_required: true,
+            reload_required: !reload_success, // Only require reload if auto-reload failed
         })
     }
 
