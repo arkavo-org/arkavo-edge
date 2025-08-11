@@ -105,10 +105,9 @@ impl AuthManager {
                 ));
             }
         } else {
-            // If no master key is set, check keychain availability (simulated for tests)
-            // In tests, we'll just require the master key to be set
+            // If no master key is set, return error with consistent message
             return Err(anyhow::anyhow!(
-                "Master key required: Set ARKAVO_MASTER_KEY environment variable (min 32 characters)"
+                "Master key required: Set ARKAVO_MASTER_KEY environment variable (at least 32 characters)"
             ));
         }
 
