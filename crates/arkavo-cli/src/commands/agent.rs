@@ -481,6 +481,17 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Initialize MCP connections
     let mcp_registry = server.mcp_registry();
+
+    // Register built-in MCP tools first
+    {
+        use crate::builtin_mcp::BuiltinMcpConnection;
+        let builtin_connection = BuiltinMcpConnection::new();
+        mcp_registry
+            .register("builtin".to_string(), Box::new(builtin_connection))
+            .await;
+        println!("Registered built-in MCP tools (echo, health, ollama_config)");
+    }
+
     for mcp_config in &config.mcp_servers {
         println!("Initializing MCP server: {}", mcp_config.name);
 
