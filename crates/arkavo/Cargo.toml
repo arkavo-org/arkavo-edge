@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["memory", "mdns", "local"]
+default = ["memory", "embeddings", "mdns", "local"]
 memory = ["arkavo-cli/memory"]
 embeddings = ["memory", "arkavo-cli/embeddings"]
 mdns = ["arkavo-cli/mdns"]

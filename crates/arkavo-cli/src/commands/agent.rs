@@ -439,9 +439,14 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     // Create process manager for MCP servers
     let process_manager = McpProcessManager::new();
+
+    // Create shutdown flag for mDNS thread
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
 
     // Parse listen address
     let parts: Vec<&str> = config.listen.split(':').collect();
@@ -481,6 +486,18 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     // Initialize MCP connections
     let mcp_registry = server.mcp_registry();
+
+    // Register built-in MCP tools first
+    {
+        use crate::builtin_mcp::BuiltinMcpConnection;
+        // Use the async version to avoid runtime conflicts
+        let builtin_connection = BuiltinMcpConnection::new_with_test_tools().await;
+        mcp_registry
+            .register("arkavo".to_string(), Box::new(builtin_connection))
+            .await;
+        println!("Registered Arkavo MCP tools (runtime and test tools)");
+    }
+
     for mcp_config in &config.mcp_servers {
         println!("Initializing MCP server: {}", mcp_config.name);
 
@@ -569,21 +586,24 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Start mDNS broadcasting if enabled
-    if config.mdns_enabled {
+    let mdns_thread_handle = if config.mdns_enabled {
         println!("Starting mDNS broadcasting...");
         let config_clone = config.clone();
+        let shutdown_flag_clone = shutdown_flag.clone();
         // Use std::thread since zeroconf is not Send
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             println!("mDNS thread spawned");
-            if let Err(e) = broadcast_agent_mdns_sync(&config_clone) {
+            if let Err(e) = broadcast_agent_mdns_sync(&config_clone, shutdown_flag_clone) {
                 eprintln!("mDNS broadcast error: {e}");
             }
         });
         // Give the mDNS thread a moment to start
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        Some(handle)
     } else {
         println!("mDNS broadcasting disabled");
-    }
+        None
+    };
 
     println!("Agent server started on {}", config.listen);
     println!("Press Ctrl+C to stop");
@@ -593,18 +613,41 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     println!("Shutting down agent server...");
 
+    // Signal the mDNS thread to stop
+    shutdown_flag.store(true, Ordering::Relaxed);
+
     // Stop the A2A server
     handle.stop()?;
 
     // Shutdown all MCP processes
     process_manager.shutdown_all()?;
 
+    // Wait for mDNS thread to finish (with timeout)
+    if let Some(handle) = mdns_thread_handle {
+        println!("Waiting for mDNS thread to stop...");
+        // Give it 2 seconds to stop gracefully
+        let timeout = std::time::Duration::from_secs(2);
+        let start = std::time::Instant::now();
+
+        while !handle.is_finished() && start.elapsed() < timeout {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        if !handle.is_finished() {
+            eprintln!("Warning: mDNS thread did not stop within timeout");
+            // Thread will be forcefully terminated when process exits
+        }
+    }
+
     println!("Agent server stopped.");
-    Ok(())
+
+    // Explicitly exit to ensure all threads are terminated
+    std::process::exit(0);
 }
 
 fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
+    #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -663,22 +706,29 @@ fn broadcast_agent_mdns_sync(
 
         // The service automatically unregisters when it goes out of scope.
         // We need to keep it alive.
-        loop {
-            thread::sleep(Duration::from_secs(30));
+        use std::sync::atomic::Ordering;
+        while !shutdown_flag.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_secs(1));
             // Keep reference to prevent dropping
             let _ = &service;
         }
+
+        println!("mDNS service shutting down...");
+        // Service will be unregistered when it goes out of scope
     }
 
     #[cfg(not(feature = "mdns"))]
     {
         println!("mDNS support not compiled in (disabled for musl builds)");
         println!("Agent will run without mDNS discovery");
-        // Keep the thread alive so the agent doesn't exit
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
+        // Keep the thread alive until shutdown is signaled
+        use std::sync::atomic::Ordering;
+        while !shutdown_flag.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
+
+    Ok(())
 }
 
 // Wrapper to implement McpConnectionTrait for arkavo-cli's McpConnection

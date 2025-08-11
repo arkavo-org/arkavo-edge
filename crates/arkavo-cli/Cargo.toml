@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["memory", "mdns", "local"]
+default = ["memory", "embeddings", "mdns", "local"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
@@ -28,6 +28,8 @@ arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }

@@ -1,3 +1,4 @@
+pub mod builtin_mcp;
 pub mod commands;
 pub mod conversation_manager;
 pub mod log;
