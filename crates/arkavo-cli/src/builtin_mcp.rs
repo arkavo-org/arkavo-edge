@@ -8,6 +8,8 @@ use std::sync::Arc;
 /// Built-in MCP connection that provides default tools
 pub struct BuiltinMcpConnection {
     tools: HashMap<String, Arc<dyn Tool>>,
+    // Optional delegate for test tools
+    test_connection: Option<crate::mcp_integration::McpConnection>,
 }
 
 impl BuiltinMcpConnection {
@@ -27,7 +29,43 @@ impl BuiltinMcpConnection {
         // Note: UiControlTool and UiInspectTool require UI channels and should be
         // registered separately when a UI is available
 
-        Self { tools }
+        // Note: Test tools initialization is deferred to avoid runtime conflicts
+        // They will be initialized lazily when needed
+        Self {
+            tools,
+            test_connection: None,
+        }
+    }
+    
+    pub async fn new_with_test_tools() -> Self {
+        let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
+
+        // Register built-in tools that don't require external dependencies
+        let echo_tool = Arc::new(EchoTool::new());
+        tools.insert("echo".to_string(), echo_tool);
+
+        let health_tool = Arc::new(HealthTool::new());
+        tools.insert("health".to_string(), health_tool);
+
+        let ollama_config = Arc::new(OllamaConfigTool::new());
+        tools.insert("ollama_config".to_string(), ollama_config);
+
+        // Try to initialize test tools if available
+        let test_connection = match crate::mcp_integration::McpConnection::new_in_process_async().await {
+            Ok(conn) => {
+                eprintln!("Registered MCP test tools from arkavo-test");
+                Some(conn)
+            }
+            Err(e) => {
+                eprintln!("Could not initialize MCP test tools: {e}");
+                None
+            }
+        };
+
+        Self {
+            tools,
+            test_connection,
+        }
     }
 }
 
@@ -41,6 +79,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
     fn list_tools(&self) -> Result<Vec<RegistryTool>, Box<dyn std::error::Error>> {
         let mut tools = Vec::new();
 
+        // Add built-in runtime tools
         for (name, tool) in &self.tools {
             let schema = tool.schema();
             tools.push(RegistryTool {
@@ -50,6 +89,24 @@ impl McpConnectionTrait for BuiltinMcpConnection {
             });
         }
 
+        // Add test tools if available
+        if let Some(ref test_conn) = self.test_connection {
+            match test_conn.list_tools() {
+                Ok(test_tools) => {
+                    for tool in test_tools {
+                        tools.push(RegistryTool {
+                            name: tool.name,
+                            description: tool.description,
+                            input_schema: Some(tool.input_schema),
+                        });
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Could not list test tools: {e}");
+                }
+            }
+        }
+
         Ok(tools)
     }
 
@@ -57,8 +114,9 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         &self,
         tool_name: &str,
         arguments: Value,
-        _llm_provider: &str,
+        llm_provider: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
+        // First check built-in tools
         if let Some(tool) = self.tools.get(tool_name) {
             // Use blocking to execute the async tool
             #[allow(clippy::disallowed_methods)]
@@ -66,6 +124,10 @@ impl McpConnectionTrait for BuiltinMcpConnection {
             #[allow(clippy::disallowed_methods)]
             let result = handle.block_on(tool.execute(arguments))?;
             Ok(result)
+        }
+        // Then check test tools if available
+        else if let Some(ref test_conn) = self.test_connection {
+            test_conn.call_tool(tool_name, arguments, llm_provider)
         } else {
             Err(format!("Tool '{tool_name}' not found").into())
         }
