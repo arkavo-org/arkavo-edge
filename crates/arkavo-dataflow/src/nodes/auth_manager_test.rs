@@ -27,18 +27,12 @@ mod auth_manager_regression_tests {
             std::env::set_var("ARKAVO_MASTER_KEY", "short");
         }
 
-        let result = AuthManager::new().await;
+        let result = AuthManager::new_for_test().await;
 
-        // The auth manager might succeed if keychain is available,
-        // or fail if it requires the environment variable
-        // The important thing is that it doesn't panic
+        // The test should fail with an error about the key being too short
         match result {
             Ok(_) => {
-                // Keychain was available, auth manager created successfully
-                assert!(
-                    true,
-                    "Auth manager created with keychain despite short env var"
-                );
+                panic!("Auth manager should not succeed with a short master key");
             }
             Err(err) => {
                 // Environment variable was required and validation worked
@@ -67,20 +61,19 @@ mod auth_manager_regression_tests {
         }
 
         // Try to create auth manager - it should attempt keychain first
-        let result = AuthManager::new().await;
+        let result = AuthManager::new_for_test().await;
 
-        // The result depends on whether keychain is available on the test system
-        // But it should not panic in either case
+        // The test should fail with an error about the master key being required
         match result {
             Ok(_manager) => {
-                // Keychain was available and worked
-                println!("Auth manager created with keychain support");
+                panic!("Auth manager should not succeed without a master key");
             }
             Err(e) => {
-                // Keychain was not available, should get a clear error message
+                // Should get a clear error message about master key requirement
                 let error_msg = e.to_string();
                 assert!(
-                    error_msg.contains("Master key required") || error_msg.contains("keychain"),
+                    error_msg.contains("Master key required")
+                        && error_msg.contains("at least 32 characters"),
                     "Unexpected error: {}",
                     error_msg
                 );
