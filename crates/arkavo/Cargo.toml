@@ -23,6 +23,9 @@ kimi = ["arkavo-cli/kimi"]
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [build-dependencies]
 
 [[bin]]

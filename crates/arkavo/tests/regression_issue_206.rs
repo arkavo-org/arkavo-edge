@@ -4,24 +4,7 @@ use std::time::Duration;
 
 #[test]
 fn test_mcp_server_starts_without_panic() {
-    // Use CARGO_BIN_EXE_arkavo to find the binary correctly in all environments
-    let binary_path = std::env::var("CARGO_BIN_EXE_arkavo")
-        .map(|p| std::path::PathBuf::from(p))
-        .or_else(|_| {
-            // Fallback for when env var is not set
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .ok_or(())
-                .map(|p| p.join("arkavo"))
-        })
-        .expect("Failed to locate arkavo binary");
-
-    let mut child = Command::new(binary_path)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_arkavo"))
         .arg("serve")
         .env("ARKAVO_NO_TERMINAL_RELAUNCH", "1")
         .stdin(Stdio::piped())
@@ -74,24 +57,7 @@ fn test_mcp_server_starts_without_panic() {
 fn test_mcp_server_responds_to_initialize() {
     use std::io::{BufRead, BufReader};
 
-    // Use CARGO_BIN_EXE_arkavo to find the binary correctly in all environments
-    let binary_path = std::env::var("CARGO_BIN_EXE_arkavo")
-        .map(|p| std::path::PathBuf::from(p))
-        .or_else(|_| {
-            // Fallback for when env var is not set
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .parent()
-                .ok_or(())
-                .map(|p| p.join("arkavo"))
-        })
-        .expect("Failed to locate arkavo binary");
-
-    let mut child = Command::new(binary_path)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_arkavo"))
         .arg("serve")
         .env("ARKAVO_NO_TERMINAL_RELAUNCH", "1")
         .stdin(Stdio::piped())
