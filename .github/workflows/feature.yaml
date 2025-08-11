@@ -126,35 +126,27 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
   test:
-    name: Test (${{ matrix.name }})
+    name: Test
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: "Workspace (core)"
-            command: "cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
-          - name: "Memory Crate"
-            command: "cargo test -p arkavo-memory --lib && cargo test -p arkavo-memory --test mcp_integration_test"
-          - name: "LLM Crate (remote)"
-            command: "cargo test -p arkavo-llm --lib --no-default-features --features llm-remote"
-          - name: "Regression Tests"
-            command: |
-              cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-              cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-              cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "test-${{ matrix.name }}"
+          key: "test"
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       - name: Run tests
-        run: ${{ matrix.command }}
+        run: |
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
+          cargo test -p arkavo-memory --lib
+          cargo test -p arkavo-memory --test mcp_integration_test
+          cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
+          cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
+          cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
+          cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
 
   test-kimi-feature:
     name: Test Kimi Feature
