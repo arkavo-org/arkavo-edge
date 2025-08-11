@@ -493,9 +493,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         // Use the async version to avoid runtime conflicts
         let builtin_connection = BuiltinMcpConnection::new_with_test_tools().await;
         mcp_registry
-            .register("builtin".to_string(), Box::new(builtin_connection))
+            .register("arkavo".to_string(), Box::new(builtin_connection))
             .await;
-        println!("Registered built-in MCP tools and test server tools");
+        println!("Registered Arkavo MCP tools (runtime and test tools)");
     }
 
     for mcp_config in &config.mcp_servers {
