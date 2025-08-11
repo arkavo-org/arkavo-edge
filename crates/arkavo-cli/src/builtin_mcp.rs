@@ -1,5 +1,5 @@
 use arkavo_mcp_core::Tool;
-use arkavo_mcp_runtime::tools::{EchoTool, HealthTool, OllamaConfigTool};
+use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
 use arkavo_protocol::mcp_registry::{McpConnectionTrait, Tool as RegistryTool};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -17,9 +17,6 @@ impl BuiltinMcpConnection {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
         // Register built-in tools that don't require external dependencies
-        let echo_tool = Arc::new(EchoTool::new());
-        tools.insert("echo".to_string(), echo_tool);
-
         let health_tool = Arc::new(HealthTool::new());
         tools.insert("health".to_string(), health_tool);
 
@@ -36,14 +33,11 @@ impl BuiltinMcpConnection {
             test_connection: None,
         }
     }
-    
+
     pub async fn new_with_test_tools() -> Self {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
         // Register built-in tools that don't require external dependencies
-        let echo_tool = Arc::new(EchoTool::new());
-        tools.insert("echo".to_string(), echo_tool);
-
         let health_tool = Arc::new(HealthTool::new());
         tools.insert("health".to_string(), health_tool);
 
@@ -51,16 +45,17 @@ impl BuiltinMcpConnection {
         tools.insert("ollama_config".to_string(), ollama_config);
 
         // Try to initialize test tools if available
-        let test_connection = match crate::mcp_integration::McpConnection::new_in_process_async().await {
-            Ok(conn) => {
-                eprintln!("Registered MCP test tools from arkavo-test");
-                Some(conn)
-            }
-            Err(e) => {
-                eprintln!("Could not initialize MCP test tools: {e}");
-                None
-            }
-        };
+        let test_connection =
+            match crate::mcp_integration::McpConnection::new_in_process_async().await {
+                Ok(conn) => {
+                    eprintln!("Registered MCP test tools from arkavo-test");
+                    Some(conn)
+                }
+                Err(e) => {
+                    eprintln!("Could not initialize MCP test tools: {e}");
+                    None
+                }
+            };
 
         Self {
             tools,

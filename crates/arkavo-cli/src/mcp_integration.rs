@@ -41,14 +41,14 @@ impl McpConnection {
 
         Ok(Self::InProcess(base_connection))
     }
-    
+
     pub async fn new_in_process_async() -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize memory tools first
         eprintln!("Initializing memory tools...");
-        
+
         // Initialize memory asynchronously
         let memory_integration = MemoryIntegration::new().await?;
-        
+
         // Get memory tools
         let additional_tools = memory_integration.get_tools();
 
