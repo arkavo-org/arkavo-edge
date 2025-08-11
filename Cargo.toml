@@ -150,13 +150,18 @@ debug = false
 codegen-units = 16
 incremental = true
 
-# Make tests run faster without full release optimizations
+# Profile for `cargo test`. Tuned for CI performance.
+# This profile inherits from `dev` but overrides settings for test builds.
+# It prioritizes fast compilation and linking over runtime performance and debuggability.
 [profile.test]
-opt-level = 1
-debug = 2
-debug-assertions = true
-overflow-checks = true
-incremental = true
+opt-level = 1          # Basic optimizations, faster to compile than opt-level=3
+debug = 0              # No debug info, significantly speeds up linking
+split-debuginfo = "off" # Disable separate debug files to reduce target dir size
+codegen-units = 16     # More parallelism during compilation
+incremental = false      # Not useful in clean CI builds
+debug-assertions = true  # Keep safety checks enabled for tests
+overflow-checks = true   # Keep safety checks enabled for tests
+
 
 [workspace.lints.rust]
 unreachable_pub = "warn"

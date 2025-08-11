@@ -109,80 +109,50 @@ jobs:
 
   clippy:
     name: Clippy
-    needs: build-all-tests
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Download target directory
-        uses: actions/download-artifact@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: target-directory
-          path: target/
+          key: "clippy"
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
-      
-
-  # Tests and builds can run in parallel
-  build-all-tests:
-    name: Build All Tests
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: "build-all-tests"
-      - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-      - name: Compile all tests
-        run: cargo nextest run --no-run --workspace
-      - name: Upload target directory
-        uses: actions/upload-artifact@v4
-        with:
-          name: target-directory
-          path: target/
-          retention-days: 1
 
   test:
     name: Test (${{ matrix.name }})
-    needs: build-all-tests
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: "Workspace (core)"
-            command: "cargo nextest run --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
+            command: "cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
           - name: "Memory Crate"
-            command: "cargo nextest run -p arkavo-memory --lib && cargo nextest run -p arkavo-memory --test mcp_integration_test"
+            command: "cargo test -p arkavo-memory --lib && cargo test -p arkavo-memory --test mcp_integration_test"
           - name: "LLM Crate (remote)"
-            command: "cargo nextest run -p arkavo-llm --lib --no-default-features --features llm-remote"
+            command: "cargo test -p arkavo-llm --lib --no-default-features --features llm-remote"
           - name: "Regression Tests"
             command: |
-              cargo nextest run -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-              cargo nextest run -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-              cargo nextest run -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+              cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
+              cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
+              cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
-      - name: Download target directory
-        uses: actions/download-artifact@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: target-directory
-          path: target/
+          key: "test-${{ matrix.name }}"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       - name: Run tests
         run: ${{ matrix.command }}
 
