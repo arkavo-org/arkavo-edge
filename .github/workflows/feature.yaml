@@ -117,7 +117,8 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "clippy"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "clippy"
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -133,7 +134,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "test"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "test"
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -158,7 +160,8 @@ jobs:
       
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test-kimi"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "test-kimi"
       
       - name: Test arkavo-kimi crate
         run: |
@@ -211,7 +214,8 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "linux-${{ matrix.target }}"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-${{ matrix.target }}"
 
       - name: Install dependencies
         run: |
@@ -270,7 +274,8 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "macos-arm64"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-aarch64"
 
       - name: Install idb-companion
         run: |
@@ -396,7 +401,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "schema-validation"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "schema"
 
       - name: Install validation tools
         run: |
@@ -496,7 +502,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "schema-compat"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "schema-compat"
 
       - name: Install jq for JSON comparison
         run: |
@@ -595,7 +602,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "xtask-schema"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "xtask"
       - name: Run schema validation
         run: cargo run -p xtask -- schema-gen --check
 
@@ -616,7 +624,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: "regression-${{ matrix.os }}-${{ matrix.issue }}"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "regression-${{ matrix.issue }}"
 
       # Issue #114: xcodebuild runtime dependency
       - name: Test Issue #114 - xcodebuild should not trigger prompts
