@@ -21,7 +21,7 @@ members = [
     "crates/arkavo-budget",
     "crates/arkavo-events",
     "crates/arkavo-debugger",
-    "tools/xtask",
+    ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"

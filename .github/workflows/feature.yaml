@@ -130,42 +130,35 @@ jobs:
 
   # Tests and builds can run in parallel
   test:
-    name: Test
+    name: Test (${{ matrix.name }})
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Workspace (core)"
+            command: "cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
+          - name: "Memory Crate"
+            command: "cargo test -p arkavo-memory --lib && cargo test -p arkavo-memory --test mcp_integration_test"
+          - name: "LLM Crate (remote)"
+            command: "cargo test -p arkavo-llm --lib --no-default-features --features llm-remote"
+          - name: "Regression Tests"
+            command: |
+              cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
+              cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
+              cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "test"
-      
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-      
-      # Tests now use isolated databases in temp directory, no cleanup needed
+
       - name: Run tests
-        run: |
-          # Run tests for all workspace members except those that need embeddings or local LLM
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
-          # Run arkavo-memory tests without embeddings (non-embedding tests only)
-          cargo test -p arkavo-memory --lib
-          cargo test -p arkavo-memory --test mcp_integration_test
-          # Run arkavo-llm tests with remote feature only (API tests only)
-          cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
-          # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
-          # Note: arkavo-llm integration tests excluded as they require local feature
-      
-      # Regression tests for PR #200 bug fixes
-      - name: Run regression tests
-        run: |
-          # Test auth manager uses proper constants (no magic numbers)
-          cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-          # Test auth manager error handling
-          cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-          # Test auth manager keychain fallback
-          cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+        run: ${{ matrix.command }}
 
   test-kimi-feature:
     name: Test Kimi Feature
