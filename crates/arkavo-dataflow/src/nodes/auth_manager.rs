@@ -94,6 +94,34 @@ impl AuthManager {
         Ok(manager)
     }
 
+    /// Create a new authentication manager for testing
+    #[cfg(test)]
+    pub async fn new_for_test() -> Result<Self> {
+        // First validate the master key if provided
+        if let Ok(master_key) = std::env::var("ARKAVO_MASTER_KEY") {
+            if master_key.len() < 32 {
+                return Err(anyhow::anyhow!(
+                    "Master key must be at least 32 characters long for security"
+                ));
+            }
+        } else {
+            // If no master key is set, return error with consistent message
+            return Err(anyhow::anyhow!(
+                "Master key required: Set ARKAVO_MASTER_KEY environment variable (at least 32 characters)"
+            ));
+        }
+
+        // Use test storage that doesn't require embeddings
+        let storage = Arc::new(MemoryStorage::new_test().await?);
+        let manager = Self {
+            credentials: Arc::new(RwLock::new(HashMap::new())),
+            storage,
+            rng: SystemRandom::new(),
+        };
+
+        Ok(manager)
+    }
+
     /// Store a new credential
     pub async fn store_credential(
         &self,

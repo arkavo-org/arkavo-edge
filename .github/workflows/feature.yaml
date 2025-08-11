@@ -117,18 +117,15 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "clippy"
-      
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "clippy"
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-      
-      # Fail on clippy warnings to enforce code quality
-      - run: cargo clippy --workspace -- -D warnings
-      
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
 
-  # Tests and builds can run in parallel
   test:
     name: Test
     runs-on: ubuntu-22.04
@@ -137,34 +134,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test"
-      
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "test"
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-      
-      # Tests now use isolated databases in temp directory, no cleanup needed
       - name: Run tests
         run: |
-          # Run tests for all workspace members except those that need embeddings or local LLM
           cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
-          # Run arkavo-memory tests without embeddings (non-embedding tests only)
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
-          # Run arkavo-llm tests with remote feature only (API tests only)
           cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
-          # Note: arkavo-test is excluded on Linux as it contains iOS/macOS specific tests
-          # Note: arkavo-llm integration tests excluded as they require local feature
-      
-      # Regression tests for PR #200 bug fixes
-      - name: Run regression tests
-        run: |
-          # Test auth manager uses proper constants (no magic numbers)
           cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-          # Test auth manager error handling
           cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-          # Test auth manager keychain fallback
           cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
 
   test-kimi-feature:
@@ -177,7 +160,8 @@ jobs:
       
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test-kimi"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "test-kimi"
       
       - name: Test arkavo-kimi crate
         run: |
@@ -230,7 +214,8 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "linux-${{ matrix.target }}"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-${{ matrix.target }}"
 
       - name: Install dependencies
         run: |
@@ -289,7 +274,8 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "macos-arm64"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-aarch64"
 
       - name: Install idb-companion
         run: |
@@ -298,6 +284,16 @@ jobs:
 
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
 
       - name: Prepare release artifact with ONNX Runtime
         run: |
@@ -321,37 +317,16 @@ jobs:
   # Performance check can run independently
   performance-check:
     name: Performance Check
+    needs: build-linux
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
         with:
-          shared-key: "perf"
-      
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-
-      - name: Check build time
-        run: |
-          cargo clean
-          BUILD_START=$(date +%s)
-          cargo build --release
-          BUILD_END=$(date +%s)
-          BUILD_TIME=$((BUILD_END - BUILD_START))
-
-          echo "Build time: $BUILD_TIME seconds"
-
-          if [ $BUILD_TIME -gt 300 ]; then
-            echo "Warning: Build time exceeds 5 minutes"
-          fi
-
+          name: arkavo-x86_64-linux
       - name: Check binary size
         run: |
-          # Use the binary from the previous build step
-          SIZE=$(du -b target/release/arkavo | cut -f1)
+          SIZE=$(du -b arkavo-x86_64-linux | cut -f1)
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
@@ -426,7 +401,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "schema-validation"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "schema"
 
       - name: Install validation tools
         run: |
@@ -526,7 +502,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "schema-compat"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "schema-compat"
 
       - name: Install jq for JSON comparison
         run: |
@@ -625,7 +602,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "xtask-schema"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "xtask"
       - name: Run schema validation
         run: cargo run -p xtask -- schema-gen --check
 
@@ -646,7 +624,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "regression-tests"
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "regression-${{ matrix.issue }}"
 
       # Issue #114: xcodebuild runtime dependency
       - name: Test Issue #114 - xcodebuild should not trigger prompts

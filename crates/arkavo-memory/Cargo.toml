@@ -8,8 +8,7 @@ description = "Local-first memory server with vector search for Arkavo"
 repository.workspace = true
 keywords = ["cli", "ai", "agent", "memory", "vector-search"]
 categories = ["command-line-utilities", "development-tools"]
-build = "build.rs"
-include = ["src/**/*", "models/**/*", "build.rs", "README.md"]
+include = ["src/**/*", "README.md"]
 
 
 [features]

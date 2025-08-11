@@ -15,6 +15,8 @@
 
 use crate::error::{MemoryError, Result};
 #[cfg(feature = "embeddings")]
+use std::path::PathBuf;
+#[cfg(feature = "embeddings")]
 use std::sync::Arc;
 #[cfg(feature = "embeddings")]
 use tokio::sync::RwLock;
@@ -25,22 +27,12 @@ use fastembed::{
     UserDefinedEmbeddingModel,
 };
 
-#[cfg(feature = "embeddings")]
-// Embed model files at compile time
-const MODEL_ONNX: &[u8] = include_bytes!("../models/model.onnx");
-#[cfg(feature = "embeddings")]
-const TOKENIZER_JSON: &[u8] = include_bytes!("../models/tokenizer.json");
-#[cfg(feature = "embeddings")]
-const CONFIG_JSON: &[u8] = include_bytes!("../models/config.json");
-#[cfg(feature = "embeddings")]
-const SPECIAL_TOKENS_MAP_JSON: &[u8] = include_bytes!("../models/special_tokens_map.json");
-#[cfg(feature = "embeddings")]
-const TOKENIZER_CONFIG_JSON: &[u8] = include_bytes!("../models/tokenizer_config.json");
-
 /// Thread-safe embedding service using bundled model
 pub struct EmbeddingService {
     #[cfg(feature = "embeddings")]
     model: Arc<RwLock<Option<TextEmbedding>>>,
+    #[cfg(feature = "embeddings")]
+    model_dir: PathBuf,
 }
 
 impl Default for EmbeddingService {
@@ -54,6 +46,13 @@ impl EmbeddingService {
         Self {
             #[cfg(feature = "embeddings")]
             model: Arc::new(RwLock::new(None)),
+            #[cfg(feature = "embeddings")]
+            model_dir: {
+                // Determine model directory relative to the executable at runtime
+                let mut path = std::env::current_exe().unwrap_or_default();
+                path.pop(); // remove binary name to get the parent directory
+                path.join("models")
+            },
         }
     }
 
@@ -69,21 +68,35 @@ impl EmbeddingService {
             let mut model_guard = self.model.write().await;
             // Double-check in case another task initialized it
             if model_guard.is_none() {
-                log::info!("Initializing bundled embedding model (AllMiniLML6V2)");
+                log::info!("Initializing embedding model from filesystem (AllMiniLML6V2)");
 
+                let model_dir = self.model_dir.clone();
                 // Run initialization in blocking thread
                 let text_embedding = tokio::task::spawn_blocking(move || {
-                    // Create TokenizerFiles from embedded data
+                    // Load model and tokenizer data from the filesystem
+                    let model_path = model_dir.join("model.onnx");
+                    let model_data = std::fs::read(&model_path).map_err(|e| {
+                        MemoryError::ModelNotAvailable(format!(
+                            "Failed to read ONNX model from {}: {}",
+                            model_path.display(),
+                            e
+                        ))
+                    })?;
+
                     let tokenizer_files = TokenizerFiles {
-                        tokenizer_file: TOKENIZER_JSON.to_vec(),
-                        config_file: CONFIG_JSON.to_vec(),
-                        special_tokens_map_file: SPECIAL_TOKENS_MAP_JSON.to_vec(),
-                        tokenizer_config_file: TOKENIZER_CONFIG_JSON.to_vec(),
+                        tokenizer_file: std::fs::read(model_dir.join("tokenizer.json"))?,
+                        config_file: std::fs::read(model_dir.join("config.json"))?,
+                        special_tokens_map_file: std::fs::read(
+                            model_dir.join("special_tokens_map.json"),
+                        )?,
+                        tokenizer_config_file: std::fs::read(
+                            model_dir.join("tokenizer_config.json"),
+                        )?,
                     };
 
-                    // Create UserDefinedEmbeddingModel with embedded ONNX model
+                    // Create UserDefinedEmbeddingModel with loaded ONNX model
                     let user_defined_model =
-                        UserDefinedEmbeddingModel::new(MODEL_ONNX.to_vec(), tokenizer_files)
+                        UserDefinedEmbeddingModel::new(model_data, tokenizer_files)
                             .with_pooling(Pooling::Mean) // AllMiniLML6V2 uses mean pooling
                             .with_quantization(QuantizationMode::None); // No quantization for base model
 
@@ -105,7 +118,7 @@ impl EmbeddingService {
                 })?;
 
                 *model_guard = Some(text_embedding);
-                log::info!("Bundled embedding model initialized successfully");
+                log::info!("Embedding model initialized successfully from filesystem");
             }
         }
         Ok(())
