@@ -4,20 +4,7 @@ use std::time::Duration;
 
 #[test]
 fn test_mcp_server_starts_without_panic() {
-    // Build the binary first
-    let build_output = Command::new("cargo")
-        .args(["build", "-p", "arkavo", "--quiet"])
-        .output()
-        .expect("Failed to build arkavo");
-
-    if !build_output.status.success() {
-        panic!(
-            "Failed to build arkavo: {}",
-            String::from_utf8_lossy(&build_output.stderr)
-        );
-    }
-
-    // Start the MCP server
+    // The binary is pre-built by the CI or `cargo test`
     let binary_path = std::env::current_exe()
         .unwrap()
         .parent()
@@ -79,20 +66,7 @@ fn test_mcp_server_starts_without_panic() {
 fn test_mcp_server_responds_to_initialize() {
     use std::io::{BufRead, BufReader};
 
-    // Build the binary first
-    let build_output = Command::new("cargo")
-        .args(["build", "-p", "arkavo", "--quiet"])
-        .output()
-        .expect("Failed to build arkavo");
-
-    if !build_output.status.success() {
-        panic!(
-            "Failed to build arkavo: {}",
-            String::from_utf8_lossy(&build_output.stderr)
-        );
-    }
-
-    // Start the MCP server
+    // The binary is pre-built by the CI or `cargo test`
     let binary_path = std::env::current_exe()
         .unwrap()
         .parent()

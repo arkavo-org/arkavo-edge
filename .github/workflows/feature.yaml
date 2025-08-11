@@ -109,54 +109,80 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: build-all-tests
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - name: Download target directory
+        uses: actions/download-artifact@v4
         with:
-          shared-key: "clippy"
-      
+          name: target-directory
+          path: target/
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-      
-      # Fail on clippy warnings to enforce code quality
-      - run: cargo clippy --workspace -- -D warnings
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
       
 
   # Tests and builds can run in parallel
+  build-all-tests:
+    name: Build All Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: "build-all-tests"
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+      - name: Compile all tests
+        run: cargo nextest run --no-run --workspace
+      - name: Upload target directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-directory
+          path: target/
+          retention-days: 1
+
   test:
     name: Test (${{ matrix.name }})
+    needs: build-all-tests
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: "Workspace (core)"
-            command: "cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
+            command: "cargo nextest run --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm"
           - name: "Memory Crate"
-            command: "cargo test -p arkavo-memory --lib && cargo test -p arkavo-memory --test mcp_integration_test"
+            command: "cargo nextest run -p arkavo-memory --lib && cargo nextest run -p arkavo-memory --test mcp_integration_test"
           - name: "LLM Crate (remote)"
-            command: "cargo test -p arkavo-llm --lib --no-default-features --features llm-remote"
+            command: "cargo nextest run -p arkavo-llm --lib --no-default-features --features llm-remote"
           - name: "Regression Tests"
             command: |
-              cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-              cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-              cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+              cargo nextest run -p arkavo-dataflow test_auth_manager_constants -- --nocapture
+              cargo nextest run -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
+              cargo nextest run -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+      - name: Download target directory
+        uses: actions/download-artifact@v4
+        with:
+          name: target-directory
+          path: target/
       - name: Run tests
         run: ${{ matrix.command }}
 
@@ -314,37 +340,16 @@ jobs:
   # Performance check can run independently
   performance-check:
     name: Performance Check
+    needs: build-linux
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
         with:
-          shared-key: "perf"
-      
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-
-      - name: Check build time
-        run: |
-          cargo clean
-          BUILD_START=$(date +%s)
-          cargo build --release
-          BUILD_END=$(date +%s)
-          BUILD_TIME=$((BUILD_END - BUILD_START))
-
-          echo "Build time: $BUILD_TIME seconds"
-
-          if [ $BUILD_TIME -gt 300 ]; then
-            echo "Warning: Build time exceeds 5 minutes"
-          fi
-
+          name: arkavo-x86_64-linux
       - name: Check binary size
         run: |
-          # Use the binary from the previous build step
-          SIZE=$(du -b target/release/arkavo | cut -f1)
+          SIZE=$(du -b arkavo-x86_64-linux | cut -f1)
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
@@ -639,7 +644,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "regression-tests"
+          key: "regression-${{ matrix.os }}-${{ matrix.issue }}"
 
       # Issue #114: xcodebuild runtime dependency
       - name: Test Issue #114 - xcodebuild should not trigger prompts
