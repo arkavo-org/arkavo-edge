@@ -318,6 +318,16 @@ jobs:
       - name: Build
         run: cargo build --release --target aarch64-apple-darwin
 
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo 2>/dev/null || stat --format=%s target/aarch64-apple-darwin/release/arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
+
       - name: Prepare release artifact with ONNX Runtime
         run: |
           mkdir -p release-package
