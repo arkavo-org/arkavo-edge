@@ -1,9 +1,18 @@
 //! Test binary for Swift test discovery without triggering Xcode prompts
 //! Used by regression tests to ensure issue #114 remains fixed
 
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    println!("This binary only works on macOS");
+    std::process::exit(1);
+}
+
+#[cfg(target_os = "macos")]
 use arkavo_mcp_macos::TestError;
+#[cfg(target_os = "macos")]
 use std::process::exit;
 
+#[cfg(target_os = "macos")]
 fn main() {
     println!("Testing Swift test discovery without Xcode prompts...");
 
@@ -22,6 +31,7 @@ fn main() {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn test_swift_discovery() -> Result<usize, TestError> {
     use arkavo_mcp_macos::mcp::xcodebuild_wrapper::XcodebuildWrapper;
 
