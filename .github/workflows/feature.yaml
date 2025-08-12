@@ -1,9 +1,10 @@
 name: Feature
 
 # Feature Strategy:
-# - Default features include: memory, mdns, local
-# - mdns is CORE functionality for agent discovery (requires avahi on Linux)
+# - Default features include: memory (portable across all platforms)
+# - mdns is OPTIONAL for agent discovery (requires system libraries: avahi on Linux)
 # - musl builds exclude mdns due to static linking incompatibility
+# - Full featured builds use --features default-with-mdns for mDNS support
 # - coverage tests may exclude some features due to tarpaulin limitations
 
 on:
@@ -17,7 +18,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
-  # System dependencies needed for mdns (core feature for agent discovery)
+  # System dependencies needed for mdns (optional feature for agent discovery)
   SYSTEM_DEPS_DEBIAN: "libavahi-client-dev libavahi-common-dev"
 
 jobs:
@@ -221,7 +222,7 @@ jobs:
         run: |
           sudo apt-get update
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Install dependencies for full build including mDNS
+            # Install dependencies for optional mDNS support
             sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
           else
             # Install musl tools for static build
@@ -240,7 +241,7 @@ jobs:
             # Full featured build with local LLM support
             cargo build --release --target ${{ matrix.target }} -p arkavo
           else
-            # Slim build for containers - memory only, no local LLM or mDNS
+            # Slim build for containers - memory only, no mDNS
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
           fi
 
@@ -252,9 +253,9 @@ jobs:
           
           # Create feature manifest
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build with local LLM, mDNS, and memory support" > release-package/features.txt
+            echo "Full featured build with local LLM and memory support (mDNS available via --features default-with-mdns)" > release-package/features.txt
           else
-            echo "Slim static build with memory and remote LLM support (no local LLM or mDNS)" > release-package/features.txt
+            echo "Slim static build with memory and remote LLM support (no mDNS)" > release-package/features.txt
           fi
 
       - name: Upload binary

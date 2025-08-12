@@ -67,7 +67,7 @@ jobs:
             ### Binaries
 
             #### Linux
-            - **Full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
+            - **Full featured** (glibc, local LLM + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
             - **Static/slim** (musl, memory + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
             - **Debian package** (full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
             
@@ -165,7 +165,8 @@ jobs:
            Arkavo Edge is an open-source agentic CLI tool that provides
            developer-centric capabilities for AI-agent development and
            framework maintenance. This is the full featured build with
-           local LLM support, mDNS discovery, and memory features.
+           local LLM support and memory features. mDNS discovery is
+           available as an optional feature.
           Section: devel
           Priority: optional
           Homepage: https://github.com/arkavo/arkavo-edge
@@ -360,10 +361,11 @@ jobs:
           else
             apt-get update
             apt-get install -y curl ca-certificates
-            # Install runtime dependencies for glibc build (mDNS support)
+            # Install runtime dependencies for glibc build (optional mDNS support)
+            # Note: mDNS is not in default features but available via --features default-with-mdns
             apt-get install -y --no-install-recommends \
               libavahi-client3 \
-              libavahi-common3
+              libavahi-common3 || echo "mDNS libraries not available"
           fi
 
       - name: Download and test tar.gz binary
