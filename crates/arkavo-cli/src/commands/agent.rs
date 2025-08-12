@@ -700,7 +700,7 @@ fn broadcast_agent_mdns_sync(
         let service_type = "_a2a._tcp.local.";
         let instance_name = format!("arkavo-agent-{}", config.name);
         let host_name = format!("{}.local.", config.name);
-        
+
         let service_info = ServiceInfo::new(
             service_type,
             &instance_name,

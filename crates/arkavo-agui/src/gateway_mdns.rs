@@ -11,8 +11,7 @@ pub async fn run_mdns_discovery(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
-        crate::mdns_impl::mdns::discover_agents(agents, agent_connections, telemetry_tx)
-            .await
+        crate::mdns_impl::mdns::discover_agents(agents, agent_connections, telemetry_tx).await
     }
 
     #[cfg(not(feature = "mdns"))]
