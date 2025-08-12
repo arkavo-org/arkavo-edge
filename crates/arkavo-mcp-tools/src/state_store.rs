@@ -89,7 +89,7 @@ impl StateStore {
             .map_err(|e| ToolError::Mcp(format!("Failed to read state: {e}")))?;
         let snapshot_data = data.clone();
         drop(data);
-        
+
         let mut snapshots = self
             .snapshots
             .write()
