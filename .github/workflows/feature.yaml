@@ -142,7 +142,7 @@ jobs:
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       - name: Run tests
         run: |
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
           cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
@@ -816,19 +816,19 @@ jobs:
           echo "Testing regression for issue #114..."
           
           # Build without default features to avoid embeddings
-          echo "Building arkavo-test..."
-          cargo build -p arkavo-test --no-default-features || exit 1
+          echo "Building arkavo-mcp-macos..."
+          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
           
           # Run the regression test
           echo "Running regression test..."
-          cargo test -p arkavo-test --no-default-features --test regression_issue_114 -- --nocapture || {
+          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
             echo "::error::Regression test failed"
             exit 1
           }
           
           # Test that discovery tools don't prompt
           echo "Testing Swift discovery tool..."
-          cd crates/arkavo-test
+          cd crates/arkavo-mcp-macos
           
           # Create a minimal PATH that excludes Xcode but includes Rust
           CARGO_BIN="${HOME}/.cargo/bin"

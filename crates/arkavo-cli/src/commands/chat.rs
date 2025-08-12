@@ -108,31 +108,38 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize MCP client - skip in print mode, otherwise attempt connection
+    #[allow(unused_variables)]
     let mcp_client = if print_mode {
-        None
+        None::<()>
     } else {
-        // Try in-process MCP first, which includes all local tools
-        let result = McpConnection::new_in_process();
+        #[cfg(all(unix, feature = "test-harness"))]
+        {
+            // Try in-process MCP first, which includes all local tools
+            let result = McpConnection::new_in_process();
 
-        match result {
-            Ok(client) => {
-                if !print_mode {
-                    match &client {
-                        McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
-                        McpConnection::External(_) => {
-                            eprintln!("✓ Connected to external MCP server");
+            match result {
+                Ok(client) => {
+                    if !print_mode {
+                        match &client {
+                            McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
+                            McpConnection::External(_) => {
+                                eprintln!("✓ Connected to external MCP server");
+                            }
                         }
                     }
+                    Some(client)
                 }
-                Some(client)
-            }
-            Err(_e) => {
+                Err(_e) => {
                 if !print_mode {
                     eprintln!("ℹ MCP server not available - using LLM-only mode");
                 }
-                None
+                    None
+                }
             }
         }
+        
+        #[cfg(not(all(unix, feature = "test-harness")))]
+        None::<()>
     };
 
     // Show MCP tools help if connected
@@ -568,6 +575,7 @@ Full repository details (available via @build_repository_context):
         }
 
         // Check for slash commands
+        #[cfg(all(unix, feature = "test-harness"))]
         if let Some(command_input) = input.strip_prefix('/')
             && let Some(command_response) =
                 handle_command(command_input, mcp_client.as_ref(), client.provider_name())
@@ -904,6 +912,7 @@ fn get_current_directory() -> String {
     }
 }
 
+#[cfg(all(unix, feature = "test-harness"))]
 #[allow(dead_code)]
 fn handle_command(
     input: &str,
@@ -1069,6 +1078,7 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
+#[cfg(all(unix, feature = "test-harness"))]
 #[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,

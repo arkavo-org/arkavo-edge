@@ -3,7 +3,6 @@ pub mod commands;
 pub mod conversation_manager;
 pub mod log;
 pub mod mcp_client;
-#[cfg(all(unix, feature = "test-harness"))]
 pub mod mcp_integration;
 pub mod mcp_spawner;
 #[cfg(all(unix, feature = "test-harness"))]
