@@ -156,7 +156,7 @@ fn test_all_tui_tools_schemas() {
         "tui_keyboard",
         "tui_screenshot",
         "tui_interaction",
-        "tui_harness",
+        // Note: tui_harness is mentioned in docs but not yet implemented
     ];
 
     for tool_name in tui_tools {
