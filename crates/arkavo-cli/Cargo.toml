@@ -12,7 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["memory", "embeddings", "mdns", "local"]
+# Default features for Unix platforms (Linux, macOS)
+default = ["memory", "mdns"]
+# Default features for Windows (without mdns due to avahi dependency)
+windows-default = ["memory", "llm-remote"]
 memory = ["arkavo-test/memory"]
 embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
 mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]

@@ -24,7 +24,8 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "proc
 # Error handling
 thiserror = { workspace = true }
 
-# System calls (Unix)
+# System calls (Unix only)
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 # Serialization

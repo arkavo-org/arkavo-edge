@@ -74,7 +74,10 @@ jobs:
             #### macOS
             - **ARM64** (full featured): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
             
-            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support.
+            #### Windows
+            - **x86_64** (memory + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-windows.zip
+            
+            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support. Windows builds include memory and remote LLM support (iOS testing capabilities are not available on Windows).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -285,6 +288,47 @@ jobs:
           files: |
             target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz
             target/aarch64-apple-darwin/release/arkavo-${{ needs.release.outputs.version }}-aarch64-apple-darwin.tar.gz.sha256
+          fail_on_unmatched_files: false
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows-x86_64:
+    needs: release
+    name: Build Windows x86_64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Windows binary
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
+
+      - name: Create release package
+        run: |
+          New-Item -ItemType Directory -Force -Path release-package
+          Copy-Item target\x86_64-pc-windows-msvc\release\arkavo.exe release-package\
+          
+          # Create ZIP archive
+          Compress-Archive -Path release-package\arkavo.exe -DestinationPath arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip
+          
+          # Generate checksum
+          $hash = Get-FileHash -Path arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip -Algorithm SHA256
+          "$($hash.Hash.ToLower())  arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip" | Out-File -FilePath arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip.sha256
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          files: |
+            arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip
+            arkavo-${{ needs.release.outputs.version }}-x86_64-windows.zip.sha256
           fail_on_unmatched_files: false
           overwrite_files: true
         env:

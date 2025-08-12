@@ -27,7 +27,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.25.14"
+version = "0.26.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -126,13 +126,12 @@ prost = "0.13"
 
 # Build optimization
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 strip = true
 opt-level = 3
-# Optimize for smaller, faster binaries in production
 panic = "abort"
-debug = 1
+debug = false
 
 [profile.dev]
 opt-level = 0

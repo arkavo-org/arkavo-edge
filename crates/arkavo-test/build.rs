@@ -23,8 +23,18 @@ fn main() {
                 setup_idb_companion();
             }
         }
+        "windows" => {
+            // Use Windows-specific stub (minimal, no standard headers needed)
+            cc::Build::new()
+                .file("src/bridge/windows_stub.c")
+                .warnings(false)
+                .compile("ios_bridge");
+
+            // Windows doesn't support iOS testing, so skip idb setup
+            println!("cargo:warning=iOS testing capabilities are not available on Windows");
+        }
         _ => {
-            // Use stub on other platforms
+            // Use stub on other platforms (Linux, etc.)
             cc::Build::new()
                 .file("src/bridge/ios_stub.c")
                 .warnings(false)
@@ -110,13 +120,19 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
         );
     }
 
-    // Make it executable
+    // Make it executable (Unix-only)
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(binary_path).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(binary_path, perms).unwrap();
+    }
+
+    // Windows executables don't need permission changes
+    #[cfg(windows)]
+    {
+        // Windows .exe files are executable by default
     }
 
     // Package the frameworks
