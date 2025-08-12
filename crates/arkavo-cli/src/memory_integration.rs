@@ -1,25 +1,36 @@
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use arkavo_mcp::Tool as McpTool;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use arkavo_mcp_macos::mcp::server::Tool;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use arkavo_memory::mcp_tools::{
     CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool,
 };
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use arkavo_memory::storage::MemoryStorage;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use async_trait::async_trait;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use serde_json::Value;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use std::collections::HashMap;
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 use std::sync::Arc;
 
 // Adapter that wraps an McpTool to use TestError
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 struct McpToolAdapter<T: McpTool> {
     inner: T,
 }
 
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 impl<T: McpTool> McpToolAdapter<T> {
     const fn new(tool: T) -> Self {
         Self { inner: tool }
     }
 }
 
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 #[async_trait]
 impl<T: McpTool> Tool for McpToolAdapter<T> {
     async fn execute(&self, params: Value) -> arkavo_mcp_macos::Result<Value> {
@@ -34,10 +45,12 @@ impl<T: McpTool> Tool for McpToolAdapter<T> {
     }
 }
 
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 pub struct MemoryIntegration {
     storage: Arc<MemoryStorage>,
 }
 
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 impl MemoryIntegration {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Initializing memory integration...");
