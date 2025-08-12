@@ -28,7 +28,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.26.1"
+version = "0.27.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -109,7 +109,7 @@ metrics = "0.23"
 metrics-exporter-prometheus = "0.15"
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors"] }
-zeroconf = "0.14"
+mdns-sd = "0.14"
 
 # LLM and ML
 tokenizers = { version = "0.21.2", default-features = false, features = ["fancy-regex"] }
