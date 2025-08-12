@@ -5,14 +5,10 @@ use crate::{
     github::GitHubPrListKit,
     server::Tool,
     state::QueryStateKit,
-    tui::{
-        interaction::TuiInteractionKit,
-        keyboard::TuiKeyboardKit,
-        screenshot::TuiScreenshotKit,
-    },
+    tui::{interaction::TuiInteractionKit, keyboard::TuiKeyboardKit, screenshot::TuiScreenshotKit},
 };
 #[allow(unused_imports)]
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
@@ -26,29 +22,44 @@ pub struct McpConnection {
 
 impl McpConnection {
     /// Creates a new MCP connection with cross-platform tools
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if unable to create a Tokio runtime when no runtime is already active
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
         // Get a handle to the current runtime or create one
         let runtime_handle = Handle::try_current().unwrap_or_else(|_| {
-            Runtime::new().expect("Failed to create Tokio runtime").handle().clone()
+            Runtime::new()
+                .expect("Failed to create Tokio runtime")
+                .handle()
+                .clone()
         });
 
         // Register cross-platform tools
         tools.insert("filesystem".to_string(), Arc::new(FileSystemKit::new()));
         tools.insert("git_status".to_string(), Arc::new(GitStatusKit::new()));
-        tools.insert("github_pr_list".to_string(), Arc::new(GitHubPrListKit::new()));
-        tools.insert("code_analysis".to_string(), Arc::new(CodeAnalysisKit::new()));
+        tools.insert(
+            "github_pr_list".to_string(),
+            Arc::new(GitHubPrListKit::new()),
+        );
+        tools.insert(
+            "code_analysis".to_string(),
+            Arc::new(CodeAnalysisKit::new()),
+        );
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
-        
+
         // TUI tools (work on all platforms with terminal)
         tools.insert("tui_keyboard".to_string(), Arc::new(TuiKeyboardKit::new()));
-        tools.insert("tui_screenshot".to_string(), Arc::new(TuiScreenshotKit::new()));
-        tools.insert("tui_interaction".to_string(), Arc::new(TuiInteractionKit::new()));
+        tools.insert(
+            "tui_screenshot".to_string(),
+            Arc::new(TuiScreenshotKit::new()),
+        );
+        tools.insert(
+            "tui_interaction".to_string(),
+            Arc::new(TuiInteractionKit::new()),
+        );
 
         Ok(Self {
             tools: Arc::new(tools),
@@ -72,12 +83,7 @@ impl McpConnection {
     }
 
     #[allow(clippy::disallowed_methods)]
-    pub fn call_tool(
-        &self,
-        name: &str,
-        args: Value,
-        _llm_origin: &str,
-    ) -> Result<Value, String> {
+    pub fn call_tool(&self, name: &str, args: Value, _llm_origin: &str) -> Result<Value, String> {
         // Verify tool exists
         let _tool = self
             .tools
@@ -97,23 +103,19 @@ impl McpConnection {
                     .get(&tool_name)
                     .ok_or_else(|| format!("Tool not found: {tool_name}"))?;
 
-                handle.block_on(async move {
-                    tool.execute(args)
-                        .await
-                        .map_err(|e| e.to_string())
-                })
+                handle.block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) })
             })
             .join()
             .map_err(|_| "Thread panic during tool execution".to_string())?
         } else {
             // No runtime conflict, execute directly
-            let tool = self.tools.get(name).ok_or_else(|| format!("Tool not found: {name}"))?;
-            
-            self.runtime_handle.block_on(async move {
-                tool.execute(args)
-                    .await
-                    .map_err(|e| e.to_string())
-            })
+            let tool = self
+                .tools
+                .get(name)
+                .ok_or_else(|| format!("Tool not found: {name}"))?;
+
+            self.runtime_handle
+                .block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) })
         }
     }
 }

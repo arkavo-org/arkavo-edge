@@ -103,10 +103,10 @@ pub async fn run() -> Result<()> {
                 Ok(client) => Some(client),
                 Err(_) => None,
             };
-            
+
             let mcp_status = if mcp_client.is_some() {
                 let tool_count = mcp_client.as_ref().unwrap().list_tools().len();
-                
+
                 McpStatusUpdate {
                     available: true,
                     error_message: None,
