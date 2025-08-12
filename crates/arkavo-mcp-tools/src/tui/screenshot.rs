@@ -87,9 +87,9 @@ impl TuiScreenshotKit {
         {
             match params.format {
                 ScreenshotFormat::Text | ScreenshotFormat::Ansi => {
-                    self.capture_terminal_text_linux(params).await
+                    self.capture_terminal_text_linux(params)
                 }
-                ScreenshotFormat::Image => self.capture_terminal_image_linux(params).await,
+                ScreenshotFormat::Image => self.capture_terminal_image_linux(params),
             }
         }
 
@@ -169,7 +169,7 @@ impl TuiScreenshotKit {
     }
 
     #[cfg(target_os = "linux")]
-    async fn capture_terminal_text_linux(&self, params: &ScreenshotParams) -> Result<String> {
+    fn capture_terminal_text_linux(&self, params: &ScreenshotParams) -> Result<String> {
         // Try to use xdotool and xclip to get terminal content
         // First, find the terminal window
         let window_id = if let Some(title) = &params.window_title {
@@ -271,7 +271,7 @@ impl TuiScreenshotKit {
     }
 
     #[cfg(target_os = "linux")]
-    async fn capture_terminal_image_linux(&self, params: &ScreenshotParams) -> Result<String> {
+    fn capture_terminal_image_linux(&self, params: &ScreenshotParams) -> Result<String> {
         use base64::{Engine as _, engine::general_purpose};
         use std::fs;
 
