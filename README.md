@@ -27,7 +27,7 @@ arkavo ui
 ```
 
 ## Why Arkavo?
-- **True zero-config discovery:** agents auto-find each other with mDNS/DNS-SRV (optional feature).
+- **True zero-config discovery:** agents auto-find each other with mDNS/DNS-SRV.
 - **Built for performance:** Rust core pushes ≤ 2 ms A2A round-trips on commodity Macs.
 - **Visual flow map:** instant insight into who's talking to whom
 
@@ -45,7 +45,7 @@ When you run `arkavo` for the first time in a directory, it automatically:
 - Creates a `.arkavo` storage directory
 - Generates a unique agent ID based on your directory name (e.g., `myproject-a1b2c3d`)
 - Configures default settings for immediate use
-- Starts the agent with optional mDNS discovery (if available)
+- Starts the agent with mDNS discovery enabled
 
 ### Kimi Integration
 
@@ -73,25 +73,19 @@ Configure with environment variables:
 
 | Platform | Architecture | Features |
 |----------|-------------|----------|
-| macOS    | ARM64 (Apple Silicon) | Full support including iOS testing, local/remote LLM, mDNS* |
-| Linux    | x86_64, ARM64 | Full support with local/remote LLM, mDNS* |
-| Linux (musl) | x86_64 | Static binary with memory and remote LLM support |
-| Windows  | x86_64 | Memory and remote LLM support (no iOS testing) |
+| macOS    | ARM64 (Apple Silicon) | Full support including iOS testing, local/remote LLM, mDNS |
+| Linux    | x86_64, ARM64 | Full support with local/remote LLM, mDNS |
+| Linux (musl) | x86_64 | Static binary with memory, remote LLM, and mDNS support |
+| Windows  | x86_64 | Memory, remote LLM, and mDNS support (no iOS testing) |
 
-*mDNS discovery is now optional and uses pure Rust implementation (no system dependencies)
+mDNS discovery uses pure Rust implementation (mdns-sd crate) with no system dependencies
 
 **Note:** iOS simulator automation and testing capabilities are only available on macOS.
 
 ## Building from Source
 
-### Default Build (without mDNS)
 ```bash
 cargo build --release
 ```
 
-### Build with mDNS Discovery
-```bash
-cargo build --release --features default-with-mdns
-```
-
-The mDNS feature now uses a pure Rust implementation (`mdns-sd` crate) that doesn't require system libraries like Avahi or Bonjour. This makes builds more portable and simplifies deployment across different platforms.
+The default build includes mDNS discovery using a pure Rust implementation (`mdns-sd` crate) that doesn't require system libraries like Avahi or Bonjour. This provides true portability across all platforms.

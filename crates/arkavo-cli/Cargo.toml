@@ -12,12 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-# Default features - portable across all platforms
-default = ["memory", "test-harness"]
-# Default features with mDNS discovery (requires system libraries)
-default-with-mdns = ["memory", "mdns", "test-harness"]
+# Default features - portable across all platforms with pure Rust mDNS
+default = ["memory", "mdns", "test-harness"]
 # Default features for Windows
-windows-default = ["memory", "llm-remote"]
+windows-default = ["memory", "mdns", "llm-remote"]
 test-harness = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]

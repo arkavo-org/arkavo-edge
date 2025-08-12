@@ -1,10 +1,9 @@
 name: Feature
 
 # Feature Strategy:
-# - Default features include: memory (portable across all platforms)
-# - mdns is OPTIONAL for agent discovery (requires system libraries: avahi on Linux)
-# - musl builds exclude mdns due to static linking incompatibility
-# - Full featured builds use --features default-with-mdns for mDNS support
+# - Default features include: memory, mdns (portable across all platforms)
+# - mdns uses pure Rust implementation (mdns-sd crate, no system dependencies)
+# - All builds include mdns since it's now pure Rust
 # - coverage tests may exclude some features due to tarpaulin limitations
 
 on:
@@ -18,8 +17,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   CARGO_NET_TIMEOUT: 10
-  # System dependencies needed for mdns (optional feature for agent discovery)
-  SYSTEM_DEPS_DEBIAN: "libavahi-client-dev libavahi-common-dev"
+  # No system dependencies needed - using pure Rust mDNS implementation
 
 jobs:
   # Version check from PR
@@ -120,10 +118,7 @@ jobs:
         with:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "clippy"
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+      # No system dependencies needed for pure Rust build
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
@@ -137,10 +132,7 @@ jobs:
         with:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "test"
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
+      # No system dependencies needed for pure Rust build
       - name: Run tests
         run: |
           cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
@@ -206,7 +198,7 @@ jobs:
             features: default
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
-            features: memory,llm-remote
+            features: memory,llm-remote,mdns
             artifact_name: arkavo-x86_64-linux-musl
     steps:
       - uses: actions/checkout@v4
@@ -218,14 +210,11 @@ jobs:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "build-${{ matrix.target }}"
 
-      - name: Install dependencies
+      - name: Install build tools
         run: |
-          sudo apt-get update
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Install dependencies for optional mDNS support
-            sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
-          else
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
             # Install musl tools for static build
+            sudo apt-get update
             sudo apt-get install -y musl-tools musl-dev
           fi
 
@@ -253,9 +242,9 @@ jobs:
           
           # Create feature manifest
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build with local LLM and memory support (mDNS available via --features default-with-mdns)" > release-package/features.txt
+            echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
           else
-            echo "Slim static build with memory and remote LLM support (no mDNS)" > release-package/features.txt
+            echo "Static build with memory, remote LLM, and mDNS support (pure Rust)" > release-package/features.txt
           fi
 
       - name: Upload binary
@@ -407,13 +396,7 @@ jobs:
         with:
           name: arkavo-x86_64-linux
 
-      - name: Install runtime dependencies for glibc build
-        if: contains(matrix.container, 'ubuntu')
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            libavahi-client3 \
-            libavahi-common3
+      # No runtime dependencies needed for pure Rust mDNS
 
       - name: Test binary
         run: |
@@ -464,12 +447,7 @@ jobs:
           name: arkavo-x86_64-linux
           path: ./
       
-      - name: Install runtime dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libavahi-client3 \
-            libavahi-common3
+      # No runtime dependencies needed for pure Rust mDNS
       
       - name: Test binary size
         run: |
