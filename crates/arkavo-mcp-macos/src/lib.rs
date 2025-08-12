@@ -4,10 +4,13 @@
 #![allow(clippy::nursery)]
 
 // This crate is macOS-only because it contains iOS simulator and XCTest functionality
+// On non-macOS platforms, this crate provides no functionality
+
+// Provide a doc comment for non-macOS platforms
 #[cfg(not(target_os = "macos"))]
-compile_error!(
-    "arkavo-mcp-macos only works on macOS. For cross-platform MCP tools, use arkavo-mcp-tools instead."
-);
+/// This crate only provides functionality on macOS.
+/// For cross-platform MCP tools, use the `arkavo-mcp-tools` crate instead.
+pub struct NotAvailableOnThisPlatform;
 
 #[cfg(target_os = "macos")]
 pub mod ai;
