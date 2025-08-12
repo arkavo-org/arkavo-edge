@@ -956,9 +956,9 @@ enum DebugCommand {
 }
 
 async fn run_mdns_discovery(
-    _agents: Arc<RwLock<Vec<serde_json::Value>>>,
-    _agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
-    _telemetry_tx: mpsc::Sender<TelemetryEvent>,
+    agents: Arc<RwLock<Vec<serde_json::Value>>>,
+    agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    telemetry_tx: mpsc::Sender<TelemetryEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // This is the same mDNS discovery code from ui.rs
     // We'll reuse it here for now
