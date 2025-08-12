@@ -25,6 +25,11 @@ pub struct McpConnection {
 }
 
 impl McpConnection {
+    /// Creates a new MCP connection with cross-platform tools
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if unable to create a Tokio runtime when no runtime is already active
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
@@ -66,6 +71,7 @@ impl McpConnection {
         })
     }
 
+    #[allow(clippy::disallowed_methods)]
     pub fn call_tool(
         &self,
         name: &str,
