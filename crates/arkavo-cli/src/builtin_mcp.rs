@@ -36,6 +36,7 @@ impl BuiltinMcpConnection {
         }
     }
 
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     pub async fn new_with_test_tools() -> Self {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
@@ -47,7 +48,6 @@ impl BuiltinMcpConnection {
         tools.insert("ollama_config".to_string(), ollama_config);
 
         // Try to initialize test tools if available
-        #[cfg(all(target_os = "macos", feature = "test-harness"))]
         let test_connection =
             match crate::mcp_integration::McpConnection::new_in_process_async().await {
                 Ok(conn) => {
@@ -62,9 +62,14 @@ impl BuiltinMcpConnection {
 
         Self {
             tools,
-            #[cfg(all(target_os = "macos", feature = "test-harness"))]
             test_connection,
         }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+    pub fn new_with_test_tools() -> Self {
+        // When test harness is not available, just use the regular new() method
+        Self::new()
     }
 }
 
@@ -114,7 +119,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         &self,
         tool_name: &str,
         arguments: Value,
-        llm_provider: &str,
+        _llm_provider: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         // First check built-in tools
         if let Some(tool) = self.tools.get(tool_name) {
@@ -130,7 +135,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         #[cfg(all(target_os = "macos", feature = "test-harness"))]
         {
             if let Some(ref test_conn) = self.test_connection {
-                return test_conn.call_tool(tool_name, arguments, llm_provider);
+                return test_conn.call_tool(tool_name, arguments, _llm_provider);
             }
         }
 
