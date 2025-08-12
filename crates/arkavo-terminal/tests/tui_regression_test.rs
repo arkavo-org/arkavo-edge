@@ -124,6 +124,7 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Requires tui_harness tool which is not yet implemented"]
 async fn test_tui_state_verification() {
     // Initialize MCP connection
     println!("Creating MCP connection...");
