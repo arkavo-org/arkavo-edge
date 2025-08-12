@@ -76,8 +76,8 @@ impl Tool for FindBugsKit {
 
         // Run analysis based on language
         let bugs = match detected_language.as_str() {
-            "rust" => analyze_rust(path, &bug_types).await?,
-            "swift" => analyze_swift(path, &bug_types).await?,
+            "rust" => analyze_rust(path, &bug_types)?,
+            "swift" => analyze_swift(path, &bug_types)?,
             _ => {
                 return Err(ToolError::Mcp(format!(
                     "Unsupported language: {detected_language}"
@@ -223,7 +223,7 @@ impl Tool for TestAnalysisKit {
             .unwrap_or(".");
 
         // Run test coverage analysis
-        let coverage = analyze_test_coverage(project_path).await?;
+        let coverage = analyze_test_coverage(project_path)?;
 
         Ok(serde_json::json!({
             "project_path": project_path,
@@ -275,7 +275,7 @@ fn detect_language(path: &str) -> Result<String> {
     }
 }
 
-async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
+fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
     let mut bugs = Vec::new();
 
     // Run clippy for Rust analysis
@@ -306,7 +306,7 @@ async fn analyze_rust(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::
     Ok(bugs)
 }
 
-async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
+fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json::Value>> {
     let mut bugs = Vec::new();
 
     // Search for common Swift anti-patterns
@@ -335,7 +335,7 @@ async fn analyze_swift(path: &str, bug_types: &[&str]) -> Result<Vec<serde_json:
     Ok(bugs)
 }
 
-async fn analyze_test_coverage(_path: &str) -> Result<serde_json::Value> {
+fn analyze_test_coverage(_path: &str) -> Result<serde_json::Value> {
     // This would run actual coverage tools
     Ok(serde_json::json!({
         "total": 75.5,

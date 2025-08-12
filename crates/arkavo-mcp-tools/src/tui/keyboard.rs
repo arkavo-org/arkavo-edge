@@ -174,7 +174,7 @@ impl TuiKeyboardKit {
         }
     }
 
-    async fn send_key_with_modifiers(&self, key: &str, modifiers: &[String]) -> Result<()> {
+    fn send_key_with_modifiers(&self, key: &str, modifiers: &[String]) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
             let modifier_str = modifiers
@@ -311,19 +311,19 @@ impl Tool for TuiKeyboardKit {
                     match key.to_lowercase().as_str() {
                         "enter" | "return" | "tab" | "escape" | "esc" | "up" | "down" | "left"
                         | "right" => {
-                            self.send_key_with_modifiers(&key, &[]).await?;
+                            self.send_key_with_modifiers(&key, &[])?;
                         }
                         _ => {
                             // For single characters, use text typing
                             if key.len() == 1 {
                                 self.send_key_sequence(&key).await?;
                             } else {
-                                self.send_key_with_modifiers(&key, &[]).await?;
+                                self.send_key_with_modifiers(&key, &[])?;
                             }
                         }
                     }
                 } else {
-                    self.send_key_with_modifiers(&key, &modifiers).await?;
+                    self.send_key_with_modifiers(&key, &modifiers)?;
                 }
 
                 Ok(json!({
@@ -349,7 +349,7 @@ impl Tool for TuiKeyboardKit {
                     modifiers
                 };
 
-                self.send_key_with_modifiers(&shortcut, &mods).await?;
+                self.send_key_with_modifiers(&shortcut, &mods)?;
 
                 Ok(json!({
                     "success": true,

@@ -3,8 +3,7 @@ use serde_json::Value;
 
 #[cfg(all(unix, feature = "test-harness"))]
 use {
-    crate::memory_integration::MemoryIntegration,
-    arkavo_mcp_macos::mcp::mcp_connection as base,
+    crate::memory_integration::MemoryIntegration, arkavo_mcp_macos::mcp::mcp_connection as base,
     tokio::runtime::Handle,
 };
 

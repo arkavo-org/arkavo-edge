@@ -125,7 +125,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
             let result = handle.block_on(tool.execute(arguments))?;
             return Ok(result);
         }
-        
+
         // Then check test tools if available
         #[cfg(all(unix, feature = "test-harness"))]
         {
@@ -133,7 +133,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
                 return test_conn.call_tool(tool_name, arguments, llm_provider);
             }
         }
-        
+
         Err(format!("Tool '{tool_name}' not found").into())
     }
 }

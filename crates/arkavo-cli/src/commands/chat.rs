@@ -121,7 +121,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 Ok(client) => {
                     if !print_mode {
                         match &client {
-                            McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
+                            McpConnection::InProcess(_) => {
+                                eprintln!("✓ Using in-process MCP server")
+                            }
                             McpConnection::External(_) => {
                                 eprintln!("✓ Connected to external MCP server");
                             }
@@ -130,14 +132,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     Some(client)
                 }
                 Err(_e) => {
-                if !print_mode {
-                    eprintln!("ℹ MCP server not available - using LLM-only mode");
-                }
+                    if !print_mode {
+                        eprintln!("ℹ MCP server not available - using LLM-only mode");
+                    }
                     None
                 }
             }
         }
-        
+
         #[cfg(not(all(unix, feature = "test-harness")))]
         None::<()>
     };

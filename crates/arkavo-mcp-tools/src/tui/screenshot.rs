@@ -72,14 +72,14 @@ impl TuiScreenshotKit {
         }
     }
 
-    async fn capture_terminal_output(&self, params: &ScreenshotParams) -> Result<String> {
+    fn capture_terminal_output(&self, params: &ScreenshotParams) -> Result<String> {
         #[cfg(target_os = "macos")]
         {
             match params.format {
                 ScreenshotFormat::Text | ScreenshotFormat::Ansi => {
-                    self.capture_terminal_text_macos(params).await
+                    self.capture_terminal_text_macos(params)
                 }
-                ScreenshotFormat::Image => self.capture_terminal_image_macos(params).await,
+                ScreenshotFormat::Image => self.capture_terminal_image_macos(params),
             }
         }
 
@@ -102,7 +102,7 @@ impl TuiScreenshotKit {
     }
 
     #[cfg(target_os = "macos")]
-    async fn capture_terminal_text_macos(&self, params: &ScreenshotParams) -> Result<String> {
+    fn capture_terminal_text_macos(&self, params: &ScreenshotParams) -> Result<String> {
         // Use AppleScript to get terminal content
         let script = if let Some(title) = &params.window_title {
             format!(
@@ -231,7 +231,7 @@ impl TuiScreenshotKit {
     }
 
     #[cfg(target_os = "macos")]
-    async fn capture_terminal_image_macos(&self, params: &ScreenshotParams) -> Result<String> {
+    fn capture_terminal_image_macos(&self, params: &ScreenshotParams) -> Result<String> {
         use base64::{Engine as _, engine::general_purpose};
         use std::fs;
 
@@ -241,9 +241,9 @@ impl TuiScreenshotKit {
         let mut cmd = Command::new("screencapture");
         cmd.args(["-x", "-o"]); // No sound, no shadow
 
-        if let Some(_title) = &params.window_title {
+        if let Some(title) = &params.window_title {
             // Try to find window by title
-            cmd.args(["-l", &self.find_window_id_by_title(_title)?]);
+            cmd.args(["-l", &self.find_window_id_by_title(title)?]);
         } else {
             // Interactive window selection
             cmd.arg("-W");
@@ -349,7 +349,7 @@ impl Tool for TuiScreenshotKit {
                 .map_err(|e| ToolError::Mcp(format!("Invalid parameters: {e}")))?
         };
 
-        let content = self.capture_terminal_output(&params).await?;
+        let content = self.capture_terminal_output(&params)?;
 
         Ok(json!({
             "success": true,

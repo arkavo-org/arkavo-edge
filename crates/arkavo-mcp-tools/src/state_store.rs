@@ -54,6 +54,7 @@ impl StateStore {
         let current = data.get(entity);
         let new_value = updater(current, action, update_data.as_ref())?;
         data.insert(entity.to_string(), new_value.clone());
+        drop(data);
 
         Ok(new_value)
     }
@@ -86,12 +87,16 @@ impl StateStore {
             .data
             .read()
             .map_err(|e| ToolError::Mcp(format!("Failed to read state: {e}")))?;
+        let snapshot_data = data.clone();
+        drop(data);
+        
         let mut snapshots = self
             .snapshots
             .write()
             .map_err(|e| ToolError::Mcp(format!("Failed to write snapshots: {e}")))?;
 
-        snapshots.insert(name.to_string(), data.clone());
+        snapshots.insert(name.to_string(), snapshot_data);
+        drop(snapshots);
         Ok(())
     }
 
@@ -104,13 +109,16 @@ impl StateStore {
         let snapshot = snapshots
             .get(name)
             .ok_or_else(|| ToolError::Mcp(format!("Snapshot '{name}' not found")))?;
+        let snapshot_data = snapshot.clone();
+        drop(snapshots);
 
         let mut data = self
             .data
             .write()
             .map_err(|e| ToolError::Mcp(format!("Failed to write state: {e}")))?;
 
-        *data = snapshot.clone();
+        *data = snapshot_data;
+        drop(data);
         Ok(())
     }
 
