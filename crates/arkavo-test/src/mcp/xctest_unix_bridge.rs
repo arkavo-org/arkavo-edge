@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use crate::{Result, TestError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -4,6 +4,7 @@ use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+#[cfg(unix)]
 use std::process::Command;
 
 pub struct TuiScreenshotKit {
@@ -95,6 +96,7 @@ impl TuiScreenshotKit {
 
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
+            let _ = params; // Suppress unused warning
             Err(TestError::Mcp(
                 "Terminal screenshot not supported on this platform".to_string(),
             ))

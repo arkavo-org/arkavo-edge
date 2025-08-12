@@ -89,14 +89,21 @@ impl SocketManager {
                         );
 
                         // Try to connect to verify it's active
-                        if let Ok(_stream) = tokio::net::UnixStream::connect(&socket_path).await {
-                            eprintln!("[SocketManager] Socket is active");
-                            let socket_path_str = socket_path.to_string_lossy().to_string();
-                            self.update_cache(device_id.to_string(), socket_path_str.clone())
-                                .await;
-                            return Some(socket_path_str);
+                        #[cfg(unix)]
+                        {
+                            if let Ok(_stream) = tokio::net::UnixStream::connect(&socket_path).await {
+                                eprintln!("[SocketManager] Socket is active");
+                                let socket_path_str = socket_path.to_string_lossy().to_string();
+                                self.update_cache(device_id.to_string(), socket_path_str.clone())
+                                    .await;
+                                return Some(socket_path_str);
+                            }
+                            eprintln!("[SocketManager] Socket exists but is not active");
                         }
-                        eprintln!("[SocketManager] Socket exists but is not active");
+                        #[cfg(not(unix))]
+                        {
+                            eprintln!("[SocketManager] Unix sockets not supported on Windows");
+                        }
                     }
                 }
             }

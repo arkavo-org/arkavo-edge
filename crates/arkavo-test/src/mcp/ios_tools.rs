@@ -126,22 +126,29 @@ impl UiInteractionKit {
                         );
 
                         // Try to connect to verify it's active
-                        if let Ok(stream) = tokio::net::UnixStream::connect(&socket_path).await {
-                            eprintln!("[AXP] Successfully connected to AXP harness");
-                            drop(stream); // Close the test connection
+                        #[cfg(unix)]
+                        {
+                            if let Ok(stream) = tokio::net::UnixStream::connect(&socket_path).await {
+                                eprintln!("[AXP] Successfully connected to AXP harness");
+                                drop(stream); // Close the test connection
 
-                            // Update cache
-                            let socket_path_str = socket_path.to_string_lossy().to_string();
-                            {
-                                let mut cache = self.axp_socket_cache.lock().await;
-                                *cache = Some((device_id.clone(), socket_path_str.clone()));
+                                // Update cache
+                                let socket_path_str = socket_path.to_string_lossy().to_string();
+                                {
+                                    let mut cache = self.axp_socket_cache.lock().await;
+                                    *cache = Some((device_id.clone(), socket_path_str.clone()));
+                                }
+
+                                return Some((socket_path_str, true));
                             }
-
-                            return Some((socket_path_str, true));
+                            eprintln!(
+                                "[AXP] Socket exists but connection failed - harness may not be running"
+                            );
                         }
-                        eprintln!(
-                            "[AXP] Socket exists but connection failed - harness may not be running"
-                        );
+                        #[cfg(not(unix))]
+                        {
+                            eprintln!("[AXP] Unix sockets not supported on Windows");
+                        }
                     }
                 }
             }
@@ -158,6 +165,7 @@ impl UiInteractionKit {
     }
 
     /// Send AXP tap command
+    #[cfg(unix)]
     async fn send_axp_tap(&self, socket_path: &str, x: f64, y: f64) -> Result<serde_json::Value> {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
@@ -275,6 +283,12 @@ impl UiInteractionKit {
 
             Err(TestError::Mcp(format!("AXP tap failed: {error}")))
         }
+    }
+    
+    /// Send AXP tap command (Windows stub)
+    #[cfg(not(unix))]
+    async fn send_axp_tap(&self, _socket_path: &str, _x: f64, _y: f64) -> Result<serde_json::Value> {
+        Err(TestError::Mcp("AXP harness not supported on Windows".to_string()))
     }
 
     /// Send a tap command through XCTest bridge (helper to avoid mutex issues)
