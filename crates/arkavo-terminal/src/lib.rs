@@ -60,6 +60,11 @@ pub struct TerminalContext {
     pub message_rx: mpsc::Receiver<ChatMessage>,
 }
 
+/// Run the terminal UI application
+///
+/// # Panics
+///
+/// Panics if the MCP client is Some but becomes None unexpectedly
 pub async fn run() -> Result<()> {
     // Create channels for LLM communication
     #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
@@ -99,13 +104,10 @@ pub async fn run() -> Result<()> {
             );
 
             // Initialize MCP connection and report status
-            let mcp_client = match McpConnection::new() {
-                Ok(client) => Some(client),
-                Err(_) => None,
-            };
+            let mcp_client = McpConnection::new().ok();
 
-            let mcp_status = if mcp_client.is_some() {
-                let tool_count = mcp_client.as_ref().unwrap().list_tools().len();
+            let mcp_status = if let Some(ref client) = mcp_client {
+                let tool_count = client.list_tools().len();
 
                 McpStatusUpdate {
                     available: true,
