@@ -79,7 +79,7 @@ pub async fn run() -> Result<()> {
         let llm_tx = llm_tx.clone();
         tokio::spawn(async move {
             use arkavo_llm::Message;
-            use arkavo_test::mcp::mcp_connection::McpConnection;
+            use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
             use tokio_stream::StreamExt;
 
             // Initialize LLM client using the same logic as chat command

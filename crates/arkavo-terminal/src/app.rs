@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_test::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},

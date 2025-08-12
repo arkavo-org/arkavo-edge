@@ -1,6 +1,6 @@
-use arkavo_test::execution::runner::TestRunner;
-use arkavo_test::gherkin::parser::Parser;
-use arkavo_test::reporting::business_report::{BusinessReporter, OutputFormat};
+use arkavo_mcp_macos::execution::runner::TestRunner;
+use arkavo_mcp_macos::gherkin::parser::Parser;
+use arkavo_mcp_macos::reporting::business_report::{BusinessReporter, OutputFormat};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -61,7 +61,7 @@ fn run_gherkin_test(feature_path: &Path) -> Result<(), Box<dyn std::error::Error
 
     let failed = results
         .iter()
-        .any(|r| r.status == arkavo_test::reporting::business_report::TestStatus::Failed);
+        .any(|r| r.status == arkavo_mcp_macos::reporting::business_report::TestStatus::Failed);
     if failed {
         std::process::exit(1);
     }
@@ -183,8 +183,8 @@ fn run_go_tests(test_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_intelligent_exploration(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_test::execution::IntelligentRunner;
-    use arkavo_test::integration::AutoDiscovery;
+    use arkavo_mcp_macos::execution::IntelligentRunner;
+    use arkavo_mcp_macos::integration::AutoDiscovery;
 
     println!("🧠 Running Intelligent Test Exploration...\n");
 

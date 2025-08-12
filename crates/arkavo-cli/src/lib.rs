@@ -3,8 +3,10 @@ pub mod commands;
 pub mod conversation_manager;
 pub mod log;
 pub mod mcp_client;
+#[cfg(all(unix, feature = "test-harness"))]
 pub mod mcp_integration;
 pub mod mcp_spawner;
+#[cfg(all(unix, feature = "test-harness"))]
 pub mod memory_integration;
 
 #[allow(clippy::disallowed_methods)]
@@ -19,7 +21,13 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "chat" => commands::chat::execute(&args[1..]),
         "plan" => commands::plan::execute(&args[1..]),
         "apply" => commands::apply::execute(&args[1..]),
+        #[cfg(all(unix, feature = "test-harness"))]
         "test" => commands::test::execute(&args[1..]),
+        #[cfg(not(all(unix, feature = "test-harness")))]
+        "test" => {
+            eprintln!("Test command is not available on this platform");
+            Err("Test command requires Unix platform with test-harness feature".into())
+        }
         "ui" => commands::ui::execute(&args[1..]),
         "vault" => commands::vault::execute(&args[1..]),
         "model" => {
@@ -81,10 +89,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        #[cfg(all(unix, feature = "test-harness"))]
         "serve" | "mcp" => {
             // Always create a new runtime for the MCP server
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { commands::mcp::run().await })
+        }
+        #[cfg(not(all(unix, feature = "test-harness")))]
+        "serve" | "mcp" => {
+            eprintln!("MCP server is not available on this platform");
+            Err("MCP server requires Unix platform with test-harness feature".into())
         }
         "help" => {
             print_usage();

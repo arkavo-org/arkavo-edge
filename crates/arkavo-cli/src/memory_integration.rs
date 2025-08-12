@@ -1,9 +1,9 @@
 use arkavo_mcp::Tool as McpTool;
+use arkavo_mcp_macos::mcp::server::Tool;
 use arkavo_memory::mcp_tools::{
     CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool,
 };
 use arkavo_memory::storage::MemoryStorage;
-use arkavo_test::mcp::server::Tool;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -22,11 +22,11 @@ impl<T: McpTool> McpToolAdapter<T> {
 
 #[async_trait]
 impl<T: McpTool> Tool for McpToolAdapter<T> {
-    async fn execute(&self, params: Value) -> arkavo_test::Result<Value> {
+    async fn execute(&self, params: Value) -> arkavo_mcp_macos::Result<Value> {
         self.inner
             .execute(params)
             .await
-            .map_err(|e| arkavo_test::TestError::Mcp(e.to_string()))
+            .map_err(|e| arkavo_mcp_macos::TestError::Mcp(e.to_string()))
     }
 
     fn schema(&self) -> &arkavo_mcp::ToolSchema {

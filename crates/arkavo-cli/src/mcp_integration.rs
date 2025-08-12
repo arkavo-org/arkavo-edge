@@ -1,6 +1,7 @@
 use crate::mcp_client::McpClient;
 use crate::memory_integration::MemoryIntegration;
-use arkavo_test::mcp::mcp_connection as base;
+#[cfg(all(unix, feature = "test-harness"))]
+use arkavo_mcp_macos::mcp::mcp_connection as base;
 use serde_json::Value;
 use tokio::runtime::Handle;
 

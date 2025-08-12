@@ -31,7 +31,7 @@ semver = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
-arkavo-test = { path = "../arkavo-test" }
+arkavo-mcp-macos = { path = "../arkavo-mcp-macos" }
 tokio-stream = { workspace = true }
 regex = { workspace = true }
 
