@@ -31,8 +31,11 @@ semver = { workspace = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-llm = { path = "../arkavo-llm", default-features = false, optional = true }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
-arkavo-mcp-macos = { path = "../arkavo-mcp-macos" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 tokio-stream = { workspace = true }
+# macOS-only dependency
+[target.'cfg(target_os = "macos")'.dependencies]
+arkavo-mcp-macos = { path = "../arkavo-mcp-macos" }
 regex = { workspace = true }
 
 # For multi-terminal support

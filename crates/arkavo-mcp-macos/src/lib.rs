@@ -3,23 +3,41 @@
 #![allow(clippy::pedantic)]
 #![allow(clippy::nursery)]
 
+// This crate is macOS-only because it contains iOS simulator and XCTest functionality
+#[cfg(not(target_os = "macos"))]
+compile_error!(
+    "arkavo-mcp-macos only works on macOS. For cross-platform MCP tools, use arkavo-mcp-tools instead."
+);
+
+#[cfg(target_os = "macos")]
 pub mod ai;
+#[cfg(target_os = "macos")]
 pub mod bridge;
+#[cfg(target_os = "macos")]
 pub mod execution;
+#[cfg(target_os = "macos")]
 pub mod gherkin;
+#[cfg(target_os = "macos")]
 pub mod integration;
+#[cfg(target_os = "macos")]
 pub mod mcp;
+#[cfg(target_os = "macos")]
 pub mod reporting;
+#[cfg(target_os = "macos")]
 pub mod state_store;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod state_store_test;
 
+#[cfg(target_os = "macos")]
 #[cfg(feature = "memory")]
 use arkavo_memory::error::MemoryError;
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use thiserror::Error;
 
+#[cfg(target_os = "macos")]
 #[derive(Error, Debug)]
 pub enum TestError {
     #[error("MCP error: {0}")]
@@ -51,14 +69,17 @@ pub enum TestError {
     Serialization(#[from] serde_json::Error),
 }
 
+#[cfg(target_os = "macos")]
 pub type Result<T> = std::result::Result<T, TestError>;
 
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone)]
 pub struct TestHarness {
     mcp_server: Arc<mcp::server::McpTestServer>,
     state_manager: Arc<execution::state::StateManager>,
 }
 
+#[cfg(target_os = "macos")]
 impl TestHarness {
     pub fn new() -> Result<Self> {
         Ok(Self {

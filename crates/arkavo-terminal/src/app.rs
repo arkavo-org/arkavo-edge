@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_tools::mcp_connection::McpConnection;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -320,7 +320,7 @@ impl App {
 
     pub fn initialize_mcp_connection(&mut self) {
         // Initialize MCP client - attempt connection and handle failures gracefully
-        let result = McpConnection::new_in_process();
+        let result = McpConnection::new();
 
         match result {
             Ok(client) => {

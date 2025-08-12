@@ -617,6 +617,7 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-llm",
  "arkavo-mcp-macos",
+ "arkavo-mcp-tools",
  "arkavo-memory",
  "chrono",
  "crossterm",

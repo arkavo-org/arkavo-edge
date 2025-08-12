@@ -1,6 +1,6 @@
 /// Comprehensive TUI regression tests for key bindings, model connections, and window management
 /// Run with: cargo test -p arkavo-terminal tui_comprehensive_regression -- --ignored --nocapture
-use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_tools::mcp_connection::McpConnection;
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -8,7 +8,7 @@ use tokio::time::sleep;
 #[tokio::test]
 #[ignore = "Interactive test - requires terminal UI"]
 async fn test_vim_mode_transitions() {
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     println!("=== Testing Vim Mode Transitions ===");
 
@@ -129,7 +129,7 @@ async fn test_vim_mode_transitions() {
 #[tokio::test]
 #[ignore = "Interactive test - requires terminal UI"]
 async fn test_key_bindings_and_navigation() {
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     println!("=== Testing Key Bindings and Navigation ===");
 
@@ -302,7 +302,7 @@ async fn test_key_bindings_and_navigation() {
 #[tokio::test]
 #[ignore = "Interactive test - requires terminal UI"]
 async fn test_chat_input_and_streaming() {
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     println!("=== Testing Chat Input and Streaming ===");
 
@@ -402,7 +402,7 @@ async fn test_chat_input_and_streaming() {
 #[tokio::test]
 #[ignore = "Interactive test - requires manual verification"]
 async fn test_concurrent_operations() {
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     println!("=== Testing Concurrent Operations ===");
 
@@ -427,7 +427,7 @@ async fn test_concurrent_operations() {
     // Send multiple operations concurrently
     let handles: Vec<_> = (0..3)
         .map(|i| {
-            let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+            let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
             tokio::spawn(async move {
                 if i % 2 == 0 {

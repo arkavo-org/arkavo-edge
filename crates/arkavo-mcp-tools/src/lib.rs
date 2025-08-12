@@ -4,6 +4,7 @@ pub mod code_analysis;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod mcp_connection;
 pub mod server;
 pub mod state;
 pub mod state_store;

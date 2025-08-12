@@ -62,9 +62,12 @@ serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
 
-# Unix-only dependencies (macOS and Linux)
-[target.'cfg(unix)'.dependencies]
+# macOS-only dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
 arkavo-mcp-macos = { path = "../arkavo-mcp-macos", optional = true }
+
+# Unix dependencies (macOS and Linux)
+[target.'cfg(unix)'.dependencies]
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 
 # Automatically enable metal feature on macOS
