@@ -92,7 +92,7 @@ async fn test_openai_rate_limiting() {
 
             let messages = vec![Message {
                 role: Role::User,
-                content: format!("Count to {} and respond with just the numbers", i),
+                content: format!("Count to {i} and respond with just the numbers"),
                 images: None,
             }];
             provider.complete(messages).await
@@ -116,10 +116,7 @@ async fn test_openai_rate_limiting() {
     }
 
     assert!(success_count > 0, "At least some requests should succeed");
-    println!(
-        "Success: {}, Rate limited: {}",
-        success_count, rate_limit_count
-    );
+    println!("Success: {success_count}, Rate limited: {rate_limit_count}");
 }
 
 #[tokio::test]
@@ -194,8 +191,7 @@ async fn test_openai_system_message() {
             || response.contains("arr")
             || response.contains("Ahoy")
             || response.contains("Arr"),
-        "Response should contain pirate speak: {}",
-        response
+        "Response should contain pirate speak: {response}"
     );
 }
 
@@ -240,8 +236,7 @@ async fn test_openai_multi_turn_conversation() {
 
     assert!(
         response.to_lowercase().contains("blue"),
-        "Response should mention 'blue': {}",
-        response
+        "Response should mention 'blue': {response}"
     );
 }
 
@@ -250,11 +245,11 @@ mod test_helpers {
     use super::*;
     use std::env;
 
-    pub fn get_test_api_key() -> Option<String> {
+    pub(crate) fn get_test_api_key() -> Option<String> {
         env::var("OPENAI_API_KEY").ok()
     }
 
-    pub fn create_test_config(model: &str) -> OpenAIConfig {
+    pub(crate) fn create_test_config(model: &str) -> OpenAIConfig {
         OpenAIConfig {
             api_key: get_test_api_key().unwrap_or_else(|| "test-key".to_string()),
             base_url: "https://api.openai.com/v1".to_string(),

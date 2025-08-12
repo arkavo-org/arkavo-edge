@@ -142,7 +142,7 @@ jobs:
           sudo apt-get install -y ${{ env.SYSTEM_DEPS_DEBIAN }}
       - name: Run tests
         run: |
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-test --exclude arkavo-llm
+          cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
           cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
@@ -266,6 +266,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
+    needs: [test, clippy]  # Run after tests and clippy pass to save costs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -314,6 +315,49 @@ jobs:
           path: release-package/
           retention-days: 1
 
+  # Windows build job
+  build-windows:
+    name: Build Windows
+    needs: [test, clippy]  # Run after tests and clippy pass to save costs
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-windows"
+
+      - name: Build Windows binary
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
+
+      - name: Check binary
+        run: |
+          Get-ChildItem target\x86_64-pc-windows-msvc\release\arkavo.exe | Select-Object Name, Length
+          $size = (Get-Item target\x86_64-pc-windows-msvc\release\arkavo.exe).Length / 1MB
+          Write-Host "Binary size: $([math]::Round($size, 2))MB"
+          if ($size -gt 60) {
+            Write-Error "Binary size exceeds 60MB limit"
+            exit 1
+          }
+          Write-Host "✅ Binary size is within limit"
+
+      - name: Prepare release artifact
+        run: |
+          New-Item -ItemType Directory -Force -Path release-package
+          Copy-Item target\x86_64-pc-windows-msvc\release\arkavo.exe release-package\
+          Write-Output "Windows build with memory and remote LLM support" > release-package\features.txt
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arkavo-x86_64-windows
+          path: release-package/
+          retention-days: 1
+
   # Performance check can run independently
   performance-check:
     name: Performance Check
@@ -330,9 +374,11 @@ jobs:
           SIZE_MB=$(( SIZE / 1024 / 1024 ))
           echo "Binary size: $SIZE_MB MB"
 
-          if [ $SIZE_MB -gt 100 ]; then
-            echo "Warning: Binary size exceeds 100 MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
           fi
+          echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
 
   # Smoke tests depend on builds
   smoke-test-linux:
@@ -388,6 +434,141 @@ jobs:
           chmod +x arkavo
           # Test with bundled ONNX Runtime library
           ./arkavo --version
+
+  smoke-test-windows:
+    name: Smoke Test Windows
+    needs: build-windows
+    runs-on: windows-2022
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arkavo-x86_64-windows
+
+      - name: Test binary
+        run: |
+          .\arkavo.exe --version
+          # Test help command
+          .\arkavo.exe --help
+
+  # Binary functionality smoke test
+  binary-smoke-test:
+    name: Binary Smoke Test
+    needs: [build-linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arkavo-x86_64-linux
+          path: ./
+      
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libavahi-client3 \
+            libavahi-common3
+      
+      - name: Test binary size
+        run: |
+          echo "=== Binary Size Check ==="
+          chmod +x arkavo-x86_64-linux
+          
+          SIZE=$(stat --format=%s arkavo-x86_64-linux)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          
+          # Check against the standard 60MB limit
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "❌ ERROR: Binary (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
+          
+          # Note if it's optimized (under 40MB means no heavy ML deps)
+          if [ $SIZE_MB -le 40 ]; then
+            echo "✅ Binary is highly optimized (${SIZE_MB}MB ≤ 40MB - no heavy ML deps)"
+          else
+            echo "✅ Binary size is within limit (${SIZE_MB}MB ≤ 60MB)"
+          fi
+      
+      - name: Test basic commands
+        run: |
+          echo "=== Testing Basic Commands ==="
+          
+          # Test version
+          ./arkavo-x86_64-linux --version || exit 1
+          echo "✅ --version works"
+          
+          # Test help
+          ./arkavo-x86_64-linux --help > help.txt || exit 1
+          echo "✅ --help works"
+          
+          # Verify expected commands are present
+          grep -q "serve" help.txt || { echo "❌ 'serve' command missing"; exit 1; }
+          grep -q "agent" help.txt || { echo "❌ 'agent' command missing"; exit 1; }
+          grep -q "model" help.txt || { echo "❌ 'model' command missing"; exit 1; }
+          echo "✅ Expected commands present"
+      
+      - name: Test server startup
+        run: |
+          echo "=== Testing Server Startup ==="
+          
+          # Try to start the server and check it responds
+          timeout 5 ./arkavo-x86_64-linux serve 2>&1 | tee server.log || true
+          
+          # Check for expected startup messages
+          if grep -qE "Starting|Listening|serve|Server" server.log; then
+            echo "✅ Server startup messages detected"
+          else
+            echo "⚠️ Server might not have started properly"
+            cat server.log
+          fi
+      
+      - name: Test model list command
+        run: |
+          echo "=== Testing Model Commands ==="
+          
+          # Test model list (should work even without models)
+          ./arkavo-x86_64-linux model list 2>&1 | tee models.log || true
+          
+          # Should at least not crash
+          if grep -qE "model|Model|No models" models.log; then
+            echo "✅ Model list command works"
+          else
+            echo "⚠️ Unexpected model list output"
+          fi
+      
+      - name: Test agent command
+        run: |
+          echo "=== Testing Agent Commands ==="
+          
+          # Test agent help
+          ./arkavo-x86_64-linux agent --help 2>&1 | tee agent.log || exit 1
+          
+          if grep -q "run" agent.log; then
+            echo "✅ Agent subcommands available"
+          else
+            echo "❌ Agent command not working properly"
+            exit 1
+          fi
+      
+      - name: Verify no heavy dependencies
+        run: |
+          echo "=== Checking Binary Dependencies ==="
+          
+          # Use ldd to check shared libraries (won't show Rust static deps, but can catch some issues)
+          ldd arkavo-x86_64-linux | tee deps.log || true
+          
+          # Basic check - should not have unusual number of dependencies
+          DEP_COUNT=$(ldd arkavo-x86_64-linux | wc -l)
+          echo "Shared library dependencies: $DEP_COUNT"
+          
+          if [ $DEP_COUNT -gt 50 ]; then
+            echo "⚠️ Unusually high number of dependencies"
+          fi
+          
+          echo "✅ Dependency check complete"
 
   # Schema validation jobs
   validate-openrpc:
@@ -610,6 +791,7 @@ jobs:
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:
     name: Regression Tests
+    needs: [test, clippy]  # Run after tests pass to save macOS runner costs
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -634,19 +816,19 @@ jobs:
           echo "Testing regression for issue #114..."
           
           # Build without default features to avoid embeddings
-          echo "Building arkavo-test..."
-          cargo build -p arkavo-test --no-default-features || exit 1
+          echo "Building arkavo-mcp-macos..."
+          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
           
           # Run the regression test
           echo "Running regression test..."
-          cargo test -p arkavo-test --no-default-features --test regression_issue_114 -- --nocapture || {
+          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
             echo "::error::Regression test failed"
             exit 1
           }
           
           # Test that discovery tools don't prompt
           echo "Testing Swift discovery tool..."
-          cd crates/arkavo-test
+          cd crates/arkavo-mcp-macos
           
           # Create a minimal PATH that excludes Xcode but includes Rust
           CARGO_BIN="${HOME}/.cargo/bin"
@@ -688,7 +870,8 @@ jobs:
           )
           
           for pattern in "${PATTERNS[@]}"; do
-            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
+            # Exclude arkavo-mcp-macos since it's macOS-specific and needs platform paths
+            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target --exclude-dir=arkavo-mcp-macos | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
               echo "::error::Found hardcoded path: $pattern"
               exit 1
             fi
@@ -708,7 +891,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
+    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -720,6 +903,7 @@ jobs:
                 "${{ needs.test.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
+                "${{ needs.binary-smoke-test.result }}" != "success" || \
                 "${{ needs.performance-check.result }}" != "success" || \
                 "${{ needs.validate-openrpc.result }}" != "success" || \
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \

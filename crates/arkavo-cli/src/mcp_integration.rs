@@ -1,19 +1,24 @@
 use crate::mcp_client::McpClient;
-use crate::memory_integration::MemoryIntegration;
-use arkavo_test::mcp::mcp_connection as base;
 use serde_json::Value;
-use tokio::runtime::Handle;
+
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
+use {
+    crate::memory_integration::MemoryIntegration, arkavo_mcp_macos::mcp::mcp_connection as base,
+    tokio::runtime::Handle,
+};
 
 // Re-export Tool from mcp_client for compatibility
 pub use crate::mcp_client::Tool;
 
 #[derive(Debug, Clone)]
 pub enum McpConnection {
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     InProcess(base::McpConnection),
     External(McpClient),
 }
 
 impl McpConnection {
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     #[allow(clippy::disallowed_methods)]
     pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize memory tools first
@@ -42,6 +47,7 @@ impl McpConnection {
         Ok(Self::InProcess(base_connection))
     }
 
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     pub async fn new_in_process_async() -> Result<Self, Box<dyn std::error::Error>> {
         // Initialize memory tools first
         eprintln!("Initializing memory tools...");
@@ -70,6 +76,7 @@ impl McpConnection {
 
     pub fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
         match self {
+            #[cfg(all(target_os = "macos", feature = "test-harness"))]
             Self::InProcess(base_conn) => {
                 let tool_names = base_conn.list_tools();
                 let tools = tool_names
@@ -99,6 +106,7 @@ impl McpConnection {
         llm_origin: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
+            #[cfg(all(target_os = "macos", feature = "test-harness"))]
             Self::InProcess(base_conn) => base_conn
                 .call_tool(tool_name, args, llm_origin)
                 .map_err(|e| e.into()),

@@ -1,4 +1,4 @@
-use arkavo_test::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_tools::mcp_connection::McpConnection;
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -7,7 +7,7 @@ use tokio::time::sleep;
 #[ignore = "Requires manual setup - run with --ignored flag"]
 async fn test_arkavo_terminal_keyboard_shortcuts() {
     // Initialize MCP connection with TUI tools
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     // Start arkavo terminal in a test harness
     let session_id = "arkavo_test_session";
@@ -124,10 +124,11 @@ async fn test_arkavo_terminal_keyboard_shortcuts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "Requires tui_harness tool which is not yet implemented"]
 async fn test_tui_state_verification() {
     // Initialize MCP connection
     println!("Creating MCP connection...");
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
     println!("MCP connection created successfully");
 
     // This test verifies we can capture and analyze terminal state

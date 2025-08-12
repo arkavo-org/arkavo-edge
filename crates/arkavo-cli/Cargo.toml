@@ -12,9 +12,13 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-default = ["memory", "embeddings", "mdns", "local"]
-memory = ["arkavo-test/memory"]
-embeddings = ["memory", "arkavo-memory/embeddings", "arkavo-test/embeddings"]
+# Default features for Unix platforms (Linux, macOS)
+default = ["memory", "mdns", "test-harness"]
+# Default features for Windows (without mdns due to avahi dependency)
+windows-default = ["memory", "llm-remote"]
+test-harness = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
+memory = []
+embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm?/metal"]
@@ -24,7 +28,6 @@ kimi = ["dep:arkavo-llm", "arkavo-llm/kimi"]
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", default-features = false }
 arkavo-git = { path = "../arkavo-git" }
-arkavo-test = { path = "../arkavo-test" }
 arkavo-llm = { path = "../arkavo-llm", optional = true }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
@@ -58,6 +61,14 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
+
+# macOS-only dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+arkavo-mcp-macos = { path = "../arkavo-mcp-macos", optional = true }
+
+# Unix dependencies (macOS and Linux)
+[target.'cfg(unix)'.dependencies]
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 
 # Automatically enable metal feature on macOS
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]

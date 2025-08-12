@@ -41,7 +41,7 @@ mdns: false
     assert_eq!(agent1.purpose, "Test agent one");
     assert_eq!(agent1.model, "model-1");
     assert_eq!(agent1.listen, "127.0.0.1:8080");
-    assert_eq!(agent1.mdns_enabled, true);
+    assert!(agent1.mdns_enabled);
     assert_eq!(agent1.mcp_servers.len(), 2);
     assert_eq!(agent1.api_keys.len(), 2);
 
@@ -56,7 +56,7 @@ mdns: false
 
     let agent2 = &agents[1];
     assert_eq!(agent2.name, "Agent2");
-    assert_eq!(agent2.mdns_enabled, false);
+    assert!(!agent2.mdns_enabled);
 }
 
 #[test]

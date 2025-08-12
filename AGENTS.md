@@ -91,7 +91,7 @@ The project follows these quality standards:
 
 - No warnings with `cargo clippy -- -D warnings`
 - Test coverage target of ≥85%
-- Binary size ≤50 MB
+- Binary size ≤60 MB
 - All files under 400 LoC
 - Each capability is implemented as a separate crate
 - Performance target: ≤50 ms from router response to diff render
@@ -112,6 +112,7 @@ The project targets:
 
 - macOS (arm64)
 - Linux (x64/aarch64)
+- Windows (x86_64) - Limited support without iOS testing capabilities
 
 All implementations must work across:
 

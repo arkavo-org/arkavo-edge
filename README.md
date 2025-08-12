@@ -4,10 +4,17 @@ Instant, secure orchestration for AI agents—launch, mesh, and monitor in real 
 
 ## Quick Start
 
-### Install via Homebrew
+### Install via Homebrew (macOS/Linux)
 ```bash
 brew tap arkavo-org/homebrew-arkavo
 brew install arkavo
+```
+
+### Install on Windows
+Download the latest Windows binary from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and add it to your PATH:
+```powershell
+# Download and extract arkavo.exe to a directory in your PATH
+# For example, to C:\Program Files\arkavo\
 ```
 
 ### Launch
@@ -29,7 +36,7 @@ arkavo ui
 |-------------------------------|---------------------------------------------------------------------------|
 | **Agent Orchestration UI**    | Web + TUI dashboards that animate live data-flows.                        |
 | **Plug-in Core**              | Drop-in providers (Ollama, OpenAI, Anthropic, Kimi, …) with cost-aware routing. |
-| **Cross-platform automation** | Unified iOS simulator control for mobile QA.                              |
+| **Cross-platform automation** | Unified iOS simulator control for mobile QA (macOS only).                 |
 
 ### Auto-Configuration
 
@@ -61,3 +68,14 @@ Configure with environment variables:
 - `OPENTDF_BASE_URL`: Platform endpoint (default: https://platform.opentdf.io)
 - `OIDC_ISSUER`: Token issuer for validation
 - `AUD`: Expected audience claim
+
+## Platform Support
+
+| Platform | Architecture | Features |
+|----------|-------------|----------|
+| macOS    | ARM64 (Apple Silicon) | Full support including iOS testing, mDNS discovery, local/remote LLM |
+| Linux    | x86_64, ARM64 | Full support with mDNS discovery (requires avahi), local/remote LLM |
+| Linux (musl) | x86_64 | Static binary with memory and remote LLM support (no mDNS) |
+| Windows  | x86_64 | Memory and remote LLM support (no iOS testing, no mDNS) |
+
+**Note:** iOS simulator automation and testing capabilities are only available on macOS.

@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -248,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -259,12 +259,13 @@ dependencies = [
  "arkavo-llm",
  "arkavo-mcp",
  "arkavo-mcp-core",
+ "arkavo-mcp-macos",
  "arkavo-mcp-runtime",
+ "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-protocol",
  "arkavo-repo",
  "arkavo-terminal",
- "arkavo-test",
  "async-trait",
  "chrono",
  "clap",
@@ -286,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -318,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -336,11 +337,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.25.14"
+version = "0.26.0"
 
 [[package]]
 name = "arkavo-events"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -354,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -363,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -385,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-kimi",
@@ -422,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -431,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -440,8 +441,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp-macos"
+version = "0.26.0"
+dependencies = [
+ "arkavo-git",
+ "arkavo-mcp",
+ "arkavo-memory",
+ "arkavo-repo",
+ "async-trait",
+ "base64 0.22.1",
+ "cc",
+ "chrono",
+ "gherkin",
+ "glob",
+ "handlebars",
+ "jsonschema",
+ "libc",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "arkavo-mcp-runtime"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -457,8 +487,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mcp-tools"
+version = "0.26.0"
+dependencies = [
+ "arkavo-git",
+ "arkavo-mcp",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "git2",
+ "glob",
+ "ignore",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "arkavo-memory"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -479,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -496,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -538,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -557,13 +611,14 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.25.14"
+version = "0.26.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
  "arkavo-llm",
+ "arkavo-mcp-macos",
+ "arkavo-mcp-tools",
  "arkavo-memory",
- "arkavo-test",
  "chrono",
  "crossterm",
  "ratatui",
@@ -577,35 +632,6 @@ dependencies = [
  "tokio-stream",
  "unicode-width 0.2.0",
  "uuid",
-]
-
-[[package]]
-name = "arkavo-test"
-version = "0.25.14"
-dependencies = [
- "arkavo-git",
- "arkavo-mcp",
- "arkavo-memory",
- "arkavo-repo",
- "async-trait",
- "base64 0.22.1",
- "cc",
- "chrono",
- "gherkin",
- "glob",
- "handlebars",
- "jsonschema",
- "libc",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.12",
- "tokio",
- "uuid",
- "walkdir",
 ]
 
 [[package]]

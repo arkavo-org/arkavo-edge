@@ -272,7 +272,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
         // Check for agent section header
         if trimmed.starts_with("## ") {
             // Save any pending MCP server before switching agents
-            if let Some(server) = current_mcp_server.take()
+            if current_mcp_server.is_some()
+                && current_agent.is_some()
+                && let Some(server) = current_mcp_server.take()
                 && let Some(agent) = current_agent.as_mut()
             {
                 agent.mcp_servers.push(server);
@@ -372,7 +374,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             {
                 // End of MCP section
                 in_mcp_section = false;
-                if let Some(server) = current_mcp_server.take()
+                if current_mcp_server.is_some()
+                    && current_agent.is_some()
+                    && let Some(server) = current_mcp_server.take()
                     && let Some(agent) = current_agent.as_mut()
                 {
                     agent.mcp_servers.push(server);
@@ -421,7 +425,9 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     }
 
     // Save any pending MCP server
-    if let Some(server) = current_mcp_server
+    if current_mcp_server.is_some()
+        && current_agent.is_some()
+        && let Some(server) = current_mcp_server
         && let Some(agent) = current_agent.as_mut()
     {
         agent.mcp_servers.push(server);
@@ -490,8 +496,10 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Register built-in MCP tools first
     {
         use crate::builtin_mcp::BuiltinMcpConnection;
-        // Use the async version to avoid runtime conflicts
+        #[cfg(all(target_os = "macos", feature = "test-harness"))]
         let builtin_connection = BuiltinMcpConnection::new_with_test_tools().await;
+        #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+        let builtin_connection = BuiltinMcpConnection::new_with_test_tools();
         mcp_registry
             .register("arkavo".to_string(), Box::new(builtin_connection))
             .await;

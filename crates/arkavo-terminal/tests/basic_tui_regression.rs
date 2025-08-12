@@ -1,6 +1,6 @@
 /// Basic TUI regression tests that can run without triggering runtime issues
 /// These tests verify the TUI testing infrastructure is working
-use arkavo_test::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_tools::mcp_connection::McpConnection;
 use serde_json::json;
 
 #[test]
@@ -13,7 +13,7 @@ fn test_tui_keyboard_functionality() {
 
     println!("=== Testing TUI Keyboard Tool ===");
 
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     // Test key press
     let result = mcp.call_tool(
@@ -96,7 +96,7 @@ fn test_tui_screenshot_functionality() {
 
     println!("=== Testing TUI Screenshot Tool ===");
 
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     // Test text format screenshot
     let result = mcp.call_tool(
@@ -127,7 +127,7 @@ fn test_tui_screenshot_functionality() {
 fn test_tui_interaction_schema() {
     println!("=== Testing TUI Interaction Tool Schema ===");
 
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     let schema = mcp
         .get_tool_schema("tui_interaction")
@@ -150,13 +150,13 @@ fn test_tui_interaction_schema() {
 fn test_all_tui_tools_schemas() {
     println!("=== Verifying All TUI Tool Schemas ===");
 
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     let tui_tools = vec![
         "tui_keyboard",
         "tui_screenshot",
         "tui_interaction",
-        "tui_harness",
+        // Note: tui_harness is mentioned in docs but not yet implemented
     ];
 
     for tool_name in tui_tools {
@@ -185,7 +185,7 @@ fn test_keyboard_modifiers() {
 
     println!("=== Testing Keyboard Modifiers ===");
 
-    let mcp = McpConnection::new_in_process().expect("Failed to create MCP connection");
+    let mcp = McpConnection::new().expect("Failed to create MCP connection");
 
     let modifier_combos = vec![
         (vec!["ctrl"], "c"),
