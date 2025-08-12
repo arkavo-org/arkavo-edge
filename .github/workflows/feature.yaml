@@ -791,6 +791,7 @@ jobs:
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:
     name: Regression Tests
+    needs: [test, clippy]  # Run after tests pass to save macOS runner costs
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
