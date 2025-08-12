@@ -39,6 +39,7 @@ enum ModelSubcommand {
 // Removed ModelFormat, ModelMeta, and ModelRegistry structs
 // These are no longer needed with the simplified zero-config approach
 
+#[allow(clippy::unused_async)]
 pub async fn run(cmd: &ModelCommand) -> Result<()> {
     match &cmd.command {
         ModelSubcommand::List => {

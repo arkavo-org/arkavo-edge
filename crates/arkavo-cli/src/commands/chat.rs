@@ -14,8 +14,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
-#[cfg(not(feature = "local"))]
-use std::io;
 #[cfg(feature = "local")]
 use std::io::{self, Write};
 use std::path::Path;
@@ -897,6 +895,7 @@ async fn process_message_print(
     }
 }
 
+#[allow(dead_code)]
 fn get_current_directory() -> String {
     match env::current_dir() {
         Ok(path) => path.display().to_string(),
@@ -904,6 +903,7 @@ fn get_current_directory() -> String {
     }
 }
 
+#[allow(dead_code)]
 fn handle_command(
     input: &str,
     mcp_client: Option<&McpConnection>,
@@ -1045,8 +1045,10 @@ fn handle_command(
 }
 
 // Type alias for tool execution results
+#[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
+#[allow(dead_code)]
 fn read_file(file_path: &str) -> Option<String> {
     match fs::read_to_string(file_path) {
         Ok(content) => {
@@ -1066,6 +1068,7 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,
     mcp_client: &McpConnection,
@@ -1164,6 +1167,7 @@ fn handle_tool_calls_in_response(
     Ok((original_response, tool_results))
 }
 
+#[allow(dead_code)]
 fn list_files(path: &str) -> Option<String> {
     let path = Path::new(path);
 
