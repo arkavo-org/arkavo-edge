@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // Benchmarks need block_on
+
 use bytes::Bytes;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use futures::{StreamExt, stream};

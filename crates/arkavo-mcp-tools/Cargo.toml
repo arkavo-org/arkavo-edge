@@ -1,0 +1,39 @@
+[package]
+name = "arkavo-mcp-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Cross-platform MCP tools for Arkavo - Git, GitHub, filesystem, and code analysis"
+repository.workspace = true
+keywords = ["mcp", "tools", "git", "github", "cross-platform"]
+categories = ["development-tools"]
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-git = { path = "../arkavo-git" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+chrono = { workspace = true }
+regex = { workspace = true }
+glob = { workspace = true }
+walkdir = { workspace = true }
+ignore = { workspace = true }
+syntect = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# For GitHub tools
+reqwest = { workspace = true, features = ["json"] }
+base64 = { workspace = true }
+
+# For Git tools
+git2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub struct BuiltinMcpConnection {
     tools: HashMap<String, Arc<dyn Tool>>,
     // Optional delegate for test tools
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     test_connection: Option<crate::mcp_integration::McpConnection>,
 }
 
@@ -30,10 +31,12 @@ impl BuiltinMcpConnection {
         // They will be initialized lazily when needed
         Self {
             tools,
+            #[cfg(all(target_os = "macos", feature = "test-harness"))]
             test_connection: None,
         }
     }
 
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
     pub async fn new_with_test_tools() -> Self {
         let mut tools: HashMap<String, Arc<dyn Tool>> = HashMap::new();
 
@@ -48,7 +51,7 @@ impl BuiltinMcpConnection {
         let test_connection =
             match crate::mcp_integration::McpConnection::new_in_process_async().await {
                 Ok(conn) => {
-                    eprintln!("Registered MCP test tools from arkavo-test");
+                    eprintln!("Registered MCP test tools from arkavo-mcp-macos");
                     Some(conn)
                 }
                 Err(e) => {
@@ -61,6 +64,12 @@ impl BuiltinMcpConnection {
             tools,
             test_connection,
         }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+    pub fn new_with_test_tools() -> Self {
+        // When test harness is not available, just use the regular new() method
+        Self::new()
     }
 }
 
@@ -85,6 +94,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         }
 
         // Add test tools if available
+        #[cfg(all(target_os = "macos", feature = "test-harness"))]
         if let Some(ref test_conn) = self.test_connection {
             match test_conn.list_tools() {
                 Ok(test_tools) => {
@@ -109,7 +119,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         &self,
         tool_name: &str,
         arguments: Value,
-        llm_provider: &str,
+        #[allow(unused_variables)] llm_provider: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         // First check built-in tools
         if let Some(tool) = self.tools.get(tool_name) {
@@ -118,13 +128,17 @@ impl McpConnectionTrait for BuiltinMcpConnection {
             let handle = tokio::runtime::Handle::current();
             #[allow(clippy::disallowed_methods)]
             let result = handle.block_on(tool.execute(arguments))?;
-            Ok(result)
+            return Ok(result);
         }
+
         // Then check test tools if available
-        else if let Some(ref test_conn) = self.test_connection {
-            test_conn.call_tool(tool_name, arguments, llm_provider)
-        } else {
-            Err(format!("Tool '{tool_name}' not found").into())
+        #[cfg(all(target_os = "macos", feature = "test-harness"))]
+        {
+            if let Some(ref test_conn) = self.test_connection {
+                return test_conn.call_tool(tool_name, arguments, llm_provider);
+            }
         }
+
+        Err(format!("Tool '{tool_name}' not found").into())
     }
 }

@@ -127,8 +127,6 @@ impl MetricsCollector {
 
     /// Record task submission
     pub fn record_task_submitted(&self) {
-        if !self.enabled {}
-
         #[cfg(feature = "metrics")]
         {
             counter!("a2a_tasks_submitted_total").increment(1);

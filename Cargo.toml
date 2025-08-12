@@ -8,13 +8,14 @@ members = [
     "crates/arkavo-protocol",
     "crates/arkavo-encryption",
     "crates/arkavo-authorization",
-    "crates/arkavo-test",
+    "crates/arkavo-mcp-macos",
     "crates/arkavo-llm",
     "crates/arkavo-kimi",
     "crates/arkavo-memory",
     "crates/arkavo-mcp",
     "crates/arkavo-mcp-core",
     "crates/arkavo-mcp-runtime",
+    "crates/arkavo-mcp-tools",
     "crates/arkavo-dataflow",
     "crates/arkavo-agui",
     "crates/arkavo-observability",
@@ -27,7 +28,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.25.14"
+version = "0.26.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -81,6 +82,7 @@ indicatif = "0.17"
 
 # Git and filesystem
 git2 = { version = "0.20.2", default-features = false }
+glob = "0.3.1"
 ignore = "0.4.23"
 walkdir = "2.5.0"
 
@@ -126,13 +128,12 @@ prost = "0.13"
 
 # Build optimization
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 strip = true
 opt-level = 3
-# Optimize for smaller, faster binaries in production
 panic = "abort"
-debug = 1
+debug = false
 
 [profile.dev]
 opt-level = 0

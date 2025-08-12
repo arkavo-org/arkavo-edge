@@ -9,8 +9,11 @@ use std::sync::Arc;
 use tiktoken_rs::{CoreBPE, cl100k_base};
 use uuid::Uuid;
 
+#[allow(dead_code)]
 const MAX_CONTEXT_MESSAGES: usize = 10; // Conservative default for Ollama
+#[allow(dead_code)]
 const MAX_CONTEXT_TOKENS: usize = 1500; // Conservative default for Ollama
+#[allow(dead_code)]
 const SUMMARY_TRIGGER_MESSAGES: usize = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +38,7 @@ pub struct ConversationSession {
 
 pub struct ConversationManager {
     memory_storage: Arc<MemoryStorage>,
+    #[allow(dead_code)]
     token_encoder: CoreBPE,
     current_session_id: Option<Uuid>,
 }
@@ -362,6 +366,7 @@ impl ConversationManager {
         self.current_session_id
     }
 
+    #[allow(dead_code)]
     fn count_tokens(&self, text: &str) -> usize {
         self.token_encoder.encode_with_special_tokens(text).len()
     }

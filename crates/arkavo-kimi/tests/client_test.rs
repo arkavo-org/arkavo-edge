@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
+
 use arkavo_kimi::provider::Message;
 use arkavo_kimi::{KimiClient, KimiConfig, Model};
 use wiremock::matchers::{header, method, path};

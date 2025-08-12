@@ -60,6 +60,11 @@ pub struct TerminalContext {
     pub message_rx: mpsc::Receiver<ChatMessage>,
 }
 
+/// Run the terminal UI application
+///
+/// # Panics
+///
+/// Panics if the MCP client is Some but becomes None unexpectedly
 pub async fn run() -> Result<()> {
     // Create channels for LLM communication
     #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
@@ -79,7 +84,7 @@ pub async fn run() -> Result<()> {
         let llm_tx = llm_tx.clone();
         tokio::spawn(async move {
             use arkavo_llm::Message;
-            use arkavo_test::mcp::mcp_connection::McpConnection;
+            use arkavo_mcp_tools::mcp_connection::McpConnection;
             use tokio_stream::StreamExt;
 
             // Initialize LLM client using the same logic as chat command
@@ -99,23 +104,21 @@ pub async fn run() -> Result<()> {
             );
 
             // Initialize MCP connection and report status
-            let (mcp_client, mcp_status) = match McpConnection::new_in_process() {
-                Ok(client) => {
-                    let tool_count = client.list_tools().len();
-                    let status = McpStatusUpdate {
-                        available: true,
-                        error_message: None,
-                        tool_count,
-                    };
-                    (Some(client), status)
+            let mcp_client = McpConnection::new().ok();
+
+            let mcp_status = if let Some(ref client) = mcp_client {
+                let tool_count = client.list_tools().len();
+
+                McpStatusUpdate {
+                    available: true,
+                    error_message: None,
+                    tool_count,
                 }
-                Err(e) => {
-                    let status = McpStatusUpdate {
-                        available: false,
-                        error_message: Some(format!("MCP server not available: {e}")),
-                        tool_count: 0,
-                    };
-                    (None, status)
+            } else {
+                McpStatusUpdate {
+                    available: false,
+                    error_message: Some("MCP tools not available".to_string()),
+                    tool_count: 0,
                 }
             };
 

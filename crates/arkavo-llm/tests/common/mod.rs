@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-pub fn load_test_env() {
+pub(crate) fn load_test_env() {
     let env_path = Path::new(".test.env");
     if env_path.exists() {
         let contents = fs::read_to_string(env_path).expect("Failed to read .test.env file");
@@ -23,7 +23,7 @@ pub fn load_test_env() {
     }
 }
 
-pub fn ensure_api_key() -> String {
+pub(crate) fn ensure_api_key() -> String {
     load_test_env();
     env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set in .test.env file")
 }

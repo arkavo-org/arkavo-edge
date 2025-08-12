@@ -1,5 +1,6 @@
 #[cfg(feature = "local")]
 use crate::conversation_manager::ConversationManager;
+#[cfg(all(unix, feature = "test-harness"))]
 use crate::mcp_integration::McpConnection;
 #[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
@@ -14,8 +15,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
-#[cfg(not(feature = "local"))]
-use std::io;
 #[cfg(feature = "local")]
 use std::io::{self, Write};
 use std::path::Path;
@@ -109,31 +108,40 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Initialize MCP client - skip in print mode, otherwise attempt connection
+    #[allow(unused_variables)]
     let mcp_client = if print_mode {
-        None
+        None::<()>
     } else {
-        // Try in-process MCP first, which includes all local tools
-        let result = McpConnection::new_in_process();
+        #[cfg(all(unix, feature = "test-harness"))]
+        {
+            // Try in-process MCP first, which includes all local tools
+            let result = McpConnection::new_in_process();
 
-        match result {
-            Ok(client) => {
-                if !print_mode {
-                    match &client {
-                        McpConnection::InProcess(_) => eprintln!("✓ Using in-process MCP server"),
-                        McpConnection::External(_) => {
-                            eprintln!("✓ Connected to external MCP server");
+            match result {
+                Ok(client) => {
+                    if !print_mode {
+                        match &client {
+                            McpConnection::InProcess(_) => {
+                                eprintln!("✓ Using in-process MCP server")
+                            }
+                            McpConnection::External(_) => {
+                                eprintln!("✓ Connected to external MCP server");
+                            }
                         }
                     }
+                    Some(client)
                 }
-                Some(client)
-            }
-            Err(_e) => {
-                if !print_mode {
-                    eprintln!("ℹ MCP server not available - using LLM-only mode");
+                Err(_e) => {
+                    if !print_mode {
+                        eprintln!("ℹ MCP server not available - using LLM-only mode");
+                    }
+                    None
                 }
-                None
             }
         }
+
+        #[cfg(not(all(unix, feature = "test-harness")))]
+        None::<()>
     };
 
     // Show MCP tools help if connected
@@ -569,6 +577,7 @@ Full repository details (available via @build_repository_context):
         }
 
         // Check for slash commands
+        #[cfg(all(unix, feature = "test-harness"))]
         if let Some(command_input) = input.strip_prefix('/')
             && let Some(command_response) =
                 handle_command(command_input, mcp_client.as_ref(), client.provider_name())
@@ -897,6 +906,7 @@ async fn process_message_print(
     }
 }
 
+#[allow(dead_code)]
 fn get_current_directory() -> String {
     match env::current_dir() {
         Ok(path) => path.display().to_string(),
@@ -904,6 +914,8 @@ fn get_current_directory() -> String {
     }
 }
 
+#[cfg(all(unix, feature = "test-harness"))]
+#[allow(dead_code)]
 fn handle_command(
     input: &str,
     mcp_client: Option<&McpConnection>,
@@ -1045,8 +1057,10 @@ fn handle_command(
 }
 
 // Type alias for tool execution results
+#[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
+#[allow(dead_code)]
 fn read_file(file_path: &str) -> Option<String> {
     match fs::read_to_string(file_path) {
         Ok(content) => {
@@ -1066,6 +1080,8 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
+#[cfg(all(unix, feature = "test-harness"))]
+#[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,
     mcp_client: &McpConnection,
@@ -1164,6 +1180,7 @@ fn handle_tool_calls_in_response(
     Ok((original_response, tool_results))
 }
 
+#[allow(dead_code)]
 fn list_files(path: &str) -> Option<String> {
     let path = Path::new(path);
 
