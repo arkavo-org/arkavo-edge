@@ -4,7 +4,7 @@
 
 #[test]
 fn test_mcp_connection_in_sync_context() {
-    use arkavo_test::mcp::mcp_connection::McpConnection;
+    use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
 
     // This test verifies that we can create an McpConnection
     // from a sync context (traditional behavior)

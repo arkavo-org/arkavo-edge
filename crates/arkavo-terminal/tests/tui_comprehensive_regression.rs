@@ -1,6 +1,6 @@
 /// Comprehensive TUI regression tests for key bindings, model connections, and window management
 /// Run with: cargo test -p arkavo-terminal tui_comprehensive_regression -- --ignored --nocapture
-use arkavo_test::mcp::mcp_connection::McpConnection;
+use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;

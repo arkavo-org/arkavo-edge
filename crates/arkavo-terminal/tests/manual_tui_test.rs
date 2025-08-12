@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod manual_tests {
-    use arkavo_test::mcp::mcp_connection::McpConnection;
+    use arkavo_mcp_macos::mcp::mcp_connection::McpConnection;
     use serde_json::json;
 
     #[test]
