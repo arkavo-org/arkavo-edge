@@ -9,7 +9,7 @@ description = "AG-UI protocol implementation and web gateway for Arkavo Edge"
 
 [features]
 default = ["mdns"]
-mdns = ["dep:zeroconf"]
+mdns = ["dep:mdns-sd"]
 
 [dependencies]
 # Core dependencies
@@ -37,9 +37,10 @@ jsonrpsee = { workspace = true, features = ["ws-client"] }
 uuid = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+tracing = { workspace = true }
 
 # mDNS discovery
-zeroconf = { workspace = true, optional = true }
+mdns-sd = { workspace = true, optional = true }
 bincode = { workspace = true }
 
 [dev-dependencies]

@@ -12,14 +12,14 @@ categories = ["command-line-utilities", "development-tools"]
 
 
 [features]
-# Default features for Unix platforms (Linux, macOS)
+# Default features - portable across all platforms with pure Rust mDNS
 default = ["memory", "mdns", "test-harness"]
-# Default features for Windows (without mdns due to avahi dependency)
-windows-default = ["memory", "llm-remote"]
+# Default features for Windows
+windows-default = ["memory", "mdns", "llm-remote"]
 test-harness = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
-mdns = ["zeroconf", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
+mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["dep:arkavo-llm", "arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm?/metal"]
 llm-remote = ["dep:arkavo-llm", "arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
@@ -37,7 +37,7 @@ arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, featu
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false }
-zeroconf = { workspace = true, optional = true }
+mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }

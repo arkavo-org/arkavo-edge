@@ -659,10 +659,10 @@ fn broadcast_agent_mdns_sync(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
+        use mdns_sd::{ServiceDaemon, ServiceInfo};
         use std::collections::HashMap;
         use std::thread;
         use std::time::Duration;
-        use zeroconf::{MdnsService, ServiceType, TxtRecord, prelude::*};
 
         println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
 
@@ -673,37 +673,45 @@ fn broadcast_agent_mdns_sync(
         let service_ip = get_service_ip();
         println!("broadcast_agent_mdns: Using IP address: {service_ip}");
 
-        let mut txt = TxtRecord::new();
+        // Create mDNS daemon
+        let mdns = ServiceDaemon::new()?;
+
+        // Prepare properties
         let mut properties = HashMap::new();
-        properties.insert("agent_id", config.name.clone());
-        properties.insert("purpose", config.purpose.clone());
-        properties.insert("model", config.model.clone());
-        properties.insert("ip", service_ip.to_string());
+        properties.insert("agent_id".to_string(), config.name.clone());
+        properties.insert("purpose".to_string(), config.purpose.clone());
+        properties.insert("model".to_string(), config.model.clone());
+        properties.insert("ip".to_string(), service_ip.to_string());
 
         // Add capabilities based on agent name/purpose
         let capabilities = get_agent_capabilities(&config.name, &config.purpose);
         if !capabilities.is_empty() {
-            properties.insert("capabilities", capabilities.join(","));
+            properties.insert("capabilities".to_string(), capabilities.join(","));
         }
 
         // Add MCP servers as capabilities
         if !config.mcp_servers.is_empty() {
             let mcp_tools: Vec<String> =
                 config.mcp_servers.iter().map(|s| s.name.clone()).collect();
-            properties.insert("mcp_tools", mcp_tools.join(","));
+            properties.insert("mcp_tools".to_string(), mcp_tools.join(","));
         }
 
-        for (key, value) in &properties {
-            txt.insert(key, value)?;
-        }
+        // Create service info
+        let service_type = "_a2a._tcp.local.";
+        let instance_name = format!("arkavo-agent-{}", config.name);
+        let host_name = format!("{}.local.", config.name);
 
-        let mut service = MdnsService::new(ServiceType::new("a2a", "tcp")?, port);
-        service.set_name(&format!("arkavo-agent-{}", config.name));
-        service.set_txt_record(txt);
-        // Note: set_host() doesn't work as expected with zeroconf library
-        // The IP is provided in TXT records instead
+        let service_info = ServiceInfo::new(
+            service_type,
+            &instance_name,
+            &host_name,
+            service_ip.to_string(),
+            port,
+            properties,
+        )?;
 
-        let service = service.register()?;
+        // Register the service
+        mdns.register(service_info)?;
 
         println!("mDNS service registered successfully!");
         println!("Service name: arkavo-agent-{}", config.name);
@@ -712,22 +720,21 @@ fn broadcast_agent_mdns_sync(
         println!("Port: {port}");
         println!("WebSocket endpoint: ws://{service_ip}:{port}/ws");
 
-        // The service automatically unregisters when it goes out of scope.
-        // We need to keep it alive.
+        // Keep the service alive until shutdown
         use std::sync::atomic::Ordering;
         while !shutdown_flag.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_secs(1));
             // Keep reference to prevent dropping
-            let _ = &service;
+            let _ = &mdns;
         }
 
         println!("mDNS service shutting down...");
-        // Service will be unregistered when it goes out of scope
+        // Service will be unregistered when mdns goes out of scope
     }
 
     #[cfg(not(feature = "mdns"))]
     {
-        println!("mDNS support not compiled in (disabled for musl builds)");
+        println!("mDNS support not compiled in");
         println!("Agent will run without mDNS discovery");
         // Keep the thread alive until shutdown is signaled
         use std::sync::atomic::Ordering;
