@@ -68,7 +68,7 @@ jobs:
 
             #### Linux
             - **Full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
-            - **Static** (musl, memory + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
+            - **Static/slim** (musl, memory + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
             - **Debian package** (full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
             
             #### macOS
@@ -94,7 +94,7 @@ jobs:
             artifact_suffix: x86_64-linux
             needs_musl: false
           - target: x86_64-unknown-linux-musl
-            features: memory,llm-remote,mdns
+            features: memory,mdns
             artifact_suffix: x86_64-linux-musl
             needs_musl: true
     steps:

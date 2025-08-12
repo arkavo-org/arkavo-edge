@@ -75,7 +75,7 @@ Configure with environment variables:
 |----------|-------------|----------|
 | macOS    | ARM64 (Apple Silicon) | Full support including iOS testing, local/remote LLM, mDNS |
 | Linux    | x86_64, ARM64 | Full support with local/remote LLM, mDNS |
-| Linux (musl) | x86_64 | Static binary with memory, remote LLM, and mDNS support |
+| Linux (musl) | x86_64 | Static/slim binary with memory and mDNS support |
 | Windows  | x86_64 | Memory, remote LLM, and mDNS support (no iOS testing) |
 
 mDNS discovery uses pure Rust implementation (mdns-sd crate) with no system dependencies
