@@ -786,6 +786,7 @@ impl Tool for GitHubPrMergeKit {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
 mod tests {
     use super::*;
 

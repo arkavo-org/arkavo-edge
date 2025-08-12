@@ -315,6 +315,7 @@ pub struct StoredEvent {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
 
     #[tokio::test]
     async fn test_event_store_basic() {

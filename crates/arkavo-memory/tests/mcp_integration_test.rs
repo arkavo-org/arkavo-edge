@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
+
 use arkavo_mcp::Tool;
 use arkavo_memory::{
     mcp_tools::{CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool},

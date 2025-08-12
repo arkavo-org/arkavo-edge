@@ -119,7 +119,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         &self,
         tool_name: &str,
         arguments: Value,
-        _llm_provider: &str,
+        #[allow(unused_variables)] llm_provider: &str,
     ) -> Result<Value, Box<dyn std::error::Error>> {
         // First check built-in tools
         if let Some(tool) = self.tools.get(tool_name) {
@@ -135,7 +135,7 @@ impl McpConnectionTrait for BuiltinMcpConnection {
         #[cfg(all(target_os = "macos", feature = "test-harness"))]
         {
             if let Some(ref test_conn) = self.test_connection {
-                return test_conn.call_tool(tool_name, arguments, _llm_provider);
+                return test_conn.call_tool(tool_name, arguments, llm_provider);
             }
         }
 

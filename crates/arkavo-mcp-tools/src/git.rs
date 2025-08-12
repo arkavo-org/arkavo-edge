@@ -579,6 +579,7 @@ impl Tool for GitRemoteKit {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test needs block_on internally
 mod tests {
     use super::*;
     use std::fs;
