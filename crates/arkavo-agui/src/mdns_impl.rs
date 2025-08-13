@@ -12,10 +12,10 @@ pub mod mdns {
     /// Discovers A2A agents using mDNS
     pub async fn discover_agents(
         agents: Arc<RwLock<Vec<serde_json::Value>>>,
-        _agent_connections: Arc<
+        agent_connections: Arc<
             RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
         >,
-        _telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
+        telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         info!("Starting mDNS discovery service with mdns-sd...");
 
@@ -28,12 +28,20 @@ pub mod mdns {
 
         // Spawn a task to handle discovered services
         let agents_clone = agents.clone();
+        let connections_clone = agent_connections.clone();
+        let telemetry_clone = telemetry_tx.clone();
         tokio::spawn(async move {
             loop {
                 match receiver.recv_timeout(Duration::from_secs(1)) {
                     Ok(event) => match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            handle_service_discovered(info, agents_clone.clone()).await;
+                            handle_service_discovered(
+                                info,
+                                agents_clone.clone(),
+                                connections_clone.clone(),
+                                telemetry_clone.clone(),
+                            )
+                            .await;
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             info!("Service removed: {}", fullname);
@@ -59,6 +67,10 @@ pub mod mdns {
     async fn handle_service_discovered(
         info: ServiceInfo,
         agents: Arc<RwLock<Vec<serde_json::Value>>>,
+        agent_connections: Arc<
+            RwLock<HashMap<String, Arc<crate::agent_connection::AgentConnection>>>,
+        >,
+        telemetry_tx: mpsc::Sender<crate::agent_connection::TelemetryEvent>,
     ) {
         let service_name = info.get_fullname();
         let port = info.get_port();
@@ -125,6 +137,38 @@ pub mod mdns {
 
         if !exists {
             info!("Adding new agent to list: {}", agent_id);
+
+            // Auto-connect to discovered agent
+            let agent_id_clone = agent_id.clone();
+            let endpoint = format!("ws://{}:{}/ws", final_host, port);
+            let telemetry_tx_clone = telemetry_tx.clone();
+            let agent_connections_clone = agent_connections.clone();
+
+            tokio::spawn(async move {
+                info!(
+                    "Auto-connecting to discovered agent: {} at {}",
+                    agent_id_clone, endpoint
+                );
+
+                // Create connection
+                let connection = Arc::new(crate::agent_connection::AgentConnection::new(
+                    agent_id_clone.clone(),
+                    endpoint.clone(),
+                    telemetry_tx_clone,
+                ));
+
+                // Connect to the agent
+                if let Err(e) = connection.connect().await {
+                    warn!("Failed to auto-connect to agent {}: {}", agent_id_clone, e);
+                } else {
+                    info!("Successfully auto-connected to agent: {}", agent_id_clone);
+
+                    // Store connection
+                    let mut connections = agent_connections_clone.write().await;
+                    connections.insert(agent_id_clone.clone(), connection);
+                }
+            });
+
             agents_list.push(agent_info);
         }
     }

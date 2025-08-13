@@ -676,6 +676,48 @@ fn broadcast_agent_mdns_sync(
         // Create mDNS daemon
         let mdns = ServiceDaemon::new()?;
 
+        // Start browsing for other agents
+        let receiver = mdns.browse("_a2a._tcp.local.")?;
+
+        // Clone shutdown flag for discovery thread
+        let shutdown_flag_discovery = shutdown_flag.clone();
+
+        // Spawn a thread to handle discovered services
+        let discovery_thread = thread::spawn(move || {
+            use mdns_sd::ServiceEvent;
+            println!("Starting discovery of other agents...");
+
+            loop {
+                match receiver.recv_timeout(Duration::from_secs(1)) {
+                    Ok(event) => match event {
+                        ServiceEvent::ServiceResolved(info) => {
+                            println!("Agent discovered: {}", info.get_fullname());
+                            if let Some(agent_id) = info.get_property_val_str("agent_id") {
+                                println!("  - Agent ID: {agent_id}");
+                            }
+                            if let Some(purpose) = info.get_property_val_str("purpose") {
+                                println!("  - Purpose: {purpose}");
+                            }
+                            if let Some(addr) = info.get_addresses().iter().next() {
+                                println!("  - Address: {}:{}", addr, info.get_port());
+                            }
+                        }
+                        ServiceEvent::ServiceRemoved(_, fullname) => {
+                            println!("Agent disconnected: {fullname}");
+                        }
+                        _ => {}
+                    },
+                    Err(_) => {
+                        // Timeout - check if we should shutdown
+                        if shutdown_flag_discovery.load(std::sync::atomic::Ordering::Relaxed) {
+                            println!("Discovery thread shutting down...");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
         // Prepare properties
         let mut properties = HashMap::new();
         properties.insert("agent_id".to_string(), config.name.clone());
@@ -729,6 +771,10 @@ fn broadcast_agent_mdns_sync(
         }
 
         println!("mDNS service shutting down...");
+
+        // Wait for discovery thread to finish
+        let _ = discovery_thread.join();
+
         // Service will be unregistered when mdns goes out of scope
     }
 

@@ -183,7 +183,7 @@ impl AgentConnection {
         }
     }
 
-    async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         *self.status.write().await = ConnectionStatus::Connecting;
 
         let url = format!("ws://{}/ws", self.endpoint);

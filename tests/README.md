@@ -2,29 +2,6 @@
 
 This directory contains all test-related files for the Arkavo Edge project.
 
-## Directory Structure
-
-```
-tests/
-├── README.md                    # This file
-├── docs/                        # Test documentation
-│   ├── test-plan.md            # Comprehensive test plan (91 tests)
-│   ├── manual-test-checklist.md # Manual test execution checklist
-│   ├── manual-test-execution-plan.md # Phased execution plan
-│   ├── test-results-*.md       # Test execution reports
-│   └── IOS_TESTING_ENHANCED.md # iOS-specific testing guide
-├── scripts/                     # Test automation scripts
-│   ├── test-runner.sh          # Main automated test runner
-│   ├── demo_agent_interaction.py # Agent interaction demo
-│   └── launch_multi_agent_system.sh # Multi-agent test launcher
-├── test-results/               # Test execution results
-│   ├── results-*.json         # JSON test results
-│   └── summary-*.md          # Human-readable summaries
-├── integration/               # Integration test files
-├── default_agent_run.rs      # Rust integration test
-└── multi_agent_collaboration_test.rs # Multi-agent Rust test
-```
-
 ## Running Tests
 
 ### Automated Tests
@@ -38,6 +15,26 @@ Or from within the tests directory:
 cd tests
 ./scripts/test-runner.sh
 ```
+
+### Multi-Agent System Tests
+Run the comprehensive multi-agent system test suite:
+```bash
+./tests/scripts/test_multi_agent_system.sh
+```
+
+This test suite validates:
+- **Configuration Updates**: Atomic updates, backup creation, version tracking
+- **Telemetry UI**: Data collection, real-time updates, metrics aggregation
+- **Ollama Remote Connectivity**: Remote server connectivity, model discovery, streaming
+- **Agent Discovery**: mDNS service registration and discovery between agents
+- **Multi-Agent Orchestration**: Startup and health checks for 10 agent types
+- **Stress Testing**: Concurrent operations and high-volume telemetry
+
+Expected results:
+- **Agent Discovery**: Should complete in ≤5 seconds (typically 2-3s)
+- **Remote Ollama**: May show slow performance warnings (>5s) depending on network
+- **Configuration**: Some concurrent update tests may show race conditions
+- **Telemetry UI**: Apple Events authorization may prevent UI launch on macOS
 
 ### Manual Tests
 Follow the checklist in `docs/manual-test-checklist.md` for manual test execution.
