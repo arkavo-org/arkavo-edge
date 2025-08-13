@@ -82,7 +82,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     // On non-macOS platforms or without test-harness, try external MCP connection
     // Check for MCP_URL environment variable or use default
     let mcp_url = std::env::var("MCP_URL").ok();
-    
+
     match McpConnection::new_external(mcp_url) {
         Ok(client) => {
             if !print_mode {
