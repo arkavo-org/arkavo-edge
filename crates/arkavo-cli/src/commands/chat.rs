@@ -21,32 +21,6 @@ use uuid;
 #[allow(dead_code)]
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
 
-// Create placeholder types when MCP is not available
-#[cfg(not(all(unix, feature = "test-harness")))]
-struct McpConnection;
-
-#[cfg(not(all(unix, feature = "test-harness")))]
-#[derive(Debug)]
-struct Tool {
-    name: String,
-    description: String,
-}
-
-#[cfg(not(all(unix, feature = "test-harness")))]
-impl McpConnection {
-    fn list_tools(&self) -> Result<Vec<Tool>, Box<dyn std::error::Error>> {
-        Ok(Vec::new())
-    }
-
-    fn call_tool(
-        &self,
-        _tool_name: &str,
-        _args: serde_json::Value,
-        _provider: &str,
-    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-        Err("MCP tools not available in this build".into())
-    }
-}
 
 // Runtime MCP initialization - checks if test-harness feature is available
 #[cfg(all(target_os = "macos", feature = "test-harness"))]
