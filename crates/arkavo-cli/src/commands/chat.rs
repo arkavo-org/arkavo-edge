@@ -1,5 +1,4 @@
 use crate::conversation_manager::ConversationManager;
-#[cfg(all(unix, feature = "test-harness"))]
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
