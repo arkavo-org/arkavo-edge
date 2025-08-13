@@ -21,7 +21,6 @@ use uuid;
 #[allow(dead_code)]
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
 
-
 // Runtime MCP initialization - checks if test-harness feature is available
 #[cfg(all(target_os = "macos", feature = "test-harness"))]
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
