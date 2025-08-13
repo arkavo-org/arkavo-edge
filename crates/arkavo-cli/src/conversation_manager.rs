@@ -1,4 +1,3 @@
-#[cfg(feature = "local")]
 use arkavo_llm::LlmClient;
 use arkavo_memory::storage::MemoryStorage;
 use chrono::{DateTime, Utc};
@@ -117,7 +116,6 @@ impl ConversationManager {
         Ok(None)
     }
 
-    #[cfg(feature = "local")]
     pub async fn add_message(&self, message: &arkavo_llm::Message) -> anyhow::Result<()> {
         let session_id = self
             .current_session_id
@@ -157,7 +155,6 @@ impl ConversationManager {
         Ok(())
     }
 
-    #[cfg(feature = "local")]
     #[allow(
         clippy::missing_panics_doc,
         clippy::literal_string_with_formatting_args
@@ -253,7 +250,6 @@ impl ConversationManager {
         Ok(context_messages)
     }
 
-    #[cfg(feature = "local")]
     #[allow(
         clippy::missing_panics_doc,
         clippy::literal_string_with_formatting_args
@@ -371,7 +367,6 @@ impl ConversationManager {
         self.token_encoder.encode_with_special_tokens(text).len()
     }
 
-    #[cfg(feature = "local")]
     fn count_message_tokens(&self, messages: &[arkavo_llm::Message]) -> usize {
         messages
             .iter()
