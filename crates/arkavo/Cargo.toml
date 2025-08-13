@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Default features - portable across all platforms with pure Rust mDNS
-default = ["memory", "mdns"]
+default = ["memory", "mdns", "llm-remote"]
 # Default features for Windows
 windows-default = ["memory", "mdns", "llm-remote"]
 memory = ["arkavo-cli/memory"]

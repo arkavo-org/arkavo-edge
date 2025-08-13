@@ -1,45 +1,76 @@
-#[cfg(feature = "local")]
 use crate::conversation_manager::ConversationManager;
-#[cfg(all(unix, feature = "test-harness"))]
 use crate::mcp_integration::McpConnection;
-#[cfg(feature = "local")]
 use arkavo_llm::{LlmClient, Message, encode_image_file};
-#[cfg(feature = "local")]
 use arkavo_memory::storage::MemoryStorage;
-#[cfg(feature = "local")]
 use arkavo_repo::repository_context::RepositoryContextManager;
-#[cfg(feature = "local")]
 use chrono;
-#[cfg(feature = "local")]
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
 use std::fs;
-#[cfg(feature = "local")]
 use std::io::{self, Write};
 use std::path::Path;
-#[cfg(feature = "local")]
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-#[cfg(feature = "local")]
 use tokio::runtime::Runtime;
-#[cfg(feature = "local")]
 use tokio_stream::StreamExt;
-#[cfg(feature = "local")]
 use uuid;
 
 // Global flag to control whether to show debug messages (kept for future use)
 #[allow(dead_code)]
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
 
-#[cfg(not(feature = "local"))]
-pub fn execute(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Chat command requires the 'local' feature to be enabled.");
-    eprintln!("Please rebuild with: cargo build --features local");
-    Err("Feature not enabled".into())
+// Runtime MCP initialization - checks if test-harness feature is available
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
+fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
+    // Try in-process MCP first, which includes all local tools
+    let result = McpConnection::new_in_process();
+
+    match result {
+        Ok(client) => {
+            if !print_mode {
+                match &client {
+                    McpConnection::InProcess(_) => {
+                        eprintln!("✓ Using in-process MCP server");
+                    }
+                    McpConnection::External(_) => {
+                        eprintln!("✓ Connected to external MCP server");
+                    }
+                }
+            }
+            Some(client)
+        }
+        Err(_e) => {
+            if !print_mode {
+                eprintln!("ℹ MCP server not available - using LLM-only mode");
+            }
+            None
+        }
+    }
 }
 
-#[cfg(feature = "local")]
+#[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
+    // On non-macOS platforms or without test-harness, try external MCP connection
+    // Check for MCP_URL environment variable or use default
+    let mcp_url = std::env::var("MCP_URL").ok();
+
+    match McpConnection::new_external(mcp_url) {
+        Ok(client) => {
+            if !print_mode {
+                eprintln!("✓ Connected to external MCP server");
+            }
+            Some(client)
+        }
+        Err(_) => {
+            if !print_mode {
+                eprintln!("ℹ MCP server not available - using LLM-only mode");
+            }
+            None
+        }
+    }
+}
+
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Terminal UI is now the default, use --no-tui to disable it
@@ -109,39 +140,11 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize MCP client - skip in print mode, otherwise attempt connection
     #[allow(unused_variables)]
-    let mcp_client = if print_mode {
-        None::<()>
+    let mcp_client: Option<McpConnection> = if print_mode {
+        None
     } else {
-        #[cfg(all(unix, feature = "test-harness"))]
-        {
-            // Try in-process MCP first, which includes all local tools
-            let result = McpConnection::new_in_process();
-
-            match result {
-                Ok(client) => {
-                    if !print_mode {
-                        match &client {
-                            McpConnection::InProcess(_) => {
-                                eprintln!("✓ Using in-process MCP server")
-                            }
-                            McpConnection::External(_) => {
-                                eprintln!("✓ Connected to external MCP server");
-                            }
-                        }
-                    }
-                    Some(client)
-                }
-                Err(_e) => {
-                    if !print_mode {
-                        eprintln!("ℹ MCP server not available - using LLM-only mode");
-                    }
-                    None
-                }
-            }
-        }
-
-        #[cfg(not(all(unix, feature = "test-harness")))]
-        None::<()>
+        // Try to initialize MCP if available
+        initialize_mcp_connection(print_mode)
     };
 
     // Show MCP tools help if connected
@@ -577,7 +580,6 @@ Full repository details (available via @build_repository_context):
         }
 
         // Check for slash commands
-        #[cfg(all(unix, feature = "test-harness"))]
         if let Some(command_input) = input.strip_prefix('/')
             && let Some(command_response) =
                 handle_command(command_input, mcp_client.as_ref(), client.provider_name())
@@ -673,7 +675,6 @@ Full repository details (available via @build_repository_context):
     Ok(())
 }
 
-#[cfg(feature = "local")]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
@@ -762,7 +763,6 @@ async fn process_message(
     Ok(full_response)
 }
 
-#[cfg(feature = "local")]
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
@@ -1060,6 +1060,28 @@ fn handle_command(
 #[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
+// Stub implementations when test-harness is not available
+#[cfg(not(all(unix, feature = "test-harness")))]
+#[allow(dead_code)]
+fn handle_command(
+    _input: &str,
+    _mcp_client: Option<&McpConnection>,
+    _llm_provider: &str,
+) -> Option<String> {
+    None
+}
+
+#[cfg(not(all(unix, feature = "test-harness")))]
+#[allow(dead_code)]
+fn handle_tool_calls_in_response(
+    response: &str,
+    _mcp_client: &McpConnection,
+    _llm_provider: &str,
+) -> Result<(String, ToolResults), Box<dyn std::error::Error>> {
+    // When MCP is not available, just return the response as-is
+    Ok((response.to_string(), Vec::new()))
+}
+
 #[allow(dead_code)]
 fn read_file(file_path: &str) -> Option<String> {
     match fs::read_to_string(file_path) {
@@ -1227,7 +1249,6 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
-#[cfg(feature = "local")]
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
     use std::time::Instant;
 
@@ -1469,7 +1490,6 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
     prompt_for_remote_ollama(print_mode, storage).await
 }
 
-#[cfg(feature = "local")]
 async fn prompt_for_remote_ollama(
     print_mode: bool,
     storage: Arc<MemoryStorage>,
@@ -1572,7 +1592,6 @@ async fn prompt_for_remote_ollama(
     }
 }
 
-#[cfg(feature = "local")]
 #[allow(clippy::disallowed_methods)]
 fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
