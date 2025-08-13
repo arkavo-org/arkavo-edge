@@ -49,7 +49,7 @@ impl McpConnection {
 }
 
 // Runtime MCP initialization - checks if test-harness feature is available
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(target_os = "macos", feature = "test-harness"))]
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     // Try in-process MCP first, which includes all local tools
     let result = McpConnection::new_in_process();
@@ -77,12 +77,26 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     }
 }
 
-#[cfg(not(all(unix, feature = "test-harness")))]
+#[cfg(not(all(target_os = "macos", feature = "test-harness")))]
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
-    if !print_mode {
-        eprintln!("ℹ MCP tools not available in this build - using LLM-only mode");
+    // On non-macOS platforms or without test-harness, try external MCP connection
+    // Check for MCP_URL environment variable or use default
+    let mcp_url = std::env::var("MCP_URL").ok();
+    
+    match McpConnection::new_external(mcp_url) {
+        Ok(client) => {
+            if !print_mode {
+                eprintln!("✓ Connected to external MCP server");
+            }
+            Some(client)
+        }
+        Err(_) => {
+            if !print_mode {
+                eprintln!("ℹ MCP server not available - using LLM-only mode");
+            }
+            None
+        }
     }
-    None
 }
 
 #[allow(clippy::disallowed_methods)]
