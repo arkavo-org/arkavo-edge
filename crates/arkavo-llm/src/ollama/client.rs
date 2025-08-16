@@ -6,8 +6,7 @@ use tokio_stream::Stream;
 use tracing::{debug, warn};
 
 use super::types::{ChatRequest, ChatResponse};
-use crate::provider::Provider;
-use crate::{Error, Message, Result, StreamResponse};
+use crate::{Error, Message, Provider, Result, StreamResponse};
 
 #[derive(Debug, Deserialize)]
 struct ModelInfo {

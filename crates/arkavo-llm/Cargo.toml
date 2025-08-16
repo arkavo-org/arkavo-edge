@@ -19,7 +19,6 @@ local = ["llm-local"]  # Alias for compatibility
 # Metal feature should only be used on macOS - handle in build configuration
 metal = ["candle-core?/metal", "candle-nn?/metal", "candle-transformers?/metal"]
 kimi = ["dep:arkavo-kimi", "llm-remote"]
-llama-cpp = ["dep:arkavo-llama-cpp", "llm-local"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "sync"] }
@@ -53,9 +52,6 @@ rand = { workspace = true }
 
 # Kimi integration
 arkavo-kimi = { path = "../arkavo-kimi", optional = true }
-
-# Llama.cpp integration
-arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 
 # Provider dependencies
 url = "2.5.4"

@@ -3,8 +3,6 @@ pub mod client;
 pub mod common;
 pub mod error;
 pub mod image;
-#[cfg(feature = "llama-cpp")]
-pub mod llama_cpp;
 #[cfg(feature = "llm-local")]
 pub mod local;
 pub mod message;

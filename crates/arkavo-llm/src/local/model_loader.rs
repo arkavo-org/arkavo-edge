@@ -1,5 +1,3 @@
-#[cfg(feature = "llama-cpp")]
-use crate::llama_cpp::provider::LlamaCppProvider;
 use crate::{Error, Result};
 use candle_core::quantized::gguf_file;
 use candle_core::{Device, Tensor};
@@ -11,21 +9,21 @@ use tokenizers::Tokenizer;
 
 // Import the specific quantized models
 use candle_transformers::models::llama;
+use candle_transformers::models::quantized_gemma3;
 use candle_transformers::models::quantized_llama;
 use candle_transformers::models::quantized_phi;
 
 pub enum Model {
+    QuantizedGemma3(quantized_gemma3::ModelWeights),
     QuantizedLlama(quantized_llama::ModelWeights),
     QuantizedPhi(quantized_phi::ModelWeights),
 }
-
-use crate::provider::Provider as CompletionProvider;
 
 pub struct ModelLoader {
     device: Device,
     model_name: String,
     model_path: Option<String>,
-    provider: Option<Box<dyn CompletionProvider>>,
+    model: Option<Model>,
     config: Option<llama::Config>,
     tokenizer_path: Option<String>,
     tokenizer: Option<Arc<Tokenizer>>,
@@ -41,7 +39,7 @@ impl ModelLoader {
             device,
             model_name: model_name.to_string(),
             model_path: model_path.map(String::from),
-            provider: None,
+            model: None,
             config: None,
             tokenizer_path: None,
             tokenizer: None,
@@ -134,27 +132,20 @@ impl ModelLoader {
                     None
                 }
             })
+            .or_else(|| {
+                // Fallback: check for phi-specific metadata
+                if content.metadata.contains_key("phi.context_length")
+                    || content.metadata.contains_key("phi2.context_length")
+                    || self.model_name.to_lowercase().contains("phi")
+                {
+                    Some("phi".to_string())
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| Error::Model("Missing architecture in GGUF metadata".to_string()))?;
 
         eprintln!("Detected GGUF architecture: {arch}");
-
-        if arch == "gemma3" {
-            #[cfg(feature = "llama-cpp")]
-            {
-                let provider = LlamaCppProvider::new(
-                    &path.to_string_lossy(),
-                    &crate::local::config::LocalConfig::default(),
-                )?;
-                self.provider = Some(Box::new(provider));
-                return Ok(());
-            }
-            #[cfg(not(feature = "llama-cpp"))]
-            {
-                return Err(Error::Model(
-                    "Gemma 3 models require the `llama-cpp` feature to be enabled.".to_string(),
-                ));
-            }
-        }
 
         // Use the device as configured (Metal will be used on macOS if available)
         let device = self.device.clone();
@@ -171,6 +162,14 @@ impl ModelLoader {
 
         // The unified, architecture-aware loading logic
         let model = match arch.as_str() {
+            "gemma3" => {
+                eprintln!("Loading Gemma 3 GGUF model...");
+                // Seek back to the beginning after reading metadata
+                file.seek(std::io::SeekFrom::Start(0))?;
+                let model = quantized_gemma3::ModelWeights::from_gguf(content, &mut file, &device)
+                    .map_err(|e| Error::Model(format!("Failed to load Gemma3 model: {e}")))?;
+                Model::QuantizedGemma3(model)
+            }
             "llama" => {
                 eprintln!("Loading Llama GGUF model...");
                 // Seek back to the beginning after reading metadata
@@ -191,11 +190,7 @@ impl ModelLoader {
             _ => return Err(Error::Model(format!("Unsupported architecture: {arch}"))),
         };
 
-        self.provider = Some(Box::new(super::candle_provider::CandleProvider::new(
-            self.model_name.clone(),
-            self.model_path.clone(),
-            &Default::default(),
-        )?));
+        self.model = Some(model);
 
         eprintln!("Successfully loaded {arch} model");
         Ok(())
@@ -629,12 +624,12 @@ impl ModelLoader {
             .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))
     }
 
-    pub fn get_provider(&self) -> Option<&Box<dyn CompletionProvider>> {
-        self.provider.as_ref()
+    pub fn get_model(&self) -> Option<&Model> {
+        self.model.as_ref()
     }
 
-    pub fn get_provider_mut(&mut self) -> Option<&mut Box<dyn CompletionProvider>> {
-        self.provider.as_mut()
+    pub fn get_model_mut(&mut self) -> Option<&mut Model> {
+        self.model.as_mut()
     }
 
     pub fn get_config(&self) -> Option<&llama::Config> {
@@ -649,7 +644,7 @@ impl ModelLoader {
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.provider.is_some()
+        self.model.is_some()
     }
 
     pub fn set_tokenizer_path(&mut self, path: String) {
