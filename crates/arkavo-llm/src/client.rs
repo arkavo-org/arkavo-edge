@@ -1,11 +1,12 @@
 use crate::chat::ChatRequest;
 #[cfg(feature = "llm-remote")]
 use crate::ollama::OllamaClient;
-use crate::{Error, Message, Provider, Result, StreamResponse};
+use crate::provider::Provider;
+use crate::{Error, Message, Result, StreamResponse};
 use tokio_stream::Stream;
 
 #[cfg(feature = "llm-local")]
-use crate::local::LocalProvider;
+use crate::local::provider::LocalProvider;
 
 pub struct LlmClient {
     provider: Box<dyn Provider>,

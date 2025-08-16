@@ -1,6 +1,7 @@
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::common::{ProviderError, ProviderResult};
-use crate::{Message, Provider, Role, StreamResponse};
+use crate::provider::Provider;
+use crate::{Message, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};

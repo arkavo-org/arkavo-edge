@@ -1,0 +1,10 @@
+[package]
+name = "arkavo-llama-cpp-sys"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[build-dependencies]
+cmake = "0.1.50"
+bindgen = "0.69.4"

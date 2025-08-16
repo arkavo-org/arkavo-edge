@@ -352,11 +352,12 @@ impl ProviderFactory for LocalProviderFactory {
             .map(std::string::ToString::to_string);
 
         // Create local provider
-        let provider = crate::local::LocalProvider::new(model_name, model_path)?;
+        let mut provider =
+            crate::local::provider::LocalProvider::new(model_name, model_path.clone())?;
 
         // Initialize the provider (load model)
         provider
-            .initialize()
+            .initialize(model_path)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {}", e))?;
 

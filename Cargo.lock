@@ -386,11 +386,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-llama-cpp"
+version = "0.1.0"
+dependencies = [
+ "arkavo-llama-cpp-sys",
+]
+
+[[package]]
+name = "arkavo-llama-cpp-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cmake",
+]
+
+[[package]]
 name = "arkavo-llm"
 version = "0.27.1"
 dependencies = [
  "anyhow",
  "arkavo-kimi",
+ "arkavo-llama-cpp",
  "async-trait",
  "base64 0.22.1",
  "bytemuck",

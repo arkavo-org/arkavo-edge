@@ -1,7 +1,6 @@
+use crate::{Message, Result, StreamResponse};
 use async_trait::async_trait;
 use tokio_stream::Stream;
-
-use crate::{Message, Result, StreamResponse};
 
 #[async_trait]
 pub trait Provider: Send + Sync {

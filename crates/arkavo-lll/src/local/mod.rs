@@ -5,6 +5,6 @@ pub mod model_loader;
 pub mod provider;
 pub mod sampling;
 pub mod streaming;
-pub mod tokenizer;
 pub mod tokenizer_utils;
+pub mod tokenizer;
 pub mod worker;

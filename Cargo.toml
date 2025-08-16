@@ -22,7 +22,7 @@ members = [
     "crates/arkavo-budget",
     "crates/arkavo-events",
     "crates/arkavo-debugger",
-    ".cargo/xtask",
+    ".cargo/xtask", "crates/arkavo-llama-cpp-sys", "crates/arkavo-llama-cpp",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
