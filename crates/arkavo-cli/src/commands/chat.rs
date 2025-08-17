@@ -20,6 +20,21 @@ use uuid;
 #[allow(dead_code)]
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
 
+// Global runtime to prevent multiple runtime creation issues
+static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
+
+fn get_or_create_runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .thread_name("arkavo-chat-worker")
+            .thread_stack_size(3 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime")
+    })
+}
+
 // Runtime MCP initialization - checks if test-harness feature is available
 #[cfg(all(target_os = "macos", feature = "test-harness"))]
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
@@ -92,14 +107,47 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let print_mode = args.contains(&"--print".to_string())
         || args.contains(&"--prompt".to_string())
         || prompt.is_some();
+    
+    // Parse sampling parameters for llama.cpp
+    let temperature = args
+        .windows(2)
+        .find(|w| w[0] == "--temperature")
+        .and_then(|w| w[1].parse::<f32>().ok())
+        .unwrap_or(0.7);
+    let top_p = args
+        .windows(2)
+        .find(|w| w[0] == "--top-p")
+        .and_then(|w| w[1].parse::<f32>().ok())
+        .unwrap_or(0.9);
+    let top_k = args
+        .windows(2)
+        .find(|w| w[0] == "--top-k")
+        .and_then(|w| w[1].parse::<i32>().ok())
+        .unwrap_or(40);
+    let max_tokens = args
+        .windows(2)
+        .find(|w| w[0] == "--max-tokens")
+        .and_then(|w| w[1].parse::<u32>().ok())
+        .unwrap_or(512);
+    let seed = args
+        .windows(2)
+        .find(|w| w[0] == "--seed")
+        .and_then(|w| w[1].parse::<u32>().ok())
+        .unwrap_or_else(|| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            std::time::SystemTime::now().hash(&mut hasher);
+            hasher.finish() as u32
+        });
 
-    // Create runtime for async operations
-    let runtime = Runtime::new()?;
+    // Use global runtime to prevent multiple runtime creation issues
+    let runtime = get_or_create_runtime();
 
     // Launch Terminal UI early if requested and not in print mode
     if use_tui && !print_mode {
         // For TUI mode, we'll initialize everything inside the TUI
-        return launch_terminal_ui(runtime);
+        return launch_terminal_ui();
     }
 
     // Initialize memory storage
@@ -112,7 +160,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;
 
     // Initialize LLM client with fallback to prompt for remote server
-    let client = runtime.block_on(initialize_llm_client(print_mode))?;
+    let client = runtime.block_on(initialize_llm_client(print_mode, temperature, top_p, top_k, max_tokens, seed))?;
 
     if !print_mode {
         println!("Starting UI testing chat session...");
@@ -1249,7 +1297,14 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
-async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
+async fn initialize_llm_client(
+    print_mode: bool, 
+    temperature: f32, 
+    top_p: f32, 
+    top_k: i32, 
+    max_tokens: u32, 
+    seed: u32
+) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
     if let Ok(client) = LlmClient::from_env() {
         if client.complete(vec![Message::user("ping")]).await.is_ok() {
@@ -1304,9 +1359,14 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
         };
 
         let model_name = "gemma-3-270m-it";
-        LlmClient::from_llamacpp_model(
+        LlmClient::from_llamacpp_model_with_config(
             model_name,
             final_path.to_string_lossy().to_string(),
+            temperature,
+            top_p,
+            top_k,
+            max_tokens,
+            seed,
         )
         .await
         .map_err(|e| e.into())
@@ -1321,6 +1381,11 @@ async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn st
 async fn prompt_for_remote_ollama(
     print_mode: bool,
     storage: Arc<MemoryStorage>,
+    _temperature: f32,
+    _top_p: f32, 
+    _top_k: i32,
+    _max_tokens: u32,
+    _seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     if print_mode {
         return Err(
@@ -1421,9 +1486,10 @@ async fn prompt_for_remote_ollama(
 }
 
 #[allow(clippy::disallowed_methods)]
-fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
+fn launch_terminal_ui() -> Result<(), Box<dyn std::error::Error>> {
     // For TUI mode, we bypass all the initialization and go straight to the UI
-    // The UI will handle its own initialization
+    // The UI will handle its own initialization using the global runtime
+    let runtime = get_or_create_runtime();
     runtime.block_on(async { arkavo_terminal::run().await })?;
     Ok(())
 }

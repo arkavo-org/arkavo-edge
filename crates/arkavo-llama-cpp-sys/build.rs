@@ -6,6 +6,14 @@ fn main() {
 
     let dst = cmake::Config::new("../../vendor/llama.cpp")
         .define("BUILD_SHARED_LIBS", "OFF")
+        .define("CMAKE_BUILD_TYPE", "Debug")        // or RelWithDebInfo
+        .define("GGML_METAL", "OFF")                // keep off till stable
+        .define("GGML_CUDA", "OFF")
+        .define("GGML_VULKAN", "OFF")
+        .define("GGML_OPENCL", "OFF")
+        .define("GGML_BLAS", "OFF")                 // avoid dual-BLAS confusion
+        .define("GGML_ACCELERATE", "ON")            // use Apple Accelerate
+        .define("GGML_ASSERTS", "ON")
         .build();
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
@@ -13,23 +21,15 @@ fn main() {
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
     println!("cargo:rustc-link-lib=static=ggml-cpu");
-    println!("cargo:rustc-link-lib=static=ggml-blas");
     
-    // On macOS, also link the Metal backend
-    if cfg!(target_os = "macos") {
-        println!("cargo:rustc-link-lib=static=ggml-metal");
-    }
+    // Metal backend disabled due to crash issues
+    // if cfg!(target_os = "macos") {
+    //     println!("cargo:rustc-link-lib=static=ggml-metal");
+    // }
     
-    // Link C++ standard library
     println!("cargo:rustc-link-lib=c++");
-
-    // On macOS, link against the Metal framework and Accelerate
-    if cfg!(target_os = "macos") {
-        println!("cargo:rustc-link-lib=framework=Foundation");
-        println!("cargo:rustc-link-lib=framework=Metal");
-        println!("cargo:rustc-link-lib=framework=MetalKit");
-        println!("cargo:rustc-link-lib=framework=Accelerate");
-    }
+    println!("cargo:rustc-link-lib=framework=Accelerate");
+    println!("cargo:rustc-link-lib=framework=Foundation");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let header = out_path.join("include").join("llama.h");
