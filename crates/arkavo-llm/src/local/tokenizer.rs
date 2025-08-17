@@ -44,6 +44,7 @@ impl Tokenizer {
                 format!("models--{}--{}", "microsoft", "phi-2"),
                 format!("models--{}--{}", "TheBloke", "phi-2-GGUF"),
                 format!("models--{}--{}", "google", "gemma-*"),
+                format!("models--{}--{}", "unsloth", "gemma-3-270m-it-GGUF"),
             ];
 
             for pattern in patterns {

@@ -27,6 +27,11 @@ pub use stream::StreamResponse;
 mod kimi_adapter;
 #[cfg(feature = "kimi")]
 pub use kimi_adapter::KimiProvider;
+
+#[cfg(feature = "llama-cpp")]
+mod llamacpp_provider;
+#[cfg(feature = "llama-cpp")]
+pub use llamacpp_provider::LlamaCppProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
     DeltaStream, DeltaType, EndReason, StreamControl, StreamDelta, StreamError, StreamId,

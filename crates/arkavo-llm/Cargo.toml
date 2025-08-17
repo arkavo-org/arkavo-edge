@@ -13,25 +13,25 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = []
-llm-remote = []
-llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
-local = ["llm-local"]  # Alias for compatibility
-# Metal feature should only be used on macOS - handle in build configuration
-metal = ["candle-core?/metal", "candle-nn?/metal", "candle-transformers?/metal"]
-kimi = ["dep:arkavo-kimi", "llm-remote"]
+llm-remote = ["dep:reqwest", "dep:serde_json", "dep:tokio", "dep:async-trait", "dep:log", "dep:thiserror", "dep:anyhow", "dep:url", "dep:futures", "dep:tokio-stream", "dep:bytes", "dep:serde"]
+llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:tracing", "dep:accelerate-src", "dep:intel-mkl-src", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
+kimi = ["dep:arkavo-kimi"]
+llama-cpp = ["dep:arkavo-llama-cpp", "dep:tokio", "dep:async-trait", "dep:tokio-stream", "dep:tracing", "dep:serde", "dep:thiserror"]
+local = ["llm-local"]
+metal = ["candle-core/metal", "candle-transformers/metal"]
 
 [dependencies]
-tokio = { workspace = true, features = ["rt", "macros", "sync"] }
-serde = { workspace = true }
-serde_json = { workspace = true }
-reqwest = { workspace = true, features = ["stream"] }
-futures = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-async-trait = { workspace = true }
-tokio-stream = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync"], optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
 base64 = { workspace = true }
-anyhow = { workspace = true }
+anyhow = { workspace = true, optional = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
@@ -49,14 +49,19 @@ indicatif = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 rand = { workspace = true }
+accelerate-src = { version = "0.3.0", optional = true }
+intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }
 
 # Kimi integration
 arkavo-kimi = { path = "../arkavo-kimi", optional = true }
+arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 
 # Provider dependencies
-url = "2.5.4"
+url = { version = "2.5.4", optional = true }
 ring = "0.17"
 keyring = "3.0"
+log = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

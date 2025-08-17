@@ -1250,244 +1250,72 @@ fn list_files(path: &str) -> Option<String> {
 }
 
 async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    use std::time::Instant;
-
-    let init_start = Instant::now();
-    eprintln!("[DEBUG] Starting LLM client initialization, print_mode={print_mode}");
-
-    // Initialize memory storage
-    let storage = Arc::new(MemoryStorage::new().await?);
-
-    // Check for previously selected provider
-    eprintln!("[DEBUG] Checking for saved provider configuration...");
-    let saved_provider = storage
-        .search("llm_provider", 1, Some("llm_provider"))
-        .await?
-        .into_iter()
-        .find(|c| c.memory.content != "CLEARED");
-
-    if let Some(ref provider) = saved_provider {
-        eprintln!("[DEBUG] Found saved provider: {}", provider.memory.content);
-    } else {
-        eprintln!("[DEBUG] No saved provider found");
-    }
-
-    // First priority: Try saved Ollama server if configured
-    if let Some(provider_config) = &saved_provider
-        && provider_config.memory.content.starts_with("http")
-    {
-        // Ollama server
-        let server_url = &provider_config.memory.content;
-        eprintln!("[DEBUG] Attempting connection to saved Ollama server: {server_url}");
-        unsafe {
-            std::env::set_var("OLLAMA_BASE_URL", server_url);
-        }
-
-        if let Ok(client) = LlmClient::from_env() {
-            eprintln!("[DEBUG] Client created, testing connection with ping...");
-            let test_message = vec![Message::user("ping")];
-            let test_start = Instant::now();
-
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!(
-                        "[DEBUG] Connection test successful (took {:?})",
-                        test_start.elapsed()
-                    );
-                    if !print_mode {
-                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
-                    }
-                    eprintln!(
-                        "[DEBUG] Total initialization time: {:?}",
-                        init_start.elapsed()
-                    );
-                    return Ok(client);
-                }
-                Err(e) => {
-                    let elapsed = test_start.elapsed();
-                    eprintln!("[DEBUG] Connection test failed after {elapsed:?}: {e}");
-                }
-            }
-        } else {
-            eprintln!("[DEBUG] Failed to create client from saved URL");
-        }
-    }
-
-    // Second priority: Try default localhost Ollama
-    eprintln!("[DEBUG] Attempting connection to localhost:11434...");
-    match LlmClient::from_env() {
-        Ok(client) => {
-            eprintln!("[DEBUG] Local client created, testing connection...");
-            // Test if the client can connect by trying a minimal request
-            let test_message = vec![Message::user("ping")];
-            let test_start = Instant::now();
-
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!(
-                        "[DEBUG] Local connection test successful (took {:?})",
-                        test_start.elapsed()
-                    );
-                    if !print_mode {
-                        eprintln!("✓ Connected to Ollama at localhost:11434");
-                    }
-                    eprintln!(
-                        "[DEBUG] Total initialization time: {:?}",
-                        init_start.elapsed()
-                    );
-                    return Ok(client);
-                }
-                Err(e) => {
-                    let elapsed = test_start.elapsed();
-                    eprintln!("[DEBUG] Local connection test failed after {elapsed:?}: {e}");
-                    if !print_mode {
-                        eprintln!("Could not connect to Ollama at localhost:11434: {e}");
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[DEBUG] Failed to create local client: {e}");
+    // Try to connect to Ollama first
+    if let Ok(client) = LlmClient::from_env() {
+        if client.complete(vec![Message::user("ping")]).await.is_ok() {
             if !print_mode {
-                eprintln!("Ollama not available: {e}");
+                println!("✓ Connected to Ollama at {}", client.provider_name());
             }
+            return Ok(client);
         }
     }
 
-    // Third priority: Check if previously selected local model is still available
-    if let Some(provider_config) = &saved_provider
-        && provider_config.memory.content.starts_with("local:")
-    {
-        let model_name = provider_config
-            .memory
-            .content
-            .strip_prefix("local:")
-            .unwrap();
-        eprintln!("[DEBUG] Found saved local model preference: {model_name}");
-        if !print_mode {
-            eprintln!("Checking for previously used local model: {model_name}");
-        }
+    if !print_mode {
+        println!("Ollama not available.");
     }
 
-    // Fourth priority: Try local models from HuggingFace cache
-    #[cfg(feature = "local")]
+    // Fallback to local llama.cpp
+    #[cfg(feature = "llama-cpp")]
     {
-        use arkavo_llm::local::{ModelDownloader, ModelManifest};
+        use hf_hub::api::tokio::Api;
+        use std::io::{self, Write};
 
-        eprintln!("[DEBUG] Checking for local models in HuggingFace cache...");
         if !print_mode {
-            eprintln!("Checking for local models in HuggingFace cache...");
+            println!("Attempting to use local model with llama.cpp...");
         }
 
-        // Load manifest and try models in priority order
-        match ModelManifest::load() {
-            Ok(manifest) => {
-                eprintln!("[DEBUG] Model manifest loaded successfully");
+        let model_repo = "unsloth/gemma-3-270m-it-GGUF";
+        let model_file = "gemma-3-270m-it-Q4_0.gguf";
 
-                // Priority order: Phi-2 first (since it's the one mentioned in the issue)
-                let model_priorities = [
-                    "phi-2-q4k",          // Phi-2 as primary
-                    "tinyllama-110m-f16", // Smallest model for testing
-                    "gemma3-1b-it-qat",   // Gemma 3 1B
-                    "tinyllama-1b-chat-q2",
-                    "tinyllama-1b-chat-q3",
-                    "tinyllama-1b-chat",
-                    "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
-                ];
+        let api = Api::new()?;
+        let repo = api.repo(hf_hub::Repo::model(model_repo.to_string()));
+        let model_path = repo.get(model_file).await;
 
-                eprintln!("[DEBUG] Trying models in priority order: {model_priorities:?}");
-
-                for model_name in &model_priorities {
-                    eprintln!("[DEBUG] Checking for model: {model_name}");
-
-                    if let Some(spec) = manifest.find(model_name) {
-                        eprintln!("[DEBUG] Found model spec for: {model_name}");
-
-                        // Create downloader to check cache
-                        match ModelDownloader::new() {
-                            Ok(downloader) => {
-                                eprintln!("[DEBUG] Model downloader created, checking cache...");
-
-                                // This will return cached path if already downloaded
-                                match downloader.get_model_path(spec).await {
-                                    Ok(model_path) => {
-                                        eprintln!(
-                                            "[DEBUG] Model found in cache at: {}",
-                                            model_path.display()
-                                        );
-
-                                        if !print_mode {
-                                            eprintln!(
-                                                "Found cached model: {} at {}",
-                                                spec.name,
-                                                model_path.display()
-                                            );
-                                        }
-
-                                        eprintln!(
-                                            "[DEBUG] Initializing local model: {}",
-                                            spec.name
-                                        );
-                                        let load_start = Instant::now();
-
-                                        match LlmClient::from_local_model(
-                                            &spec.name,
-                                            model_path.to_string_lossy().to_string(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(client) => {
-                                                eprintln!(
-                                                    "[DEBUG] Model loaded successfully in {:?}",
-                                                    load_start.elapsed()
-                                                );
-                                                if !print_mode {
-                                                    eprintln!("✓ Using local model: {}", spec.name);
-                                                }
-                                                eprintln!(
-                                                    "[DEBUG] Total initialization time: {:?}",
-                                                    init_start.elapsed()
-                                                );
-                                                return Ok(client);
-                                            }
-                                            Err(e) => {
-                                                eprintln!(
-                                                    "[ERROR] Failed to initialize model {} after {:?}: {}",
-                                                    spec.name,
-                                                    load_start.elapsed(),
-                                                    e
-                                                );
-                                                if !print_mode {
-                                                    eprintln!(
-                                                        "Failed to initialize local model {}: {}",
-                                                        spec.name, e
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[DEBUG] Model {model_name} not in cache: {e}");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[ERROR] Failed to create model downloader: {e}");
-                            }
-                        }
-                    } else {
-                        eprintln!("[DEBUG] Model {model_name} not found in manifest");
+        let final_path = match model_path {
+            Ok(path) => path,
+            Err(_) => {
+                if !print_mode {
+                    print!(
+                        "Model '{}' not found locally. Download now? (Y/n) ",
+                        model_file
+                    );
+                    io::stdout().flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    if input.trim().to_lowercase() != "y" && !input.trim().is_empty() {
+                        return Err("Download declined by user.".into());
                     }
                 }
+                println!("Downloading model... this may take a while.");
+                let download_path = repo.get(model_file).await?;
+                println!("Model downloaded to: {}", download_path.display());
+                download_path
             }
-            Err(e) => {
-                eprintln!("[ERROR] Failed to load model manifest: {e}");
-            }
-        }
+        };
+
+        let model_name = "gemma-3-270m-it";
+        LlmClient::from_llamacpp_model(
+            model_name,
+            final_path.to_string_lossy().to_string(),
+        )
+        .await
+        .map_err(|e| e.into())
     }
 
-    // Last resort: Prompt for remote Ollama server
-    prompt_for_remote_ollama(print_mode, storage).await
+    #[cfg(not(feature = "llama-cpp"))]
+    {
+        Err("No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature.".into())
+    }
 }
 
 async fn prompt_for_remote_ollama(

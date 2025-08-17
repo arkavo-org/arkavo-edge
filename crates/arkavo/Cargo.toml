@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Default features - portable across all platforms with pure Rust mDNS
-default = ["memory", "mdns", "llm-remote"]
+default = ["memory", "mdns", "llm-remote", "llama-cpp"]
 # Default features for Windows
 windows-default = ["memory", "mdns", "llm-remote"]
 memory = ["arkavo-cli/memory"]
@@ -22,6 +22,7 @@ local = ["arkavo-cli/local"]
 metal = ["arkavo-cli/metal"]
 llm-remote = ["arkavo-cli/llm-remote"]
 kimi = ["arkavo-cli/kimi"]
+llama-cpp = ["arkavo-cli/llama-cpp"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }
