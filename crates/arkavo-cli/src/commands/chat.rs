@@ -91,9 +91,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    
-    // Terminal UI is now the default, use --no-tui to disable it
-    let use_tui = !args.contains(&"--no-tui".to_string());
 
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
@@ -111,7 +108,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let print_mode = args.contains(&"--print".to_string())
         || args.contains(&"--prompt".to_string())
         || prompt.is_some();
-    
+
+    // Check if --new-session flag is present to start fresh without history
+    let new_session = args.contains(&"--new-session".to_string());
+
     // Parse sampling parameters for llama.cpp
     let temperature = args
         .windows(2)
@@ -132,10 +132,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .windows(2)
         .find(|w| w[0] == "--max-tokens")
         .and_then(|w| w[1].parse::<u32>().ok())
-        .or_else(|| std::env::var("ARKAVO_MAX_TOKENS")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok()))
-        .unwrap_or(4096);  // Default to 4K tokens
+        .or_else(|| {
+            std::env::var("ARKAVO_MAX_TOKENS")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+        })
+        .unwrap_or(4096); // Default to 4K tokens
     let seed = args
         .windows(2)
         .find(|w| w[0] == "--seed")
@@ -151,12 +153,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Use global runtime to prevent multiple runtime creation issues
     let runtime = get_or_create_runtime();
 
-    // Launch Terminal UI early if requested and not in print mode
-    if use_tui && !print_mode {
-        // For TUI mode, we'll initialize everything inside the TUI
-        return launch_terminal_ui();
-    }
-
     // Initialize memory storage
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
 
@@ -167,28 +163,74 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;
 
     // Initialize LLM client with fallback to prompt for remote server
-    let client = runtime.block_on(initialize_llm_client(print_mode, temperature, top_p, top_k, max_tokens, seed))?;
+    let client = runtime.block_on(initialize_llm_client(
+        print_mode,
+        temperature,
+        top_p,
+        top_k,
+        max_tokens,
+        seed,
+    ))?;
+
+    // Detect model size hint from model name
+    let model_size_hint =
+        if client.provider_name().contains("270m") || client.provider_name().contains("270M") {
+            Some("270M")
+        } else if client.provider_name().contains("1b") || client.provider_name().contains("1B") {
+            Some("1B")
+        } else if client.provider_name().contains("2b") || client.provider_name().contains("2B") {
+            Some("2B")
+        } else if client.provider_name().contains("7b") || client.provider_name().contains("7B") {
+            Some("7B")
+        } else {
+            None
+        };
 
     if !print_mode {
         println!("Starting UI testing chat session...");
         println!("Repository context: {}", get_current_directory());
         println!("LLM Provider: {}", client.provider_name());
 
-        // Try to restore last session
-        if let Ok(Some(session_id)) = runtime.block_on(conversation_manager.restore_last_session())
-        {
+        // Show model-specific settings for small models
+        if let Some(size) = &model_size_hint {
+            println!("Model size: {} - using limited history", size);
+        }
+
+        // Try to restore last session unless --new-session is specified
+        if new_session {
+            // Start fresh session with metadata
+            let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
+                client.provider_name(),
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                model_size_hint.as_deref(),
+            ))?;
+            println!("Started new conversation session");
+        } else if let Ok(Some(session_id)) = runtime.block_on(
+            conversation_manager.restore_last_session_with_compatibility(
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                Some(client.provider_name()),
+            ),
+        ) {
             println!(
                 "Restored previous conversation (session: {})",
                 &session_id.to_string()[..8]
             );
         } else {
-            // Start new session
-            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+            // Start new session with metadata
+            let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
+                client.provider_name(),
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                model_size_hint.as_deref(),
+            ))?;
         }
 
         println!("Type '/exit' or '/quit' to end the session.");
+        println!("Commands: /read <file>, /list [path], /test, /run <test_name>, /tools");
         println!(
-            "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools, /switch <session>"
+            "Session: /new (start fresh), /clear (clear history), /history (show stats), /switch <id>"
         );
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
@@ -403,8 +445,19 @@ Full repository details (available via @build_repository_context):
         // In print mode, just create a simple message list
         vec![system_message.clone()]
     } else {
-        // In interactive mode, get full context from conversation manager
-        runtime.block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?
+        // In interactive mode, get context with appropriate history limits
+        let history_limit = if let Some("270M") = model_size_hint.as_deref() {
+            Some(2) // Very limited for tiny models
+        } else if let Some("1B") | Some("2B") = model_size_hint.as_deref() {
+            Some(4)
+        } else {
+            None // Use default
+        };
+
+        runtime.block_on(
+            conversation_manager
+                .get_context_messages_with_limits(Some(system_message.clone()), history_limit),
+        )?
     };
 
     // If prompt provided via command line, process it and exit
@@ -441,85 +494,6 @@ Full repository details (available via @build_repository_context):
         return Ok(());
     }
 
-    // Launch Terminal UI if requested
-    if use_tui && !print_mode {
-        // Create channels for communication between TUI and LLM
-        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
-        let (llm_tx, llm_rx) = tokio::sync::mpsc::channel::<String>(100);
-
-        // Clone necessary components for the TUI task
-        let client = Arc::new(client);
-        let client_clone: Arc<LlmClient> = Arc::clone(&client);
-        let mut messages_clone = messages.clone();
-
-        // Spawn LLM processing task
-        let llm_handle = runtime.spawn(async move {
-            eprintln!("[LLM Task] Started, waiting for messages...");
-            while let Some(user_input) = ui_rx.recv().await {
-                eprintln!("[LLM Task] Received user input: {user_input}");
-                // Process the user input with LLM
-                let user_message = Message::user(user_input.clone());
-                messages_clone.push(user_message);
-
-                // Get streaming response from LLM
-                match client_clone.stream(messages_clone.clone()).await {
-                    Ok(mut stream) => {
-                        let mut full_response = String::new();
-
-                        // Send start streaming signal
-                        let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
-
-                        while let Some(chunk_result) = stream.next().await {
-                            match chunk_result {
-                                Ok(chunk) => {
-                                    if !chunk.content.is_empty() {
-                                        full_response.push_str(&chunk.content);
-                                        // Send each chunk as it arrives
-                                        let _ = llm_tx
-                                            .send(format!("<<STREAM_CHUNK>>{}", chunk.content))
-                                            .await;
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ =
-                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {e}")).await;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Send end streaming signal
-                        let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
-
-                        // Save the complete message
-                        let assistant_message = Message::assistant(full_response.clone());
-                        messages_clone.push(assistant_message);
-                        eprintln!(
-                            "[LLM Task] Response complete, {} chars. Messages in context: {}",
-                            full_response.len(),
-                            messages_clone.len()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[LLM Task] Error: {e}");
-                        let _ = llm_tx.send(format!("Error: {e}")).await;
-                    }
-                }
-                eprintln!("[LLM Task] Waiting for next message...");
-            }
-            eprintln!("[LLM Task] Channel closed, exiting...");
-        });
-
-        // Run the Terminal UI with communication channels
-        let tui_result = runtime
-            .block_on(async { arkavo_terminal::run_with_string_channels(ui_tx, llm_rx).await });
-
-        // Clean up
-        llm_handle.abort();
-
-        return tui_result.map_err(std::convert::Into::into);
-    }
-
     // Interactive chat loop
     loop {
         print!("> ");
@@ -539,13 +513,78 @@ Full repository details (available via @build_repository_context):
             break;
         }
 
-        if input == "clear" {
-            // Start new session
+        // Handle /new command - start fresh session
+        if input == "/new" {
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
-            messages = runtime.block_on(
-                conversation_manager.get_context_messages(Some(system_message.clone())),
-            )?;
-            println!("Conversation cleared. New session started.");
+            messages = vec![system_message.clone()];
+            println!("Started new conversation session");
+            continue;
+        }
+
+        // Handle /clear command - clear current session
+        if input == "/clear" {
+            runtime.block_on(conversation_manager.clear_session())?;
+            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+            messages = vec![system_message.clone()];
+            println!("Cleared conversation history");
+            continue;
+        }
+
+        // Handle /history command - show session stats
+        if input.starts_with("/history") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() > 1 && parts[1] == "--last" {
+                // Show last N messages
+                let n = parts
+                    .get(2)
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(5);
+                println!("\nLast {} messages:", n);
+                let display_messages = messages.iter().rev().take(n).rev();
+                for msg in display_messages {
+                    match msg.role {
+                        arkavo_llm::Role::User => println!("User: {}", msg.content),
+                        arkavo_llm::Role::Assistant => {
+                            let preview = if msg.content.len() > 100 {
+                                format!("{}...", &msg.content[..100])
+                            } else {
+                                msg.content.clone()
+                            };
+                            println!("Assistant: {}", preview);
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                // Show session statistics
+                match runtime.block_on(conversation_manager.get_session_stats()) {
+                    Ok((turns, tokens, fence_balanced)) => {
+                        println!("\nSession statistics:");
+                        println!("  Messages: {}", turns);
+                        println!("  Tokens: {}", tokens);
+                        println!(
+                            "  Code fence parity: {}",
+                            if fence_balanced {
+                                "✓ balanced"
+                            } else {
+                                "⚠ UNBALANCED"
+                            }
+                        );
+                        if !fence_balanced {
+                            println!(
+                                "  Warning: Unbalanced code fences may cause generation issues"
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("Error getting session stats: {}", e),
+                }
+            }
+            continue;
+        }
+
+        if input == "clear" {
+            // Legacy clear command - redirect to /clear
+            println!("Use /clear to clear conversation history");
             continue;
         }
 
@@ -736,6 +775,44 @@ async fn process_message(
     mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // Debug output if enabled
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[DEBUG] Processing message with {} messages",
+            messages.len()
+        );
+
+        // Show template info (first 200 and last 200 chars)
+        let full_context = messages
+            .iter()
+            .map(|m| format!("{:?}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let preview = if full_context.len() > 400 {
+            format!(
+                "{}...{}",
+                &full_context[..200],
+                &full_context[full_context.len() - 200..]
+            )
+        } else {
+            full_context.clone()
+        };
+        eprintln!("[DEBUG] Context preview: {}", preview);
+
+        // Check fence parity
+        let fence_count = full_context.matches("```").count();
+        eprintln!(
+            "[DEBUG] Fence parity check: {} fences ({})",
+            fence_count,
+            if fence_count % 2 == 0 {
+                "balanced"
+            } else {
+                "UNBALANCED!"
+            }
+        );
+    }
+
     print!("Assistant: ");
     io::stdout().flush()?;
 
@@ -830,6 +907,36 @@ async fn process_message_print(
         eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
         eprintln!("[DEBUG] Messages count: {}", messages.len());
         eprintln!("[DEBUG] Provider: {}", client.provider_name());
+
+        // Show template info
+        let full_context = messages
+            .iter()
+            .map(|m| format!("{:?}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let preview = if full_context.len() > 400 {
+            format!(
+                "{}...{}",
+                &full_context[..200],
+                &full_context[full_context.len() - 200..]
+            )
+        } else {
+            full_context.clone()
+        };
+        eprintln!("[DEBUG] Context preview: {}", preview);
+
+        // Check fence parity
+        let fence_count = full_context.matches("```").count();
+        eprintln!(
+            "[DEBUG] Fence parity: {} ({})",
+            fence_count,
+            if fence_count % 2 == 0 {
+                "balanced"
+            } else {
+                "UNBALANCED!"
+            }
+        );
     }
 
     // Use streaming but only print content
@@ -1329,12 +1436,12 @@ fn list_files(path: &str) -> Option<String> {
 }
 
 async fn initialize_llm_client(
-    print_mode: bool, 
-    temperature: f32, 
-    top_p: f32, 
-    top_k: i32, 
-    max_tokens: u32, 
-    seed: u32
+    print_mode: bool,
+    temperature: f32,
+    top_p: f32,
+    top_k: i32,
+    max_tokens: u32,
+    seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
     if let Ok(client) = LlmClient::from_env() {
@@ -1405,15 +1512,9 @@ async fn initialize_llm_client(
 
     #[cfg(not(feature = "llama-cpp"))]
     {
-        Err("No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature.".into())
+        Err(
+            "No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature."
+                .into(),
+        )
     }
-}
-
-#[allow(clippy::disallowed_methods)]
-fn launch_terminal_ui() -> Result<(), Box<dyn std::error::Error>> {
-    // For TUI mode, we bypass all the initialization and go straight to the UI
-    // The UI will handle its own initialization using the global runtime
-    let runtime = get_or_create_runtime();
-    runtime.block_on(async { arkavo_terminal::run().await })?;
-    Ok(())
 }

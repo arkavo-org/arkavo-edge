@@ -18,6 +18,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match args[0].as_str() {
         "agent" => commands::agent::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
+        "terminal" => commands::terminal::execute(&args[1..]),
         "plan" => commands::plan::execute(&args[1..]),
         "apply" => commands::apply::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "test-harness"))]
@@ -124,12 +125,10 @@ fn print_usage() {
     println!();
     println!("COMMANDS:");
     println!("    agent     Configure and run AI agents (default when no command given)");
-    println!(
-        "    chat      Start conversational agent with repository context (Terminal UI by default)"
-    );
-    println!(
-        "              Options: --no-tui (disable Terminal UI), --prompt <text>, --image <path>"
-    );
+    println!("    chat      Simple conversational chat interface");
+    println!("              Options: --prompt <text>, --image <path>, --max-tokens <n>");
+    println!("              Use /new in chat to start fresh session");
+    println!("    terminal  Launch Terminal UI with streaming chat interface");
     println!("    plan      Generate a change plan before code edits");
     println!("    apply     Execute plan and commit changes");
     println!("    test      Run intelligent tests (use --help for modes)");

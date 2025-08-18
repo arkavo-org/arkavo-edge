@@ -82,7 +82,8 @@ The project will support the following main commands:
 
 - `arkavo ui`: User-interface for agent orchestration
 - `arkavo agent run`: Start an agent
-- `arkavo chat`: Conversational agent with repository context and streaming diff previews (interactive command - should not be used for testing)
+- `arkavo chat`: Simple conversational chat interface without TUI (interactive command - should not be used for testing)
+- `arkavo terminal`: Terminal UI with streaming LLM responses and full visual interface
 
 
 ## Quality Standards
@@ -136,6 +137,43 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 
 - Keep required third-party tools to a minimum. Zero configuration is required for humans.
 
+## Chat Session Management for Small Models
+
+The chat command includes sophisticated session management to handle small language models (≤1B parameters) more effectively:
+
+### History Sanitization
+- Automatically balances unclosed code fences in conversation history
+- Removes trailing role artifacts ("Assistant:", "User:", etc.)
+- Adds buffer after code introduction patterns to prevent immediate fence generation
+
+### Session Compatibility Checking
+- Sessions store metadata: chat template hash, system prompt hash, model size
+- Automatically starts new session if:
+  - Model changes (even quantization differences)
+  - Chat template changes
+  - System prompt changes
+- Clear message: "Session skipped: [reason] (starting fresh)"
+
+### Smart Defaults by Model Size
+- **270M models**: 2 turn history limit
+- **1-2B models**: 4 turn history limit  
+- **Larger models**: 10 turn history (default)
+- Override with `ARKAVO_MAX_HISTORY_TURNS` environment variable
+
+### Interactive Commands
+- `/new` - Start fresh session (replaces --new-session flag)
+- `/clear` - Clear current session history
+- `/history` - Show session statistics (turns, tokens, fence parity)
+- `/history --last N` - Display last N messages
+- `/switch <id>` - Switch between sessions
+
+### Debug Features
+When `ARKAVO_DEBUG_CHAT=1`:
+- Shows template/prompt preview (first/last 200 chars)
+- Reports token and message counts
+- Checks code fence parity before generation
+- Warns about unbalanced fences that may cause issues
+
 ## Memories
 
 - Faking success is worse than an honest failure
@@ -174,7 +212,14 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - **ARKAVO_EVENT_RETENTION_HOURS**: Sets event retention period (default: 24)
 - **ARKAVO_MAX_EVENTS_PER_SESSION**: Maximum events per session (default: 100000)
 - **ARKAVO_DEBUG**: Enables debug logging
+- **ARKAVO_DEBUG_CHAT**: Enables verbose debug output for chat/terminal commands including:
+  - Template and prompt preview (first/last 200 chars)
+  - Token counts and message counts
+  - Code fence parity checking
+  - Session compatibility checks
 - **ARKAVO_MASTER_KEY**: Sets master encryption key
+- **ARKAVO_MAX_TOKENS**: Sets default max tokens for LLM generation (default: 4096)
+- **ARKAVO_MAX_HISTORY_TURNS**: Maximum conversation turns to include in context (default: 2 for <1B models, 10 for larger)
 - remove dead code instead of adding `#[allow(dead_code)]`
 - Debug output is now controlled by the ARKAVO_DEBUG_CHAT environment variable. By default, all those
   verbose debug statements are suppressed. To enable them for debugging, users can run:
