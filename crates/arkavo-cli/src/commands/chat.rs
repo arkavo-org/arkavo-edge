@@ -3,7 +3,6 @@ use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
-use chrono;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
@@ -1375,113 +1374,6 @@ async fn initialize_llm_client(
     #[cfg(not(feature = "llama-cpp"))]
     {
         Err("No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature.".into())
-    }
-}
-
-async fn prompt_for_remote_ollama(
-    print_mode: bool,
-    storage: Arc<MemoryStorage>,
-    _temperature: f32,
-    _top_p: f32, 
-    _top_k: i32,
-    _max_tokens: u32,
-    _seed: u32,
-) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    if print_mode {
-        return Err(
-            "Ollama is not running locally and print mode doesn't support interactive prompts"
-                .into(),
-        );
-    }
-
-    eprintln!("⚠️  Could not connect to Ollama at localhost:11434");
-    eprintln!("Please ensure Ollama is running or provide a remote server address.");
-    eprintln!();
-    eprintln!("Tip: To clear saved configuration, type 'clear'");
-    print!("Enter Ollama server address (e.g., 192.168.1.100:11434) or press Enter to cancel: ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim();
-
-    if input.is_empty() {
-        return Err("No Ollama server configured".into());
-    }
-
-    // Check if user wants to clear saved configuration
-    if input == "clear" {
-        // Delete saved configuration by searching and marking as deleted
-        let saved_configs = storage
-            .search("ollama_server_config", 100, Some("config"))
-            .await?;
-        for config in saved_configs {
-            // We can't delete, but we can update the content to mark it as cleared
-            let mut cleared_memory = config.memory;
-            cleared_memory.content = "CLEARED".to_string();
-            cleared_memory.updated_at = chrono::Utc::now();
-            if let Err(e) = storage.store(cleared_memory).await {
-                eprintln!("Warning: Could not clear configuration: {e}");
-            }
-        }
-        eprintln!("✓ Cleared saved Ollama server configuration");
-        return Err("Please restart the command to configure a new server".into());
-    }
-
-    // Ensure the URL has the correct format
-    let base_url = if input.starts_with("http://") || input.starts_with("https://") {
-        input.to_string()
-    } else {
-        format!("http://{input}")
-    };
-
-    // Set the environment variable for this session
-    unsafe {
-        std::env::set_var("OLLAMA_BASE_URL", &base_url);
-    }
-
-    // Try to create client with the new URL and test it
-    match LlmClient::from_env() {
-        Ok(client) => {
-            // Test connection with a minimal request
-            let test_message = vec![Message::user("ping")];
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!("✓ Connected to Ollama at {base_url}");
-
-                    // Save the configuration for future use
-                    // Generate a dummy embedding since we're not using embeddings feature
-                    let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
-                    let embedding = match embedding_service.generate_embedding(&base_url).await {
-                        Ok(e) => e,
-                        Err(_) => vec![0.0; 384], // Default embedding size
-                    };
-
-                    let memory = arkavo_memory::models::Memory {
-                        id: uuid::Uuid::new_v4(),
-                        content: base_url.clone(),
-                        metadata: Some(json!({
-                            "type": "ollama_server_config",
-                            "timestamp": chrono::Utc::now().to_rfc3339()
-                        })),
-                        category: Some("config".to_string()),
-                        embedding,
-                        created_at: chrono::Utc::now(),
-                        updated_at: chrono::Utc::now(),
-                    };
-
-                    if let Err(e) = storage.store(memory).await {
-                        eprintln!("Warning: Could not save Ollama server configuration: {e}");
-                    } else {
-                        eprintln!("✓ Saved configuration for future use");
-                    }
-
-                    Ok(client)
-                }
-                Err(e) => Err(format!("Failed to connect to Ollama at {base_url}: {e}").into()),
-            }
-        }
-        Err(e) => Err(format!("Failed to create client for {base_url}: {e}").into()),
     }
 }
 

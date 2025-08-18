@@ -1,15 +1,15 @@
 use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 use arkavo_llama_cpp::{
-    ffi, LlamaContext, LlamaModel, LlamaSampler, apply_chat_template, 
-    tokenize_with_model, token_to_piece, batch_get_one, batch_get_one_with_logits, batch_get_one_with_offset, decode_batch, 
-    get_logits_ith, create_sampler_chain, test_minimal_init, batch_init_with_tokens, batch_free
+    ffi, LlamaContext, LlamaModel, apply_chat_template, 
+    tokenize_with_model, token_to_piece, batch_get_one_with_logits, batch_get_one_with_offset, decode_batch, 
+    create_sampler_chain, test_minimal_init
 };
 use async_trait::async_trait;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
-use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
+use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
@@ -63,39 +63,6 @@ impl LlamaCppProvider {
         })
     }
 
-    fn messages_to_llama_chat(&self, messages: &[Message]) -> Result<(Vec<ffi::llama_chat_message>, Vec<CString>)> {
-        let mut llama_messages = Vec::new();
-        let mut role_strings = Vec::new();
-        let mut content_strings = Vec::new();
-
-        for msg in messages {
-            let role_str = match msg.role {
-                Role::System => "system",
-                Role::User => "user", 
-                Role::Assistant => "assistant",
-            };
-            
-            let role_cstring = CString::new(role_str)
-                .map_err(|e| Error::Config(format!("Invalid role string: {}", e)))?;
-            let content_cstring = CString::new(msg.content.clone())
-                .map_err(|e| Error::Config(format!("Invalid content string: {}", e)))?;
-
-            llama_messages.push(ffi::llama_chat_message {
-                role: role_cstring.as_ptr(),
-                content: content_cstring.as_ptr(),
-            });
-
-            role_strings.push(role_cstring);
-            content_strings.push(content_cstring);
-        }
-
-        // Store all CStrings together to keep them alive
-        let mut all_cstrings = role_strings;
-        all_cstrings.extend(content_strings);
-
-        Ok((llama_messages, all_cstrings))
-    }
-
     async fn generate_streaming(&self, messages: Vec<Message>) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
         // Prepare data outside of spawn to avoid Send issues with raw pointers
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
@@ -115,7 +82,7 @@ impl LlamaCppProvider {
             let mut tokens_generated = 0u32;
 
             let result = async {
-                let mut ctx = context.lock().await;
+                let ctx = context.lock().await;
                 
                 // Get vocab and tokenize inside the lock to avoid Send issues
                 let vocab = model.get_vocab();

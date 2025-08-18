@@ -175,3 +175,4 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - **ARKAVO_MAX_EVENTS_PER_SESSION**: Maximum events per session (default: 100000)
 - **ARKAVO_DEBUG**: Enables debug logging
 - **ARKAVO_MASTER_KEY**: Sets master encryption key
+- remove dead code instead of adding `#[allow(dead_code)]`
