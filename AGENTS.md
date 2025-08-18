@@ -176,3 +176,7 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 - **ARKAVO_DEBUG**: Enables debug logging
 - **ARKAVO_MASTER_KEY**: Sets master encryption key
 - remove dead code instead of adding `#[allow(dead_code)]`
+- Debug output is now controlled by the ARKAVO_DEBUG_CHAT environment variable. By default, all those
+  verbose debug statements are suppressed. To enable them for debugging, users can run:
+
+  ARKAVO_DEBUG_CHAT=1 arkavo chat --prompt "test"

@@ -138,7 +138,9 @@ impl LlamaCppProvider {
                     decode_batch(&ctx, batch)
                         .map_err(|e| Error::Config(format!("Failed to decode input: {}", e)))?;
                 }
-                eprintln!("✅ Input batch decoded successfully");
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("✅ Input batch decoded successfully");
+                }
 
                 // Generation loop - limit to reasonable context window  
                 let max_generation = std::cmp::min(config.max_tokens, 1500); // Leave 512 tokens for input

@@ -823,9 +823,11 @@ async fn process_message_print(
     use std::time::Instant;
 
     let start_time = Instant::now();
-    eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
-    eprintln!("[DEBUG] Messages count: {}", messages.len());
-    eprintln!("[DEBUG] Provider: {}", client.provider_name());
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
+        eprintln!("[DEBUG] Messages count: {}", messages.len());
+        eprintln!("[DEBUG] Provider: {}", client.provider_name());
+    }
 
     // Use streaming but only print content
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
@@ -962,10 +964,12 @@ async fn process_message_print(
                 }
             }
 
-            eprintln!(
-                "[DEBUG] Response processing complete, total time: {:?}",
-                start_time.elapsed()
-            );
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DEBUG] Response processing complete, total time: {:?}",
+                    start_time.elapsed()
+                );
+            }
             Ok(full_response)
         }
         Err(e) => {

@@ -16,6 +16,9 @@ use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use scopeguard::defer;
 
+// Debug flag controlled by ARKAVO_DEBUG_CHAT environment variable
+static DEBUG_LLAMACPP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
     pub temperature: f32,
@@ -86,6 +89,11 @@ impl LlamaCppProvider {
     }
 
     pub fn new_with_config(model_name: String, model_path: String, config: SamplingConfig) -> Result<Self> {
+        // Initialize debug flag from environment variable once
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            DEBUG_LLAMACPP.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        
         // Initialize backend with proper cleanup
         unsafe { ffi::llama_backend_init(); }
         
@@ -144,7 +152,9 @@ impl LlamaCppProvider {
     ) -> Result<()> {
         if tokens.len() <= chunk_threshold {
             // Single batch decode - preferred approach
-            eprintln!("🚀 Single batch decode for {} tokens", tokens.len());
+            if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("🚀 Single batch decode for {} tokens", tokens.len());
+            }
             let mut batch = batch_init_with_tokens(tokens, 0, true);
             defer! { batch_free(&mut batch); }
             
@@ -152,13 +162,17 @@ impl LlamaCppProvider {
                 .map_err(|e| Error::Config(format!("Failed to decode prompt batch: {}", e)))?;
         } else {
             // Chunked processing for very long prompts
-            eprintln!("📦 Chunked processing for {} tokens", tokens.len());
+            if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("📦 Chunked processing for {} tokens", tokens.len());
+            }
             let chunk_size = chunk_threshold;
             let mut pos_offset = 0i32;
             
             for (i, chunk) in tokens.chunks(chunk_size).enumerate() {
                 let is_last_chunk = (i + 1) * chunk_size >= tokens.len();
-                eprintln!("  📦 Chunk {} with {} tokens (pos: {})", i + 1, chunk.len(), pos_offset);
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("  📦 Chunk {} with {} tokens (pos: {})", i + 1, chunk.len(), pos_offset);
+                }
                 
                 let mut batch = batch_init_with_tokens(chunk, pos_offset, is_last_chunk);
                 defer! { batch_free(&mut batch); }
@@ -208,7 +222,9 @@ impl LlamaCppProvider {
                     .map_err(|e| Error::Config(format!("Failed to tokenize: {}", e)))?;
 
                 tracing::info!("Input tokenized to {} tokens", input_tokens.len());
-                eprintln!("🔍 Input tokens: {} total", input_tokens.len());
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("🔍 Input tokens: {} total", input_tokens.len());
+                }
 
                 // Create sampler with proper fallback
                 let sampler = create_sampler_chain(
@@ -223,7 +239,9 @@ impl LlamaCppProvider {
                 
                 // Decode prompt using proper "llama way" batching
                 Self::decode_prompt_properly(&ctx, &input_tokens, 64).await?;
-                eprintln!("✅ Prompt decoded successfully");
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("✅ Prompt decoded successfully");
+                }
 
                 // Generation loop with proper invariant: add token -> decode -> sample -> accept
                 let max_generation = std::cmp::min(config.max_tokens, 1500);
