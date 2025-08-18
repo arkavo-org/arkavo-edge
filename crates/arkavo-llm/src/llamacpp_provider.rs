@@ -30,7 +30,7 @@ impl Default for SamplingConfig {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
-            max_tokens: 512,
+            max_tokens: 4096,  // Default to 4K tokens
             seed: 42,
         }
     }
@@ -165,6 +165,10 @@ impl LlamaCppProvider {
                 // Generation loop - limit to reasonable context window  
                 let max_generation = std::cmp::min(config.max_tokens, 30000); // Max generation within 32K context
                 let mut pos = input_tokens.len() as i32; // Track position for new tokens
+                
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("🎯 Max generation tokens: {} (config.max_tokens: {})", max_generation, config.max_tokens);
+                }
                 
                 for i in 0..max_generation {
                     // Guardrail: assert logits exist before sampling

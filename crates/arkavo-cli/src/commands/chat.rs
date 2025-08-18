@@ -132,7 +132,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .windows(2)
         .find(|w| w[0] == "--max-tokens")
         .and_then(|w| w[1].parse::<u32>().ok())
-        .unwrap_or(512);
+        .or_else(|| std::env::var("ARKAVO_MAX_TOKENS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok()))
+        .unwrap_or(4096);  // Default to 4K tokens
     let seed = args
         .windows(2)
         .find(|w| w[0] == "--seed")
