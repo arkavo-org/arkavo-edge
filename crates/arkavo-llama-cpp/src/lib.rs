@@ -128,11 +128,18 @@ pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
 ) -> Result<Vec<u8>, String> {
+    // Gemma-3 chat template
+    // Format: <start_of_turn>role\ncontent<end_of_turn>
+    let gemma3_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'system' %}{{'<start_of_turn>system\n' + message['content'] + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}";
+    
+    let template_cstring = CString::new(gemma3_template)
+        .map_err(|e| format!("Failed to create template CString: {}", e))?;
+    
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         let wrote = unsafe {
             ffi::llama_chat_apply_template(
-                std::ptr::null(),              // NULL => use model's default chat template
+                template_cstring.as_ptr(),     // Use Gemma-3 template
                 messages.as_ptr(),
                 messages.len(),
                 add_assistant,
@@ -400,33 +407,44 @@ impl Drop for LlamaSampler {
 }
 
 pub fn create_sampler_chain(temp: f32, top_p: f32, top_k: i32, _seed: u32) -> Result<LlamaSampler, String> {
-    // Clamp params so they don't silently disable everything
-    let _top_k = if top_k < 1 { 0 } else { top_k };
-    let _top_p = top_p.clamp(1e-6, 0.999_999);
+    // Clamp params to reasonable ranges
+    let top_k = if top_k < 1 { 40 } else { top_k }; // Default to 40 if not set
+    let top_p = top_p.clamp(0.1, 1.0);
     let temp = temp.max(0.0);
     
     let sampler = LlamaSampler::new_chain(false)?;
     
-    // CRITICAL FIX: Always add greedy as final fallback to ensure a token is selected
-    // This prevents the GGML_ASSERT(cur_p.selected >= 0) failure
-    if temp > 0.0 {
-        sampler.add_temp(temp);
-        sampler.add_greedy(); // Fallback sampler to guarantee selection
-        // Only show debug if ARKAVO_DEBUG_CHAT is set
+    // Build a proper sampling chain
+    if temp <= 0.0 {
+        // Greedy/deterministic sampling
+        sampler.add_greedy();
         if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
-            eprintln!("sampler chain: temp={} + greedy fallback", temp);
+            eprintln!("Sampler: greedy (deterministic)");
         }
     } else {
+        // Stochastic sampling with proper chain
+        // Order matters: top_k -> top_p -> temp -> final selection
+        
+        // 1. Top-K sampling (keep only top K tokens)
+        if top_k > 0 {
+            sampler.add_top_k(top_k);
+        }
+        
+        // 2. Top-P (nucleus) sampling  
+        if top_p < 1.0 {
+            sampler.add_top_p(top_p, 1); // min_keep=1
+        }
+        
+        // 3. Temperature scaling
+        sampler.add_temp(temp);
+        
+        // 4. Final token selection - greedy picks the most likely after transformations
         sampler.add_greedy();
-        // Only show debug if ARKAVO_DEBUG_CHAT is set
+        
         if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
-            eprintln!("sampler chain: greedy only");
+            eprintln!("Sampler: top_k={}, top_p={}, temp={}", top_k, top_p, temp);
         }
     }
-    
-    // TODO: Re-enable complex chain with top_k/top_p once temp+greedy is stable
-    // The issue is that temp alone can fail to select when probs are too flat
-    // Need to ensure proper normalization before re-enabling
     
     Ok(sampler)
 }

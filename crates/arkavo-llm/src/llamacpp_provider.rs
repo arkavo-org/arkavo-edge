@@ -1,7 +1,8 @@
 use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 use arkavo_llama_cpp::{
     ffi, LlamaContext, LlamaModel, apply_chat_template, 
-    tokenize_with_model, token_to_piece, batch_get_one_with_logits, batch_get_one_with_offset, decode_batch, 
+    tokenize_with_model, token_to_piece, batch_get_one_with_logits, batch_get_one_with_offset, 
+    batch_init_with_tokens, batch_free, decode_batch, 
     create_sampler_chain, test_minimal_init, init_llama_logging
 };
 use async_trait::async_trait;
@@ -81,6 +82,19 @@ impl LlamaCppProvider {
         // Apply chat template
         let prompt_bytes = apply_chat_template(&llama_messages, true)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {}", e)))?;
+        
+        // Debug: show what the template produced
+        if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes) {
+                eprintln!("Chat template output:\n{}", prompt_str);
+                // Check if it's using the right format
+                if prompt_str.contains("<|im_start|>") {
+                    eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
+                } else if prompt_str.contains("<start_of_turn>") {
+                    eprintln!("✓ Template is using correct Gemma-3 format");
+                }
+            }
+        }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
@@ -149,22 +163,23 @@ impl LlamaCppProvider {
                 }
 
                 // Generation loop - limit to reasonable context window  
-                let max_generation = std::cmp::min(config.max_tokens, 1500); // Leave 512 tokens for input
-                let mut recent_output = String::new(); // Track recent output to detect stop sequences
+                let max_generation = std::cmp::min(config.max_tokens, 30000); // Max generation within 32K context
+                let mut pos = input_tokens.len() as i32; // Track position for new tokens
+                
                 for i in 0..max_generation {
-                    // Guardrail: assert logits exist before sampling (step 3)
+                    // Guardrail: assert logits exist before sampling
                     let logits_ptr = ctx.get_logits_ith(-1);
                     if logits_ptr.is_null() {
                         return Err(Error::Config("No logits available for sampling - decode step missing logits=1".to_string()));
                     }
                     if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!("✓ Logits available for sampling token #{}", i + 1);
+                        eprintln!("✓ Logits available for sampling token #{} at pos {}", i + 1, pos);
                     }
                     
                     // Sample next token (using -1 for last logits)
                     let token = sampler.sample(&ctx, -1);
                     if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!("Sampled token: {}", token);
+                        eprintln!("Sampled token: {} at pos {}", token, pos);
                     }
                     
                     // Check for EOS
@@ -176,40 +191,6 @@ impl LlamaCppProvider {
                     // Convert token to text
                     let piece = token_to_piece(vocab, token, false)
                         .map_err(|e| Error::Config(format!("Failed to decode token: {}", e)))?;
-                    
-                    // Accumulate recent output to check for stop sequences
-                    recent_output.push_str(&piece);
-                    if recent_output.len() > 50 {
-                        recent_output = recent_output[recent_output.len() - 50..].to_string();
-                    }
-                    
-                    // Check for common stop sequences that the model might output as text
-                    let stop_sequences = ["<|im_end|>", "<end_of_turn>", "</s>"];
-                    let mut found_stop = false;
-                    for stop_seq in &stop_sequences {
-                        if recent_output.contains(stop_seq) {
-                            if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                                eprintln!("Detected stop sequence '{}' in output", stop_seq);
-                            }
-                            // Don't send the stop sequence itself
-                            if !piece.trim().is_empty() && !stop_sequences.contains(&piece.as_str()) {
-                                // Send partial content before stop sequence if any
-                                if let Some(idx) = recent_output.find(stop_seq) {
-                                    let before_stop = &recent_output[..idx];
-                                    if !before_stop.is_empty() && before_stop != piece {
-                                        // We've already sent this content
-                                    }
-                                }
-                            }
-                            found_stop = true;
-                            break;
-                        }
-                    }
-                    
-                    if found_stop {
-                        tracing::info!("Generation stopped at stop sequence");
-                        break;
-                    }
 
                     // Record first token timing
                     if first_token_time.is_none() {
@@ -218,35 +199,37 @@ impl LlamaCppProvider {
 
                     tokens_generated += 1;
 
-                    // Send the token only if it's not part of a stop sequence
+                    // Send the token
                     let response = StreamResponse {
                         content: piece,
-                        done: i + 1 >= config.max_tokens,
+                        done: false, // Will be set to true when we break
                     };
 
                     if tx.send(Ok(response)).is_err() {
                         break; // Receiver dropped
                     }
 
-                    // Accept the token for the sampler
+                    // Accept the token for the sampler (for repetition penalty etc)
                     sampler.accept(token);
+                    
+                    // CRITICAL: Feed the token back to the model and decode to get new logits
+                    // Use batch_init_with_tokens for proper position handling
+                    let mut batch = batch_init_with_tokens(&[token], pos, true);
+                    decode_batch(&ctx, batch)
+                        .map_err(|e| Error::Config(format!("Failed to decode token at pos {}: {}", pos, e)))?;
+                    batch_free(&mut batch); // Clean up the batch
+                    
+                    // Increment position for next token
+                    pos += 1;
 
                     // Check if we're approaching context limit
                     let total_tokens = input_tokens.len() + tokens_generated as usize;
-                    if total_tokens >= 1900 { // Stop before hitting the 2048 limit
+                    if total_tokens >= 32000 { // Leave some room before hitting the 32768 limit
                         tracing::info!("Generation stopped at context limit: {} tokens", total_tokens);
                         let _ = tx.send(Ok(StreamResponse {
                             content: String::new(),
                             done: true,
                         }));
-                        break;
-                    }
-
-                    // Prepare for next iteration - decode the new token WITH logits for next sampling
-                    let next_pos = input_tokens.len() as i32 + i as i32;
-                    let next_batch = batch_get_one_with_offset(&[token], next_pos, true);
-                    if let Err(e) = decode_batch(&ctx, next_batch) {
-                        let _ = tx.send(Err(Error::Config(format!("Failed to decode token: {}", e))));
                         break;
                     }
                 }
