@@ -20,9 +20,20 @@ extern "C" fn llama_log_callback_filtered(level: ffi::ggml_log_level, text: *con
             unsafe {
                 let c_str = std::ffi::CStr::from_ptr(text);
                 if let Ok(str_slice) = c_str.to_str() {
-                    // Skip the dots progress indicator and cache messages unless debug is on
-                    if !debug_enabled && (str_slice == "." || str_slice.contains("llama_kv_cache")) {
-                        return;
+                    // Skip various non-critical messages unless debug is on
+                    if !debug_enabled {
+                        // Skip progress dots
+                        if str_slice == "." {
+                            return;
+                        }
+                        // Skip cache messages
+                        if str_slice.contains("llama_kv_cache") {
+                            return;
+                        }
+                        // Skip Metal BF16 kernel messages (not supported, not needed)
+                        if str_slice.contains("ggml_metal_init: skipping") && str_slice.contains("bf16") {
+                            return;
+                        }
                     }
                     eprint!("{}", str_slice);
                 }
@@ -60,7 +71,17 @@ impl LlamaModel {
         }
         
         let c_path = CString::new(path).unwrap();
-        let params = unsafe { ffi::llama_model_default_params() };
+        let mut params = unsafe { ffi::llama_model_default_params() };
+        
+        // Enable GPU acceleration - offload all layers to GPU/Metal
+        params.n_gpu_layers = 999;  // Offload all layers (999 = all)
+        params.main_gpu = 0;         // Use GPU 0 (primary GPU)
+        
+        // Show GPU offloading info if debug is enabled
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!("GPU: Offloading all layers to Metal/GPU");
+        }
+        
         let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
         if model.is_null() {
             Err("Failed to load model".to_string())
@@ -108,8 +129,18 @@ impl LlamaContext {
         params.n_batch = 512;       // Batch size for processing
         params.n_ubatch = 512;      // Micro-batch size
         params.n_seq_max = 1;       // Single sequence 
-        params.n_threads = 4;       // CPU threads
-        params.n_threads_batch = 4; // Batch processing threads
+        params.n_threads = 8;       // CPU threads (use more for M4)
+        params.n_threads_batch = 8; // Batch processing threads
+        
+        // Enable GPU offloading for KV cache and operations
+        params.offload_kqv = true;  // Offload KV cache to GPU
+        params.flash_attn = true;   // Use Flash Attention if available
+        
+        // Show context configuration if debug is enabled
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!("Context: KV offload={}, flash_attn={}, threads={}", 
+                params.offload_kqv, params.flash_attn, params.n_threads);
+        }
         
         let context = unsafe { ffi::llama_new_context_with_model(model.ptr, params) };
         if context.is_null() {
