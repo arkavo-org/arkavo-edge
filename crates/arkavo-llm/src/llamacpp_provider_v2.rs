@@ -237,8 +237,11 @@ impl LlamaCppProvider {
                     config.seed
                 ).map_err(|e| Error::Config(format!("Failed to create sampler: {}", e)))?;
 
-                // EOS token for Gemma-3
-                let eos_token = 106;
+                // Get EOS token from the model's vocabulary
+                let eos_token = model.get_eos_token();
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("EOS token from model: {}", eos_token);
+                }
                 
                 // Decode prompt using proper "llama way" batching
                 Self::decode_prompt_properly(&ctx, &input_tokens, 64).await?;

@@ -113,8 +113,11 @@ impl LlamaCppProvider {
                     config.seed
                 ).map_err(|e| Error::Config(format!("Failed to create sampler: {}", e)))?;
 
-                // Get EOS token
-                let eos_token = 106; // Gemma-3 EOS token from model metadata
+                // Get EOS token from the model's vocabulary
+                let eos_token = model.get_eos_token();
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("EOS token from model: {}", eos_token);
+                }
                 
                 // Process input tokens - CRUCIAL: request logits on final token for sampling
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
@@ -172,6 +175,13 @@ impl LlamaCppProvider {
                     // Convert token to text
                     let piece = token_to_piece(vocab, token, false)
                         .map_err(|e| Error::Config(format!("Failed to decode token: {}", e)))?;
+                    
+                    // Debug: check if we're outputting what looks like an end token
+                    if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                        if piece.contains("im_end") || piece.contains("end_of_turn") {
+                            eprintln!("WARNING: Token {} decoded to '{}' - might be wrong EOS token", token, piece);
+                        }
+                    }
 
                     // Record first token timing
                     if first_token_time.is_none() {

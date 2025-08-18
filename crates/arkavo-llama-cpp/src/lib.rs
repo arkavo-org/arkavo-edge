@@ -64,6 +64,16 @@ impl LlamaModel {
     pub fn get_vocab(&self) -> *const ffi::llama_vocab {
         unsafe { ffi::llama_model_get_vocab(self.ptr) }
     }
+    
+    pub fn get_eos_token(&self) -> i32 {
+        let vocab = self.get_vocab();
+        unsafe { ffi::llama_vocab_eos(vocab) }
+    }
+    
+    pub fn get_bos_token(&self) -> i32 {
+        let vocab = self.get_vocab();
+        unsafe { ffi::llama_vocab_bos(vocab) }
+    }
 }
 
 impl Drop for LlamaModel {
@@ -85,8 +95,9 @@ impl LlamaContext {
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
         let mut params = unsafe { ffi::llama_context_default_params() };
         
-        // Set reasonable context size for Gemma-3 270M
-        params.n_ctx = 2048;        // Context window: 2K tokens  
+        // Set context size to match model's training context
+        // Gemma models typically train with 8K context, but we'll use 4K for memory efficiency
+        params.n_ctx = 4096;        // Context window: 4K tokens (avoids warning, uses less than full 32K)
         params.n_batch = 512;       // Batch size for processing
         params.n_ubatch = 512;      // Micro-batch size
         params.n_seq_max = 1;       // Single sequence 
