@@ -19,6 +19,9 @@ use uuid;
 // Set via ARKAVO_DEBUG_CHAT=1 environment variable
 static SHOW_DEBUG: AtomicBool = AtomicBool::new(false);
 
+// Global flag for repo context mode (can be changed via REPL command)
+static REPO_CONTEXT_MODE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
 // Global runtime to prevent multiple runtime creation issues
 static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
 
@@ -32,6 +35,90 @@ fn get_or_create_runtime() -> &'static Runtime {
             .build()
             .expect("Failed to create tokio runtime")
     })
+}
+
+/// Determines if repository context should be attached based on the prompt
+fn should_attach_repo_context(prompt: &str) -> bool {
+    let p = prompt.trim();
+    
+    // Short math/calculation pattern - no context needed
+    if p.len() < 32 {
+        // Check if it's just numbers and math operators
+        let is_math = p.chars().all(|c| "0123456789+-*/().=? \t\n".contains(c));
+        if is_math {
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DEBUG] RepoCtx: skipped (short math expression)");
+            }
+            return false;
+        }
+    }
+    
+    // Greeting patterns - no context needed
+    let greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"];
+    let lower = p.to_lowercase();
+    if p.len() < 20 && greetings.iter().any(|g| lower == *g || lower == format!("{g}!")) {
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: skipped (greeting)");
+        }
+        return false;
+    }
+    
+    // Keywords that indicate code/doc related queries - context needed
+    let code_keywords = [
+        "readme", "build", "compile", "cargo", "rust", "error:", "panic",
+        ".rs", ".gd", ".swift", ".toml", "arkavo", "how do i", "how to",
+        "api", "design", "function", "struct", "impl", "trait", "module",
+        "test", "debug", "fix", "implement", "code", "file", "directory",
+        "git", "branch", "commit", "repository", "project", "crate",
+    ];
+    
+    if code_keywords.iter().any(|k| lower.contains(k)) {
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: will inject (code/doc keyword detected)");
+        }
+        return true;
+    }
+    
+    // Default: no context for unrecognized patterns
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] RepoCtx: skipped (no relevant keywords)");
+    }
+    false
+}
+
+/// Compresses repository context to a digest suitable for small models
+fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
+    // For now, take the first part of the content with a clear header
+    // In the future, this could do smart summarization
+    let header = "[PROJECT CONTEXT DIGEST — KEEP ANSWER CONCISE]\n";
+    
+    // Estimate ~4 chars per token (rough approximation)
+    let max_chars = max_tokens * 4;
+    
+    if full_content.len() <= max_chars {
+        format!("{header}{full_content}")
+    } else {
+        // Take key sections: title, overview, and first few command examples
+        let lines: Vec<&str> = full_content.lines().collect();
+        let mut digest = String::from(header);
+        let mut token_budget = max_tokens - 20; // Reserve some for header
+        
+        for line in lines {
+            // Prioritize headers and overview sections
+            if line.starts_with("# ") || line.starts_with("## Project Overview") 
+                || line.starts_with("## Key Command") || line.contains("arkavo") {
+                digest.push_str(line);
+                digest.push('\n');
+                token_budget = token_budget.saturating_sub(line.len() / 4);
+                if token_budget < 50 {
+                    break;
+                }
+            }
+        }
+        
+        digest.push_str("\n(Use 'show docs' for more details)\n");
+        digest
+    }
 }
 
 // Runtime MCP initialization - checks if test-harness feature is available
@@ -118,6 +205,20 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--model")
         .map(|w| w[1].clone())
         .unwrap_or_else(|| "gemma-3-270m".to_string());
+
+    // Parse repo context mode: auto (default), on, off
+    let repo_context_mode = args
+        .windows(2)
+        .find(|w| w[0] == "--repo-context")
+        .map(|w| w[1].clone())
+        .or_else(|| env::var("ARKAVO_REPO_CONTEXT").ok())
+        .unwrap_or_else(|| "auto".to_string());
+    
+    // Store repo context mode globally for REPL commands
+    {
+        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+        *mode = repo_context_mode.clone();
+    }
 
     // Parse sampling parameters for llama.cpp
     let temperature = args
@@ -240,6 +341,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "Session: /new (start fresh), /clear (clear history), /history (show stats), /switch <id>"
         );
+        println!("Context: /context {{auto|on|off}} - Control repository context injection");
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
@@ -289,7 +391,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize with a minimal context and let the agent ask for more.
     let repo_context_str = format!("Working directory: {}", get_current_directory());
-    let repo_context = json!({
+    let _repo_context = json!({
         "working_directory": get_current_directory(),
     });
 
@@ -368,77 +470,87 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
-    // Try to read AGENTS.md for system prompt
-    let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
-        Ok(content) => Some(content),
-        Err(_) => {
-            // Try CLAUDE.md as fallback
-            std::fs::read_to_string("CLAUDE.md").ok()
-        }
-    };
-
-    let system_prompt = if let Some(agents_content) = agents_md_content {
+    // Build base system prompt (without repo context initially)
+    let base_system_prompt = if mcp_client.is_some() {
         format!(
-            "{}\n\nRepository context:\n{}\n\nRepository details:\n{}\n\n{}",
-            agents_content,
-            repo_context_str,
-            serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
+            "You are a helpful AI assistant with access to MCP tools for development tasks.\
+            \n{}",
             mcp_info
         )
     } else {
-        format!(
-        "You are an expert UI testing assistant working with the Arkavo Edge project. \
-         You have access to MCP tools for clicking elements, entering text, and other UI interactions. \
-         When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI. \
-         Always analyze images thoroughly to understand the current state of the UI before suggesting next steps.
-
-\
-         To invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
-         For example: @device_management {{\"action\": \"list\"}} or @ui_interaction {{\"action\": \"tap\", \"element\": \"button\"}}
-
-\
-         TYPICAL UI TESTING WORKFLOW:\
-         1. Use @device_management {{\"action\": \"list\"}} to find available devices\
-         2. Use @screen_capture {{\"device_id\": \"<device_id>\"}} to take a screenshot\
-         3. The screenshot path will be returned, which you can then analyze using vision capabilities\
-         4. Use @ui_interaction for tapping, swiping, or entering text based on what you see
-
-\
-         When a user asks to analyze an image, you should:\
-         - Use @analyze_screenshot with the path to analyze a screenshot: @analyze_screenshot path/to/screenshot.png\
-         - Or use your vision capabilities to analyze the provided image\
-         - Describe what you see in detail\
-         - Suggest appropriate UI interactions based on the content
-
-\
-         GIT REPOSITORY ANALYSIS:\
-         When asked to perform a \\\"full analysis\\\", \\\"repository analysis\\\", or comprehensive Git analysis:\
-         1. MUST call @build_repository_context {{}} to get the full repository context.\
-         2. MUST call @git_status {{}} to get working tree status\
-         3. MUST call @git_log {{\"limit\": 20}} to get recent commits\
-         4. MUST call @git_diff {{}} to get unstaged changes\
-         5. MUST call @git_diff {{\"staged\": true}} to get staged changes\
-         6. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
-         7. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
-         \
-         After collecting all responses:\
-         - Generate a structured report with sections for each data type\
-         - Use ONLY actual data from tool responses - DO NOT fabricate any information\
-         - If a tool fails, note the failure in the report\
-         - Store the complete analysis in memory using @store_memory
-
-\
-         Initial repository context (minimal):
-{}
-
-Full repository details (available via @build_repository_context):
-{}
-
-{}",
-        repo_context_str,
-        serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
-        mcp_info
-    )
+        "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
+    };
+    
+    // Determine whether to inject repo context
+    let should_inject_context = if print_mode && prompt.is_some() {
+        // For print mode with prompt, check if we should attach context
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        match (model_size_hint.as_deref(), current_mode.as_str()) {
+            // Tiny models: only inject if explicitly on or auto with relevant query
+            (Some("270M") | Some("1B"), "on") => true,
+            (Some("270M") | Some("1B"), "auto") => should_attach_repo_context(prompt.as_ref().unwrap()),
+            (Some("270M") | Some("1B"), _) => false,
+            // Larger models: inject unless off or auto with irrelevant query
+            (_, "off") => false,
+            (_, "auto") => should_attach_repo_context(prompt.as_ref().unwrap()),
+            (_, _) => true,
+        }
+    } else if !print_mode {
+        // Interactive mode: check based on model size and mode
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        match (model_size_hint.as_deref(), current_mode.as_str()) {
+            (Some("270M") | Some("1B"), "on") => true,
+            (Some("270M") | Some("1B"), _) => false, // Default off for tiny in interactive
+            (_, "off") => false,
+            _ => true, // Default on for larger models in interactive
+        }
+    } else {
+        false // No context for other cases
+    };
+    
+    let system_prompt = if should_inject_context {
+        // Try to read AGENTS.md or CLAUDE.md
+        let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
+            Ok(content) => Some(content),
+            Err(_) => std::fs::read_to_string("CLAUDE.md").ok(),
+        };
+        
+        if let Some(agents_content) = agents_md_content {
+            // Determine context size based on model
+            let max_context_tokens = match model_size_hint.as_deref() {
+                Some("270M") => 200,
+                Some("1B") => 300,
+                Some("2B") => 500,
+                _ => 1000,
+            };
+            
+            let compressed_context = compress_repo_context(&agents_content, max_context_tokens);
+            
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                let token_estimate = compressed_context.len() / 4;
+                eprintln!("[DEBUG] RepoCtx: injected={} tokens (compressed)", token_estimate);
+            }
+            
+            format!(
+                "{}\n\n{}\n\nWorking directory: {}",
+                base_system_prompt,
+                compressed_context,
+                repo_context_str
+            )
+        } else {
+            // No README found, use base prompt with minimal context
+            format!(
+                "{}\n\nWorking directory: {}",
+                base_system_prompt,
+                repo_context_str
+            )
+        }
+    } else {
+        // No context injection
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: not injected (model/mode policy)");
+        }
+        base_system_prompt
     };
 
     // Get conversation context with system message
@@ -535,6 +647,32 @@ Full repository details (available via @build_repository_context):
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
             messages = vec![system_message.clone()];
             println!("Cleared conversation history");
+            continue;
+        }
+
+        // Handle /context command - toggle repo context mode
+        if input.starts_with("/context") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() > 1 {
+                let new_mode = parts[1];
+                if ["auto", "on", "off"].contains(&new_mode) {
+                    let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+                    *mode = new_mode.to_string();
+                    println!("Repository context mode set to: {}", new_mode);
+                    match new_mode {
+                        "auto" => println!("  Context will be injected based on query relevance"),
+                        "on" => println!("  Context will always be injected"),
+                        "off" => println!("  Context will never be injected"),
+                        _ => {}
+                    }
+                } else {
+                    println!("Invalid mode. Use: /context {{auto|on|off}}");
+                }
+            } else {
+                let mode = REPO_CONTEXT_MODE.read().unwrap();
+                println!("Current repository context mode: {}", mode);
+                println!("Use: /context {{auto|on|off}} to change");
+            }
             continue;
         }
 

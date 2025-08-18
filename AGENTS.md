@@ -141,6 +141,28 @@ The configuration of Arkavo Edge is a dynamic process handled by the AI agent at
 
 The chat command includes sophisticated session management to handle small language models (≤1B parameters) more effectively:
 
+### Smart Repository Context Injection
+Prevents small models from getting confused by documentation:
+
+#### Policy
+- **≤1B models**: No repo context by default (just system prompt + conversation)
+- **≥2B models**: Auto-inject context based on query relevance
+- **Override**: Use `--repo-context {auto|on|off}` or `/context` command
+
+#### Auto-Detection
+Context is only injected for code/doc related queries:
+- Math expressions like "2+2=" → No context
+- Greetings like "hello" → No context  
+- Keywords like "build", "cargo", "error:" → Context injected
+- File paths or code terms → Context injected
+
+#### Compression
+When context is injected, it's compressed to:
+- 270M models: 200 tokens max
+- 1B models: 300 tokens max
+- 2B models: 500 tokens max
+- Larger models: 1000 tokens max
+
 ### History Sanitization
 - Automatically balances unclosed code fences in conversation history
 - Removes trailing role artifacts ("Assistant:", "User:", etc.)
@@ -163,6 +185,7 @@ The chat command includes sophisticated session management to handle small langu
 ### Interactive Commands
 - `/new` - Start fresh session (replaces --new-session flag)
 - `/clear` - Clear current session history
+- `/context {auto|on|off}` - Control repository context injection
 - `/history` - Show session statistics (turns, tokens, fence parity)
 - `/history --last N` - Display last N messages
 - `/switch <id>` - Switch between sessions
@@ -173,6 +196,7 @@ When `ARKAVO_DEBUG_CHAT=1`:
 - Reports token and message counts
 - Checks code fence parity before generation
 - Warns about unbalanced fences that may cause issues
+- Shows context injection decisions ("RepoCtx: injected=N tokens" or "RepoCtx: skipped (reason)")
 
 ## Memories
 
@@ -217,9 +241,11 @@ When `ARKAVO_DEBUG_CHAT=1`:
   - Token counts and message counts
   - Code fence parity checking
   - Session compatibility checks
+  - Repository context injection decisions
 - **ARKAVO_MASTER_KEY**: Sets master encryption key
 - **ARKAVO_MAX_TOKENS**: Sets default max tokens for LLM generation (default: 4096)
 - **ARKAVO_MAX_HISTORY_TURNS**: Maximum conversation turns to include in context (default: 2 for <1B models, 10 for larger)
+- **ARKAVO_REPO_CONTEXT**: Controls repository context injection: auto|on|off (default: auto)
 - remove dead code instead of adding `#[allow(dead_code)]`
 - Debug output is now controlled by the ARKAVO_DEBUG_CHAT environment variable. By default, all those
   verbose debug statements are suppressed. To enable them for debugging, users can run:

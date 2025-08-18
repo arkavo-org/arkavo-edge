@@ -128,7 +128,9 @@ fn print_usage() {
     println!("    chat      Simple conversational chat interface");
     println!("              Options: --prompt <text>, --image <path>, --max-tokens <n>");
     println!("                       --model <name> (gemma-3-270m or gemma-2-2b)");
+    println!("                       --repo-context {{auto|on|off}} (default: auto)");
     println!("              Use /new in chat to start fresh session");
+    println!("              Use /context {{auto|on|off}} to toggle context in REPL");
     println!("    terminal  Launch Terminal UI with streaming chat interface");
     println!("              Options: --model <name> (gemma-3-270m or gemma-2-2b)");
     println!("    plan      Generate a change plan before code edits");
