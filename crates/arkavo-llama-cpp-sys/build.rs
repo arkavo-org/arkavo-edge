@@ -30,7 +30,9 @@ fn main() {
             .define("GGML_CUDA", "OFF"); // Could be enabled if CUDA toolkit present
     } else {
         // Linux - use CPU optimizations by default
-        config.define("GGML_BLAS", "OFF"); // Could be enabled if OpenBLAS present
+        config
+            .define("GGML_BLAS", "OFF") // Could be enabled if OpenBLAS present
+            .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON"); // Required for static linking
     }
 
     // Common settings for all platforms
@@ -46,7 +48,12 @@ fn main() {
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
     println!("cargo:rustc-link-lib=static=ggml-cpu");
-    println!("cargo:rustc-link-lib=static=ggml-blas"); // Required even when BLAS is off
+    
+    // Only link ggml-blas if it exists (it may not be built when BLAS is OFF)
+    let blas_lib = dst.join("lib").join("libggml-blas.a");
+    if blas_lib.exists() {
+        println!("cargo:rustc-link-lib=static=ggml-blas");
+    }
 
     // Platform-specific linking
     if cfg!(target_os = "macos") {
@@ -63,6 +70,8 @@ fn main() {
     } else {
         // Linux specific libraries
         println!("cargo:rustc-link-lib=stdc++");
+        println!("cargo:rustc-link-lib=pthread");
+        println!("cargo:rustc-link-lib=m"); // math library
     }
 
     // C++ standard library (handling varies by platform)
