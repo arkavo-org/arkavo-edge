@@ -240,6 +240,45 @@ pub fn batch_get_one_with_offset(tokens: &[ffi::llama_token], pos_offset: i32, r
     batch
 }
 
+/// Proper "llama way" batch creation with guaranteed allocation
+pub fn batch_init_with_tokens(tokens: &[ffi::llama_token], pos_offset: i32, request_logits_on_last: bool) -> ffi::llama_batch {
+    let mut batch = unsafe {
+        ffi::llama_batch_init(
+            tokens.len() as i32,
+            0, // embd = 0 for token mode  
+            1, // n_seq_max = 1
+        )
+    };
+    
+    // Fill batch arrays - all arrays are guaranteed allocated by llama_batch_init
+    for (i, &token) in tokens.iter().enumerate() {
+        unsafe {
+            *batch.token.add(i) = token;
+            *batch.pos.add(i) = pos_offset + i as i32;
+            *batch.n_seq_id.add(i) = 1;                    // 1 sequence
+            *(*batch.seq_id.add(i)) = 0;                   // sequence ID = 0
+            *batch.logits.add(i) = 0;                      // no logits by default
+        }
+    }
+    
+    // Set logits=1 on the last token if requested (crucial for sampling)
+    if request_logits_on_last && !tokens.is_empty() {
+        unsafe {
+            *batch.logits.add(tokens.len() - 1) = 1;
+        }
+    }
+    
+    batch.n_tokens = tokens.len() as i32;
+    batch
+}
+
+/// Free a batch created with batch_init_with_tokens
+pub fn batch_free(batch: &mut ffi::llama_batch) {
+    unsafe {
+        ffi::llama_batch_free(*batch);
+    }
+}
+
 pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), String> {
     let result = unsafe { ffi::llama_decode(ctx.ptr, batch) };
     if result != 0 {
@@ -319,28 +358,26 @@ impl Drop for LlamaSampler {
 
 pub fn create_sampler_chain(temp: f32, top_p: f32, top_k: i32, _seed: u32) -> Result<LlamaSampler, String> {
     // Clamp params so they don't silently disable everything
-    let top_k = if top_k < 1 { 0 } else { top_k };
-    let top_p = top_p.clamp(1e-6, 0.999_999);
-    let temp = temp.max(0.0); // treat <=0 as "don't add temp"
+    let _top_k = if top_k < 1 { 0 } else { top_k };
+    let _top_p = top_p.clamp(1e-6, 0.999_999);
+    let temp = temp.max(0.0);
     
     let sampler = LlamaSampler::new_chain(false)?;
     
-    // TEMPORARY: Use simple chain to debug - just temperature + greedy fallback
+    // CRITICAL FIX: Always add greedy as final fallback to ensure a token is selected
+    // This prevents the GGML_ASSERT(cur_p.selected >= 0) failure
     if temp > 0.0 {
         sampler.add_temp(temp);
-        eprintln!("sampler chain: temp={} (simple chain for debugging)", temp);
+        sampler.add_greedy(); // Fallback sampler to guarantee selection
+        eprintln!("sampler chain: temp={} + greedy fallback", temp);
     } else {
         sampler.add_greedy();
-        eprintln!("sampler chain: greedy (simple chain for debugging)");
+        eprintln!("sampler chain: greedy only");
     }
     
-    // TODO: Re-enable complex chain once we debug the issue
-    // if top_k > 0 {
-    //     sampler.add_top_k(top_k);
-    // }
-    // if top_p < 0.999_999 {
-    //     sampler.add_top_p(top_p, 1);
-    // }
+    // TODO: Re-enable complex chain with top_k/top_p once temp+greedy is stable
+    // The issue is that temp alone can fail to select when probs are too flat
+    // Need to ensure proper normalization before re-enabling
     
     Ok(sampler)
 }

@@ -48,6 +48,8 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 futures = "0.3.31"
 async-trait = "0.1.88"
+scopeguard = "1.2.0"
+tokio-util = "0.7.12"
 
 # Consolidated versions to reduce duplicates
 base64 = "0.22.1"

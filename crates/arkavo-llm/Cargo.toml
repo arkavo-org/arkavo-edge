@@ -16,7 +16,7 @@ default = []
 llm-remote = ["dep:reqwest", "dep:serde_json", "dep:tokio", "dep:async-trait", "dep:log", "dep:thiserror", "dep:anyhow", "dep:url", "dep:futures", "dep:tokio-stream", "dep:bytes", "dep:serde"]
 llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:tracing", "dep:accelerate-src", "dep:intel-mkl-src", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
 kimi = ["dep:arkavo-kimi"]
-llama-cpp = ["dep:arkavo-llama-cpp", "dep:tokio", "dep:async-trait", "dep:tokio-stream", "dep:tracing", "dep:serde", "dep:thiserror"]
+llama-cpp = ["dep:arkavo-llama-cpp", "dep:tokio", "dep:async-trait", "dep:tokio-stream", "dep:tracing", "dep:serde", "dep:thiserror", "dep:scopeguard", "dep:tokio-util"]
 local = ["llm-local"]
 metal = ["candle-core/metal", "candle-transformers/metal"]
 
@@ -62,6 +62,8 @@ ring = "0.17"
 keyring = "3.0"
 log = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+scopeguard = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

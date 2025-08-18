@@ -57,3 +57,4 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 **/fuzz/artifacts/
 **/fuzz/corpus/**/
 /.test.env
+/STATUS.md

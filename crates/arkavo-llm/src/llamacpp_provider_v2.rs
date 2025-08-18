@@ -1,15 +1,20 @@
 use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 use arkavo_llama_cpp::{
     ffi, LlamaContext, LlamaModel, LlamaSampler, apply_chat_template, 
-    tokenize_with_model, token_to_piece, batch_get_one, batch_get_one_with_logits, batch_get_one_with_offset, decode_batch, 
-    get_logits_ith, create_sampler_chain, test_minimal_init, batch_init_with_tokens, batch_free
+    tokenize_with_model, token_to_piece, batch_init_with_tokens, batch_free, decode_batch, 
+    create_sampler_chain, test_minimal_init
 };
 use async_trait::async_trait;
 use std::ffi::CString;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Instant;
-use tokio::sync::Mutex;
-use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
+use tokio::sync::{mpsc, Mutex};
+use tokio::{select, task::JoinHandle};
+use tokio_stream::Stream;
+use tokio_util::sync::CancellationToken;
+use scopeguard::defer;
 
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
@@ -32,6 +37,42 @@ impl Default for SamplingConfig {
     }
 }
 
+/// AbortOnDropReceiverStream: Cancels producer task and frees resources on drop
+pub struct AbortOnDropReceiverStream<T> {
+    rx: mpsc::Receiver<Result<T, Error>>,
+    handle: JoinHandle<()>,
+    cancel: CancellationToken,
+}
+
+impl<T> Stream for AbortOnDropReceiverStream<T> {
+    type Item = Result<T, Error>;
+    
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let me = self.get_mut();
+        Pin::new(&mut me.rx).poll_recv(cx)
+    }
+}
+
+impl<T> Drop for AbortOnDropReceiverStream<T> {
+    fn drop(&mut self) {
+        // 1) Signal cancellation to producer
+        self.cancel.cancel();
+        // 2) Close receiver so producer sees send errors  
+        self.rx.close();
+        // 3) Abort producer task (in case it's stuck)
+        self.handle.abort();
+        // llama resources freed by producer's scopeguards
+    }
+}
+
+fn make_stream<T>(
+    handle: JoinHandle<()>,
+    cancel: CancellationToken,
+    rx: mpsc::Receiver<Result<T, Error>>,
+) -> AbortOnDropReceiverStream<T> {
+    AbortOnDropReceiverStream { rx, handle, cancel }
+}
+
 pub struct LlamaCppProvider {
     model: Arc<LlamaModel>,
     context: Arc<Mutex<LlamaContext>>,
@@ -45,6 +86,9 @@ impl LlamaCppProvider {
     }
 
     pub fn new_with_config(model_name: String, model_path: String, config: SamplingConfig) -> Result<Self> {
+        // Initialize backend with proper cleanup
+        unsafe { ffi::llama_backend_init(); }
+        
         // Run minimal FFI test first to catch early crashes
         test_minimal_init()
             .map_err(|e| Error::Config(format!("FFI initialization test failed: {}", e)))?;
@@ -63,10 +107,10 @@ impl LlamaCppProvider {
         })
     }
 
-    fn messages_to_llama_chat(&self, messages: &[Message]) -> Result<(Vec<ffi::llama_chat_message>, Vec<CString>)> {
+    /// Convert messages to llama chat format (static to avoid Send issues)
+    fn messages_to_llama_chat_static(messages: &[Message]) -> Result<(Vec<ffi::llama_chat_message>, Vec<CString>)> {
         let mut llama_messages = Vec::new();
-        let mut role_strings = Vec::new();
-        let mut content_strings = Vec::new();
+        let mut all_cstrings = Vec::new();
 
         for msg in messages {
             let role_str = match msg.role {
@@ -85,37 +129,78 @@ impl LlamaCppProvider {
                 content: content_cstring.as_ptr(),
             });
 
-            role_strings.push(role_cstring);
-            content_strings.push(content_cstring);
+            all_cstrings.push(role_cstring);
+            all_cstrings.push(content_cstring);
         }
-
-        // Store all CStrings together to keep them alive
-        let mut all_cstrings = role_strings;
-        all_cstrings.extend(content_strings);
 
         Ok((llama_messages, all_cstrings))
     }
 
-    async fn generate_streaming(&self, messages: Vec<Message>) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
-        // Prepare data outside of spawn to avoid Send issues with raw pointers
+    /// "Llama way" batching: single batch for entire prompt or proper chunking
+    async fn decode_prompt_properly(
+        ctx: &LlamaContext,
+        tokens: &[ffi::llama_token],
+        chunk_threshold: usize
+    ) -> Result<()> {
+        if tokens.len() <= chunk_threshold {
+            // Single batch decode - preferred approach
+            eprintln!("🚀 Single batch decode for {} tokens", tokens.len());
+            let mut batch = batch_init_with_tokens(tokens, 0, true);
+            defer! { batch_free(&mut batch); }
+            
+            decode_batch(ctx, batch)
+                .map_err(|e| Error::Config(format!("Failed to decode prompt batch: {}", e)))?;
+        } else {
+            // Chunked processing for very long prompts
+            eprintln!("📦 Chunked processing for {} tokens", tokens.len());
+            let chunk_size = chunk_threshold;
+            let mut pos_offset = 0i32;
+            
+            for (i, chunk) in tokens.chunks(chunk_size).enumerate() {
+                let is_last_chunk = (i + 1) * chunk_size >= tokens.len();
+                eprintln!("  📦 Chunk {} with {} tokens (pos: {})", i + 1, chunk.len(), pos_offset);
+                
+                let mut batch = batch_init_with_tokens(chunk, pos_offset, is_last_chunk);
+                defer! { batch_free(&mut batch); }
+                
+                decode_batch(ctx, batch)
+                    .map_err(|e| Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e)))?;
+                    
+                pos_offset += chunk.len() as i32;
+            }
+        }
+        Ok(())
+    }
+
+    async fn generate_streaming(&self, messages: Vec<Message>) -> Result<AbortOnDropReceiverStream<StreamResponse>> {
+        // Prepare data outside of spawn to avoid Send issues
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
         
         // Apply chat template
         let prompt_bytes = apply_chat_template(&llama_messages, true)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {}", e)))?;
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel::<Result<StreamResponse, Error>>(64); // Bounded channel
+        let cancel = CancellationToken::new();
+        
         let model = self.model.clone();
         let context = self.context.clone();
         let config = self.config.clone();
+        let cancel_clone = cancel.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
+            // Proper resource cleanup with scopeguards
+            defer! { 
+                unsafe { ffi::llama_backend_free(); }
+                eprintln!("🧹 Cleaned up llama backend");
+            }
+
             let start_time = Instant::now();
             let mut first_token_time: Option<Instant> = None;
             let mut tokens_generated = 0u32;
 
             let result = async {
-                let mut ctx = context.lock().await;
+                let ctx = context.lock().await;
                 
                 // Get vocab and tokenize inside the lock to avoid Send issues
                 let vocab = model.get_vocab();
@@ -123,9 +208,9 @@ impl LlamaCppProvider {
                     .map_err(|e| Error::Config(format!("Failed to tokenize: {}", e)))?;
 
                 tracing::info!("Input tokenized to {} tokens", input_tokens.len());
-                eprintln!("🔍 First 10 tokens: {:?}", input_tokens.iter().take(10).collect::<Vec<_>>());
+                eprintln!("🔍 Input tokens: {} total", input_tokens.len());
 
-                // Create sampler
+                // Create sampler with proper fallback
                 let sampler = create_sampler_chain(
                     config.temperature, 
                     config.top_p, 
@@ -133,45 +218,34 @@ impl LlamaCppProvider {
                     config.seed
                 ).map_err(|e| Error::Config(format!("Failed to create sampler: {}", e)))?;
 
-                // Get EOS token
-                let eos_token = 106; // Gemma-3 EOS token from model metadata
+                // EOS token for Gemma-3
+                let eos_token = 106;
                 
-                // Process input tokens - CRUCIAL: request logits on final token for sampling
-                eprintln!("🔥 About to decode input batch with {} tokens", input_tokens.len());
-                
-                // Try smaller batch processing to avoid hanging issues
-                if input_tokens.len() > 32 {
-                    // Process tokens in smaller chunks with proper position offsets
-                    let chunk_size = 16;
-                    let mut pos_offset = 0i32;
-                    for (i, chunk) in input_tokens.chunks(chunk_size).enumerate() {
-                        eprintln!("  📦 Processing chunk {} with {} tokens (pos_offset: {})", i + 1, chunk.len(), pos_offset);
-                        let is_last_chunk = (i + 1) * chunk_size >= input_tokens.len();
-                        let batch = batch_get_one_with_offset(chunk, pos_offset, is_last_chunk);
-                        decode_batch(&ctx, batch)
-                            .map_err(|e| Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e)))?;
-                        pos_offset += chunk.len() as i32;
-                    }
-                } else {
-                    let batch = batch_get_one_with_logits(&input_tokens, true);
-                    decode_batch(&ctx, batch)
-                        .map_err(|e| Error::Config(format!("Failed to decode input: {}", e)))?;
-                }
-                eprintln!("✅ Input batch decoded successfully");
+                // Decode prompt using proper "llama way" batching
+                Self::decode_prompt_properly(&ctx, &input_tokens, 64).await?;
+                eprintln!("✅ Prompt decoded successfully");
 
-                // Generation loop - limit to reasonable context window  
-                let max_generation = std::cmp::min(config.max_tokens, 1500); // Leave 512 tokens for input
+                // Generation loop with proper invariant: add token -> decode -> sample -> accept
+                let max_generation = std::cmp::min(config.max_tokens, 1500);
                 for i in 0..max_generation {
-                    // Guardrail: assert logits exist before sampling (step 3)
+                    // Check for cancellation
+                    select! {
+                        _ = cancel_clone.cancelled() => {
+                            eprintln!("🛑 Generation cancelled");
+                            break;
+                        }
+                        default => {}
+                    }
+
+                    // Guardrail: assert logits exist before sampling
                     let logits_ptr = ctx.get_logits_ith(-1);
                     if logits_ptr.is_null() {
-                        return Err(Error::Config("No logits available for sampling - decode step missing logits=1".to_string()));
+                        return Err(Error::Config("No logits available for sampling".to_string()));
                     }
-                    eprintln!("✓ Logits available for sampling token #{}", i + 1);
                     
-                    // Sample next token (using -1 for last logits)
+                    // Sample next token
                     let token = sampler.sample(&ctx, -1);
-                    eprintln!("Sampled token: {}", token);
+                    sampler.accept(token);
                     
                     // Check for EOS
                     if token == eos_token {
@@ -183,43 +257,42 @@ impl LlamaCppProvider {
                     let piece = token_to_piece(vocab, token, false)
                         .map_err(|e| Error::Config(format!("Failed to decode token: {}", e)))?;
 
-                    // Record first token timing
+                    // Record timing
                     if first_token_time.is_none() {
                         first_token_time = Some(Instant::now());
                     }
-
                     tokens_generated += 1;
 
-                    // Send the token
+                    // Send the token (non-blocking in async context)
                     let response = StreamResponse {
                         content: piece,
                         done: i + 1 >= config.max_tokens,
                     };
 
-                    if tx.send(Ok(response)).is_err() {
+                    if tx.send(Ok(response)).await.is_err() {
                         break; // Receiver dropped
                     }
 
-                    // Accept the token for the sampler
-                    sampler.accept(token);
-
-                    // Check if we're approaching context limit
+                    // Check context limit
                     let total_tokens = input_tokens.len() + tokens_generated as usize;
-                    if total_tokens >= 1900 { // Stop before hitting the 2048 limit
-                        tracing::info!("Generation stopped at context limit: {} tokens", total_tokens);
-                        let _ = tx.send(Ok(StreamResponse {
-                            content: String::new(),
-                            done: true,
-                        }));
+                    if total_tokens >= 1900 {
+                        tracing::info!("Generation stopped at context limit");
                         break;
                     }
 
-                    // Prepare for next iteration - decode the new token WITH logits for next sampling
+                    // Decode next token with proper position
                     let next_pos = input_tokens.len() as i32 + i as i32;
-                    let next_batch = batch_get_one_with_offset(&[token], next_pos, true);
+                    let mut next_batch = batch_init_with_tokens(&[token], next_pos, true);
+                    defer! { batch_free(&mut next_batch); }
+                    
                     if let Err(e) = decode_batch(&ctx, next_batch) {
-                        let _ = tx.send(Err(Error::Config(format!("Failed to decode token: {}", e))));
+                        let _ = tx.send(Err(Error::Config(format!("Failed to decode token: {}", e)))).await;
                         break;
+                    }
+
+                    // Yield periodically to prevent blocking
+                    if i % 10 == 0 {
+                        tokio::task::yield_now().await;
                     }
                 }
 
@@ -237,9 +310,9 @@ impl LlamaCppProvider {
                         0.0
                     };
 
-                    let metrics_msg = if let Some(ttft) = ttft {
+                    let metrics = if let Some(ttft) = ttft {
                         format!(
-                            "\nGenerated {} tokens in {:.2}s ({:.1} tok/s, TTFT: {}ms)",
+                            "Generated {} tokens in {:.2}s ({:.1} tok/s, TTFT: {}ms)",
                             tokens_generated,
                             total_time.as_secs_f64(),
                             tokens_per_sec,
@@ -247,75 +320,46 @@ impl LlamaCppProvider {
                         )
                     } else {
                         format!(
-                            "\nGenerated {} tokens in {:.2}s ({:.1} tok/s)",
+                            "Generated {} tokens in {:.2}s ({:.1} tok/s)",
                             tokens_generated,
                             total_time.as_secs_f64(),
                             tokens_per_sec
                         )
                     };
 
-                    tracing::info!("{}", metrics_msg);
-                    eprintln!("{}", metrics_msg);
+                    tracing::info!("{}", metrics);
+                    eprintln!("📊 {}", metrics);
 
                     // Send final done response
                     let _ = tx.send(Ok(StreamResponse {
                         content: String::new(),
                         done: true,
-                    }));
+                    })).await;
                 }
                 Err(e) => {
-                    let _ = tx.send(Err(e));
+                    let _ = tx.send(Err(e)).await;
                 }
             }
         });
 
-        Ok(UnboundedReceiverStream::new(rx))
-    }
-
-    fn messages_to_llama_chat_static(messages: &[Message]) -> Result<(Vec<ffi::llama_chat_message>, Vec<CString>)> {
-        let mut llama_messages = Vec::new();
-        let mut role_strings = Vec::new();
-        let mut content_strings = Vec::new();
-
-        for msg in messages {
-            let role_str = match msg.role {
-                Role::System => "system",
-                Role::User => "user", 
-                Role::Assistant => "assistant",
-            };
-            
-            let role_cstring = CString::new(role_str)
-                .map_err(|e| Error::Config(format!("Invalid role string: {}", e)))?;
-            let content_cstring = CString::new(msg.content.clone())
-                .map_err(|e| Error::Config(format!("Invalid content string: {}", e)))?;
-
-            llama_messages.push(ffi::llama_chat_message {
-                role: role_cstring.as_ptr(),
-                content: content_cstring.as_ptr(),
-            });
-
-            role_strings.push(role_cstring);
-            content_strings.push(content_cstring);
-        }
-
-        // Store all CStrings together to keep them alive
-        let mut all_cstrings = role_strings;
-        all_cstrings.extend(content_strings);
-
-        Ok((llama_messages, all_cstrings))
+        Ok(make_stream(handle, cancel, rx))
     }
 }
 
 #[async_trait]
 impl Provider for LlamaCppProvider {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        let mut stream = self.generate_streaming(messages).await?;
-        let mut full_response = String::new();
+        let mut stream = self.stream(messages).await?;
+        let mut result = String::new();
         
         while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
             match chunk {
                 Ok(response) => {
-                    full_response.push_str(&response.content);
+                    result.push_str(&response.content);
                     if response.done {
                         break;
                     }
@@ -324,18 +368,11 @@ impl Provider for LlamaCppProvider {
             }
         }
         
-        Ok(full_response)
+        Ok(result)
     }
 
-    async fn stream(
-        &self,
-        messages: Vec<Message>,
-    ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+    async fn stream(&self, messages: Vec<Message>) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let stream = self.generate_streaming(messages).await?;
         Ok(Box::new(stream))
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 }
