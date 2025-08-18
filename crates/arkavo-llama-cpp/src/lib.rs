@@ -45,17 +45,20 @@ extern "C" fn llama_log_callback_filtered(
     }
 }
 
-/// Initialize llama.cpp logging based on ARKAVO_DEBUG_CHAT environment variable
+/// Initialize llama.cpp logging
 pub fn init_llama_logging() {
-    // Check environment variable
-    if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
-        LLAMA_LOGGING_ENABLED.store(true, Ordering::Relaxed);
-    }
+    // Logging disabled by default, can be enabled with set_debug_logging
+    LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
 
     // Set our custom log callback
     unsafe {
         ffi::llama_log_set(Some(llama_log_callback_filtered), std::ptr::null_mut());
     }
+}
+
+/// Enable or disable debug logging for llama.cpp
+pub fn set_debug_logging(enabled: bool) {
+    LLAMA_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
 pub struct LlamaModel {
@@ -81,7 +84,7 @@ impl LlamaModel {
         params.main_gpu = 0; // Use GPU 0 (primary GPU)
 
         // Show GPU offloading info if debug is enabled
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!("GPU: Offloading all layers to Metal/GPU");
         }
 
@@ -140,7 +143,7 @@ impl LlamaContext {
         params.flash_attn = true; // Use Flash Attention if available
 
         // Show context configuration if debug is enabled
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
                 "Context: KV offload={}, flash_attn={}, threads={}",
                 params.offload_kqv, params.flash_attn, params.n_threads
@@ -165,7 +168,7 @@ impl LlamaContext {
             // Use the older API name that's available
             ffi::llama_kv_self_clear(self.ptr);
         }
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!("[DEBUG] KV cache cleared");
         }
     }
@@ -173,7 +176,7 @@ impl LlamaContext {
     /// Remove a specific sequence from the KV cache
     pub fn remove_sequence(&self, seq_id: i32, pos_start: i32, pos_end: i32) -> bool {
         let result = unsafe { ffi::llama_kv_self_seq_rm(self.ptr, seq_id, pos_start, pos_end) };
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
                 "[DEBUG] Removed sequence {} from KV cache (pos {}-{})",
                 seq_id, pos_start, pos_end
@@ -502,7 +505,7 @@ pub fn create_sampler_chain(
     if temp <= 0.0 {
         // Greedy/deterministic sampling
         sampler.add_greedy();
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!("Sampler: greedy (deterministic)");
         }
     } else {
@@ -525,7 +528,7 @@ pub fn create_sampler_chain(
         // 4. Final token selection - greedy picks the most likely after transformations
         sampler.add_greedy();
 
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!("Sampler: top_k={}, top_p={}, temp={}", top_k, top_p, temp);
         }
     }

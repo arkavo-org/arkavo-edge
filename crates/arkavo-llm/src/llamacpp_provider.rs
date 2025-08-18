@@ -11,7 +11,7 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
-// Debug flag controlled by ARKAVO_DEBUG_CHAT environment variable
+// Debug flag for llama.cpp provider
 static DEBUG_LLAMACPP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
@@ -21,6 +21,7 @@ pub struct SamplingConfig {
     pub top_k: i32,
     pub max_tokens: u32,
     pub seed: u32,
+    pub debug: bool,
 }
 
 impl Default for SamplingConfig {
@@ -31,6 +32,7 @@ impl Default for SamplingConfig {
             top_k: 40,
             max_tokens: 4096, // Default to 4K tokens
             seed: 42,
+            debug: false,
         }
     }
 }
@@ -52,13 +54,14 @@ impl LlamaCppProvider {
         model_path: String,
         config: SamplingConfig,
     ) -> Result<Self> {
-        // Initialize debug flag from environment variable once
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        // Initialize llama.cpp logging
+        init_llama_logging();
+        
+        // Enable debug if requested
+        if config.debug {
+            arkavo_llama_cpp::set_debug_logging(true);
             DEBUG_LLAMACPP.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-
-        // Initialize llama.cpp logging (will check ARKAVO_DEBUG_CHAT internally)
-        init_llama_logging();
 
         // Run minimal FFI test first to catch early crashes
         test_minimal_init()

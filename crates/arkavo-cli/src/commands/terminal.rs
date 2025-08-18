@@ -80,8 +80,8 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize debug flag from environment variable
-    if env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+    // Check for --debug flag in arguments
+    if args.iter().any(|arg| arg == "--debug") {
         SHOW_DEBUG.store(true, Ordering::Relaxed);
     }
 

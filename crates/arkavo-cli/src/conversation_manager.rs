@@ -389,30 +389,24 @@ impl ConversationManager {
             total_tokens += msg_tokens;
         }
 
-        // Debug output if enabled
-        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
-            eprintln!(
-                "[DEBUG] Context messages: {} messages, {} tokens",
-                context_messages.len(),
-                total_tokens
-            );
+        // Debug output using tracing
+        tracing::debug!(
+            "Context messages: {} messages, {} tokens",
+            context_messages.len(),
+            total_tokens
+        );
 
-            // Check fence parity in final context
-            let full_context = context_messages
-                .iter()
-                .map(|m| m.content.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let fence_count = full_context.matches("```").count();
-            eprintln!(
-                "[DEBUG] Fence parity: {} ({})",
-                fence_count,
-                if fence_count % 2 == 0 {
-                    "balanced"
-                } else {
-                    "UNBALANCED!"
-                }
-            );
+        // Check fence parity in final context for debugging
+        let full_context = context_messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let fence_count = full_context.matches("```").count();
+        if fence_count % 2 != 0 {
+            tracing::warn!("Fence parity: {} (UNBALANCED!)", fence_count);
+        } else {
+            tracing::debug!("Fence parity: {} (balanced)", fence_count);
         }
 
         progress.finish_and_clear();
