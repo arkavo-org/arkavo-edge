@@ -36,7 +36,8 @@ fn main() {
     // Common settings for all platforms
     config
         .define("GGML_OPENCL", "OFF")
-        .define("GGML_ASSERTS", "OFF"); // Disable asserts for performance
+        .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
+        .define("LLAMA_CURL", "OFF"); // Disable CURL requirement (not needed for local inference)
 
     let dst = config.build();
 
