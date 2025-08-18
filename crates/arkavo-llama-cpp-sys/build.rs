@@ -2,7 +2,16 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/llama.h");
+    // Track the actual header file location
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
+    
+    // Track key source directories
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/src");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/ggml");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/CMakeLists.txt");
+    
+    // Track this build script itself
+    println!("cargo:rerun-if-changed=build.rs");
 
     let dst = cmake::Config::new("../../vendor/llama.cpp")
         .define("BUILD_SHARED_LIBS", "OFF")
