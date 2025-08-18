@@ -81,6 +81,12 @@ fn main() {
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let header = out_path.join("include").join("llama.h");
+    
+    // Check if header exists
+    if !header.exists() {
+        panic!("llama.h not found at {:?}. CMake build may have failed.", header);
+    }
+    
     let bindings = bindgen::Builder::default()
         .header(header.to_str().unwrap())
         .clang_arg(format!("-I{}", out_path.join("include").display()))

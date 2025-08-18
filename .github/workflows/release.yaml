@@ -112,8 +112,10 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Install CMake
-        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Install CMake and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev
 
       - name: Install dependencies for glibc build
         if: matrix.needs_musl == false
