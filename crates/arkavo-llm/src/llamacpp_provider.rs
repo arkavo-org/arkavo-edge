@@ -115,6 +115,9 @@ impl LlamaCppProvider {
             let result = async {
                 let ctx = context.lock().await;
 
+                // Clear KV cache for fresh conversation - prevents position mismatch errors
+                ctx.clear_kv_cache();
+
                 // Get vocab and tokenize inside the lock to avoid Send issues
                 let vocab = model.get_vocab();
                 let input_tokens = tokenize_with_model(vocab, &prompt_bytes)

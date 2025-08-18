@@ -40,7 +40,7 @@ fn get_or_create_runtime() -> &'static Runtime {
 /// Determines if repository context should be attached based on the prompt
 fn should_attach_repo_context(prompt: &str) -> bool {
     let p = prompt.trim();
-    
+
     // Short math/calculation pattern - no context needed
     if p.len() < 32 {
         // Check if it's just numbers and math operators
@@ -52,33 +52,73 @@ fn should_attach_repo_context(prompt: &str) -> bool {
             return false;
         }
     }
-    
+
     // Greeting patterns - no context needed
-    let greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"];
+    let greetings = [
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    ];
     let lower = p.to_lowercase();
-    if p.len() < 20 && greetings.iter().any(|g| lower == *g || lower == format!("{g}!")) {
+    if p.len() < 20
+        && greetings
+            .iter()
+            .any(|g| lower == *g || lower == format!("{g}!"))
+    {
         if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             eprintln!("[DEBUG] RepoCtx: skipped (greeting)");
         }
         return false;
     }
-    
+
     // Keywords that indicate code/doc related queries - context needed
     let code_keywords = [
-        "readme", "build", "compile", "cargo", "rust", "error:", "panic",
-        ".rs", ".gd", ".swift", ".toml", "arkavo", "how do i", "how to",
-        "api", "design", "function", "struct", "impl", "trait", "module",
-        "test", "debug", "fix", "implement", "code", "file", "directory",
-        "git", "branch", "commit", "repository", "project", "crate",
+        "readme",
+        "build",
+        "compile",
+        "cargo",
+        "rust",
+        "error:",
+        "panic",
+        ".rs",
+        ".gd",
+        ".swift",
+        ".toml",
+        "arkavo",
+        "how do i",
+        "how to",
+        "api",
+        "design",
+        "function",
+        "struct",
+        "impl",
+        "trait",
+        "module",
+        "test",
+        "debug",
+        "fix",
+        "implement",
+        "code",
+        "file",
+        "directory",
+        "git",
+        "branch",
+        "commit",
+        "repository",
+        "project",
+        "crate",
     ];
-    
+
     if code_keywords.iter().any(|k| lower.contains(k)) {
         if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             eprintln!("[DEBUG] RepoCtx: will inject (code/doc keyword detected)");
         }
         return true;
     }
-    
+
     // Default: no context for unrecognized patterns
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
         eprintln!("[DEBUG] RepoCtx: skipped (no relevant keywords)");
@@ -91,10 +131,10 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
     // For now, take the first part of the content with a clear header
     // In the future, this could do smart summarization
     let header = "[PROJECT CONTEXT DIGEST — KEEP ANSWER CONCISE]\n";
-    
+
     // Estimate ~4 chars per token (rough approximation)
     let max_chars = max_tokens * 4;
-    
+
     if full_content.len() <= max_chars {
         format!("{header}{full_content}")
     } else {
@@ -102,11 +142,14 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
         let lines: Vec<&str> = full_content.lines().collect();
         let mut digest = String::from(header);
         let mut token_budget = max_tokens - 20; // Reserve some for header
-        
+
         for line in lines {
             // Prioritize headers and overview sections
-            if line.starts_with("# ") || line.starts_with("## Project Overview") 
-                || line.starts_with("## Key Command") || line.contains("arkavo") {
+            if line.starts_with("# ")
+                || line.starts_with("## Project Overview")
+                || line.starts_with("## Key Command")
+                || line.contains("arkavo")
+            {
                 digest.push_str(line);
                 digest.push('\n');
                 token_budget = token_budget.saturating_sub(line.len() / 4);
@@ -115,7 +158,7 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
                 }
             }
         }
-        
+
         digest.push_str("\n(Use 'show docs' for more details)\n");
         digest
     }
@@ -213,7 +256,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .map(|w| w[1].clone())
         .or_else(|| env::var("ARKAVO_REPO_CONTEXT").ok())
         .unwrap_or_else(|| "auto".to_string());
-    
+
     // Store repo context mode globally for REPL commands
     {
         let mut mode = REPO_CONTEXT_MODE.write().unwrap();
@@ -480,7 +523,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
     };
-    
+
     // Determine whether to inject repo context
     let should_inject_context = if print_mode && prompt.is_some() {
         // For print mode with prompt, check if we should attach context
@@ -488,7 +531,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         match (model_size_hint.as_deref(), current_mode.as_str()) {
             // Tiny models: only inject if explicitly on or auto with relevant query
             (Some("270M") | Some("1B"), "on") => true,
-            (Some("270M") | Some("1B"), "auto") => should_attach_repo_context(prompt.as_ref().unwrap()),
+            (Some("270M") | Some("1B"), "auto") => {
+                should_attach_repo_context(prompt.as_ref().unwrap())
+            }
             (Some("270M") | Some("1B"), _) => false,
             // Larger models: inject unless off or auto with irrelevant query
             (_, "off") => false,
@@ -507,14 +552,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         false // No context for other cases
     };
-    
+
     let system_prompt = if should_inject_context {
         // Try to read AGENTS.md or CLAUDE.md
         let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
             Ok(content) => Some(content),
             Err(_) => std::fs::read_to_string("CLAUDE.md").ok(),
         };
-        
+
         if let Some(agents_content) = agents_md_content {
             // Determine context size based on model
             let max_context_tokens = match model_size_hint.as_deref() {
@@ -523,26 +568,26 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 Some("2B") => 500,
                 _ => 1000,
             };
-            
+
             let compressed_context = compress_repo_context(&agents_content, max_context_tokens);
-            
+
             if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 let token_estimate = compressed_context.len() / 4;
-                eprintln!("[DEBUG] RepoCtx: injected={} tokens (compressed)", token_estimate);
+                eprintln!(
+                    "[DEBUG] RepoCtx: injected={} tokens (compressed)",
+                    token_estimate
+                );
             }
-            
+
             format!(
                 "{}\n\n{}\n\nWorking directory: {}",
-                base_system_prompt,
-                compressed_context,
-                repo_context_str
+                base_system_prompt, compressed_context, repo_context_str
             )
         } else {
             // No README found, use base prompt with minimal context
             format!(
                 "{}\n\nWorking directory: {}",
-                base_system_prompt,
-                repo_context_str
+                base_system_prompt, repo_context_str
             )
         }
     } else {

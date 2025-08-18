@@ -34,8 +34,7 @@ extern "C" fn llama_log_callback_filtered(
                         return;
                     }
                     // Skip Metal BF16 kernel messages (not supported, not needed)
-                    if str_slice.contains("ggml_metal_init: skipping")
-                        && str_slice.contains("bf16")
+                    if str_slice.contains("ggml_metal_init: skipping") && str_slice.contains("bf16")
                     {
                         return;
                     }
@@ -158,6 +157,29 @@ impl LlamaContext {
 
     pub fn get_logits_ith(&self, i: i32) -> *mut f32 {
         unsafe { ffi::llama_get_logits_ith(self.ptr, i) }
+    }
+
+    /// Clear the KV cache for all sequences
+    pub fn clear_kv_cache(&self) {
+        unsafe {
+            // Use the older API name that's available
+            ffi::llama_kv_self_clear(self.ptr);
+        }
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!("[DEBUG] KV cache cleared");
+        }
+    }
+
+    /// Remove a specific sequence from the KV cache
+    pub fn remove_sequence(&self, seq_id: i32, pos_start: i32, pos_end: i32) -> bool {
+        let result = unsafe { ffi::llama_kv_self_seq_rm(self.ptr, seq_id, pos_start, pos_end) };
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!(
+                "[DEBUG] Removed sequence {} from KV cache (pos {}-{})",
+                seq_id, pos_start, pos_end
+            );
+        }
+        result
     }
 }
 
