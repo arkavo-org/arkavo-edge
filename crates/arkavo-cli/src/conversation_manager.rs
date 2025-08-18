@@ -1,3 +1,4 @@
+use crate::commands::chat::SHOW_DEBUG;
 use arkavo_llm::LlmClient;
 use arkavo_memory::storage::MemoryStorage;
 use chrono::{DateTime, Utc};
@@ -389,12 +390,14 @@ impl ConversationManager {
             total_tokens += msg_tokens;
         }
 
-        // Debug output using tracing
-        tracing::debug!(
-            "Context messages: {} messages, {} tokens",
-            context_messages.len(),
-            total_tokens
-        );
+        // Debug output
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "Context messages: {} messages, {} tokens",
+                context_messages.len(),
+                total_tokens
+            );
+        }
 
         // Check fence parity in final context for debugging
         let full_context = context_messages
@@ -403,10 +406,12 @@ impl ConversationManager {
             .collect::<Vec<_>>()
             .join("\n");
         let fence_count = full_context.matches("```").count();
-        if fence_count % 2 != 0 {
-            tracing::warn!("Fence parity: {} (UNBALANCED!)", fence_count);
-        } else {
-            tracing::debug!("Fence parity: {} (balanced)", fence_count);
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            if fence_count % 2 != 0 {
+                eprintln!("Fence parity: {fence_count} (UNBALANCED!)");
+            } else {
+                eprintln!("Fence parity: {fence_count} (balanced)");
+            }
         }
 
         progress.finish_and_clear();

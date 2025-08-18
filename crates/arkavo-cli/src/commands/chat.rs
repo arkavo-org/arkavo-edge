@@ -16,8 +16,8 @@ use tokio_stream::StreamExt;
 use uuid;
 
 // Global flag to control whether to show debug messages
-// Set via ARKAVO_DEBUG_CHAT=1 environment variable
-static SHOW_DEBUG: AtomicBool = AtomicBool::new(false);
+// Set via --debug command line flag
+pub(crate) static SHOW_DEBUG: AtomicBool = AtomicBool::new(false);
 
 // Global flag for repo context mode (can be changed via REPL command)
 static REPO_CONTEXT_MODE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
