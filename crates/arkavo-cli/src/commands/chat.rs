@@ -260,7 +260,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Store repo context mode globally for REPL commands
     {
         let mut mode = REPO_CONTEXT_MODE.write().unwrap();
-        *mode = repo_context_mode.clone();
+        *mode = repo_context_mode;
     }
 
     // Parse sampling parameters for llama.cpp
@@ -345,7 +345,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         // Show model-specific settings for small models
         if let Some(size) = &model_size_hint {
-            println!("Model size: {} - using limited history", size);
+            println!("Model size: {size} - using limited history");
         }
 
         // Try to restore last session unless --new-session is specified
@@ -355,7 +355,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 client.provider_name(),
                 Some("gemma3"), // TODO: Get actual template name
                 None,           // System prompt not available yet
-                model_size_hint.as_deref(),
+                model_size_hint,
             ))?;
             println!("Started new conversation session");
         } else if let Ok(Some(session_id)) = runtime.block_on(
@@ -375,7 +375,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 client.provider_name(),
                 Some("gemma3"), // TODO: Get actual template name
                 None,           // System prompt not available yet
-                model_size_hint.as_deref(),
+                model_size_hint,
             ))?;
         }
 
@@ -517,35 +517,32 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let base_system_prompt = if mcp_client.is_some() {
         format!(
             "You are a helpful AI assistant with access to MCP tools for development tasks.\
-            \n{}",
-            mcp_info
+            \n{mcp_info}"
         )
     } else {
         "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
     };
 
     // Determine whether to inject repo context
-    let should_inject_context = if print_mode && prompt.is_some() {
+    let should_inject_context = if let (true, Some(ref p)) = (print_mode, prompt.as_ref()) {
         // For print mode with prompt, check if we should attach context
         let current_mode = REPO_CONTEXT_MODE.read().unwrap();
-        match (model_size_hint.as_deref(), current_mode.as_str()) {
+        match (model_size_hint, current_mode.as_str()) {
             // Tiny models: only inject if explicitly on or auto with relevant query
-            (Some("270M") | Some("1B"), "on") => true,
-            (Some("270M") | Some("1B"), "auto") => {
-                should_attach_repo_context(prompt.as_ref().unwrap())
-            }
-            (Some("270M") | Some("1B"), _) => false,
+            (Some("270M" | "1B"), "on") => true,
+            (Some("270M" | "1B"), "auto") => should_attach_repo_context(p),
+            (Some("270M" | "1B"), _) => false,
             // Larger models: inject unless off or auto with irrelevant query
             (_, "off") => false,
-            (_, "auto") => should_attach_repo_context(prompt.as_ref().unwrap()),
+            (_, "auto") => should_attach_repo_context(p),
             (_, _) => true,
         }
     } else if !print_mode {
         // Interactive mode: check based on model size and mode
         let current_mode = REPO_CONTEXT_MODE.read().unwrap();
-        match (model_size_hint.as_deref(), current_mode.as_str()) {
-            (Some("270M") | Some("1B"), "on") => true,
-            (Some("270M") | Some("1B"), _) => false, // Default off for tiny in interactive
+        match (model_size_hint, current_mode.as_str()) {
+            (Some("270M" | "1B"), "on") => true,
+            (Some("270M" | "1B"), _) => false, // Default off for tiny in interactive
             (_, "off") => false,
             _ => true, // Default on for larger models in interactive
         }
@@ -562,7 +559,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(agents_content) = agents_md_content {
             // Determine context size based on model
-            let max_context_tokens = match model_size_hint.as_deref() {
+            let max_context_tokens = match model_size_hint {
                 Some("270M") => 200,
                 Some("1B") => 300,
                 Some("2B") => 500,
@@ -574,20 +571,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 let token_estimate = compressed_context.len() / 4;
                 eprintln!(
-                    "[DEBUG] RepoCtx: injected={} tokens (compressed)",
-                    token_estimate
+                    "[DEBUG] RepoCtx: injected={token_estimate} tokens (compressed)"
                 );
             }
 
             format!(
-                "{}\n\n{}\n\nWorking directory: {}",
-                base_system_prompt, compressed_context, repo_context_str
+                "{base_system_prompt}\n\n{compressed_context}\n\nWorking directory: {repo_context_str}"
             )
         } else {
             // No README found, use base prompt with minimal context
             format!(
-                "{}\n\nWorking directory: {}",
-                base_system_prompt, repo_context_str
+                "{base_system_prompt}\n\nWorking directory: {repo_context_str}"
             )
         }
     } else {
@@ -611,9 +605,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         vec![system_message.clone()]
     } else {
         // In interactive mode, get context with appropriate history limits
-        let history_limit = if let Some("270M") = model_size_hint.as_deref() {
+        let history_limit = if model_size_hint == Some("270M") {
             Some(2) // Very limited for tiny models
-        } else if let Some("1B") | Some("2B") = model_size_hint.as_deref() {
+        } else if let Some("1B" | "2B") = model_size_hint {
             Some(4)
         } else {
             None // Use default
@@ -703,7 +697,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 if ["auto", "on", "off"].contains(&new_mode) {
                     let mut mode = REPO_CONTEXT_MODE.write().unwrap();
                     *mode = new_mode.to_string();
-                    println!("Repository context mode set to: {}", new_mode);
+                    println!("Repository context mode set to: {new_mode}");
                     match new_mode {
                         "auto" => println!("  Context will be injected based on query relevance"),
                         "on" => println!("  Context will always be injected"),
@@ -715,7 +709,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 let mode = REPO_CONTEXT_MODE.read().unwrap();
-                println!("Current repository context mode: {}", mode);
+                println!("Current repository context mode: {mode}");
                 println!("Use: /context {{auto|on|off}} to change");
             }
             continue;
@@ -730,7 +724,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     .get(2)
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(5);
-                println!("\nLast {} messages:", n);
+                println!("\nLast {n} messages:");
                 let display_messages = messages.iter().rev().take(n).rev();
                 for msg in display_messages {
                     match msg.role {
@@ -741,7 +735,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 msg.content.clone()
                             };
-                            println!("Assistant: {}", preview);
+                            println!("Assistant: {preview}");
                         }
                         _ => {}
                     }
@@ -751,8 +745,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 match runtime.block_on(conversation_manager.get_session_stats()) {
                     Ok((turns, tokens, fence_balanced)) => {
                         println!("\nSession statistics:");
-                        println!("  Messages: {}", turns);
-                        println!("  Tokens: {}", tokens);
+                        println!("  Messages: {turns}");
+                        println!("  Tokens: {tokens}");
                         println!(
                             "  Code fence parity: {}",
                             if fence_balanced {
@@ -767,7 +761,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                     }
-                    Err(e) => eprintln!("Error getting session stats: {}", e),
+                    Err(e) => eprintln!("Error getting session stats: {e}"),
                 }
             }
             continue;
@@ -989,7 +983,7 @@ async fn process_message(
         } else {
             full_context.clone()
         };
-        eprintln!("[DEBUG] Context preview: {}", preview);
+        eprintln!("[DEBUG] Context preview: {preview}");
 
         // Check fence parity
         let fence_count = full_context.matches("```").count();
@@ -1115,7 +1109,7 @@ async fn process_message_print(
         } else {
             full_context.clone()
         };
-        eprintln!("[DEBUG] Context preview: {}", preview);
+        eprintln!("[DEBUG] Context preview: {preview}");
 
         // Check fence parity
         let fence_count = full_context.matches("```").count();
@@ -1636,14 +1630,13 @@ async fn initialize_llm_client(
     seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
-    if let Ok(client) = LlmClient::from_env() {
-        if client.complete(vec![Message::user("ping")]).await.is_ok() {
+    if let Ok(client) = LlmClient::from_env()
+        && client.complete(vec![Message::user("ping")]).await.is_ok() {
             if !print_mode {
                 println!("✓ Connected to Ollama at {}", client.provider_name());
             }
             return Ok(client);
         }
-    }
 
     if !print_mode {
         println!("Ollama not available.");
@@ -1675,7 +1668,7 @@ async fn initialize_llm_client(
         };
 
         if !print_mode {
-            println!("Loading model: {}", display_name);
+            println!("Loading model: {display_name}");
         }
 
         let api = Api::new()?;
@@ -1687,8 +1680,7 @@ async fn initialize_llm_client(
             Err(_) => {
                 if !print_mode {
                     print!(
-                        "Model '{}' not found locally. Download now? (Y/n) ",
-                        model_file
+                        "Model '{model_file}' not found locally. Download now? (Y/n) "
                     );
                     io::stdout().flush()?;
                     let mut input = String::new();

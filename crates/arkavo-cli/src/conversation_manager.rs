@@ -73,7 +73,7 @@ impl ConversationManager {
             || trimmed.ends_with("Model:")
             || trimmed.ends_with("User:")
         {
-            sanitized = format!("{}\n", trimmed);
+            sanitized = format!("{trimmed}\n");
         }
 
         // Add buffer after "code:" patterns to prevent immediate fence generation
@@ -220,15 +220,13 @@ impl ConversationManager {
                     session.created_at.format("%Y-%m-%d %H:%M")
                 ));
                 return Ok(Some(session.id));
-            } else {
-                // Session incompatible
-                incompatibility_reason = incompatibility_reason.trim_end_matches(", ").to_string();
-                progress.finish_with_message(format!(
-                    "Session skipped: {} (starting fresh)",
-                    incompatibility_reason
-                ));
-                return Ok(None);
             }
+            // Session incompatible
+            incompatibility_reason = incompatibility_reason.trim_end_matches(", ").to_string();
+            progress.finish_with_message(format!(
+                "Session skipped: {incompatibility_reason} (starting fresh)"
+            ));
+            return Ok(None);
         }
 
         progress.finish_and_clear();

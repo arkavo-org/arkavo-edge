@@ -43,7 +43,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
             }
             Err(e) => {
                 if !print_mode {
-                    eprintln!("⚠ In-process MCP not available: {}", e);
+                    eprintln!("⚠ In-process MCP not available: {e}");
                 }
             }
         }
@@ -71,7 +71,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
         }
         Err(e) => {
             if !print_mode {
-                eprintln!("ℹ MCP server not available - using LLM-only mode: {}", e);
+                eprintln!("ℹ MCP server not available - using LLM-only mode: {e}");
             }
             None
         }
@@ -170,7 +170,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "You are a helpful AI assistant with access to the user's codebase and tools.",
     );
     let messages = runtime
-        .block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?;
+        .block_on(conversation_manager.get_context_messages(Some(system_message)))?;
 
     // Create channels for communication between TUI and LLM
     let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
@@ -179,7 +179,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Clone necessary components for the TUI task
     let client = Arc::new(client);
     let client_clone: Arc<LlmClient> = Arc::clone(&client);
-    let mut messages_clone = messages.clone();
+    let mut messages_clone = messages;
 
     // Spawn LLM processing task
     let llm_handle = runtime.spawn(async move {
@@ -270,14 +270,13 @@ async fn initialize_llm_client(
     seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
-    if let Ok(client) = LlmClient::from_env() {
-        if client.complete(vec![Message::user("ping")]).await.is_ok() {
+    if let Ok(client) = LlmClient::from_env()
+        && client.complete(vec![Message::user("ping")]).await.is_ok() {
             if !print_mode {
                 println!("✓ Connected to Ollama at {}", client.provider_name());
             }
             return Ok(client);
         }
-    }
 
     if !print_mode {
         println!("Ollama not available. Using local model with llama.cpp...");
@@ -304,7 +303,7 @@ async fn initialize_llm_client(
         };
 
         if !print_mode {
-            println!("Loading model: {}", display_name);
+            println!("Loading model: {display_name}");
         }
 
         let api = Api::new()?;
