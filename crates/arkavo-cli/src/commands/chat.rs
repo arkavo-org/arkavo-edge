@@ -215,7 +215,13 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     }
 }
 
+/// Execute the chat command
+///
+/// # Panics
+///
+/// May panic if RwLock is poisoned
 #[allow(clippy::disallowed_methods)]
+#[allow(clippy::significant_drop_tightening)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize debug flag from environment variable
     if env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
@@ -678,7 +684,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
         // Handle /clear command - clear current session
         if input == "/clear" {
-            runtime.block_on(conversation_manager.clear_session())?;
+            conversation_manager.clear_session()?;
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
             messages = vec![system_message.clone()];
             println!("Cleared conversation history");
@@ -691,8 +697,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             if parts.len() > 1 {
                 let new_mode = parts[1];
                 if ["auto", "on", "off"].contains(&new_mode) {
-                    let mut mode = REPO_CONTEXT_MODE.write().unwrap();
-                    *mode = new_mode.to_string();
+                    {
+                        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+                        *mode = new_mode.to_string();
+                    }
                     println!("Repository context mode set to: {new_mode}");
                     match new_mode {
                         "auto" => println!("  Context will be injected based on query relevance"),
@@ -704,8 +712,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     println!("Invalid mode. Use: /context {{auto|on|off}}");
                 }
             } else {
-                let mode = REPO_CONTEXT_MODE.read().unwrap();
-                println!("Current repository context mode: {mode}");
+                {
+                    let mode = REPO_CONTEXT_MODE.read().unwrap();
+                    println!("Current repository context mode: {mode}");
+                }
                 println!("Use: /context {{auto|on|off}} to change");
             }
             continue;

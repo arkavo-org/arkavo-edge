@@ -62,13 +62,13 @@ impl LlamaCppProvider {
 
         // Run minimal FFI test first to catch early crashes
         test_minimal_init()
-            .map_err(|e| Error::Config(format!("FFI initialization test failed: {}", e)))?;
+            .map_err(|e| Error::Config(format!("FFI initialization test failed: {e}")))?;
 
         let model = LlamaModel::from_file(&model_path)
-            .map_err(|e| Error::Config(format!("Failed to load model: {}", e)))?;
+            .map_err(|e| Error::Config(format!("Failed to load model: {e}")))?;
 
         let context = LlamaContext::new(&model)
-            .map_err(|e| Error::Config(format!("Failed to create context: {}", e)))?;
+            .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
 
         Ok(Self {
             model: Arc::new(model),
@@ -78,7 +78,7 @@ impl LlamaCppProvider {
         })
     }
 
-    async fn generate_streaming(
+    fn generate_streaming(
         &self,
         messages: Vec<Message>,
     ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
@@ -87,18 +87,18 @@ impl LlamaCppProvider {
 
         // Apply chat template
         let prompt_bytes = apply_chat_template(&llama_messages, true)
-            .map_err(|e| Error::Config(format!("Failed to apply chat template: {}", e)))?;
+            .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
 
         // Debug: show what the template produced
-        if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-            if let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes) {
-                eprintln!("Chat template output:\n{}", prompt_str);
-                // Check if it's using the right format
-                if prompt_str.contains("<|im_start|>") {
-                    eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
-                } else if prompt_str.contains("<start_of_turn>") {
-                    eprintln!("✓ Template is using correct Gemma-3 format");
-                }
+        if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed)
+            && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
+        {
+            eprintln!("Chat template output:\n{prompt_str}");
+            // Check if it's using the right format
+            if prompt_str.contains("<|im_start|>") {
+                eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
+            } else if prompt_str.contains("<start_of_turn>") {
+                eprintln!("✓ Template is using correct Gemma-3 format");
             }
         }
 
@@ -112,6 +112,7 @@ impl LlamaCppProvider {
             let mut first_token_time: Option<Instant> = None;
             let mut tokens_generated = 0u32;
 
+            #[allow(clippy::significant_drop_tightening)]
             let result = async {
                 let ctx = context.lock().await;
 
@@ -121,7 +122,7 @@ impl LlamaCppProvider {
                 // Get vocab and tokenize inside the lock to avoid Send issues
                 let vocab = model.get_vocab();
                 let input_tokens = tokenize_with_model(vocab, &prompt_bytes)
-                    .map_err(|e| Error::Config(format!("Failed to tokenize: {}", e)))?;
+                    .map_err(|e| Error::Config(format!("Failed to tokenize: {e}")))?;
 
                 tracing::info!("Input tokenized to {} tokens", input_tokens.len());
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
@@ -138,12 +139,12 @@ impl LlamaCppProvider {
                     config.top_k,
                     config.seed,
                 )
-                .map_err(|e| Error::Config(format!("Failed to create sampler: {}", e)))?;
+                .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?;
 
                 // Get EOS token from the model's vocabulary
                 let eos_token = model.get_eos_token();
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!("EOS token from model: {}", eos_token);
+                    eprintln!("EOS token from model: {eos_token}");
                 }
 
                 // Process input tokens - CRUCIAL: request logits on final token for sampling
@@ -173,12 +174,12 @@ impl LlamaCppProvider {
                         decode_batch(&ctx, batch).map_err(|e| {
                             Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e))
                         })?;
-                        pos_offset += chunk.len() as i32;
+                        pos_offset += i32::try_from(chunk.len()).unwrap_or(i32::MAX);
                     }
                 } else {
                     let batch = batch_get_one_with_logits(&input_tokens, true);
                     decode_batch(&ctx, batch)
-                        .map_err(|e| Error::Config(format!("Failed to decode input: {}", e)))?;
+                        .map_err(|e| Error::Config(format!("Failed to decode input: {e}")))?;
                 }
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
                     eprintln!("✅ Input batch decoded successfully");
@@ -186,7 +187,7 @@ impl LlamaCppProvider {
 
                 // Generation loop - limit to reasonable context window
                 let max_generation = std::cmp::min(config.max_tokens, 30000); // Max generation within 32K context
-                let mut pos = input_tokens.len() as i32; // Track position for new tokens
+                let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0); // Track position for new tokens
 
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
                     eprintln!(
@@ -215,7 +216,7 @@ impl LlamaCppProvider {
                     // Sample next token (using -1 for last logits)
                     let token = sampler.sample(&ctx, -1);
                     if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!("Sampled token: {} at pos {}", token, pos);
+                        eprintln!("Sampled token: {token} at pos {pos}");
                     }
 
                     // Check for EOS
@@ -226,7 +227,7 @@ impl LlamaCppProvider {
 
                     // Convert token to text
                     let piece = token_to_piece(vocab, token, false)
-                        .map_err(|e| Error::Config(format!("Failed to decode token: {}", e)))?;
+                        .map_err(|e| Error::Config(format!("Failed to decode token: {e}")))?;
 
                     // Record first token timing
                     if first_token_time.is_none() {
@@ -252,7 +253,7 @@ impl LlamaCppProvider {
                     // Use batch_init_with_tokens for proper position handling
                     let mut batch = batch_init_with_tokens(&[token], pos, true);
                     decode_batch(&ctx, batch).map_err(|e| {
-                        Error::Config(format!("Failed to decode token at pos {}: {}", pos, e))
+                        Error::Config(format!("Failed to decode token at pos {pos}: {e}"))
                     })?;
                     batch_free(&mut batch); // Clean up the batch
 
@@ -308,7 +309,7 @@ impl LlamaCppProvider {
                     };
 
                     tracing::info!("{}", metrics_msg);
-                    eprintln!("{}", metrics_msg);
+                    eprintln!("{metrics_msg}");
 
                     // Send final done response
                     let _ = tx.send(Ok(StreamResponse {
@@ -340,9 +341,9 @@ impl LlamaCppProvider {
             };
 
             let role_cstring = CString::new(role_str)
-                .map_err(|e| Error::Config(format!("Invalid role string: {}", e)))?;
+                .map_err(|e| Error::Config(format!("Invalid role string: {e}")))?;
             let content_cstring = CString::new(msg.content.clone())
-                .map_err(|e| Error::Config(format!("Invalid content string: {}", e)))?;
+                .map_err(|e| Error::Config(format!("Invalid content string: {e}")))?;
 
             llama_messages.push(ffi::llama_chat_message {
                 role: role_cstring.as_ptr(),
@@ -364,7 +365,7 @@ impl LlamaCppProvider {
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        let mut stream = self.generate_streaming(messages).await?;
+        let mut stream = self.generate_streaming(messages)?;
         let mut full_response = String::new();
 
         while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {
@@ -386,7 +387,7 @@ impl Provider for LlamaCppProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        let stream = self.generate_streaming(messages).await?;
+        let stream = self.generate_streaming(messages)?;
         Ok(Box::new(stream))
     }
 

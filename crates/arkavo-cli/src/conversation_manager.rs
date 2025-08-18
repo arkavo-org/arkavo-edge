@@ -143,10 +143,8 @@ impl ConversationManager {
             .await
     }
 
-    #[allow(
-        clippy::missing_panics_doc,
-        clippy::literal_string_with_formatting_args
-    )]
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::literal_string_with_formatting_args)]
     pub async fn restore_last_session_with_compatibility(
         &mut self,
         current_template: Option<&str>,
@@ -284,6 +282,12 @@ impl ConversationManager {
             .await
     }
 
+    /// Get context messages with optional limits
+    ///
+    /// # Panics
+    ///
+    /// May panic if progress style template is invalid
+    #[allow(clippy::literal_string_with_formatting_args)]
     pub async fn get_context_messages_with_limits(
         &self,
         system_message: Option<arkavo_llm::Message>,
@@ -415,10 +419,8 @@ impl ConversationManager {
         Ok(context_messages)
     }
 
-    #[allow(
-        clippy::missing_panics_doc,
-        clippy::literal_string_with_formatting_args
-    )]
+    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::literal_string_with_formatting_args)]
     pub async fn create_summary(
         &self,
         client: &LlmClient,
@@ -490,7 +492,7 @@ impl ConversationManager {
         Ok(summary)
     }
 
-    pub async fn clear_session(&mut self) -> anyhow::Result<()> {
+    pub fn clear_session(&mut self) -> anyhow::Result<()> {
         self.current_session_id = None;
         Ok(())
     }

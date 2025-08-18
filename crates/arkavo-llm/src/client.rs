@@ -64,7 +64,7 @@ impl LlmClient {
         }
     }
 
-    #[cfg_attr(not(feature = "llama-cpp"), allow(clippy::unused_async))]
+    #[allow(clippy::unused_async)]
     pub async fn from_llamacpp_model(model_name: &str, model_path: String) -> Result<Self> {
         #[cfg(feature = "llama-cpp")]
         {
@@ -81,7 +81,7 @@ impl LlmClient {
         }
     }
 
-    #[cfg_attr(not(feature = "llama-cpp"), allow(clippy::unused_async))]
+    #[allow(clippy::unused_async)]
     pub async fn from_llamacpp_model_with_config(
         model_name: &str,
         model_path: String,
