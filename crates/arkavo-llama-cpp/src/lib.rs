@@ -9,15 +9,23 @@ static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 
 // Custom log callback that filters based on log level and our debug flag
 extern "C" fn llama_log_callback_filtered(level: ffi::ggml_log_level, text: *const c_char, _user_data: *mut c_void) {
-    // Only show logs if debug is enabled or if it's a warning/error
-    let show_log = LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) 
-        || level >= ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
+    // Only show logs if:
+    // - Debug is enabled AND it's any level, OR
+    // - It's a warning/error (always show these)
+    let is_warning_or_error = level >= ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
+    let debug_enabled = LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed);
     
-    if show_log && !text.is_null() {
-        unsafe {
-            let c_str = std::ffi::CStr::from_ptr(text);
-            if let Ok(str_slice) = c_str.to_str() {
-                eprint!("{}", str_slice);
+    if is_warning_or_error || debug_enabled {
+        if !text.is_null() {
+            unsafe {
+                let c_str = std::ffi::CStr::from_ptr(text);
+                if let Ok(str_slice) = c_str.to_str() {
+                    // Skip the dots progress indicator and cache messages unless debug is on
+                    if !debug_enabled && (str_slice == "." || str_slice.contains("llama_kv_cache")) {
+                        return;
+                    }
+                    eprint!("{}", str_slice);
+                }
             }
         }
     }
@@ -457,8 +465,11 @@ pub fn test_minimal_init() -> Result<(), String> {
     _model_params.use_mmap = false;          // avoid vm tricks until stable
     _model_params.use_mlock = false;         // avoid locking (needs perms)
     
-    eprintln!("✓ llama_model_default_params() succeeded");
-    eprintln!("✓ Minimal FFI initialization test passed!");
+    // Only show debug output if ARKAVO_DEBUG_CHAT is enabled
+    if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        eprintln!("✓ llama_model_default_params() succeeded");
+        eprintln!("✓ Minimal FFI initialization test passed!");
+    }
     
     Ok(())
 }
