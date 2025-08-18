@@ -570,9 +570,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
             if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 let token_estimate = compressed_context.len() / 4;
-                eprintln!(
-                    "[DEBUG] RepoCtx: injected={token_estimate} tokens (compressed)"
-                );
+                eprintln!("[DEBUG] RepoCtx: injected={token_estimate} tokens (compressed)");
             }
 
             format!(
@@ -580,9 +578,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             )
         } else {
             // No README found, use base prompt with minimal context
-            format!(
-                "{base_system_prompt}\n\nWorking directory: {repo_context_str}"
-            )
+            format!("{base_system_prompt}\n\nWorking directory: {repo_context_str}")
         }
     } else {
         // No context injection
@@ -1631,12 +1627,13 @@ async fn initialize_llm_client(
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
     if let Ok(client) = LlmClient::from_env()
-        && client.complete(vec![Message::user("ping")]).await.is_ok() {
-            if !print_mode {
-                println!("✓ Connected to Ollama at {}", client.provider_name());
-            }
-            return Ok(client);
+        && client.complete(vec![Message::user("ping")]).await.is_ok()
+    {
+        if !print_mode {
+            println!("✓ Connected to Ollama at {}", client.provider_name());
         }
+        return Ok(client);
+    }
 
     if !print_mode {
         println!("Ollama not available.");
@@ -1679,9 +1676,7 @@ async fn initialize_llm_client(
             Ok(path) => path,
             Err(_) => {
                 if !print_mode {
-                    print!(
-                        "Model '{model_file}' not found locally. Download now? (Y/n) "
-                    );
+                    print!("Model '{model_file}' not found locally. Download now? (Y/n) ");
                     io::stdout().flush()?;
                     let mut input = String::new();
                     io::stdin().read_line(&mut input)?;

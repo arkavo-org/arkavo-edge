@@ -169,8 +169,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let system_message = Message::system(
         "You are a helpful AI assistant with access to the user's codebase and tools.",
     );
-    let messages = runtime
-        .block_on(conversation_manager.get_context_messages(Some(system_message)))?;
+    let messages =
+        runtime.block_on(conversation_manager.get_context_messages(Some(system_message)))?;
 
     // Create channels for communication between TUI and LLM
     let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
@@ -271,12 +271,13 @@ async fn initialize_llm_client(
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
     if let Ok(client) = LlmClient::from_env()
-        && client.complete(vec![Message::user("ping")]).await.is_ok() {
-            if !print_mode {
-                println!("✓ Connected to Ollama at {}", client.provider_name());
-            }
-            return Ok(client);
+        && client.complete(vec![Message::user("ping")]).await.is_ok()
+    {
+        if !print_mode {
+            println!("✓ Connected to Ollama at {}", client.provider_name());
         }
+        return Ok(client);
+    }
 
     if !print_mode {
         println!("Ollama not available. Using local model with llama.cpp...");
