@@ -1,7 +1,40 @@
 pub use arkavo_llama_cpp_sys as ffi;
 
 use std::ffi::CString;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// Global flag to control llama.cpp logging
+static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
+
+// Custom log callback that filters based on log level and our debug flag
+extern "C" fn llama_log_callback_filtered(level: ffi::ggml_log_level, text: *const c_char, _user_data: *mut c_void) {
+    // Only show logs if debug is enabled or if it's a warning/error
+    let show_log = LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) 
+        || level >= ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
+    
+    if show_log && !text.is_null() {
+        unsafe {
+            let c_str = std::ffi::CStr::from_ptr(text);
+            if let Ok(str_slice) = c_str.to_str() {
+                eprint!("{}", str_slice);
+            }
+        }
+    }
+}
+
+/// Initialize llama.cpp logging based on ARKAVO_DEBUG_CHAT environment variable
+pub fn init_llama_logging() {
+    // Check environment variable
+    if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        LLAMA_LOGGING_ENABLED.store(true, Ordering::Relaxed);
+    }
+    
+    // Set our custom log callback
+    unsafe {
+        ffi::llama_log_set(Some(llama_log_callback_filtered), std::ptr::null_mut());
+    }
+}
 
 pub struct LlamaModel {
     pub(crate) ptr: *mut ffi::llama_model,

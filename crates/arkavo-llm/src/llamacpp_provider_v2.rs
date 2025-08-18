@@ -2,7 +2,7 @@ use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 use arkavo_llama_cpp::{
     ffi, LlamaContext, LlamaModel, LlamaSampler, apply_chat_template, 
     tokenize_with_model, token_to_piece, batch_init_with_tokens, batch_free, decode_batch, 
-    create_sampler_chain, test_minimal_init
+    create_sampler_chain, test_minimal_init, init_llama_logging
 };
 use async_trait::async_trait;
 use std::ffi::CString;
@@ -93,6 +93,9 @@ impl LlamaCppProvider {
         if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
             DEBUG_LLAMACPP.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        
+        // Initialize llama.cpp logging (will check ARKAVO_DEBUG_CHAT internally)
+        init_llama_logging();
         
         // Initialize backend with proper cleanup
         unsafe { ffi::llama_backend_init(); }
