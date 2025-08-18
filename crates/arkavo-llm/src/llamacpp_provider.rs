@@ -150,6 +150,7 @@ impl LlamaCppProvider {
 
                 // Generation loop - limit to reasonable context window  
                 let max_generation = std::cmp::min(config.max_tokens, 1500); // Leave 512 tokens for input
+                let mut recent_output = String::new(); // Track recent output to detect stop sequences
                 for i in 0..max_generation {
                     // Guardrail: assert logits exist before sampling (step 3)
                     let logits_ptr = ctx.get_logits_ith(-1);
@@ -176,11 +177,38 @@ impl LlamaCppProvider {
                     let piece = token_to_piece(vocab, token, false)
                         .map_err(|e| Error::Config(format!("Failed to decode token: {}", e)))?;
                     
-                    // Debug: check if we're outputting what looks like an end token
-                    if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
-                        if piece.contains("im_end") || piece.contains("end_of_turn") {
-                            eprintln!("WARNING: Token {} decoded to '{}' - might be wrong EOS token", token, piece);
+                    // Accumulate recent output to check for stop sequences
+                    recent_output.push_str(&piece);
+                    if recent_output.len() > 50 {
+                        recent_output = recent_output[recent_output.len() - 50..].to_string();
+                    }
+                    
+                    // Check for common stop sequences that the model might output as text
+                    let stop_sequences = ["<|im_end|>", "<end_of_turn>", "</s>"];
+                    let mut found_stop = false;
+                    for stop_seq in &stop_sequences {
+                        if recent_output.contains(stop_seq) {
+                            if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                                eprintln!("Detected stop sequence '{}' in output", stop_seq);
+                            }
+                            // Don't send the stop sequence itself
+                            if !piece.trim().is_empty() && !stop_sequences.contains(&piece.as_str()) {
+                                // Send partial content before stop sequence if any
+                                if let Some(idx) = recent_output.find(stop_seq) {
+                                    let before_stop = &recent_output[..idx];
+                                    if !before_stop.is_empty() && before_stop != piece {
+                                        // We've already sent this content
+                                    }
+                                }
+                            }
+                            found_stop = true;
+                            break;
                         }
+                    }
+                    
+                    if found_stop {
+                        tracing::info!("Generation stopped at stop sequence");
+                        break;
                     }
 
                     // Record first token timing
@@ -190,7 +218,7 @@ impl LlamaCppProvider {
 
                     tokens_generated += 1;
 
-                    // Send the token
+                    // Send the token only if it's not part of a stop sequence
                     let response = StreamResponse {
                         content: piece,
                         done: i + 1 >= config.max_tokens,
