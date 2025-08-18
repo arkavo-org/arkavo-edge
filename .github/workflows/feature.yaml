@@ -114,6 +114,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -131,6 +133,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -154,6 +158,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       
       - uses: dtolnay/rust-toolchain@stable
       
@@ -210,6 +217,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -569,6 +578,9 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -671,6 +683,9 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -747,6 +762,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Test documentation examples
@@ -775,6 +792,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

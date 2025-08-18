@@ -56,7 +56,7 @@ impl LlamaCppProvider {
     ) -> Result<Self> {
         // Initialize llama.cpp logging
         init_llama_logging();
-        
+
         // Enable debug if requested
         if config.debug {
             arkavo_llama_cpp::set_debug_logging(true);

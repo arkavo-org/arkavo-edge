@@ -544,8 +544,8 @@ pub fn test_minimal_init() -> Result<(), String> {
     _model_params.use_mmap = false; // avoid vm tricks until stable
     _model_params.use_mlock = false; // avoid locking (needs perms)
 
-    // Only show debug output if ARKAVO_DEBUG_CHAT is enabled
-    if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+    // Only show debug output if debug logging is enabled
+    if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
         eprintln!("✓ llama_model_default_params() succeeded");
         eprintln!("✓ Minimal FFI initialization test passed!");
     }
