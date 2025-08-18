@@ -369,10 +369,16 @@ pub fn create_sampler_chain(temp: f32, top_p: f32, top_k: i32, _seed: u32) -> Re
     if temp > 0.0 {
         sampler.add_temp(temp);
         sampler.add_greedy(); // Fallback sampler to guarantee selection
-        eprintln!("sampler chain: temp={} + greedy fallback", temp);
+        // Only show debug if ARKAVO_DEBUG_CHAT is set
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!("sampler chain: temp={} + greedy fallback", temp);
+        }
     } else {
         sampler.add_greedy();
-        eprintln!("sampler chain: greedy only");
+        // Only show debug if ARKAVO_DEBUG_CHAT is set
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            eprintln!("sampler chain: greedy only");
+        }
     }
     
     // TODO: Re-enable complex chain with top_k/top_p once temp+greedy is stable

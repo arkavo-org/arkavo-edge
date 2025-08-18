@@ -15,9 +15,9 @@ use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
 use uuid;
 
-// Global flag to control whether to show debug messages (kept for future use)
-#[allow(dead_code)]
-static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
+// Global flag to control whether to show debug messages
+// Set via ARKAVO_DEBUG_CHAT=1 environment variable
+static SHOW_DEBUG: AtomicBool = AtomicBool::new(false);
 
 // Global runtime to prevent multiple runtime creation issues
 static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
@@ -87,6 +87,11 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize debug flag from environment variable
+    if env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+        SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    
     // Terminal UI is now the default, use --no-tui to disable it
     let use_tui = !args.contains(&"--no-tui".to_string());
 
@@ -823,40 +828,50 @@ async fn process_message_print(
     eprintln!("[DEBUG] Provider: {}", client.provider_name());
 
     // Use streaming but only print content
-    eprintln!("[DEBUG] Calling client.stream() to get response stream...");
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Calling client.stream() to get response stream...");
+    }
     let stream_result = client.stream(messages.to_vec()).await;
 
     match stream_result {
         Ok(mut stream) => {
-            eprintln!("[DEBUG] Stream created successfully, waiting for chunks...");
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DEBUG] Stream created successfully, waiting for chunks...");
+            }
             let mut full_response = String::new();
             let mut chunk_count = 0;
             let mut total_chars = 0;
 
             loop {
-                eprintln!(
-                    "[DEBUG] Polling for next chunk (chunk #{}, elapsed: {:?})...",
-                    chunk_count + 1,
-                    start_time.elapsed()
-                );
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[DEBUG] Polling for next chunk (chunk #{}, elapsed: {:?})...",
+                        chunk_count + 1,
+                        start_time.elapsed()
+                    );
+                }
 
                 match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next()).await
                 {
                     Ok(Some(chunk)) => {
                         chunk_count += 1;
-                        eprintln!(
-                            "[DEBUG] Received chunk #{} after {:?}",
-                            chunk_count,
-                            start_time.elapsed()
-                        );
+                        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!(
+                                "[DEBUG] Received chunk #{} after {:?}",
+                                chunk_count,
+                                start_time.elapsed()
+                            );
+                        }
 
                         match chunk {
                             Ok(response) => {
                                 let chunk_size = response.content.len();
-                                eprintln!(
-                                    "[DEBUG] Chunk #{}: {} chars, done={}",
-                                    chunk_count, chunk_size, response.done
-                                );
+                                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                    eprintln!(
+                                        "[DEBUG] Chunk #{}: {} chars, done={}",
+                                        chunk_count, chunk_size, response.done
+                                    );
+                                }
 
                                 print!("{}", response.content);
                                 io::stdout().flush()?;
@@ -864,7 +879,9 @@ async fn process_message_print(
                                 total_chars += chunk_size;
 
                                 if response.done {
-                                    eprintln!("[DEBUG] Stream marked as done, breaking loop");
+                                    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                        eprintln!("[DEBUG] Stream marked as done, breaking loop");
+                                    }
                                     break;
                                 }
                             }
@@ -875,7 +892,9 @@ async fn process_message_print(
                         }
                     }
                     Ok(None) => {
-                        eprintln!("[DEBUG] Stream ended naturally after {chunk_count} chunks");
+                        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[DEBUG] Stream ended naturally after {chunk_count} chunks");
+                        }
                         break;
                     }
                     Err(_) => {
@@ -900,24 +919,30 @@ async fn process_message_print(
                 }
             }
 
-            eprintln!(
-                "[DEBUG] Stream completed: {} chunks, {} total chars, elapsed: {:?}",
-                chunk_count,
-                total_chars,
-                start_time.elapsed()
-            );
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DEBUG] Stream completed: {} chunks, {} total chars, elapsed: {:?}",
+                    chunk_count,
+                    total_chars,
+                    start_time.elapsed()
+                );
+            }
 
             println!(); // New line at end
 
             // Check if the response contains @tool calls and execute them
             if let Some(mcp) = mcp_client {
-                eprintln!("[DEBUG] Checking for MCP tool calls in response...");
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("[DEBUG] Checking for MCP tool calls in response...");
+                }
                 let (response_text, tool_results) =
                     handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
 
                 // If we executed tools, print them
                 if !tool_results.is_empty() {
-                    eprintln!("[DEBUG] Executed {} MCP tools", tool_results.len());
+                    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("[DEBUG] Executed {} MCP tools", tool_results.len());
+                    }
                     for (tool_name, result) in tool_results {
                         println!("\n[Tool Result - {tool_name}]:");
 

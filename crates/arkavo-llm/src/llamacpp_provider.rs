@@ -11,6 +11,9 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
+// Debug flag controlled by ARKAVO_DEBUG_CHAT environment variable
+static DEBUG_LLAMACPP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
     pub temperature: f32,
@@ -45,6 +48,11 @@ impl LlamaCppProvider {
     }
 
     pub fn new_with_config(model_name: String, model_path: String, config: SamplingConfig) -> Result<Self> {
+        // Initialize debug flag from environment variable once
+        if std::env::var("ARKAVO_DEBUG_CHAT").unwrap_or_default() == "1" {
+            DEBUG_LLAMACPP.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        
         // Run minimal FFI test first to catch early crashes
         test_minimal_init()
             .map_err(|e| Error::Config(format!("FFI initialization test failed: {}", e)))?;
@@ -90,7 +98,9 @@ impl LlamaCppProvider {
                     .map_err(|e| Error::Config(format!("Failed to tokenize: {}", e)))?;
 
                 tracing::info!("Input tokenized to {} tokens", input_tokens.len());
-                eprintln!("🔍 First 10 tokens: {:?}", input_tokens.iter().take(10).collect::<Vec<_>>());
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("🔍 First 10 tokens: {:?}", input_tokens.iter().take(10).collect::<Vec<_>>());
+                }
 
                 // Create sampler
                 let sampler = create_sampler_chain(
@@ -104,7 +114,9 @@ impl LlamaCppProvider {
                 let eos_token = 106; // Gemma-3 EOS token from model metadata
                 
                 // Process input tokens - CRUCIAL: request logits on final token for sampling
-                eprintln!("🔥 About to decode input batch with {} tokens", input_tokens.len());
+                if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("🔥 About to decode input batch with {} tokens", input_tokens.len());
+                }
                 
                 // Try smaller batch processing to avoid hanging issues
                 if input_tokens.len() > 32 {
@@ -112,7 +124,9 @@ impl LlamaCppProvider {
                     let chunk_size = 16;
                     let mut pos_offset = 0i32;
                     for (i, chunk) in input_tokens.chunks(chunk_size).enumerate() {
-                        eprintln!("  📦 Processing chunk {} with {} tokens (pos_offset: {})", i + 1, chunk.len(), pos_offset);
+                        if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("  📦 Processing chunk {} with {} tokens (pos_offset: {})", i + 1, chunk.len(), pos_offset);
+                        }
                         let is_last_chunk = (i + 1) * chunk_size >= input_tokens.len();
                         let batch = batch_get_one_with_offset(chunk, pos_offset, is_last_chunk);
                         decode_batch(&ctx, batch)
@@ -134,11 +148,15 @@ impl LlamaCppProvider {
                     if logits_ptr.is_null() {
                         return Err(Error::Config("No logits available for sampling - decode step missing logits=1".to_string()));
                     }
-                    eprintln!("✓ Logits available for sampling token #{}", i + 1);
+                    if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("✓ Logits available for sampling token #{}", i + 1);
+                    }
                     
                     // Sample next token (using -1 for last logits)
                     let token = sampler.sample(&ctx, -1);
-                    eprintln!("Sampled token: {}", token);
+                    if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("Sampled token: {}", token);
+                    }
                     
                     // Check for EOS
                     if token == eos_token {
