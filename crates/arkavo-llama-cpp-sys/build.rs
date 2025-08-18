@@ -48,7 +48,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
     println!("cargo:rustc-link-lib=static=ggml-cpu");
-    
+
     // Only link ggml-blas if it exists (it may not be built when BLAS is OFF)
     let blas_lib = dst.join("lib").join("libggml-blas.a");
     if blas_lib.exists() {
