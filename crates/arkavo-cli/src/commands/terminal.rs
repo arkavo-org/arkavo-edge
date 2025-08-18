@@ -85,6 +85,13 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         SHOW_DEBUG.store(true, Ordering::Relaxed);
     }
 
+    // Parse model selection
+    let model_name = args
+        .windows(2)
+        .find(|w| w[0] == "--model")
+        .map(|w| w[1].clone())
+        .unwrap_or_else(|| "gemma-3-270m".to_string());
+
     // Parse sampling parameters for llama.cpp
     let temperature = args
         .windows(2)
@@ -133,6 +140,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize LLM client
     let client = runtime.block_on(initialize_llm_client(
         false,
+        &model_name,
         temperature,
         top_p,
         top_k,
@@ -254,6 +262,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 async fn initialize_llm_client(
     print_mode: bool,
+    model_name: &str,
     temperature: f32,
     top_p: f32,
     top_k: i32,
@@ -279,8 +288,24 @@ async fn initialize_llm_client(
     {
         use hf_hub::api::tokio::Api;
 
-        let model_repo = "unsloth/gemma-3-270m-it-GGUF";
-        let model_file = "gemma-3-270m-it-Q4_0.gguf";
+        // Select model based on parameter
+        let (model_repo, model_file, display_name) = match model_name {
+            "gemma-2-2b" | "gemma-2b" => (
+                "bartowski/gemma-2-2b-it-GGUF",
+                "gemma-2-2b-it-Q4_K_M.gguf",
+                "gemma-2-2b-it",
+            ),
+            _ => (
+                // Default to gemma-3-270m
+                "unsloth/gemma-3-270m-it-GGUF",
+                "gemma-3-270m-it-Q4_0.gguf",
+                "gemma-3-270m-it",
+            ),
+        };
+
+        if !print_mode {
+            println!("Loading model: {}", display_name);
+        }
 
         let api = Api::new()?;
         let repo = api.repo(hf_hub::Repo::model(model_repo.to_string()));
@@ -298,9 +323,8 @@ async fn initialize_llm_client(
             }
         };
 
-        let model_name = "gemma-3-270m-it";
         LlmClient::from_llamacpp_model_with_config(
-            model_name,
+            display_name,
             final_path.to_string_lossy().to_string(),
             temperature,
             top_p,
