@@ -2,6 +2,15 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // Skip building for musl targets - llama.cpp doesn't work well with musl
+    let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("musl") {
+        println!("cargo:warning=Skipping llama.cpp build for musl target");
+        // Create dummy bindings for musl
+        let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+        std::fs::write(out_path.join("bindings.rs"), "// Dummy bindings for musl\n").unwrap();
+        return;
+    }
     // Track the actual header file location (relative to crate root)
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
 
@@ -47,7 +56,7 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
-    
+
     // Only link libraries that actually exist
     if lib_dir.join("libggml-base.a").exists() {
         println!("cargo:rustc-link-lib=static=ggml-base");
