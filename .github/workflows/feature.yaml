@@ -118,7 +118,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -140,7 +141,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -169,7 +171,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       
       - uses: dtolnay/rust-toolchain@stable
       
@@ -230,7 +233,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -596,7 +600,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -704,7 +709,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -786,7 +792,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Test documentation examples
@@ -819,7 +826,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

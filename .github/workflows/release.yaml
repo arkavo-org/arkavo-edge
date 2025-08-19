@@ -116,7 +116,8 @@ jobs:
         run: |
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
 
       - name: Install dependencies for glibc build
         if: matrix.needs_musl == false

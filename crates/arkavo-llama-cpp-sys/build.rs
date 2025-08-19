@@ -89,7 +89,11 @@ fn main() {
         println!("cargo:rustc-link-lib=m"); // math library
 
         // Static linking of OpenMP for zero-config deployment
+        // Try multiple possible GCC library paths
         println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
+        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
+        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
+        println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
         println!("cargo:rustc-link-lib=static=gomp"); // Static OpenMP
     }
 

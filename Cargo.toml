@@ -56,7 +56,7 @@ base64 = "0.22.1"
 jsonschema = "0.26.2"
 thiserror = "2.0.12"
 tempfile = "3.20"
-reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
