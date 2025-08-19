@@ -3,7 +3,6 @@ use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
-use chrono;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::json;
 use std::env;
@@ -16,9 +15,154 @@ use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
 use uuid;
 
-// Global flag to control whether to show debug messages (kept for future use)
-#[allow(dead_code)]
-static SHOW_DEBUG: AtomicBool = AtomicBool::new(true);
+// Global flag to control whether to show debug messages
+// Set via --debug command line flag
+pub(crate) static SHOW_DEBUG: AtomicBool = AtomicBool::new(false);
+
+// Global flag for repo context mode (can be changed via REPL command)
+static REPO_CONTEXT_MODE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+// Global runtime to prevent multiple runtime creation issues
+static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
+
+fn get_or_create_runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .thread_name("arkavo-chat-worker")
+            .thread_stack_size(3 * 1024 * 1024)
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime")
+    })
+}
+
+/// Determines if repository context should be attached based on the prompt
+fn should_attach_repo_context(prompt: &str) -> bool {
+    let p = prompt.trim();
+
+    // Short math/calculation pattern - no context needed
+    if p.len() < 32 {
+        // Check if it's just numbers and math operators
+        let is_math = p.chars().all(|c| "0123456789+-*/().=? \t\n".contains(c));
+        if is_math {
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DEBUG] RepoCtx: skipped (short math expression)");
+            }
+            return false;
+        }
+    }
+
+    // Greeting patterns - no context needed
+    let greetings = [
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    ];
+    let lower = p.to_lowercase();
+    if p.len() < 20
+        && greetings
+            .iter()
+            .any(|g| lower == *g || lower == format!("{g}!"))
+    {
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: skipped (greeting)");
+        }
+        return false;
+    }
+
+    // Keywords that indicate code/doc related queries - context needed
+    let code_keywords = [
+        "readme",
+        "build",
+        "compile",
+        "cargo",
+        "rust",
+        "error:",
+        "panic",
+        ".rs",
+        ".gd",
+        ".swift",
+        ".toml",
+        "arkavo",
+        "how do i",
+        "how to",
+        "api",
+        "design",
+        "function",
+        "struct",
+        "impl",
+        "trait",
+        "module",
+        "test",
+        "debug",
+        "fix",
+        "implement",
+        "code",
+        "file",
+        "directory",
+        "git",
+        "branch",
+        "commit",
+        "repository",
+        "project",
+        "crate",
+    ];
+
+    if code_keywords.iter().any(|k| lower.contains(k)) {
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: will inject (code/doc keyword detected)");
+        }
+        return true;
+    }
+
+    // Default: no context for unrecognized patterns
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] RepoCtx: skipped (no relevant keywords)");
+    }
+    false
+}
+
+/// Compresses repository context to a digest suitable for small models
+fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
+    // For now, take the first part of the content with a clear header
+    // In the future, this could do smart summarization
+    let header = "[PROJECT CONTEXT DIGEST — KEEP ANSWER CONCISE]\n";
+
+    // Estimate ~4 chars per token (rough approximation)
+    let max_chars = max_tokens * 4;
+
+    if full_content.len() <= max_chars {
+        format!("{header}{full_content}")
+    } else {
+        // Take key sections: title, overview, and first few command examples
+        let lines: Vec<&str> = full_content.lines().collect();
+        let mut digest = String::from(header);
+        let mut token_budget = max_tokens - 20; // Reserve some for header
+
+        for line in lines {
+            // Prioritize headers and overview sections
+            if line.starts_with("# ")
+                || line.starts_with("## Project Overview")
+                || line.starts_with("## Key Command")
+                || line.contains("arkavo")
+            {
+                digest.push_str(line);
+                digest.push('\n');
+                token_budget = token_budget.saturating_sub(line.len() / 4);
+                if token_budget < 50 {
+                    break;
+                }
+            }
+        }
+
+        digest.push_str("\n(Use 'show docs' for more details)\n");
+        digest
+    }
+}
 
 // Runtime MCP initialization - checks if test-harness feature is available
 #[cfg(all(target_os = "macos", feature = "test-harness"))]
@@ -71,10 +215,18 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     }
 }
 
+/// Execute the chat command
+///
+/// # Panics
+///
+/// May panic if RwLock is poisoned
 #[allow(clippy::disallowed_methods)]
+#[allow(clippy::significant_drop_tightening)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    // Terminal UI is now the default, use --no-tui to disable it
-    let use_tui = !args.contains(&"--no-tui".to_string());
+    // Check for --debug flag in arguments
+    if args.iter().any(|arg| arg == "--debug") {
+        SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 
     // Check if there's a --prompt argument (also accepts --print for compatibility)
     let prompt = args
@@ -93,14 +245,70 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         || args.contains(&"--prompt".to_string())
         || prompt.is_some();
 
-    // Create runtime for async operations
-    let runtime = Runtime::new()?;
+    // Check if --new-session flag is present to start fresh without history
+    let new_session = args.contains(&"--new-session".to_string());
 
-    // Launch Terminal UI early if requested and not in print mode
-    if use_tui && !print_mode {
-        // For TUI mode, we'll initialize everything inside the TUI
-        return launch_terminal_ui(runtime);
+    // Parse model selection
+    let model_name = args
+        .windows(2)
+        .find(|w| w[0] == "--model")
+        .map(|w| w[1].clone())
+        .unwrap_or_else(|| "gemma-3-270m".to_string());
+
+    // Parse repo context mode: auto (default), on, off
+    let repo_context_mode = args
+        .windows(2)
+        .find(|w| w[0] == "--repo-context")
+        .map(|w| w[1].clone())
+        .or_else(|| env::var("ARKAVO_REPO_CONTEXT").ok())
+        .unwrap_or_else(|| "auto".to_string());
+
+    // Store repo context mode globally for REPL commands
+    {
+        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+        *mode = repo_context_mode;
     }
+
+    // Parse sampling parameters for llama.cpp
+    let temperature = args
+        .windows(2)
+        .find(|w| w[0] == "--temperature")
+        .and_then(|w| w[1].parse::<f32>().ok())
+        .unwrap_or(0.7);
+    let top_p = args
+        .windows(2)
+        .find(|w| w[0] == "--top-p")
+        .and_then(|w| w[1].parse::<f32>().ok())
+        .unwrap_or(0.9);
+    let top_k = args
+        .windows(2)
+        .find(|w| w[0] == "--top-k")
+        .and_then(|w| w[1].parse::<i32>().ok())
+        .unwrap_or(40);
+    let max_tokens = args
+        .windows(2)
+        .find(|w| w[0] == "--max-tokens")
+        .and_then(|w| w[1].parse::<u32>().ok())
+        .or_else(|| {
+            std::env::var("ARKAVO_MAX_TOKENS")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+        })
+        .unwrap_or(4096); // Default to 4K tokens
+    let seed = args
+        .windows(2)
+        .find(|w| w[0] == "--seed")
+        .and_then(|w| w[1].parse::<u32>().ok())
+        .unwrap_or_else(|| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            std::time::SystemTime::now().hash(&mut hasher);
+            hasher.finish() as u32
+        });
+
+    // Use global runtime to prevent multiple runtime creation issues
+    let runtime = get_or_create_runtime();
 
     // Initialize memory storage
     let memory_storage = Arc::new(runtime.block_on(MemoryStorage::new())?);
@@ -112,29 +320,77 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let _repo_context_manager = RepositoryContextManager::new(memory_storage)?;
 
     // Initialize LLM client with fallback to prompt for remote server
-    let client = runtime.block_on(initialize_llm_client(print_mode))?;
+    let client = runtime.block_on(initialize_llm_client(
+        print_mode,
+        &model_name,
+        temperature,
+        top_p,
+        top_k,
+        max_tokens,
+        seed,
+    ))?;
+
+    // Detect model size hint from model name
+    let model_size_hint =
+        if client.provider_name().contains("270m") || client.provider_name().contains("270M") {
+            Some("270M")
+        } else if client.provider_name().contains("1b") || client.provider_name().contains("1B") {
+            Some("1B")
+        } else if client.provider_name().contains("2b") || client.provider_name().contains("2B") {
+            Some("2B")
+        } else if client.provider_name().contains("7b") || client.provider_name().contains("7B") {
+            Some("7B")
+        } else {
+            None
+        };
 
     if !print_mode {
         println!("Starting UI testing chat session...");
         println!("Repository context: {}", get_current_directory());
         println!("LLM Provider: {}", client.provider_name());
 
-        // Try to restore last session
-        if let Ok(Some(session_id)) = runtime.block_on(conversation_manager.restore_last_session())
-        {
+        // Show model-specific settings for small models
+        if let Some(size) = &model_size_hint {
+            println!("Model size: {size} - using limited history");
+        }
+
+        // Try to restore last session unless --new-session is specified
+        if new_session {
+            // Start fresh session with metadata
+            let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
+                client.provider_name(),
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                model_size_hint,
+            ))?;
+            println!("Started new conversation session");
+        } else if let Ok(Some(session_id)) = runtime.block_on(
+            conversation_manager.restore_last_session_with_compatibility(
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                Some(client.provider_name()),
+            ),
+        ) {
             println!(
                 "Restored previous conversation (session: {})",
                 &session_id.to_string()[..8]
             );
         } else {
-            // Start new session
-            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+            // Start new session with metadata
+            let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
+                client.provider_name(),
+                Some("gemma3"), // TODO: Get actual template name
+                None,           // System prompt not available yet
+                model_size_hint,
+            ))?;
         }
 
         println!("Type '/exit' or '/quit' to end the session.");
+        println!("Commands: /read <file>, /list [path], /test, /run <test_name>, /tools");
         println!(
-            "Commands: /read <file>, /list [path], /test, /run <test_name>, /tools, /switch <session>"
+            "Session: /new (start fresh), /clear (clear history), /history (show stats), /switch <id>"
         );
+        println!("Context: /context {{auto|on|off}} - Control repository context injection");
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
@@ -184,7 +440,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize with a minimal context and let the agent ask for more.
     let repo_context_str = format!("Working directory: {}", get_current_directory());
-    let repo_context = json!({
+    let _repo_context = json!({
         "working_directory": get_current_directory(),
     });
 
@@ -263,77 +519,79 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
-    // Try to read AGENTS.md for system prompt
-    let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
-        Ok(content) => Some(content),
-        Err(_) => {
-            // Try CLAUDE.md as fallback
-            std::fs::read_to_string("CLAUDE.md").ok()
-        }
-    };
-
-    let system_prompt = if let Some(agents_content) = agents_md_content {
+    // Build base system prompt (without repo context initially)
+    let base_system_prompt = if mcp_client.is_some() {
         format!(
-            "{}\n\nRepository context:\n{}\n\nRepository details:\n{}\n\n{}",
-            agents_content,
-            repo_context_str,
-            serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
-            mcp_info
+            "You are a helpful AI assistant with access to MCP tools for development tasks.\
+            \n{mcp_info}"
         )
     } else {
-        format!(
-        "You are an expert UI testing assistant working with the Arkavo Edge project. \
-         You have access to MCP tools for clicking elements, entering text, and other UI interactions. \
-         When the user asks you to test something, you should use the appropriate MCP tools to interact with the UI. \
-         Always analyze images thoroughly to understand the current state of the UI before suggesting next steps.
+        "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
+    };
 
-\
-         To invoke an MCP tool, use the format: @toolname {{arguments}} or @toolname plain text arguments\
-         For example: @device_management {{\"action\": \"list\"}} or @ui_interaction {{\"action\": \"tap\", \"element\": \"button\"}}
+    // Determine whether to inject repo context
+    let should_inject_context = if let (true, Some(ref p)) = (print_mode, prompt.as_ref()) {
+        // For print mode with prompt, check if we should attach context
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        match (model_size_hint, current_mode.as_str()) {
+            // Tiny models: only inject if explicitly on or auto with relevant query
+            (Some("270M" | "1B"), "on") => true,
+            (Some("270M" | "1B"), "auto") => should_attach_repo_context(p),
+            (Some("270M" | "1B"), _) => false,
+            // Larger models: inject unless off or auto with irrelevant query
+            (_, "off") => false,
+            (_, "auto") => should_attach_repo_context(p),
+            (_, _) => true,
+        }
+    } else if !print_mode {
+        // Interactive mode: check based on model size and mode
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        match (model_size_hint, current_mode.as_str()) {
+            (Some("270M" | "1B"), "on") => true,
+            (Some("270M" | "1B"), _) => false, // Default off for tiny in interactive
+            (_, "off") => false,
+            _ => true, // Default on for larger models in interactive
+        }
+    } else {
+        false // No context for other cases
+    };
 
-\
-         TYPICAL UI TESTING WORKFLOW:\
-         1. Use @device_management {{\"action\": \"list\"}} to find available devices\
-         2. Use @screen_capture {{\"device_id\": \"<device_id>\"}} to take a screenshot\
-         3. The screenshot path will be returned, which you can then analyze using vision capabilities\
-         4. Use @ui_interaction for tapping, swiping, or entering text based on what you see
+    let system_prompt = if should_inject_context {
+        // Try to read AGENTS.md or CLAUDE.md
+        let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
+            Ok(content) => Some(content),
+            Err(_) => std::fs::read_to_string("CLAUDE.md").ok(),
+        };
 
-\
-         When a user asks to analyze an image, you should:\
-         - Use @analyze_screenshot with the path to analyze a screenshot: @analyze_screenshot path/to/screenshot.png\
-         - Or use your vision capabilities to analyze the provided image\
-         - Describe what you see in detail\
-         - Suggest appropriate UI interactions based on the content
+        if let Some(agents_content) = agents_md_content {
+            // Determine context size based on model
+            let max_context_tokens = match model_size_hint {
+                Some("270M") => 200,
+                Some("1B") => 300,
+                Some("2B") => 500,
+                _ => 1000,
+            };
 
-\
-         GIT REPOSITORY ANALYSIS:\
-         When asked to perform a \\\"full analysis\\\", \\\"repository analysis\\\", or comprehensive Git analysis:\
-         1. MUST call @build_repository_context {{}} to get the full repository context.\
-         2. MUST call @git_status {{}} to get working tree status\
-         3. MUST call @git_log {{\"limit\": 20}} to get recent commits\
-         4. MUST call @git_diff {{}} to get unstaged changes\
-         5. MUST call @git_diff {{\"staged\": true}} to get staged changes\
-         6. MUST call @git_branch {{\"action\": \"list\"}} to get branch information\
-         7. MUST call @git_remote {{\"action\": \"fetch\"}} to check remote status\
-         \
-         After collecting all responses:\
-         - Generate a structured report with sections for each data type\
-         - Use ONLY actual data from tool responses - DO NOT fabricate any information\
-         - If a tool fails, note the failure in the report\
-         - Store the complete analysis in memory using @store_memory
+            let compressed_context = compress_repo_context(&agents_content, max_context_tokens);
 
-\
-         Initial repository context (minimal):
-{}
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                let token_estimate = compressed_context.len() / 4;
+                eprintln!("[DEBUG] RepoCtx: injected={token_estimate} tokens (compressed)");
+            }
 
-Full repository details (available via @build_repository_context):
-{}
-
-{}",
-        repo_context_str,
-        serde_json::to_string_pretty(&repo_context).unwrap_or_default(),
-        mcp_info
-    )
+            format!(
+                "{base_system_prompt}\n\n{compressed_context}\n\nWorking directory: {repo_context_str}"
+            )
+        } else {
+            // No README found, use base prompt with minimal context
+            format!("{base_system_prompt}\n\nWorking directory: {repo_context_str}")
+        }
+    } else {
+        // No context injection
+        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("[DEBUG] RepoCtx: not injected (model/mode policy)");
+        }
+        base_system_prompt
     };
 
     // Get conversation context with system message
@@ -348,8 +606,19 @@ Full repository details (available via @build_repository_context):
         // In print mode, just create a simple message list
         vec![system_message.clone()]
     } else {
-        // In interactive mode, get full context from conversation manager
-        runtime.block_on(conversation_manager.get_context_messages(Some(system_message.clone())))?
+        // In interactive mode, get context with appropriate history limits
+        let history_limit = if model_size_hint == Some("270M") {
+            Some(2) // Very limited for tiny models
+        } else if let Some("1B" | "2B") = model_size_hint {
+            Some(4)
+        } else {
+            None // Use default
+        };
+
+        runtime.block_on(
+            conversation_manager
+                .get_context_messages_with_limits(Some(system_message.clone()), history_limit),
+        )?
     };
 
     // If prompt provided via command line, process it and exit
@@ -386,85 +655,6 @@ Full repository details (available via @build_repository_context):
         return Ok(());
     }
 
-    // Launch Terminal UI if requested
-    if use_tui && !print_mode {
-        // Create channels for communication between TUI and LLM
-        let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel::<String>(100);
-        let (llm_tx, llm_rx) = tokio::sync::mpsc::channel::<String>(100);
-
-        // Clone necessary components for the TUI task
-        let client = Arc::new(client);
-        let client_clone: Arc<LlmClient> = Arc::clone(&client);
-        let mut messages_clone = messages.clone();
-
-        // Spawn LLM processing task
-        let llm_handle = runtime.spawn(async move {
-            eprintln!("[LLM Task] Started, waiting for messages...");
-            while let Some(user_input) = ui_rx.recv().await {
-                eprintln!("[LLM Task] Received user input: {user_input}");
-                // Process the user input with LLM
-                let user_message = Message::user(user_input.clone());
-                messages_clone.push(user_message);
-
-                // Get streaming response from LLM
-                match client_clone.stream(messages_clone.clone()).await {
-                    Ok(mut stream) => {
-                        let mut full_response = String::new();
-
-                        // Send start streaming signal
-                        let _ = llm_tx.send("<<STREAM_START>>".to_string()).await;
-
-                        while let Some(chunk_result) = stream.next().await {
-                            match chunk_result {
-                                Ok(chunk) => {
-                                    if !chunk.content.is_empty() {
-                                        full_response.push_str(&chunk.content);
-                                        // Send each chunk as it arrives
-                                        let _ = llm_tx
-                                            .send(format!("<<STREAM_CHUNK>>{}", chunk.content))
-                                            .await;
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ =
-                                        llm_tx.send(format!("<<STREAM_ERROR>>Error: {e}")).await;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Send end streaming signal
-                        let _ = llm_tx.send("<<STREAM_END>>".to_string()).await;
-
-                        // Save the complete message
-                        let assistant_message = Message::assistant(full_response.clone());
-                        messages_clone.push(assistant_message);
-                        eprintln!(
-                            "[LLM Task] Response complete, {} chars. Messages in context: {}",
-                            full_response.len(),
-                            messages_clone.len()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[LLM Task] Error: {e}");
-                        let _ = llm_tx.send(format!("Error: {e}")).await;
-                    }
-                }
-                eprintln!("[LLM Task] Waiting for next message...");
-            }
-            eprintln!("[LLM Task] Channel closed, exiting...");
-        });
-
-        // Run the Terminal UI with communication channels
-        let tui_result = runtime
-            .block_on(async { arkavo_terminal::run_with_string_channels(ui_tx, llm_rx).await });
-
-        // Clean up
-        llm_handle.abort();
-
-        return tui_result.map_err(std::convert::Into::into);
-    }
-
     // Interactive chat loop
     loop {
         print!("> ");
@@ -484,13 +674,108 @@ Full repository details (available via @build_repository_context):
             break;
         }
 
-        if input == "clear" {
-            // Start new session
+        // Handle /new command - start fresh session
+        if input == "/new" {
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
-            messages = runtime.block_on(
-                conversation_manager.get_context_messages(Some(system_message.clone())),
-            )?;
-            println!("Conversation cleared. New session started.");
+            messages = vec![system_message.clone()];
+            println!("Started new conversation session");
+            continue;
+        }
+
+        // Handle /clear command - clear current session
+        if input == "/clear" {
+            conversation_manager.clear_session()?;
+            let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
+            messages = vec![system_message.clone()];
+            println!("Cleared conversation history");
+            continue;
+        }
+
+        // Handle /context command - toggle repo context mode
+        if input.starts_with("/context") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() > 1 {
+                let new_mode = parts[1];
+                if ["auto", "on", "off"].contains(&new_mode) {
+                    {
+                        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+                        *mode = new_mode.to_string();
+                    }
+                    println!("Repository context mode set to: {new_mode}");
+                    match new_mode {
+                        "auto" => println!("  Context will be injected based on query relevance"),
+                        "on" => println!("  Context will always be injected"),
+                        "off" => println!("  Context will never be injected"),
+                        _ => {}
+                    }
+                } else {
+                    println!("Invalid mode. Use: /context {{auto|on|off}}");
+                }
+            } else {
+                {
+                    let mode = REPO_CONTEXT_MODE.read().unwrap();
+                    println!("Current repository context mode: {mode}");
+                }
+                println!("Use: /context {{auto|on|off}} to change");
+            }
+            continue;
+        }
+
+        // Handle /history command - show session stats
+        if input.starts_with("/history") {
+            let parts: Vec<&str> = input.split_whitespace().collect();
+            if parts.len() > 1 && parts[1] == "--last" {
+                // Show last N messages
+                let n = parts
+                    .get(2)
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(5);
+                println!("\nLast {n} messages:");
+                let display_messages = messages.iter().rev().take(n).rev();
+                for msg in display_messages {
+                    match msg.role {
+                        arkavo_llm::Role::User => println!("User: {}", msg.content),
+                        arkavo_llm::Role::Assistant => {
+                            let preview = if msg.content.len() > 100 {
+                                format!("{}...", &msg.content[..100])
+                            } else {
+                                msg.content.clone()
+                            };
+                            println!("Assistant: {preview}");
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                // Show session statistics
+                match runtime.block_on(conversation_manager.get_session_stats()) {
+                    Ok((turns, tokens, fence_balanced)) => {
+                        println!("\nSession statistics:");
+                        println!("  Messages: {turns}");
+                        println!("  Tokens: {tokens}");
+                        println!(
+                            "  Code fence parity: {}",
+                            if fence_balanced {
+                                "✓ balanced"
+                            } else {
+                                "⚠ UNBALANCED"
+                            }
+                        );
+                        if !fence_balanced {
+                            println!(
+                                "  Warning: Unbalanced code fences may cause generation issues"
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("Error getting session stats: {e}"),
+                }
+            }
+            continue;
+        }
+
+        if input == "clear" {
+            // Legacy clear command - redirect to /clear
+            println!("Use /clear to clear conversation history");
             continue;
         }
 
@@ -681,6 +966,44 @@ async fn process_message(
     mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // Debug output if enabled
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[DEBUG] Processing message with {} messages",
+            messages.len()
+        );
+
+        // Show template info (first 200 and last 200 chars)
+        let full_context = messages
+            .iter()
+            .map(|m| format!("{:?}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let preview = if full_context.len() > 400 {
+            format!(
+                "{}...{}",
+                &full_context[..200],
+                &full_context[full_context.len() - 200..]
+            )
+        } else {
+            full_context.clone()
+        };
+        eprintln!("[DEBUG] Context preview: {preview}");
+
+        // Check fence parity
+        let fence_count = full_context.matches("```").count();
+        eprintln!(
+            "[DEBUG] Fence parity check: {} fences ({})",
+            fence_count,
+            if fence_count % 2 == 0 {
+                "balanced"
+            } else {
+                "UNBALANCED!"
+            }
+        );
+    }
+
     print!("Assistant: ");
     io::stdout().flush()?;
 
@@ -771,45 +1094,87 @@ async fn process_message_print(
     use std::time::Instant;
 
     let start_time = Instant::now();
-    eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
-    eprintln!("[DEBUG] Messages count: {}", messages.len());
-    eprintln!("[DEBUG] Provider: {}", client.provider_name());
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Starting process_message_print at {start_time:?}");
+        eprintln!("[DEBUG] Messages count: {}", messages.len());
+        eprintln!("[DEBUG] Provider: {}", client.provider_name());
+
+        // Show template info
+        let full_context = messages
+            .iter()
+            .map(|m| format!("{:?}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let preview = if full_context.len() > 400 {
+            format!(
+                "{}...{}",
+                &full_context[..200],
+                &full_context[full_context.len() - 200..]
+            )
+        } else {
+            full_context.clone()
+        };
+        eprintln!("[DEBUG] Context preview: {preview}");
+
+        // Check fence parity
+        let fence_count = full_context.matches("```").count();
+        eprintln!(
+            "[DEBUG] Fence parity: {} ({})",
+            fence_count,
+            if fence_count % 2 == 0 {
+                "balanced"
+            } else {
+                "UNBALANCED!"
+            }
+        );
+    }
 
     // Use streaming but only print content
-    eprintln!("[DEBUG] Calling client.stream() to get response stream...");
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] Calling client.stream() to get response stream...");
+    }
     let stream_result = client.stream(messages.to_vec()).await;
 
     match stream_result {
         Ok(mut stream) => {
-            eprintln!("[DEBUG] Stream created successfully, waiting for chunks...");
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DEBUG] Stream created successfully, waiting for chunks...");
+            }
             let mut full_response = String::new();
             let mut chunk_count = 0;
             let mut total_chars = 0;
 
             loop {
-                eprintln!(
-                    "[DEBUG] Polling for next chunk (chunk #{}, elapsed: {:?})...",
-                    chunk_count + 1,
-                    start_time.elapsed()
-                );
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[DEBUG] Polling for next chunk (chunk #{}, elapsed: {:?})...",
+                        chunk_count + 1,
+                        start_time.elapsed()
+                    );
+                }
 
                 match tokio::time::timeout(std::time::Duration::from_secs(30), stream.next()).await
                 {
                     Ok(Some(chunk)) => {
                         chunk_count += 1;
-                        eprintln!(
-                            "[DEBUG] Received chunk #{} after {:?}",
-                            chunk_count,
-                            start_time.elapsed()
-                        );
+                        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!(
+                                "[DEBUG] Received chunk #{} after {:?}",
+                                chunk_count,
+                                start_time.elapsed()
+                            );
+                        }
 
                         match chunk {
                             Ok(response) => {
                                 let chunk_size = response.content.len();
-                                eprintln!(
-                                    "[DEBUG] Chunk #{}: {} chars, done={}",
-                                    chunk_count, chunk_size, response.done
-                                );
+                                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                    eprintln!(
+                                        "[DEBUG] Chunk #{}: {} chars, done={}",
+                                        chunk_count, chunk_size, response.done
+                                    );
+                                }
 
                                 print!("{}", response.content);
                                 io::stdout().flush()?;
@@ -817,7 +1182,9 @@ async fn process_message_print(
                                 total_chars += chunk_size;
 
                                 if response.done {
-                                    eprintln!("[DEBUG] Stream marked as done, breaking loop");
+                                    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                        eprintln!("[DEBUG] Stream marked as done, breaking loop");
+                                    }
                                     break;
                                 }
                             }
@@ -828,7 +1195,9 @@ async fn process_message_print(
                         }
                     }
                     Ok(None) => {
-                        eprintln!("[DEBUG] Stream ended naturally after {chunk_count} chunks");
+                        if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[DEBUG] Stream ended naturally after {chunk_count} chunks");
+                        }
                         break;
                     }
                     Err(_) => {
@@ -853,24 +1222,30 @@ async fn process_message_print(
                 }
             }
 
-            eprintln!(
-                "[DEBUG] Stream completed: {} chunks, {} total chars, elapsed: {:?}",
-                chunk_count,
-                total_chars,
-                start_time.elapsed()
-            );
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DEBUG] Stream completed: {} chunks, {} total chars, elapsed: {:?}",
+                    chunk_count,
+                    total_chars,
+                    start_time.elapsed()
+                );
+            }
 
             println!(); // New line at end
 
             // Check if the response contains @tool calls and execute them
             if let Some(mcp) = mcp_client {
-                eprintln!("[DEBUG] Checking for MCP tool calls in response...");
+                if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("[DEBUG] Checking for MCP tool calls in response...");
+                }
                 let (response_text, tool_results) =
                     handle_tool_calls_in_response(&full_response, mcp, client.provider_name())?;
 
                 // If we executed tools, print them
                 if !tool_results.is_empty() {
-                    eprintln!("[DEBUG] Executed {} MCP tools", tool_results.len());
+                    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!("[DEBUG] Executed {} MCP tools", tool_results.len());
+                    }
                     for (tool_name, result) in tool_results {
                         println!("\n[Tool Result - {tool_name}]:");
 
@@ -890,10 +1265,12 @@ async fn process_message_print(
                 }
             }
 
-            eprintln!(
-                "[DEBUG] Response processing complete, total time: {:?}",
-                start_time.elapsed()
-            );
+            if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DEBUG] Response processing complete, total time: {:?}",
+                    start_time.elapsed()
+                );
+            }
             Ok(full_response)
         }
         Err(e) => {
@@ -1249,353 +1626,98 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
-async fn initialize_llm_client(print_mode: bool) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    use std::time::Instant;
-
-    let init_start = Instant::now();
-    eprintln!("[DEBUG] Starting LLM client initialization, print_mode={print_mode}");
-
-    // Initialize memory storage
-    let storage = Arc::new(MemoryStorage::new().await?);
-
-    // Check for previously selected provider
-    eprintln!("[DEBUG] Checking for saved provider configuration...");
-    let saved_provider = storage
-        .search("llm_provider", 1, Some("llm_provider"))
-        .await?
-        .into_iter()
-        .find(|c| c.memory.content != "CLEARED");
-
-    if let Some(ref provider) = saved_provider {
-        eprintln!("[DEBUG] Found saved provider: {}", provider.memory.content);
-    } else {
-        eprintln!("[DEBUG] No saved provider found");
-    }
-
-    // First priority: Try saved Ollama server if configured
-    if let Some(provider_config) = &saved_provider
-        && provider_config.memory.content.starts_with("http")
-    {
-        // Ollama server
-        let server_url = &provider_config.memory.content;
-        eprintln!("[DEBUG] Attempting connection to saved Ollama server: {server_url}");
-        unsafe {
-            std::env::set_var("OLLAMA_BASE_URL", server_url);
-        }
-
-        if let Ok(client) = LlmClient::from_env() {
-            eprintln!("[DEBUG] Client created, testing connection with ping...");
-            let test_message = vec![Message::user("ping")];
-            let test_start = Instant::now();
-
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!(
-                        "[DEBUG] Connection test successful (took {:?})",
-                        test_start.elapsed()
-                    );
-                    if !print_mode {
-                        eprintln!("✓ Connected to saved Ollama server at {server_url}");
-                    }
-                    eprintln!(
-                        "[DEBUG] Total initialization time: {:?}",
-                        init_start.elapsed()
-                    );
-                    return Ok(client);
-                }
-                Err(e) => {
-                    let elapsed = test_start.elapsed();
-                    eprintln!("[DEBUG] Connection test failed after {elapsed:?}: {e}");
-                }
-            }
-        } else {
-            eprintln!("[DEBUG] Failed to create client from saved URL");
-        }
-    }
-
-    // Second priority: Try default localhost Ollama
-    eprintln!("[DEBUG] Attempting connection to localhost:11434...");
-    match LlmClient::from_env() {
-        Ok(client) => {
-            eprintln!("[DEBUG] Local client created, testing connection...");
-            // Test if the client can connect by trying a minimal request
-            let test_message = vec![Message::user("ping")];
-            let test_start = Instant::now();
-
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!(
-                        "[DEBUG] Local connection test successful (took {:?})",
-                        test_start.elapsed()
-                    );
-                    if !print_mode {
-                        eprintln!("✓ Connected to Ollama at localhost:11434");
-                    }
-                    eprintln!(
-                        "[DEBUG] Total initialization time: {:?}",
-                        init_start.elapsed()
-                    );
-                    return Ok(client);
-                }
-                Err(e) => {
-                    let elapsed = test_start.elapsed();
-                    eprintln!("[DEBUG] Local connection test failed after {elapsed:?}: {e}");
-                    if !print_mode {
-                        eprintln!("Could not connect to Ollama at localhost:11434: {e}");
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("[DEBUG] Failed to create local client: {e}");
-            if !print_mode {
-                eprintln!("Ollama not available: {e}");
-            }
-        }
-    }
-
-    // Third priority: Check if previously selected local model is still available
-    if let Some(provider_config) = &saved_provider
-        && provider_config.memory.content.starts_with("local:")
-    {
-        let model_name = provider_config
-            .memory
-            .content
-            .strip_prefix("local:")
-            .unwrap();
-        eprintln!("[DEBUG] Found saved local model preference: {model_name}");
-        if !print_mode {
-            eprintln!("Checking for previously used local model: {model_name}");
-        }
-    }
-
-    // Fourth priority: Try local models from HuggingFace cache
-    #[cfg(feature = "local")]
-    {
-        use arkavo_llm::local::{ModelDownloader, ModelManifest};
-
-        eprintln!("[DEBUG] Checking for local models in HuggingFace cache...");
-        if !print_mode {
-            eprintln!("Checking for local models in HuggingFace cache...");
-        }
-
-        // Load manifest and try models in priority order
-        match ModelManifest::load() {
-            Ok(manifest) => {
-                eprintln!("[DEBUG] Model manifest loaded successfully");
-
-                // Priority order: Phi-2 first (since it's the one mentioned in the issue)
-                let model_priorities = [
-                    "phi-2-q4k",          // Phi-2 as primary
-                    "tinyllama-110m-f16", // Smallest model for testing
-                    "gemma3-1b-it-qat",   // Gemma 3 1B
-                    "tinyllama-1b-chat-q2",
-                    "tinyllama-1b-chat-q3",
-                    "tinyllama-1b-chat",
-                    "gemma3n-e4b-it", // Gemma 3n E4B - not yet supported by Candle
-                ];
-
-                eprintln!("[DEBUG] Trying models in priority order: {model_priorities:?}");
-
-                for model_name in &model_priorities {
-                    eprintln!("[DEBUG] Checking for model: {model_name}");
-
-                    if let Some(spec) = manifest.find(model_name) {
-                        eprintln!("[DEBUG] Found model spec for: {model_name}");
-
-                        // Create downloader to check cache
-                        match ModelDownloader::new() {
-                            Ok(downloader) => {
-                                eprintln!("[DEBUG] Model downloader created, checking cache...");
-
-                                // This will return cached path if already downloaded
-                                match downloader.get_model_path(spec).await {
-                                    Ok(model_path) => {
-                                        eprintln!(
-                                            "[DEBUG] Model found in cache at: {}",
-                                            model_path.display()
-                                        );
-
-                                        if !print_mode {
-                                            eprintln!(
-                                                "Found cached model: {} at {}",
-                                                spec.name,
-                                                model_path.display()
-                                            );
-                                        }
-
-                                        eprintln!(
-                                            "[DEBUG] Initializing local model: {}",
-                                            spec.name
-                                        );
-                                        let load_start = Instant::now();
-
-                                        match LlmClient::from_local_model(
-                                            &spec.name,
-                                            model_path.to_string_lossy().to_string(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(client) => {
-                                                eprintln!(
-                                                    "[DEBUG] Model loaded successfully in {:?}",
-                                                    load_start.elapsed()
-                                                );
-                                                if !print_mode {
-                                                    eprintln!("✓ Using local model: {}", spec.name);
-                                                }
-                                                eprintln!(
-                                                    "[DEBUG] Total initialization time: {:?}",
-                                                    init_start.elapsed()
-                                                );
-                                                return Ok(client);
-                                            }
-                                            Err(e) => {
-                                                eprintln!(
-                                                    "[ERROR] Failed to initialize model {} after {:?}: {}",
-                                                    spec.name,
-                                                    load_start.elapsed(),
-                                                    e
-                                                );
-                                                if !print_mode {
-                                                    eprintln!(
-                                                        "Failed to initialize local model {}: {}",
-                                                        spec.name, e
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[DEBUG] Model {model_name} not in cache: {e}");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("[ERROR] Failed to create model downloader: {e}");
-                            }
-                        }
-                    } else {
-                        eprintln!("[DEBUG] Model {model_name} not found in manifest");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[ERROR] Failed to load model manifest: {e}");
-            }
-        }
-    }
-
-    // Last resort: Prompt for remote Ollama server
-    prompt_for_remote_ollama(print_mode, storage).await
-}
-
-async fn prompt_for_remote_ollama(
+async fn initialize_llm_client(
     print_mode: bool,
-    storage: Arc<MemoryStorage>,
+    model_name: &str,
+    temperature: f32,
+    top_p: f32,
+    top_k: i32,
+    max_tokens: u32,
+    seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    if print_mode {
-        return Err(
-            "Ollama is not running locally and print mode doesn't support interactive prompts"
-                .into(),
-        );
-    }
-
-    eprintln!("⚠️  Could not connect to Ollama at localhost:11434");
-    eprintln!("Please ensure Ollama is running or provide a remote server address.");
-    eprintln!();
-    eprintln!("Tip: To clear saved configuration, type 'clear'");
-    print!("Enter Ollama server address (e.g., 192.168.1.100:11434) or press Enter to cancel: ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim();
-
-    if input.is_empty() {
-        return Err("No Ollama server configured".into());
-    }
-
-    // Check if user wants to clear saved configuration
-    if input == "clear" {
-        // Delete saved configuration by searching and marking as deleted
-        let saved_configs = storage
-            .search("ollama_server_config", 100, Some("config"))
-            .await?;
-        for config in saved_configs {
-            // We can't delete, but we can update the content to mark it as cleared
-            let mut cleared_memory = config.memory;
-            cleared_memory.content = "CLEARED".to_string();
-            cleared_memory.updated_at = chrono::Utc::now();
-            if let Err(e) = storage.store(cleared_memory).await {
-                eprintln!("Warning: Could not clear configuration: {e}");
-            }
+    // Try to connect to Ollama first
+    if let Ok(client) = LlmClient::from_env()
+        && client.complete(vec![Message::user("ping")]).await.is_ok()
+    {
+        if !print_mode {
+            println!("✓ Connected to Ollama at {}", client.provider_name());
         }
-        eprintln!("✓ Cleared saved Ollama server configuration");
-        return Err("Please restart the command to configure a new server".into());
+        return Ok(client);
     }
 
-    // Ensure the URL has the correct format
-    let base_url = if input.starts_with("http://") || input.starts_with("https://") {
-        input.to_string()
-    } else {
-        format!("http://{input}")
-    };
-
-    // Set the environment variable for this session
-    unsafe {
-        std::env::set_var("OLLAMA_BASE_URL", &base_url);
+    if !print_mode {
+        println!("Ollama not available.");
     }
 
-    // Try to create client with the new URL and test it
-    match LlmClient::from_env() {
-        Ok(client) => {
-            // Test connection with a minimal request
-            let test_message = vec![Message::user("ping")];
-            match client.complete(test_message).await {
-                Ok(_) => {
-                    eprintln!("✓ Connected to Ollama at {base_url}");
+    // Fallback to local llama.cpp
+    #[cfg(feature = "llama-cpp")]
+    {
+        use hf_hub::api::tokio::Api;
+        use std::io::{self, Write};
 
-                    // Save the configuration for future use
-                    // Generate a dummy embedding since we're not using embeddings feature
-                    let embedding_service = arkavo_memory::embeddings::EmbeddingService::new();
-                    let embedding = match embedding_service.generate_embedding(&base_url).await {
-                        Ok(e) => e,
-                        Err(_) => vec![0.0; 384], // Default embedding size
-                    };
+        if !print_mode {
+            println!("Attempting to use local model with llama.cpp...");
+        }
 
-                    let memory = arkavo_memory::models::Memory {
-                        id: uuid::Uuid::new_v4(),
-                        content: base_url.clone(),
-                        metadata: Some(json!({
-                            "type": "ollama_server_config",
-                            "timestamp": chrono::Utc::now().to_rfc3339()
-                        })),
-                        category: Some("config".to_string()),
-                        embedding,
-                        created_at: chrono::Utc::now(),
-                        updated_at: chrono::Utc::now(),
-                    };
+        // Select model based on parameter
+        let (model_repo, model_file, display_name) = match model_name {
+            "gemma-2-2b" | "gemma-2b" => (
+                "bartowski/gemma-2-2b-it-GGUF",
+                "gemma-2-2b-it-Q4_K_M.gguf",
+                "gemma-2-2b-it",
+            ),
+            _ => (
+                // Default to gemma-3-270m
+                "unsloth/gemma-3-270m-it-GGUF",
+                "gemma-3-270m-it-Q4_0.gguf",
+                "gemma-3-270m-it",
+            ),
+        };
 
-                    if let Err(e) = storage.store(memory).await {
-                        eprintln!("Warning: Could not save Ollama server configuration: {e}");
-                    } else {
-                        eprintln!("✓ Saved configuration for future use");
+        if !print_mode {
+            println!("Loading model: {display_name}");
+        }
+
+        let api = Api::new()?;
+        let repo = api.repo(hf_hub::Repo::model(model_repo.to_string()));
+        let model_path = repo.get(model_file).await;
+
+        let final_path = match model_path {
+            Ok(path) => path,
+            Err(_) => {
+                if !print_mode {
+                    print!("Model '{model_file}' not found locally. Download now? (Y/n) ");
+                    io::stdout().flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    if input.trim().to_lowercase() != "y" && !input.trim().is_empty() {
+                        return Err("Download declined by user.".into());
                     }
-
-                    Ok(client)
                 }
-                Err(e) => Err(format!("Failed to connect to Ollama at {base_url}: {e}").into()),
+                println!("Downloading model... this may take a while.");
+                let download_path = repo.get(model_file).await?;
+                println!("Model downloaded to: {}", download_path.display());
+                download_path
             }
-        }
-        Err(e) => Err(format!("Failed to create client for {base_url}: {e}").into()),
+        };
+        LlmClient::from_llamacpp_model_with_config(
+            display_name,
+            final_path.to_string_lossy().to_string(),
+            temperature,
+            top_p,
+            top_k,
+            max_tokens,
+            seed,
+        )
+        .await
+        .map_err(|e| e.into())
     }
-}
 
-#[allow(clippy::disallowed_methods)]
-fn launch_terminal_ui(runtime: Runtime) -> Result<(), Box<dyn std::error::Error>> {
-    // For TUI mode, we bypass all the initialization and go straight to the UI
-    // The UI will handle its own initialization
-    runtime.block_on(async { arkavo_terminal::run().await })?;
-    Ok(())
+    #[cfg(not(feature = "llama-cpp"))]
+    {
+        Err(
+            "No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature."
+                .into(),
+        )
+    }
 }

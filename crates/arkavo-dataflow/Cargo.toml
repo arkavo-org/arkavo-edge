@@ -31,7 +31,7 @@ thiserror = { workspace = true }
 tempfile = { workspace = true }
 lazy-regex = "3.3"
 flate2 = "1.0"
-arkavo-llm = { path = "../arkavo-llm", optional = true, default-features = false }
+arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"], optional = true }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-memory = { path = "../arkavo-memory" }
 tokio-stream = "0.1"

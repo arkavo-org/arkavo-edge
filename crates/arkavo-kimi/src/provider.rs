@@ -75,6 +75,10 @@ impl KimiProvider {
         self.top_p = Some(top_p);
         self
     }
+
+    pub fn client(&self) -> &KimiClient {
+        &self.client
+    }
 }
 
 // This trait will be implemented when used through arkavo-llm

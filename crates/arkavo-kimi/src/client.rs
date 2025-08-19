@@ -108,6 +108,10 @@ impl KimiClient {
         })
     }
 
+    pub fn config(&self) -> &KimiConfig {
+        &self.config
+    }
+
     /// Convert arkavo-llm messages to Kimi API format
     fn convert_messages(&self, messages: Vec<Message>) -> Vec<ChatMessage> {
         messages
