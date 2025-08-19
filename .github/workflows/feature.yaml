@@ -117,7 +117,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -138,7 +139,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -166,7 +168,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       
       - uses: dtolnay/rust-toolchain@stable
       
@@ -226,7 +229,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -250,9 +254,11 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
+          # For glibc build, ensure static linking of OpenMP
+          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
         run: |
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support
+            # Full featured build with local LLM support and static OpenMP
             cargo build --release --target ${{ matrix.target }} -p arkavo
           else
             # Static build for containers with memory and mDNS
@@ -589,7 +595,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -696,7 +703,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -777,7 +785,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Test documentation examples
@@ -809,7 +818,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

@@ -38,10 +38,12 @@ fn main() {
             .define("GGML_VULKAN", "OFF") // Could be enabled if Vulkan SDK present
             .define("GGML_CUDA", "OFF"); // Could be enabled if CUDA toolkit present
     } else {
-        // Linux - use CPU optimizations by default
+        // Linux - use CPU optimizations by default with static linking
         config
             .define("GGML_BLAS", "OFF") // Could be enabled if OpenBLAS present
-            .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON"); // Required for static linking
+            .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON") // Required for static linking
+            .define("GGML_STATIC", "ON") // Build static libraries
+            .define("GGML_OPENMP", "ON"); // Enable OpenMP but link statically
     }
 
     // Common settings for all platforms
@@ -85,7 +87,10 @@ fn main() {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=pthread");
         println!("cargo:rustc-link-lib=m"); // math library
-        println!("cargo:rustc-link-lib=gomp"); // OpenMP support
+
+        // Static linking of OpenMP for zero-config deployment
+        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
+        println!("cargo:rustc-link-lib=static=gomp"); // Static OpenMP
     }
 
     // C++ standard library (handling varies by platform)

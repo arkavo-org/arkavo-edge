@@ -115,7 +115,8 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1
+          # Install both runtime and static OpenMP libraries for static linking
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 libgomp-11-dev
 
       - name: Install dependencies for glibc build
         if: matrix.needs_musl == false
