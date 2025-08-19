@@ -28,9 +28,9 @@ mod kimi_adapter;
 #[cfg(feature = "kimi")]
 pub use kimi_adapter::KimiProvider;
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 mod llamacpp_provider;
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use llamacpp_provider::LlamaCppProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
