@@ -22,13 +22,15 @@ members = [
     "crates/arkavo-budget",
     "crates/arkavo-events",
     "crates/arkavo-debugger",
+    "crates/arkavo-llama-cpp-sys",
+    "crates/arkavo-llama-cpp",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.27.1"
+version = "0.28.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -46,13 +48,15 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 futures = "0.3.31"
 async-trait = "0.1.88"
+scopeguard = "1.2.0"
+tokio-util = "0.7.12"
 
 # Consolidated versions to reduce duplicates
 base64 = "0.22.1"
 jsonschema = "0.26.2"
 thiserror = "2.0.12"
 tempfile = "3.20"
-reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12.20", default-features = false, features = ["rustls-tls", "json", "stream"] }
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }

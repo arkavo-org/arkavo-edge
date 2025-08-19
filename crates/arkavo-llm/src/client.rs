@@ -64,6 +64,65 @@ impl LlmClient {
         }
     }
 
+    #[allow(clippy::unused_async)]
+    pub async fn from_llamacpp_model(model_name: &str, model_path: String) -> Result<Self> {
+        #[cfg(feature = "llama-cpp")]
+        {
+            use crate::LlamaCppProvider;
+            let provider = LlamaCppProvider::new(model_name.to_string(), model_path)?;
+            Ok(Self::new(Box::new(provider)))
+        }
+        #[cfg(not(feature = "llama-cpp"))]
+        {
+            let _ = (model_name, model_path); // Suppress unused variable warnings
+            Err(Error::Config(
+                "LLama.cpp models require the 'llama-cpp' feature to be enabled".to_string(),
+            ))
+        }
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn from_llamacpp_model_with_config(
+        model_name: &str,
+        model_path: String,
+        temperature: f32,
+        top_p: f32,
+        top_k: i32,
+        max_tokens: u32,
+        seed: u32,
+    ) -> Result<Self> {
+        #[cfg(feature = "llama-cpp")]
+        {
+            use crate::{LlamaCppProvider, llamacpp_provider::SamplingConfig};
+            let config = SamplingConfig {
+                temperature,
+                top_p,
+                top_k,
+                max_tokens,
+                seed,
+                debug: false,
+            };
+            let provider =
+                LlamaCppProvider::new_with_config(model_name.to_string(), model_path, config)?;
+            Ok(Self::new(Box::new(provider)))
+        }
+        #[cfg(not(feature = "llama-cpp"))]
+        {
+            let _ = (
+                model_name,
+                model_path,
+                temperature,
+                top_p,
+                top_k,
+                max_tokens,
+                seed,
+            ); // Suppress unused variable warnings
+            Err(Error::Config(
+                "LLama.cpp models require the 'llama-cpp' feature to be enabled".to_string(),
+            ))
+        }
+    }
+
     pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
         self.provider.complete(messages).await
     }

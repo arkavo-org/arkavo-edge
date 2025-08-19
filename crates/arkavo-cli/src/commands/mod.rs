@@ -6,6 +6,7 @@ pub mod dataflow;
 pub mod mcp;
 pub mod model;
 pub mod plan;
+pub mod terminal;
 #[cfg(all(target_os = "macos", feature = "test-harness"))]
 pub mod test;
 pub mod ui;
