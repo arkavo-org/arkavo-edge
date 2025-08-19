@@ -43,15 +43,19 @@ fn main() {
 
     let dst = config.build();
 
-    println!("cargo:rustc-link-search=native={}/lib", dst.display());
+    let lib_dir = dst.join("lib");
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
-    println!("cargo:rustc-link-lib=static=ggml-base");
-    println!("cargo:rustc-link-lib=static=ggml-cpu");
-
-    // Only link ggml-blas if it exists (it may not be built when BLAS is OFF)
-    let blas_lib = dst.join("lib").join("libggml-blas.a");
-    if blas_lib.exists() {
+    
+    // Only link libraries that actually exist
+    if lib_dir.join("libggml-base.a").exists() {
+        println!("cargo:rustc-link-lib=static=ggml-base");
+    }
+    if lib_dir.join("libggml-cpu.a").exists() {
+        println!("cargo:rustc-link-lib=static=ggml-cpu");
+    }
+    if lib_dir.join("libggml-blas.a").exists() {
         println!("cargo:rustc-link-lib=static=ggml-blas");
     }
 
@@ -72,6 +76,7 @@ fn main() {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=pthread");
         println!("cargo:rustc-link-lib=m"); // math library
+        println!("cargo:rustc-link-lib=gomp"); // OpenMP support
     }
 
     // C++ standard library (handling varies by platform)
