@@ -325,8 +325,11 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Install CMake
+        shell: pwsh
         run: |
-          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          # Refresh environment variables in PowerShell
+          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           refreshenv
 
       - name: Build Windows binary
