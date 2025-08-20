@@ -1678,47 +1678,112 @@ async fn initialize_llm_client(
             println!("Attempting to use local model with llama.cpp...");
         }
 
-        // Select model based on parameter
-        let (model_repo, model_file, display_name) = match model_name {
-            "gemma-2-2b" | "gemma-2b" => (
-                "bartowski/gemma-2-2b-it-GGUF",
-                "gemma-2-2b-it-Q4_K_M.gguf",
-                "gemma-2-2b-it",
-            ),
-            _ => (
-                // Default to gemma-3-270m
-                "unsloth/gemma-3-270m-it-GGUF",
-                "gemma-3-270m-it-Q4_0.gguf",
-                "gemma-3-270m-it",
-            ),
-        };
-
-        if !print_mode {
-            println!("Loading model: {display_name}");
-        }
-
-        let api = Api::new()?;
-        let repo = api.repo(hf_hub::Repo::model(model_repo.to_string()));
-        let model_path = repo.get(model_file).await;
-
-        let final_path = match model_path {
-            Ok(path) => path,
-            Err(_) => {
-                if !print_mode {
-                    print!("Model '{model_file}' not found locally. Download now? (Y/n) ");
-                    io::stdout().flush()?;
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
-                    if input.trim().to_lowercase() != "y" && !input.trim().is_empty() {
-                        return Err("Download declined by user.".into());
+        // Check if model_name is a path to a GGUF file or a model identifier
+        let final_path = if model_name.ends_with(".gguf") || model_name.contains('/') && std::path::Path::new(model_name).exists() {
+            // Direct path to GGUF file
+            if !print_mode {
+                println!("Loading model from path: {model_name}");
+            }
+            std::path::PathBuf::from(model_name)
+        } else {
+            // Model identifier - try to find it in HF cache or download
+            let (model_repo, model_file, display_name) = if model_name.contains('/') {
+                // Format: repo/file or repo/model
+                if model_name.contains(".gguf") {
+                    // Full repo/file.gguf format
+                    let parts: Vec<&str> = model_name.rsplitn(2, '/').collect();
+                    let file = parts[0];
+                    let repo = parts[1];
+                    (repo, file, file.trim_end_matches(".gguf"))
+                } else {
+                    // Just repo name, need to guess the file
+                    match model_name {
+                        "bartowski/gemma-2-2b-it-GGUF" | "gemma-2-2b" | "gemma-2b" => (
+                            "bartowski/gemma-2-2b-it-GGUF",
+                            "gemma-2-2b-it-Q4_K_M.gguf",
+                            "gemma-2-2b-it",
+                        ),
+                        "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF" | "tinyllama" => (
+                            "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+                            "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+                            "tinyllama-1.1b",
+                        ),
+                        "TheBloke/phi-2-GGUF" | "phi-2" => (
+                            "TheBloke/phi-2-GGUF",
+                            "phi-2.Q4_K_M.gguf",
+                            "phi-2",
+                        ),
+                        _ => (
+                            "unsloth/gemma-3-270m-it-GGUF",
+                            "gemma-3-270m-it-Q4_0.gguf",
+                            "gemma-3-270m-it",
+                        ),
                     }
                 }
-                println!("Downloading model... this may take a while.");
-                let download_path = repo.get(model_file).await?;
-                println!("Model downloaded to: {}", download_path.display());
-                download_path
+            } else {
+                // Simple model name
+                match model_name {
+                    "gemma-2-2b" | "gemma-2b" | "gemma2" => (
+                        "bartowski/gemma-2-2b-it-GGUF",
+                        "gemma-2-2b-it-Q4_K_M.gguf",
+                        "gemma-2-2b-it",
+                    ),
+                    "tinyllama" | "tiny" => (
+                        "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+                        "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+                        "tinyllama-1.1b",
+                    ),
+                    "phi-2" | "phi2" => (
+                        "TheBloke/phi-2-GGUF",
+                        "phi-2.Q4_K_M.gguf",
+                        "phi-2",
+                    ),
+                    _ => (
+                        // Default to gemma-3-270m
+                        "unsloth/gemma-3-270m-it-GGUF",
+                        "gemma-3-270m-it-Q4_0.gguf",
+                        "gemma-3-270m-it",
+                    ),
+                }
+            };
+
+            if !print_mode {
+                println!("Loading model: {display_name}");
+            }
+
+            let api = Api::new()?;
+            let repo = api.repo(hf_hub::Repo::model(model_repo.to_string()));
+            let model_path = repo.get(model_file).await;
+
+            match model_path {
+                Ok(path) => path,
+                Err(_) => {
+                    if !print_mode {
+                        print!("Model '{model_file}' not found locally. Download now? (Y/n) ");
+                        io::stdout().flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        if input.trim().to_lowercase() != "y" && !input.trim().is_empty() {
+                            return Err("Download declined by user.".into());
+                        }
+                    }
+                    println!("Downloading model... this may take a while.");
+                    let download_path = repo.get(model_file).await?;
+                    println!("Model downloaded to: {}", download_path.display());
+                    download_path
+                }
             }
         };
+        
+        // Extract display name from path if needed
+        let display_name = if model_name.ends_with(".gguf") || model_name.contains('/') && std::path::Path::new(model_name).exists() {
+            final_path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("model")
+        } else {
+            model_name
+        };
+        
         LlmClient::from_llamacpp_model_with_config(
             display_name,
             final_path.to_string_lossy().to_string(),
