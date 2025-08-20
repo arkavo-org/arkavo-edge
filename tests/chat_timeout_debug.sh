@@ -15,11 +15,11 @@ cargo build -p arkavo-cli -p arkavo-llm 2>&1 | tail -5
 
 echo ""
 echo "Running chat command with timeout and debug output..."
-echo "Command: RUST_LOG=arkavo_llm=debug,arkavo_cli=debug ARKAVO_NO_TERMINAL_RELAUNCH=1 timeout 10 ./target/debug/arkavo chat --no-tui --prompt \"What is 2+2?\""
+echo "Command: RUST_LOG=arkavo_llm=debug,arkavo_cli=debug ARKAVO_NO_TERMINAL_RELAUNCH=1 timeout 10 ./target/debug/arkavo chat --prompt \"What is 2+2?\""
 echo ""
 
 # Run the command with enhanced logging
-RUST_LOG=arkavo_llm=debug,arkavo_cli=debug ARKAVO_NO_TERMINAL_RELAUNCH=1 timeout 10 ./target/debug/arkavo chat --no-tui --prompt "What is 2+2?"
+RUST_LOG=arkavo_llm=debug,arkavo_cli=debug ARKAVO_NO_TERMINAL_RELAUNCH=1 timeout 10 ./target/debug/arkavo chat --prompt "What is 2+2?"
 
 EXIT_CODE=$?
 

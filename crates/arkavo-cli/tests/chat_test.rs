@@ -6,7 +6,6 @@ fn test_chat_command() {
         "chat".to_string(),
         "--prompt".to_string(),
         "Hello".to_string(),
-        "--no-tui".to_string(),
     ];
 
     // This will fail if Ollama is not running, but that's expected
@@ -40,7 +39,6 @@ fn test_git_analysis_prompt() {
         "chat".to_string(),
         "--prompt".to_string(),
         "Perform a full repository analysis".to_string(),
-        "--no-tui".to_string(),
     ];
 
     // This test verifies that the chat command is structured to handle Git analysis

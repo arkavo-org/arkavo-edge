@@ -127,7 +127,9 @@ fn print_usage() {
     println!("    agent     Configure and run AI agents (default when no command given)");
     println!("    chat      Simple conversational chat interface");
     println!("              Options: --prompt <text>, --image <path>, --max-tokens <n>");
-    println!("                       --model <name> (gemma-3-270m or gemma-2-2b)");
+    println!("                       --model <name|path> (e.g., tinyllama, gemma-2b, phi-2)");
+    println!("                       --model <repo/model> (e.g., TheBloke/phi-2-GGUF)");
+    println!("                       --model <path.gguf> (direct path to GGUF file)");
     println!("                       --repo-context {{auto|on|off}} (default: auto)");
     println!("              Use /new in chat to start fresh session");
     println!("              Use /context {{auto|on|off}} to toggle context in REPL");

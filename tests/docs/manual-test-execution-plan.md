@@ -43,7 +43,7 @@ target/release/arkavo invalid-command 2>&1
 
 # ERR-02: Offline test (requires network disconnection)
 # Disconnect network, then:
-target/release/arkavo chat --no-tui --prompt "Hello" 2>&1
+target/release/arkavo chat --prompt "Hello" 2>&1
 
 # REG-01: Regression suite
 .github/workflows/regression.yaml
