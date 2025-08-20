@@ -51,66 +51,9 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("AGENTS.md already exists. Please rename or remove it first.".into());
     }
 
-    let template = format!(
-        r#"# AGENTS.md
-
-## {name}
-purpose: Describe what this agent does
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
-listen:  0.0.0.0:8342
-
-# MCP servers provide additional tools and capabilities to the agent
-# Uncomment and configure the following to add MCP servers:
-# mcp_servers:
-#   - name: filesystem
-#     command: mcp-filesystem
-#     args: ["--allow-write"]
-#   - name: git
-#     command: mcp-git
-#     args: []
-#   - name: external
-#     url: http://localhost:8080
-
-# mDNS discovery is enabled by default for zero-config networking
-# To disable mDNS, uncomment the following:
-# discovery:
-#   mdns: false
-
-# Additional agent configurations can be added below
-# Each agent starts with ## agent-name
-
-# API keys can be configured per agent (will be disseminated from UI):
-# MOONSHOT_API_KEY: sk-your-api-key-here
-# OPENAI_API_KEY: sk-your-openai-key
-# ANTHROPIC_API_KEY: sk-your-anthropic-key
-
-# Example configurations:
-#
-# ## code-reviewer
-# purpose: Review code for quality and suggest improvements
-# model:   openai://gpt-4
-# listen:  0.0.0.0:8343
-# OPENAI_API_KEY: sk-your-openai-key
-# mcp_servers:
-#   - name: git
-#     command: mcp-git
-#     args: ["--read-only"]
-#
-# ## test-runner
-# purpose: Run tests and report results
-# model:   anthropic://claude-3-opus
-# listen:  0.0.0.0:8344
-# ANTHROPIC_API_KEY: sk-your-anthropic-key
-# discovery:
-#   mdns: false  # Explicitly disable mDNS for this agent
-#
-# ## kimi-assistant
-# purpose: AI assistant with 128k context window
-# model:   kimi://moonshot-v1-128k
-# listen:  0.0.0.0:8345
-# MOONSHOT_API_KEY: sk-your-moonshot-key
-"#
-    );
+    let template_path = Path::new("assets/prompts/agents_md.prompt.md");
+    let template_content = fs::read_to_string(template_path)?;
+    let template = template_content.replace("{name}", name);
 
     fs::write(agents_path, template)?;
     println!("Created AGENTS.md with agent configuration for '{name}'");
@@ -147,15 +90,9 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         let agent_name = format!("{dir_name}-{random_id}");
 
         // Generate AGENTS.md with defaults
-        let template = format!(
-            r#"# AGENTS.md
-
-## {agent_name}
-purpose: AI agent for {dir_name} development
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
-listen:  0.0.0.0:8342
-"#
-        );
+        let template_path = Path::new("assets/prompts/agents_md.prompt.md");
+        let template_content = fs::read_to_string(template_path)?;
+        let template = template_content.replace("{name}", &agent_name);
 
         fs::write(config_path, template)?;
         println!("Auto-generated AGENTS.md with agent '{agent_name}'");
