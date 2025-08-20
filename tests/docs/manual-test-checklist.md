@@ -54,7 +54,7 @@ This checklist covers the 79 remaining tests that require manual verification or
 
 - [ ] **ERR-02**: Offline Execution
   - [ ] Disconnect network
-  - [ ] Run: `target/release/arkavo chat --no-tui --prompt "Hello"`
+  - [ ] Run: `target/release/arkavo chat --prompt "Hello"`
   - [ ] Graceful error message
   - [ ] No hang/crash
   - Result: ________
