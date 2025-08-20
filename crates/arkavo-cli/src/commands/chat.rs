@@ -213,7 +213,9 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
         Err(_) => {
             if !print_mode {
                 eprintln!("ℹ MCP tools not available - using LLM-only mode");
-                eprintln!("  To enable git/filesystem tools, rebuild with: cargo build --features test-harness");
+                eprintln!(
+                    "  To enable git/filesystem tools, rebuild with: cargo build --features test-harness"
+                );
             }
             None
         }
@@ -399,14 +401,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("Vision commands: @screenshot <path> - Analyze a screenshot");
     }
 
-    // Initialize MCP client - skip in print mode, otherwise attempt connection
+    // Initialize MCP client - always try to initialize for tool access
     #[allow(unused_variables)]
-    let mcp_client: Option<McpConnection> = if print_mode {
-        None
-    } else {
-        // Try to initialize MCP if available
-        initialize_mcp_connection(print_mode)
-    };
+    let mcp_client: Option<McpConnection> = initialize_mcp_connection(print_mode);
 
     // Show MCP tools help if connected
     if !print_mode && mcp_client.is_some() {
@@ -527,22 +524,22 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Build base system prompt (without repo context initially)
     let base_system_prompt = if mcp_client.is_some() {
         format!(
-            "You are a helpful AI assistant with access to MCP tools for development tasks.
+            "You are an AI assistant with MCP tools for development tasks. You MUST use tools for information gathering.
 
-\
-            When asked about the git repository, current branch, recent commits, or codebase structure, \
-            you MUST use the available MCP tools to get accurate information:
-\
-            - Use @git_status tool to check current branch and repository status
-\
-            - Use @filesystem tool to explore files and directories
-\
-            - Use @code_analysis tool to understand code structure
-\
-            
-\
-            Always prefer using tools over guessing or providing generic responses.\
-            \n{mcp_info}"
+TOOL USAGE RULES:
+1. For git questions: Always respond with @git_status first
+2. For file operations: Always use @filesystem {{\"path\": \"<path>\"}} 
+3. For code analysis: Always use @code_analysis {{\"task\": \"<task>\"}}
+4. NEVER give generic responses - gather real data first
+
+EXAMPLES:
+Q: \"What git branch am I on?\" → A: @git_status
+Q: \"List files here\" → A: @filesystem {{\"path\": \".\"}}
+Q: \"What's in the README?\" → A: @filesystem {{\"path\": \"README.md\"}}
+Q: \"Recent commits?\" → A: @git_status
+
+Always lead with tool calls, then interpret the results for the user.
+\n{mcp_info}"
         )
     } else {
         "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
@@ -614,10 +611,11 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Get conversation context with system message
-    let system_message = if print_mode {
-        // Use minimal system prompt for print mode to avoid token limit issues
+    let system_message = if print_mode && mcp_client.is_none() {
+        // Use minimal system prompt only when MCP is not available
         Message::system("You are a helpful AI assistant.")
     } else {
+        // Use full system prompt with MCP tools when available
         Message::system(&system_prompt)
     };
 
@@ -1523,72 +1521,77 @@ fn handle_tool_calls_in_response(
         // Check if this is a tool call (followed by word characters)
         let after_at = &remaining[at_pos + 1..];
 
-        if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
-            let tool_name = &after_at[..space_or_brace];
+        let (tool_name, args_start) =
+            if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
+                // Tool name followed by arguments
+                (&after_at[..space_or_brace], at_pos + 1 + space_or_brace)
+            } else {
+                // Tool name at end of string or followed by non-alphanumeric chars
+                let end_pos = after_at
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(after_at.len());
+                (&after_at[..end_pos], at_pos + 1 + end_pos)
+            };
 
-            // Only process if tool_name is alphanumeric and not exactly "screenshot" (which is not allowed)
-            if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && tool_name != "screenshot"
-            {
-                let args_start = at_pos + 1 + space_or_brace;
-                let args_str = &remaining[args_start..].trim_start();
+        // Only process if tool_name is alphanumeric and not exactly "screenshot" (which is not allowed)
+        if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') && tool_name != "screenshot" {
+            let args_str = &remaining[args_start..].trim_start();
 
-                let (args, _consumed_len) = if args_str.starts_with('{') {
-                    // Find matching closing brace
-                    let mut brace_count = 0;
-                    let mut end_pos = 0;
-                    for (i, ch) in args_str.chars().enumerate() {
-                        match ch {
-                            '{' => brace_count += 1,
-                            '}' => {
-                                brace_count -= 1;
-                                if brace_count == 0 {
-                                    end_pos = i + 1;
-                                    break;
-                                }
+            let (args, _consumed_len) = if args_str.starts_with('{') {
+                // Find matching closing brace
+                let mut brace_count = 0;
+                let mut end_pos = 0;
+                for (i, ch) in args_str.chars().enumerate() {
+                    match ch {
+                        '{' => brace_count += 1,
+                        '}' => {
+                            brace_count -= 1;
+                            if brace_count == 0 {
+                                end_pos = i + 1;
+                                break;
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
+                }
 
-                    if end_pos > 0 {
-                        let json_str = &args_str[..end_pos];
+                if end_pos > 0 {
+                    let json_str = &args_str[..end_pos];
 
-                        match serde_json::from_str(json_str) {
-                            Ok(json) => (json, end_pos),
-                            Err(_e) => (json!({ "prompt": json_str }), end_pos),
-                        }
-                    } else {
-                        (json!({ "prompt": args_str }), 0)
+                    match serde_json::from_str(json_str) {
+                        Ok(json) => (json, end_pos),
+                        Err(_e) => (json!({ "prompt": json_str }), end_pos),
                     }
                 } else {
-                    // Take until newline or end of string
-                    let end_pos = args_str.find('\n').unwrap_or(args_str.len());
-                    let arg_text = &args_str[..end_pos].trim();
-                    (json!({ "prompt": arg_text }), end_pos)
-                };
+                    (json!({ "prompt": args_str }), 0)
+                }
+            } else {
+                // Take until newline or end of string
+                let end_pos = args_str.find('\n').unwrap_or(args_str.len());
+                let arg_text = &args_str[..end_pos].trim();
+                (json!({ "prompt": arg_text }), end_pos)
+            };
 
-                // Execute the tool
-                match mcp_client.call_tool(tool_name, args, llm_provider) {
-                    Ok(tool_result) => {
-                        // Extract the actual result text from the MCP response
-                        let result_text = if let Some(result_obj) = tool_result.get("result") {
-                            if let Some(text) = result_obj.as_str() {
-                                text.to_string()
-                            } else {
-                                serde_json::to_string_pretty(&result_obj)
-                                    .unwrap_or_else(|_e| result_obj.to_string())
-                            }
+            // Execute the tool
+            match mcp_client.call_tool(tool_name, args, llm_provider) {
+                Ok(tool_result) => {
+                    // Extract the actual result text from the MCP response
+                    let result_text = if let Some(result_obj) = tool_result.get("result") {
+                        if let Some(text) = result_obj.as_str() {
+                            text.to_string()
                         } else {
-                            serde_json::to_string_pretty(&tool_result)
-                                .unwrap_or_else(|_e| tool_result.to_string())
-                        };
+                            serde_json::to_string_pretty(&result_obj)
+                                .unwrap_or_else(|_e| result_obj.to_string())
+                        }
+                    } else {
+                        serde_json::to_string_pretty(&tool_result)
+                            .unwrap_or_else(|_e| tool_result.to_string())
+                    };
 
-                        tool_results.push((tool_name.to_string(), result_text));
-                    }
-                    Err(e) => {
-                        tool_results.push((tool_name.to_string(), format!("Error: {e}")));
-                    }
+                    tool_results.push((tool_name.to_string(), result_text));
+                }
+                Err(e) => {
+                    tool_results.push((tool_name.to_string(), format!("Error: {e}")));
                 }
             }
         }
@@ -1679,7 +1682,9 @@ async fn initialize_llm_client(
         }
 
         // Check if model_name is a path to a GGUF file or a model identifier
-        let final_path = if model_name.ends_with(".gguf") || model_name.contains('/') && std::path::Path::new(model_name).exists() {
+        let final_path = if model_name.ends_with(".gguf")
+            || model_name.contains('/') && std::path::Path::new(model_name).exists()
+        {
             // Direct path to GGUF file
             if !print_mode {
                 println!("Loading model from path: {model_name}");
@@ -1703,16 +1708,24 @@ async fn initialize_llm_client(
                             "gemma-2-2b-it-Q4_K_M.gguf",
                             "gemma-2-2b-it",
                         ),
+                        "bartowski/gemma-2-9b-it-GGUF" | "gemma-2-9b" | "gemma-9b" | "gemma9" => (
+                            "bartowski/gemma-2-9b-it-GGUF",
+                            "gemma-2-9b-it-Q4_K_M.gguf",
+                            "gemma-2-9b-it",
+                        ),
+                        "unsloth/gemma-3-4b-it-GGUF" | "gemma-3-4b" | "gemma-4b" | "gemma4" => (
+                            "unsloth/gemma-3-4b-it-GGUF",
+                            "gemma-3-4b-it-Q4_K_M.gguf",
+                            "gemma-3-4b-it",
+                        ),
                         "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF" | "tinyllama" => (
                             "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
                             "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
                             "tinyllama-1.1b",
                         ),
-                        "TheBloke/phi-2-GGUF" | "phi-2" => (
-                            "TheBloke/phi-2-GGUF",
-                            "phi-2.Q4_K_M.gguf",
-                            "phi-2",
-                        ),
+                        "TheBloke/phi-2-GGUF" | "phi-2" => {
+                            ("TheBloke/phi-2-GGUF", "phi-2.Q4_K_M.gguf", "phi-2")
+                        }
                         _ => (
                             "unsloth/gemma-3-270m-it-GGUF",
                             "gemma-3-270m-it-Q4_0.gguf",
@@ -1728,16 +1741,22 @@ async fn initialize_llm_client(
                         "gemma-2-2b-it-Q4_K_M.gguf",
                         "gemma-2-2b-it",
                     ),
+                    "gemma-2-9b" | "gemma-9b" | "gemma9" => (
+                        "bartowski/gemma-2-9b-it-GGUF",
+                        "gemma-2-9b-it-Q4_K_M.gguf",
+                        "gemma-2-9b-it",
+                    ),
+                    "gemma-3-4b" | "gemma-4b" | "gemma4" => (
+                        "unsloth/gemma-3-4b-it-GGUF",
+                        "gemma-3-4b-it-Q4_K_M.gguf",
+                        "gemma-3-4b-it",
+                    ),
                     "tinyllama" | "tiny" => (
                         "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
                         "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
                         "tinyllama-1.1b",
                     ),
-                    "phi-2" | "phi2" => (
-                        "TheBloke/phi-2-GGUF",
-                        "phi-2.Q4_K_M.gguf",
-                        "phi-2",
-                    ),
+                    "phi-2" | "phi2" => ("TheBloke/phi-2-GGUF", "phi-2.Q4_K_M.gguf", "phi-2"),
                     _ => (
                         // Default to gemma-3-270m
                         "unsloth/gemma-3-270m-it-GGUF",
@@ -1774,16 +1793,19 @@ async fn initialize_llm_client(
                 }
             }
         };
-        
+
         // Extract display name from path if needed
-        let display_name = if model_name.ends_with(".gguf") || model_name.contains('/') && std::path::Path::new(model_name).exists() {
-            final_path.file_stem()
+        let display_name = if model_name.ends_with(".gguf")
+            || model_name.contains('/') && std::path::Path::new(model_name).exists()
+        {
+            final_path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("model")
         } else {
             model_name
         };
-        
+
         LlmClient::from_llamacpp_model_with_config(
             display_name,
             final_path.to_string_lossy().to_string(),
