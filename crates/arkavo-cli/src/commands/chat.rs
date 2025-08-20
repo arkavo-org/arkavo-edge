@@ -165,40 +165,44 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
 }
 
 // Runtime MCP initialization - checks if test-harness feature is available
-#[cfg(all(target_os = "macos", feature = "test-harness"))]
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
-    // Try in-process MCP first, which includes all local tools
-    let result = McpConnection::new_in_process();
-
-    match result {
-        Ok(client) => {
-            if !print_mode {
-                match &client {
-                    McpConnection::InProcess(_) => {
-                        eprintln!("✓ Using in-process MCP server");
-                    }
-                    McpConnection::External(_) => {
-                        eprintln!("✓ Connected to external MCP server");
-                    }
+    // Try platform-specific MCP first
+    #[cfg(all(target_os = "macos", feature = "test-harness"))]
+    {
+        // Try in-process MCP first on macOS, which includes iOS simulator tools
+        let result = McpConnection::new_in_process();
+        match result {
+            Ok(client) => {
+                if !print_mode {
+                    eprintln!("✓ Using macOS in-process MCP server (with iOS tools)");
                 }
+                return Some(client);
             }
-            Some(client)
-        }
-        Err(_e) => {
-            if !print_mode {
-                eprintln!("ℹ MCP server not available - using LLM-only mode");
+            Err(_e) => {
+                // Fall through to try cross-platform tools
             }
-            None
         }
     }
-}
 
-#[cfg(not(all(target_os = "macos", feature = "test-harness")))]
-fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
-    // On non-macOS platforms or without test-harness, try external MCP connection
-    // Check for MCP_URL environment variable or use default
+    // Try cross-platform tools on Unix systems
+    #[cfg(all(unix, feature = "test-harness"))]
+    {
+        let result = McpConnection::new_cross_platform();
+        match result {
+            Ok(client) => {
+                if !print_mode {
+                    eprintln!("✓ Using cross-platform MCP tools (git, filesystem, code analysis)");
+                }
+                return Some(client);
+            }
+            Err(_e) => {
+                // Fall through to try external connection
+            }
+        }
+    }
+
+    // Finally, try external MCP connection
     let mcp_url = std::env::var("MCP_URL").ok();
-
     match McpConnection::new_external(mcp_url) {
         Ok(client) => {
             if !print_mode {
@@ -208,7 +212,8 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
         }
         Err(_) => {
             if !print_mode {
-                eprintln!("ℹ MCP server not available - using LLM-only mode");
+                eprintln!("ℹ MCP tools not available - using LLM-only mode");
+                eprintln!("  To enable git/filesystem tools, rebuild with: cargo build --features test-harness");
             }
             None
         }
@@ -522,7 +527,21 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Build base system prompt (without repo context initially)
     let base_system_prompt = if mcp_client.is_some() {
         format!(
-            "You are a helpful AI assistant with access to MCP tools for development tasks.\
+            "You are a helpful AI assistant with access to MCP tools for development tasks.
+
+\
+            When asked about the git repository, current branch, recent commits, or codebase structure, \
+            you MUST use the available MCP tools to get accurate information:
+\
+            - Use @git_status tool to check current branch and repository status
+\
+            - Use @filesystem tool to explore files and directories
+\
+            - Use @code_analysis tool to understand code structure
+\
+            
+\
+            Always prefer using tools over guessing or providing generic responses.\
             \n{mcp_info}"
         )
     } else {

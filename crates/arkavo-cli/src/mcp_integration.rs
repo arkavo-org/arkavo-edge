@@ -7,6 +7,9 @@ use {
     tokio::runtime::Handle,
 };
 
+#[cfg(all(unix, feature = "test-harness"))]
+use arkavo_mcp_tools::mcp_connection as tools;
+
 // Re-export Tool from mcp_client for compatibility
 pub use crate::mcp_client::Tool;
 
@@ -14,6 +17,8 @@ pub use crate::mcp_client::Tool;
 pub enum McpConnection {
     #[cfg(all(target_os = "macos", feature = "test-harness"))]
     InProcess(base::McpConnection),
+    #[cfg(all(unix, feature = "test-harness"))]
+    CrossPlatform(tools::McpConnection),
     External(McpClient),
 }
 
@@ -65,6 +70,13 @@ impl McpConnection {
         Ok(Self::InProcess(base_connection))
     }
 
+    #[cfg(all(unix, feature = "test-harness"))]
+    pub fn new_cross_platform() -> Result<Self, Box<dyn std::error::Error>> {
+        // Create cross-platform MCP connection with git, filesystem, and code analysis tools
+        let connection = tools::McpConnection::new()?;
+        Ok(Self::CrossPlatform(connection))
+    }
+
     pub fn new_external(mcp_url: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
         if let Some(url) = mcp_url {
             let client = McpClient::new(Some(url))?;
@@ -95,6 +107,25 @@ impl McpConnection {
                     .collect();
                 Ok(tools)
             }
+            #[cfg(all(unix, feature = "test-harness"))]
+            Self::CrossPlatform(tools_conn) => {
+                let tool_names = tools_conn.list_tools();
+                let tools = tool_names
+                    .into_iter()
+                    .filter_map(|name| {
+                        tools_conn.get_tool_schema(&name).map(|schema| Tool {
+                            name: name.clone(),
+                            description: schema
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            input_schema: schema,
+                        })
+                    })
+                    .collect();
+                Ok(tools)
+            }
             Self::External(client) => client.list_tools(),
         }
     }
@@ -108,6 +139,10 @@ impl McpConnection {
         match self {
             #[cfg(all(target_os = "macos", feature = "test-harness"))]
             Self::InProcess(base_conn) => base_conn
+                .call_tool(tool_name, args, llm_origin)
+                .map_err(|e| e.into()),
+            #[cfg(all(unix, feature = "test-harness"))]
+            Self::CrossPlatform(tools_conn) => tools_conn
                 .call_tool(tool_name, args, llm_origin)
                 .map_err(|e| e.into()),
             Self::External(client) => client.call_tool(tool_name, args, llm_origin),
