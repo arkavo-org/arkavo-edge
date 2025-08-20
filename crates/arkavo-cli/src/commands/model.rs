@@ -84,38 +84,37 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                                         && let Ok(snapshot_entries) =
                                             std::fs::read_dir(&snapshots_dir)
                                     {
-                                            for snapshot in snapshot_entries.flatten() {
-                                                let snapshot_path = snapshot.path();
-                                                if snapshot_path.is_dir() {
-                                                    // Check for .gguf files
-                                                    if let Ok(files) =
-                                                        std::fs::read_dir(&snapshot_path)
-                                                    {
-                                                        for file in files.flatten() {
-                                                            if let Some(name) =
-                                                                file.file_name().to_str()
-                                                                && name.ends_with(".gguf") {
-                                                                    let model_name = dir_name
-                                                                        .strip_prefix("models--")
-                                                                        .unwrap_or(dir_name)
-                                                                        .replace("--", "/");
-                                                                    let file_path = file.path();
-                                                                    let size = std::fs::metadata(
-                                                                        &file_path,
-                                                                    )
+                                        for snapshot in snapshot_entries.flatten() {
+                                            let snapshot_path = snapshot.path();
+                                            if snapshot_path.is_dir() {
+                                                // Check for .gguf files
+                                                if let Ok(files) = std::fs::read_dir(&snapshot_path)
+                                                {
+                                                    for file in files.flatten() {
+                                                        if let Some(name) =
+                                                            file.file_name().to_str()
+                                                            && name.ends_with(".gguf")
+                                                        {
+                                                            let model_name = dir_name
+                                                                .strip_prefix("models--")
+                                                                .unwrap_or(dir_name)
+                                                                .replace("--", "/");
+                                                            let file_path = file.path();
+                                                            let size =
+                                                                std::fs::metadata(&file_path)
                                                                     .map(|m| m.len())
                                                                     .unwrap_or(0);
-                                                                    found_models.push((
-                                                                        model_name,
-                                                                        name.to_string(),
-                                                                        file_path,
-                                                                        size,
-                                                                    ));
-                                                                }
+                                                            found_models.push((
+                                                                model_name,
+                                                                name.to_string(),
+                                                                file_path,
+                                                                size,
+                                                            ));
                                                         }
                                                     }
                                                 }
                                             }
+                                        }
                                     }
                                 }
                             }
