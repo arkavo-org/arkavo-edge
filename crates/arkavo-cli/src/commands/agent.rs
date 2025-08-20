@@ -51,8 +51,11 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("AGENTS.md already exists. Please rename or remove it first.".into());
     }
 
-    let template_path = Path::new("assets/prompts/agents_md.prompt.md");
-    let template_content = fs::read_to_string(template_path)?;
+    // Load the agents_md template using the prompt loader (with fallback)
+    let template_content = crate::prompt_loader::load_prompt(
+        "agents_md",
+        "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\"",
+    );
     let template = template_content.replace("{name}", name);
 
     fs::write(agents_path, template)?;
@@ -89,9 +92,11 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         // Create agent name: directory-randomid
         let agent_name = format!("{dir_name}-{random_id}");
 
-        // Generate AGENTS.md with defaults
-        let template_path = Path::new("assets/prompts/agents_md.prompt.md");
-        let template_content = fs::read_to_string(template_path)?;
+        // Generate AGENTS.md with defaults using embedded template
+        let template_content = crate::prompt_loader::load_prompt(
+            "agents_md",
+            "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\"",
+        );
         let template = template_content.replace("{name}", &agent_name);
 
         fs::write(config_path, template)?;

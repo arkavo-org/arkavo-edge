@@ -521,28 +521,24 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
+    // Initialize prompt override directory if needed
+    let _ = crate::prompt_loader::init_prompt_override_dir();
+
     // Build base system prompt (without repo context initially)
     let base_system_prompt = if mcp_client.is_some() {
-        format!(
-            "You are an AI assistant with MCP tools for development tasks. You MUST use tools for information gathering.
-
-TOOL USAGE RULES:
-1. For git questions: Always respond with @git_status first
-2. For file operations: Always use @filesystem {{\"path\": \"<path>\"}} 
-3. For code analysis: Always use @code_analysis {{\"task\": \"<task>\"}}
-4. NEVER give generic responses - gather real data first
-
-EXAMPLES:
+        // Load chat system prompt with MCP tools info
+        let tools_info = format!(
+            "EXAMPLES:
 Q: \"What git branch am I on?\" → A: @git_status
 Q: \"List files here\" → A: @filesystem {{\"path\": \".\"}}
 Q: \"What's in the README?\" → A: @filesystem {{\"path\": \"README.md\"}}
 Q: \"Recent commits?\" → A: @git_status
 
-Always lead with tool calls, then interpret the results for the user.
-\n{mcp_info}"
-        )
+{mcp_info}"
+        );
+        crate::prompt_loader::load_chat_system_prompt(true, Some(&tools_info))
     } else {
-        "You are a helpful AI assistant. Be concise and direct in your responses.".to_string()
+        crate::prompt_loader::load_chat_system_prompt(false, None)
     };
 
     // Determine whether to inject repo context
