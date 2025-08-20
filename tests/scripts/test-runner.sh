@@ -118,7 +118,7 @@ echo ""
 echo "======== PHASE 1: Foundation Tests ========"
 
 run_test "CLI-01" "Help flag" "$BINARY --help | grep -q 'USAGE'"
-run_test "CLI-05" "Non-interactive chat" "echo 'Hello' | $BINARY chat --no-tui --prompt 'Say hi'" 10
+run_test "CLI-05" "Non-interactive chat" "echo 'Hello' | $BINARY chat --prompt 'Say hi'" 10
 run_test "ERR-01" "Invalid command handling" "$BINARY invalid-command 2>&1 | grep -q 'help'" 5
 run_test "CLAUDE-01" "CLAUDE.md validity" "test -f $PROJECT_ROOT/CLAUDE.md && grep -q 'Project Overview' $PROJECT_ROOT/CLAUDE.md" 2
 
@@ -141,7 +141,7 @@ run_test "DOC-01" "README validity" "test -f $PROJECT_ROOT/README.md && grep -q 
 echo ""
 echo "======== PHASE 4: Error Handling Tests ========"
 
-run_test "ERR-02" "Offline execution" "unset OPENAI_API_KEY && $BINARY chat --no-tui --prompt 'Test' 2>&1 | grep -qE '(error|fail|connect)'" 10
+run_test "ERR-02" "Offline execution" "unset OPENAI_API_KEY && $BINARY chat --prompt 'Test' 2>&1 | grep -qE '(error|fail|connect)'" 10
 
 # Phase 5: Git Integration Tests (if in git repo)
 echo ""
