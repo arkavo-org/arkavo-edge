@@ -1665,12 +1665,8 @@ async fn initialize_llm_client(
                 println!("✓ Connected to DeepSeek API");
             }
             return Ok(client);
-        } else {
-            if !print_mode {
-                println!(
-                    "Failed to connect to DeepSeek. Check DEEPSEEK_API_KEY environment variable."
-                );
-            }
+        } else if !print_mode {
+            println!("Failed to connect to DeepSeek. Check DEEPSEEK_API_KEY environment variable.");
         }
     } else if model_name == "kimi" {
         // Set environment variable for Kimi provider
@@ -1683,10 +1679,8 @@ async fn initialize_llm_client(
                 println!("✓ Connected to Kimi API");
             }
             return Ok(client);
-        } else {
-            if !print_mode {
-                println!("Failed to connect to Kimi. Check MOONSHOT_API_KEY environment variable.");
-            }
+        } else if !print_mode {
+            println!("Failed to connect to Kimi. Check MOONSHOT_API_KEY environment variable.");
         }
     }
 

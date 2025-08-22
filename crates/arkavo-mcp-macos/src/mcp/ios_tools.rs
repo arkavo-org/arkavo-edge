@@ -722,88 +722,88 @@ impl Tool for UiInteractionKit {
                     }
 
                     // If using XCUITest, try to execute the tap
-                    if use_xctest && xctest_command.is_some() {
-                        if let Some(bridge_arc) = self.get_existing_xctest_bridge().await {
-                            let command = xctest_command.unwrap();
+                    if use_xctest {
+                        if let Some(command) = xctest_command {
+                            if let Some(bridge_arc) = self.get_existing_xctest_bridge().await {
+                                // Check if connected first
+                                let is_connected = {
+                                    let bridge = bridge_arc.lock().await;
+                                    bridge.is_connected()
+                                };
 
-                            // Check if connected first
-                            let is_connected = {
-                                let bridge = bridge_arc.lock().await;
-                                bridge.is_connected()
-                            };
-
-                            if is_connected {
-                                // Send the tap command using our helper method
-                                match self.send_xctest_tap(bridge_arc, command).await {
-                                    Ok(response) => {
-                                        if response.success {
-                                            return Ok(serde_json::json!({
-                                                "success": true,
-                                                "action": "tap",
-                                                "method": "xcuitest",
-                                                "response": response.result,
-                                                "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active"),
-                                                "confidence": "high"
-                                            }));
+                                if is_connected {
+                                    // Send the tap command using our helper method
+                                    match self.send_xctest_tap(bridge_arc, command).await {
+                                        Ok(response) => {
+                                            if response.success {
+                                                return Ok(serde_json::json!({
+                                                    "success": true,
+                                                    "action": "tap",
+                                                    "method": "xcuitest",
+                                                    "response": response.result,
+                                                    "device_id": params.get("device_id").and_then(|v| v.as_str()).unwrap_or("active"),
+                                                    "confidence": "high"
+                                                }));
+                                            }
+                                            // XCUITest failed, fall back to AppleScript for coordinates
+                                            eprintln!(
+                                                "XCUITest tap failed: {:?}, falling back to AppleScript",
+                                                response.error
+                                            );
+                                            if let (Some(x), Some(y)) =
+                                                (target.get("x"), target.get("y"))
+                                            {
+                                                tap_params["x"] = x.clone();
+                                                tap_params["y"] = y.clone();
+                                            } else {
+                                                // Can't fall back for text/accessibility taps
+                                                return Ok(serde_json::json!({
+                                                    "error": {
+                                                        "code": "XCUITEST_TAP_FAILED",
+                                                        "message": response.error.unwrap_or_else(|| "XCUITest tap failed".to_string()),
+                                                        "suggestion": "For text/accessibility taps, use screen_capture and tap with coordinates instead"
+                                                    }
+                                                }));
+                                            }
                                         }
-                                        // XCUITest failed, fall back to AppleScript for coordinates
-                                        eprintln!(
-                                            "XCUITest tap failed: {:?}, falling back to AppleScript",
-                                            response.error
-                                        );
-                                        if let (Some(x), Some(y)) =
-                                            (target.get("x"), target.get("y"))
-                                        {
-                                            tap_params["x"] = x.clone();
-                                            tap_params["y"] = y.clone();
-                                        } else {
-                                            // Can't fall back for text/accessibility taps
-                                            return Ok(serde_json::json!({
-                                                "error": {
-                                                    "code": "XCUITEST_TAP_FAILED",
-                                                    "message": response.error.unwrap_or_else(|| "XCUITest tap failed".to_string()),
-                                                    "suggestion": "For text/accessibility taps, use screen_capture and tap with coordinates instead"
-                                                }
-                                            }));
+                                        Err(e) => {
+                                            eprintln!(
+                                                "XCUITest error: {e}, falling back to AppleScript"
+                                            );
+                                            // Fall back to AppleScript for coordinates
+                                            if let (Some(x), Some(y)) =
+                                                (target.get("x"), target.get("y"))
+                                            {
+                                                tap_params["x"] = x.clone();
+                                                tap_params["y"] = y.clone();
+                                            } else {
+                                                // Can't fall back for text/accessibility taps
+                                                return Ok(serde_json::json!({
+                                                    "error": {
+                                                        "code": "XCUITEST_BRIDGE_ERROR",
+                                                        "message": format!("XCUITest bridge error: {}", e),
+                                                        "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                                    }
+                                                }));
+                                            }
                                         }
                                     }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "XCUITest error: {e}, falling back to AppleScript"
-                                        );
-                                        // Fall back to AppleScript for coordinates
-                                        if let (Some(x), Some(y)) =
-                                            (target.get("x"), target.get("y"))
-                                        {
-                                            tap_params["x"] = x.clone();
-                                            tap_params["y"] = y.clone();
-                                        } else {
-                                            // Can't fall back for text/accessibility taps
-                                            return Ok(serde_json::json!({
-                                                "error": {
-                                                    "code": "XCUITEST_BRIDGE_ERROR",
-                                                    "message": format!("XCUITest bridge error: {}", e),
-                                                    "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
-                                                }
-                                            }));
-                                        }
-                                    }
-                                }
-                            } else {
-                                eprintln!(
-                                    "XCUITest bridge not connected, falling back to AppleScript"
-                                );
-                                if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
-                                    tap_params["x"] = x.clone();
-                                    tap_params["y"] = y.clone();
                                 } else {
-                                    return Ok(serde_json::json!({
-                                        "error": {
-                                            "code": "XCUITEST_NOT_CONNECTED",
-                                            "message": "XCUITest bridge not connected",
-                                            "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
-                                        }
-                                    }));
+                                    eprintln!(
+                                        "XCUITest bridge not connected, falling back to AppleScript"
+                                    );
+                                    if let (Some(x), Some(y)) = (target.get("x"), target.get("y")) {
+                                        tap_params["x"] = x.clone();
+                                        tap_params["y"] = y.clone();
+                                    } else {
+                                        return Ok(serde_json::json!({
+                                            "error": {
+                                                "code": "XCUITEST_NOT_CONNECTED",
+                                                "message": "XCUITest bridge not connected",
+                                                "suggestion": "Use screen_capture to find elements and tap with coordinates instead"
+                                            }
+                                        }));
+                                    }
                                 }
                             }
                         } else {
