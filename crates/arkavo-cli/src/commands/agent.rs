@@ -327,7 +327,8 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         "Runtime Configuration (example)" => {
                             // Try to extract listen address from YAML block
                             if trimmed.starts_with("listen:")
-                                && let Some(listen) = extract_yaml_value(trimmed, "listen:") {
+                                && let Some(listen) = extract_yaml_value(trimmed, "listen:")
+                            {
                                 agent.listen = listen;
                             }
                         }
