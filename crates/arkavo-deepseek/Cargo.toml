@@ -1,0 +1,39 @@
+[package]
+name = "arkavo-deepseek"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DeepSeek provider with Anthropic-compatible API and Function Calling support for Arkavo Edge"
+keywords = ["deepseek", "llm", "ai", "function-calling", "anthropic"]
+categories = ["api-bindings", "asynchronous"]
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["rt", "macros", "sync"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+tokio-stream = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+
+# Schema validation for strict mode
+jsonschema = { workspace = true }
+
+# URL parsing
+url = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = { workspace = true }
+serial_test = "3"
+
+[lints]
+workspace = true

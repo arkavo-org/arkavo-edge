@@ -28,6 +28,11 @@ mod kimi_adapter;
 #[cfg(feature = "kimi")]
 pub use kimi_adapter::KimiProvider;
 
+#[cfg(feature = "deepseek")]
+mod deepseek_adapter;
+#[cfg(feature = "deepseek")]
+pub use deepseek_adapter::DeepSeekProvider;
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 mod llamacpp_provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

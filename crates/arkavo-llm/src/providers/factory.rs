@@ -20,6 +20,8 @@ pub enum ProviderType {
     Anthropic,
     #[cfg(feature = "llm-remote")]
     Gemini,
+    #[cfg(feature = "deepseek")]
+    DeepSeek,
     #[cfg(feature = "llm-local")]
     Local,
     Custom(String),
@@ -42,6 +44,13 @@ impl ProviderType {
             }
             if name_lower.contains("gemini") {
                 return ProviderType::Gemini;
+            }
+        }
+
+        #[cfg(feature = "deepseek")]
+        {
+            if name_lower.contains("deepseek") {
+                return ProviderType::DeepSeek;
             }
         }
 
@@ -146,6 +155,8 @@ impl ProviderFactoryRegistry {
             registry.register(Arc::new(OpenAIProviderFactory));
             registry.register(Arc::new(AnthropicProviderFactory));
         }
+        #[cfg(feature = "deepseek")]
+        registry.register(Arc::new(DeepSeekProviderFactory));
         #[cfg(feature = "llm-local")]
         registry.register(Arc::new(LocalProviderFactory));
 
@@ -321,6 +332,112 @@ impl ProviderFactory for AnthropicProviderFactory {
         let url = url::Url::parse(&config.base_url)?;
         if !matches!(url.scheme(), "http" | "https") {
             return Err(anyhow::anyhow!("Invalid URL scheme for Anthropic provider"));
+        }
+
+        Ok(())
+    }
+}
+
+/// Factory for creating DeepSeek provider instances
+#[cfg(feature = "deepseek")]
+pub struct DeepSeekProviderFactory;
+
+#[cfg(feature = "deepseek")]
+#[async_trait]
+impl ProviderFactory for DeepSeekProviderFactory {
+    async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
+        // Get API key from auth manager if auth_ref is provided
+        let api_key = if let Some(ref auth_ref) = config.auth_ref {
+            // TODO(#204): Re-enable AuthManager when available in arkavo-llm
+            // For now, try environment variable
+            std::env::var(auth_ref).map_err(|_| {
+                anyhow::anyhow!(
+                    "Credential '{}' not found in environment",
+                    auth_ref.chars().take(8).collect::<String>() + "..."
+                )
+            })?
+        } else {
+            return Err(anyhow::anyhow!(
+                "API key required for DeepSeek provider. Set auth_ref in the node configuration or provide DEEPSEEK_API_KEY environment variable"
+            ));
+        };
+
+        // Use feature flag to import DeepSeek types
+        #[cfg(feature = "deepseek")]
+        use crate::DeepSeekProvider;
+        #[cfg(feature = "deepseek")]
+        use arkavo_deepseek::DeepSeekConfig;
+
+        let use_strict_mode = config
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("strict_mode"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let anthropic_compat = config
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("anthropic_compat"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let deepseek_config = DeepSeekConfig {
+            api_key,
+            base_url: if use_strict_mode {
+                "https://api.deepseek.com/beta".to_string()
+            } else if anthropic_compat {
+                "https://api.deepseek.com/anthropic".to_string()
+            } else {
+                config.base_url.clone()
+            },
+            model: config
+                .default_model
+                .clone()
+                .unwrap_or_else(|| "deepseek-chat".to_string()),
+            use_strict_mode,
+            anthropic_compat,
+            max_tokens: config
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("max_tokens"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32),
+            temperature: config
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("temperature"))
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32),
+            top_p: config
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("top_p"))
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32),
+            timeout: std::time::Duration::from_secs(config.timeout_secs.unwrap_or(60)),
+            max_retries: config.max_retries.unwrap_or(3),
+        };
+
+        let provider = DeepSeekProvider::new(deepseek_config)?;
+        Ok(Box::new(provider))
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::DeepSeek
+    }
+
+    async fn validate_config(&self, config: &ProviderConfig) -> Result<()> {
+        if config.auth_ref.is_none() {
+            return Err(anyhow::anyhow!(
+                "API key required for DeepSeek provider. Set auth_ref in the node configuration"
+            ));
+        }
+
+        // Validate URL format
+        let url = url::Url::parse(&config.base_url)?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(anyhow::anyhow!("Invalid URL scheme for DeepSeek provider"));
         }
 
         Ok(())
