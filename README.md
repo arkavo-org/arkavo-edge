@@ -55,6 +55,32 @@ Arkavo Edge now supports Kimi (Moonshot AI) models including the 128k context wi
 - API keys are securely disseminated from the UI orchestrator to agents
 - Supports 8k, 32k, and 128k context models
 
+### DeepSeek Integration
+
+Arkavo Edge provides first-class support for DeepSeek's API with both standard and reasoning models:
+- **Anthropic-compatible API**: Full support for DeepSeek's Anthropic-style endpoints
+- **Function Calling**: Support for up to 128 tools per request with automatic schema validation
+- **Model Selection**: Use `deepseek-chat` (default) or `deepseek-reasoner` via `DEEPSEEK_MODEL` environment variable
+- **Strict Mode (Beta)**: Enhanced reliability with JSON Schema validation for tool arguments
+- **Automatic Fallback**: Seamlessly switches from `deepseek-reasoner` to `deepseek-chat` when tools are present
+
+Configure with environment variables:
+- `DEEPSEEK_API_KEY`: Your DeepSeek API key
+- `DEEPSEEK_MODEL`: Model to use (`deepseek-chat` or `deepseek-reasoner`)
+- `DEEPSEEK_BASE_URL`: Optional custom API endpoint
+
+Usage:
+```bash
+# Interactive chat with DeepSeek
+DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek
+
+# Single prompt
+DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek --prompt "Explain quantum computing"
+
+# With reasoning model
+DEEPSEEK_API_KEY=your-key DEEPSEEK_MODEL=deepseek-reasoner arkavo chat --model deepseek --prompt "Solve: 15 * 23"
+```
+
 ### OpenTDF Authorization
 
 Arkavo Edge integrates with [OpenTDF](https://opentdf.io) platform for entitlement-based access control:

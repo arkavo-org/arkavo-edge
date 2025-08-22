@@ -530,8 +530,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let tools_info = format!(
             "EXAMPLES:
 Q: \"What git branch am I on?\" → A: @git_status
-Q: \"List files here\" → A: @filesystem {{\"path\": \".\"}}
-Q: \"What's in the README?\" → A: @filesystem {{\"path\": \"README.md\"}}
+Q: \"List files here\" → A: @filesystem {{\"action\": \"list_directory\", \"dir_path\": \".\"}}
+Q: \"What's in the README?\" → A: @filesystem {{\"action\": \"read_file\", \"file_path\": \"README.md\"}}
 Q: \"Recent commits?\" → A: @git_status
 
 {mcp_info}"
@@ -1653,7 +1653,46 @@ async fn initialize_llm_client(
     max_tokens: u32,
     seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
-    // Try to connect to Ollama first
+    // Check if model_name specifies a provider directly
+    if model_name == "deepseek" {
+        // Set environment variable for DeepSeek provider
+        // SAFETY: This is safe as we're only setting the env var once during initialization
+        unsafe {
+            std::env::set_var("LLM_PROVIDER", "deepseek");
+        }
+        if let Ok(client) = LlmClient::from_env() {
+            if !print_mode {
+                println!("✓ Connected to DeepSeek API");
+            }
+            return Ok(client);
+        } else {
+            if !print_mode {
+                println!("Failed to connect to DeepSeek. Check DEEPSEEK_API_KEY environment variable.");
+            }
+        }
+    } else if model_name == "kimi" {
+        // Set environment variable for Kimi provider
+        // SAFETY: This is safe as we're only setting the env var once during initialization
+        unsafe {
+            std::env::set_var("LLM_PROVIDER", "kimi");
+        }
+        if let Ok(client) = LlmClient::from_env() {
+            if !print_mode {
+                println!("✓ Connected to Kimi API");
+            }
+            return Ok(client);
+        } else {
+            if !print_mode {
+                println!("Failed to connect to Kimi. Check MOONSHOT_API_KEY environment variable.");
+            }
+        }
+    }
+    
+    // Try to connect to Ollama for other models
+    // SAFETY: This is safe as we're only setting the env var once during initialization
+    unsafe {
+        std::env::set_var("LLM_PROVIDER", "ollama");
+    }
     if let Ok(client) = LlmClient::from_env()
         && client.complete(vec![Message::user("ping")]).await.is_ok()
     {

@@ -24,6 +24,7 @@ local = ["arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local
 metal = ["arkavo-llm/metal"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
 kimi = ["arkavo-llm/kimi"]
+deepseek = ["arkavo-llm/deepseek"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 
 [dependencies]
