@@ -260,25 +260,32 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             // Track current markdown section
             if trimmed.starts_with("## ") {
                 let section_name = trimmed.strip_prefix("## ").unwrap_or("").to_string();
-                
+
                 // Check if this is an agent definition (not a standard section like "Agent Identity")
-                if !matches!(section_name.as_str(), 
-                    "Agent Identity" | "Runtime Configuration" | "Runtime Configuration (example)" |
-                    "Capabilities" | "Tool Requirements" | "MCP Servers") {
-                    
+                if !matches!(
+                    section_name.as_str(),
+                    "Agent Identity"
+                        | "Runtime Configuration"
+                        | "Runtime Configuration (example)"
+                        | "Capabilities"
+                        | "Tool Requirements"
+                        | "MCP Servers"
+                ) {
                     // Save any pending MCP server before switching agents
-                    if let (Some(server), Some(agent)) = (current_mcp_server.take(), current_agent.as_mut()) {
+                    if let (Some(server), Some(agent)) =
+                        (current_mcp_server.take(), current_agent.as_mut())
+                    {
                         agent.mcp_servers.push(server);
                     }
-                    
+
                     // Save previous agent if exists
                     if let Some(agent) = current_agent.take() {
                         agents.push(agent);
                     }
-                    
+
                     // Reset MCP section flag
                     in_mcp_section = false;
-                    
+
                     // Create new agent from ## agent-name header
                     current_agent = Some(AgentConfig {
                         name: section_name.clone(),
@@ -291,7 +298,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     });
                     in_agent_section = true;
                 }
-                
+
                 current_section = Some(section_name);
                 continue;
             }
