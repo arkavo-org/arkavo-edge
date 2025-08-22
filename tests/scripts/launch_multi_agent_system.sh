@@ -31,7 +31,7 @@ agents=(
 pids=()
 for agent in "${agents[@]}"; do
     echo "🤖 Starting $agent agent..."
-    cd "agents/$agent"
+    cd "examples/software-development-lifecycle/$agent"
     ../../target/release/arkavo agent run > "$agent.log" 2>&1 &
     pid=$!
     pids+=($pid)
@@ -65,7 +65,7 @@ echo "- Architecture:    http://localhost:8351"
 echo "- Data Science:    http://localhost:8352"
 
 echo ""
-echo "📝 Logs are being written to agents/*/[agent-name].log"
+echo "📝 Logs are being written to examples/software-development-lifecycle/*/[agent-name].log"
 echo ""
 echo "🛑 Press Ctrl+C to stop all agents..."
 

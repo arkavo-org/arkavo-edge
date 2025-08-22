@@ -82,7 +82,7 @@ The system uses a hybrid orchestrator-mesh architecture:
 
 ### Start Individual Agent
 ```bash
-cd agents/security
+cd examples/software-development-lifecycle/security
 arkavo agent run
 ```
 
@@ -172,11 +172,11 @@ npm install -g @cyanheads/git-mcp-server
 
 To add a new specialized agent:
 
-1. Create directory: `mkdir agents/new-specialist`
+1. Create directory: `mkdir examples/software-development-lifecycle/new-specialist`
 2. Create `AGENTS.md` with appropriate configuration
 3. Set unique port number
 4. Define purpose that includes keywords for capability detection
-5. Start the agent: `cd agents/new-specialist && arkavo agent run`
+5. Start the agent: `cd examples/software-development-lifecycle/new-specialist && arkavo agent run`
 
 The agent will automatically:
 - Broadcast its capabilities via mDNS

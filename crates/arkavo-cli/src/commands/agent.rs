@@ -44,6 +44,17 @@ fn print_usage() {
     println!("    help           Print this help message");
 }
 
+// Extract agent role/purpose from AGENTS.md for use in chat mode
+pub fn extract_agent_role() -> Option<String> {
+    if let Ok(content) = fs::read_to_string("AGENTS.md")
+        && let Ok(agents) = parse_agents_config(&content)
+        && let Some(first_agent) = agents.first()
+    {
+        return Some(first_agent.purpose.clone());
+    }
+    None
+}
+
 fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let agents_path = Path::new("AGENTS.md");
 
@@ -51,65 +62,9 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("AGENTS.md already exists. Please rename or remove it first.".into());
     }
 
+    // Create a basic AGENTS.md template
     let template = format!(
-        r#"# AGENTS.md
-
-## {name}
-purpose: Describe what this agent does
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
-listen:  0.0.0.0:8342
-
-# MCP servers provide additional tools and capabilities to the agent
-# Uncomment and configure the following to add MCP servers:
-# mcp_servers:
-#   - name: filesystem
-#     command: mcp-filesystem
-#     args: ["--allow-write"]
-#   - name: git
-#     command: mcp-git
-#     args: []
-#   - name: external
-#     url: http://localhost:8080
-
-# mDNS discovery is enabled by default for zero-config networking
-# To disable mDNS, uncomment the following:
-# discovery:
-#   mdns: false
-
-# Additional agent configurations can be added below
-# Each agent starts with ## agent-name
-
-# API keys can be configured per agent (will be disseminated from UI):
-# MOONSHOT_API_KEY: sk-your-api-key-here
-# OPENAI_API_KEY: sk-your-openai-key
-# ANTHROPIC_API_KEY: sk-your-anthropic-key
-
-# Example configurations:
-#
-# ## code-reviewer
-# purpose: Review code for quality and suggest improvements
-# model:   openai://gpt-4
-# listen:  0.0.0.0:8343
-# OPENAI_API_KEY: sk-your-openai-key
-# mcp_servers:
-#   - name: git
-#     command: mcp-git
-#     args: ["--read-only"]
-#
-# ## test-runner
-# purpose: Run tests and report results
-# model:   anthropic://claude-3-opus
-# listen:  0.0.0.0:8344
-# ANTHROPIC_API_KEY: sk-your-anthropic-key
-# discovery:
-#   mdns: false  # Explicitly disable mDNS for this agent
-#
-# ## kimi-assistant
-# purpose: AI assistant with 128k context window
-# model:   kimi://moonshot-v1-128k
-# listen:  0.0.0.0:8345
-# MOONSHOT_API_KEY: sk-your-moonshot-key
-"#
+        "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\""
     );
 
     fs::write(agents_path, template)?;
@@ -146,16 +101,12 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
         // Create agent name: directory-randomid
         let agent_name = format!("{dir_name}-{random_id}");
 
-        // Generate AGENTS.md with defaults
-        let template = format!(
-            r#"# AGENTS.md
-
-## {agent_name}
-purpose: AI agent for {dir_name} development
-model:   ollama://127.0.0.1:11434/qwen3:0.6b
-listen:  0.0.0.0:8342
-"#
+        // Generate AGENTS.md with defaults using embedded template
+        let template_content = crate::prompt_loader::load_prompt(
+            "agents_md",
+            "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\"",
         );
+        let template = template_content.replace("{name}", &agent_name);
 
         fs::write(config_path, template)?;
         println!("Auto-generated AGENTS.md with agent '{agent_name}'");
@@ -265,171 +216,175 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     let mut in_agent_section = false;
     let mut in_mcp_section = false;
     let mut current_mcp_server: Option<McpServerConfig> = None;
+    let mut current_section: Option<String> = None;
+
+    // Check if this is the new markdown format by looking for specific patterns
+    let is_new_format = content.contains("## Agent Identity")
+        || content.contains("**Mission:**")
+        || content.contains("**Name:**")
+        || content.contains("# AGENTS.md");
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Check for agent section header
-        if trimmed.starts_with("## ") {
-            // Save any pending MCP server before switching agents
-            if current_mcp_server.is_some()
-                && current_agent.is_some()
-                && let Some(server) = current_mcp_server.take()
-                && let Some(agent) = current_agent.as_mut()
-            {
-                agent.mcp_servers.push(server);
-            }
-
-            // Save previous agent if exists
-            if let Some(agent) = current_agent.take() {
-                agents.push(agent);
-            }
-
-            // Reset MCP section flag
-            in_mcp_section = false;
-
-            let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
-            current_agent = Some(AgentConfig {
-                name,
-                purpose: String::new(),
-                model: String::new(),
-                listen: String::new(),
-                mdns_enabled: true, // Default to true for zero-config
-                mcp_servers: Vec::new(),
-                api_keys: std::collections::HashMap::new(),
-            });
-            in_agent_section = true;
-            continue;
-        }
-
-        // Skip if not in agent section
-        if !in_agent_section || current_agent.is_none() {
-            continue;
-        }
-
-        // Check for mcp_servers section
-        if trimmed == "mcp_servers:" {
-            in_mcp_section = true;
-            continue;
-        }
-
-        // Handle MCP server entries
-        if in_mcp_section && trimmed.starts_with("- name:") {
-            // Save previous MCP server if exists
-            if let Some(server) = current_mcp_server.take()
-                && let Some(agent) = current_agent.as_mut()
-            {
-                agent.mcp_servers.push(server);
-            }
-
-            // Start new MCP server
-            current_mcp_server = Some(McpServerConfig {
-                name: trimmed
-                    .strip_prefix("- name:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-                command: None,
-                args: Vec::new(),
-                url: None,
-            });
-            continue;
-        }
-
-        // Parse MCP server properties
-        if in_mcp_section
-            && current_mcp_server.is_some()
-            && let Some(server) = current_mcp_server.as_mut()
-        {
-            if trimmed.starts_with("command:") {
-                server.command = Some(
-                    trimmed
-                        .strip_prefix("command:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if trimmed.starts_with("args:") {
-                // Parse array format: ["arg1", "arg2"]
-                let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
-                if args_str.starts_with('[') && args_str.ends_with(']') {
-                    let args_content = &args_str[1..args_str.len() - 1];
-                    server.args = args_content
-                        .split(',')
-                        .map(|s| s.trim().trim_matches('"').to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
+        // Handle new markdown format
+        if is_new_format {
+            // Extract agent name from H1 title (e.g., "# AGENTS.md — alert-manager")
+            if trimmed.starts_with("# AGENTS.md") && trimmed.contains("—") {
+                // Save previous agent if exists
+                if let Some(agent) = current_agent.take() {
+                    agents.push(agent);
                 }
-            } else if trimmed.starts_with("url:") {
-                server.url = Some(
-                    trimmed
-                        .strip_prefix("url:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
-            {
-                // End of MCP section
-                in_mcp_section = false;
-                if current_mcp_server.is_some()
-                    && current_agent.is_some()
-                    && let Some(server) = current_mcp_server.take()
-                    && let Some(agent) = current_agent.as_mut()
+
+                let name = if let Some(em_dash_pos) = trimmed.find("—") {
+                    trimmed[em_dash_pos + "—".len()..].trim().to_string()
+                } else if let Some(dash_pos) = trimmed.find(" - ") {
+                    trimmed[dash_pos + 3..].trim().to_string()
+                } else {
+                    "unnamed-agent".to_string()
+                };
+
+                current_agent = Some(AgentConfig {
+                    name,
+                    purpose: String::new(),
+                    model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
+                    listen: "0.0.0.0:8342".to_string(), // Default listen address
+                    mdns_enabled: true,
+                    mcp_servers: Vec::new(),
+                    api_keys: std::collections::HashMap::new(),
+                });
+                in_agent_section = true;
+                continue;
+            }
+
+            // Track current markdown section
+            if trimmed.starts_with("## ") {
+                let section_name = trimmed.strip_prefix("## ").unwrap_or("").to_string();
+
+                // Check if this is an agent definition (not a standard section like "Agent Identity")
+                if !matches!(
+                    section_name.as_str(),
+                    "Agent Identity"
+                        | "Runtime Configuration"
+                        | "Runtime Configuration (example)"
+                        | "Capabilities"
+                        | "Tool Requirements"
+                        | "MCP Servers"
+                ) {
+                    // Save any pending MCP server before switching agents
+                    if let (Some(server), Some(agent)) =
+                        (current_mcp_server.take(), current_agent.as_mut())
+                    {
+                        agent.mcp_servers.push(server);
+                    }
+
+                    // Save previous agent if exists
+                    if let Some(agent) = current_agent.take() {
+                        agents.push(agent);
+                    }
+
+                    // Reset MCP section flag
+                    in_mcp_section = false;
+
+                    // Create new agent from ## agent-name header
+                    current_agent = Some(AgentConfig {
+                        name: section_name.clone(),
+                        purpose: String::new(),
+                        model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
+                        listen: "0.0.0.0:8342".to_string(), // Default listen address
+                        mdns_enabled: true,
+                        mcp_servers: Vec::new(),
+                        api_keys: std::collections::HashMap::new(),
+                    });
+                    in_agent_section = true;
+                }
+
+                current_section = Some(section_name);
+                continue;
+            }
+
+            // Parse agent information from markdown sections
+            if let Some(agent) = current_agent.as_mut() {
+                if let Some(section) = &current_section {
+                    match section.as_str() {
+                        "Agent Identity" => {
+                            // Extract name
+                            if trimmed.starts_with("- **Name:**") {
+                                if let Some(name) =
+                                    extract_markdown_field_value(trimmed, "**Name:**")
+                                {
+                                    agent.name = name;
+                                }
+                            }
+                            // Extract mission/purpose
+                            else if trimmed.starts_with("- **Mission:**")
+                                && let Some(mission) =
+                                    extract_markdown_field_value(trimmed, "**Mission:**")
+                            {
+                                agent.purpose = mission;
+                            }
+                        }
+                        "Runtime Configuration (example)" => {
+                            // Try to extract listen address from YAML block
+                            if trimmed.starts_with("listen:")
+                                && let Some(listen) = extract_yaml_value(trimmed, "listen:")
+                            {
+                                agent.listen = listen;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Also handle direct YAML-style properties in markdown (for flexibility)
+                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server);
+            }
+        } else {
+            // Handle old YAML-style format
+            // Check for agent section header
+            if trimmed.starts_with("## ") {
+                // Save any pending MCP server before switching agents
+                if let (Some(server), Some(agent)) =
+                    (current_mcp_server.take(), current_agent.as_mut())
                 {
                     agent.mcp_servers.push(server);
                 }
-            }
-        }
 
-        // Parse agent properties (when not in MCP section)
-        if !in_mcp_section && let Some(agent) = current_agent.as_mut() {
-            if trimmed.starts_with("purpose:") {
-                agent.purpose = trimmed
-                    .strip_prefix("purpose:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("model:") {
-                agent.model = trimmed
-                    .strip_prefix("model:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("listen:") {
-                agent.listen = trimmed
-                    .strip_prefix("listen:")
-                    .unwrap_or("")
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
-            } else if trimmed.starts_with("mdns:") {
-                // Only disable if explicitly set to false
-                agent.mdns_enabled = !trimmed.contains("false");
-            } else if trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:") {
-                // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
-                if let Some(colon_pos) = trimmed.find(':') {
-                    let key_name = trimmed[..colon_pos].trim().to_string();
-                    let key_value = trimmed[colon_pos + 1..]
-                        .trim()
-                        .trim_matches('"')
-                        .to_string();
-                    agent.api_keys.insert(key_name, key_value);
+                // Save previous agent if exists
+                if let Some(agent) = current_agent.take() {
+                    agents.push(agent);
                 }
+
+                // Reset MCP section flag
+                in_mcp_section = false;
+
+                let name = trimmed.strip_prefix("## ").unwrap_or("").trim().to_string();
+                current_agent = Some(AgentConfig {
+                    name,
+                    purpose: String::new(),
+                    model: String::new(),
+                    listen: String::new(),
+                    mdns_enabled: true, // Default to true for zero-config
+                    mcp_servers: Vec::new(),
+                    api_keys: std::collections::HashMap::new(),
+                });
+                in_agent_section = true;
+                continue;
+            }
+
+            // Skip if not in agent section
+            if !in_agent_section || current_agent.is_none() {
+                continue;
+            }
+
+            if let Some(agent) = current_agent.as_mut() {
+                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server);
             }
         }
     }
 
     // Save any pending MCP server
-    if current_mcp_server.is_some()
-        && current_agent.is_some()
-        && let Some(server) = current_mcp_server
-        && let Some(agent) = current_agent.as_mut()
-    {
+    if let (Some(server), Some(agent)) = (current_mcp_server.take(), current_agent.as_mut()) {
         agent.mcp_servers.push(server);
     }
 
@@ -439,6 +394,146 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
     }
 
     Ok(agents)
+}
+
+// Helper function to extract value from markdown field like "- **Name:** value"
+fn extract_markdown_field_value(line: &str, field_prefix: &str) -> Option<String> {
+    if let Some(start_pos) = line.find(field_prefix) {
+        let after_prefix = &line[start_pos + field_prefix.len()..];
+        let value = after_prefix.trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+// Helper function to extract YAML-style values like "listen: 0.0.0.0:8342"
+fn extract_yaml_value(line: &str, key: &str) -> Option<String> {
+    if let Some(colon_pos) = line.find(':') {
+        let key_part = line[..colon_pos].trim();
+        if key_part == key.trim_end_matches(':') {
+            let value = line[colon_pos + 1..].trim().trim_matches('"');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+// Helper function to parse YAML-style properties (used by both old and new format parsers)
+fn parse_yaml_properties(
+    trimmed: &str,
+    agent: &mut AgentConfig,
+    in_mcp_section: &mut bool,
+    current_mcp_server: &mut Option<McpServerConfig>,
+) {
+    // Check for mcp_servers section
+    if trimmed == "mcp_servers:" {
+        *in_mcp_section = true;
+        return;
+    }
+
+    // Handle MCP server entries
+    if *in_mcp_section && trimmed.starts_with("- name:") {
+        // Save previous MCP server if exists
+        if let Some(server) = current_mcp_server.take() {
+            agent.mcp_servers.push(server);
+        }
+
+        // Start new MCP server
+        *current_mcp_server = Some(McpServerConfig {
+            name: trimmed
+                .strip_prefix("- name:")
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            command: None,
+            args: Vec::new(),
+            url: None,
+        });
+        return;
+    }
+
+    // Parse MCP server properties
+    if *in_mcp_section && let Some(server) = current_mcp_server.as_mut() {
+        if trimmed.starts_with("command:") {
+            server.command = Some(
+                trimmed
+                    .strip_prefix("command:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
+        } else if trimmed.starts_with("args:") {
+            // Parse array format: ["arg1", "arg2"]
+            let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
+            if args_str.starts_with('[') && args_str.ends_with(']') {
+                let args_content = &args_str[1..args_str.len() - 1];
+                server.args = args_content
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        } else if trimmed.starts_with("url:") {
+            server.url = Some(
+                trimmed
+                    .strip_prefix("url:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
+        } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
+            // End of MCP section
+            *in_mcp_section = false;
+            if let Some(server) = current_mcp_server.take() {
+                agent.mcp_servers.push(server);
+            }
+        }
+    }
+
+    // Parse agent properties (when not in MCP section)
+    if !*in_mcp_section {
+        if trimmed.starts_with("purpose:") {
+            agent.purpose = trimmed
+                .strip_prefix("purpose:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+        } else if trimmed.starts_with("model:") {
+            agent.model = trimmed
+                .strip_prefix("model:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+        } else if trimmed.starts_with("listen:") {
+            agent.listen = trimmed
+                .strip_prefix("listen:")
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string();
+        } else if trimmed.starts_with("mdns:") {
+            // Only disable if explicitly set to false
+            agent.mdns_enabled = !trimmed.contains("false");
+        } else if trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:") {
+            // Parse API key entries (e.g., MOONSHOT_API_KEY: sk-xxx)
+            if let Some(colon_pos) = trimmed.find(':') {
+                let key_name = trimmed[..colon_pos].trim().to_string();
+                let key_value = trimmed[colon_pos + 1..]
+                    .trim()
+                    .trim_matches('"')
+                    .to_string();
+                agent.api_keys.insert(key_name, key_value);
+            }
+        }
+    }
 }
 
 #[allow(clippy::future_not_send)]

@@ -161,13 +161,18 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
     }
 
+    // Initialize prompt override directory if needed
+    let _ = crate::prompt_loader::init_prompt_override_dir();
+
     // Initialize MCP client
-    let _mcp_client: Option<McpConnection> = initialize_mcp_connection(false);
+    let mcp_client: Option<McpConnection> = initialize_mcp_connection(false);
 
     // Get initial messages from conversation manager
-    let system_message = Message::system(
-        "You are a helpful AI assistant with access to the user's codebase and tools.",
+    let system_prompt = crate::prompt_loader::load_terminal_system_prompt(
+        mcp_client.is_some(),
+        None, // MCP info will be added later if available
     );
+    let system_message = Message::system(&system_prompt);
     let messages =
         runtime.block_on(conversation_manager.get_context_messages(Some(system_message)))?;
 
