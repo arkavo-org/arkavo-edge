@@ -317,20 +317,18 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                                 }
                             }
                             // Extract mission/purpose
-                            else if trimmed.starts_with("- **Mission:**") {
-                                if let Some(mission) =
+                            else if trimmed.starts_with("- **Mission:**")
+                                && let Some(mission) =
                                     extract_markdown_field_value(trimmed, "**Mission:**")
-                                {
-                                    agent.purpose = mission;
-                                }
+                            {
+                                agent.purpose = mission;
                             }
                         }
                         "Runtime Configuration (example)" => {
                             // Try to extract listen address from YAML block
-                            if trimmed.starts_with("listen:") {
-                                if let Some(listen) = extract_yaml_value(trimmed, "listen:") {
-                                    agent.listen = listen;
-                                }
+                            if trimmed.starts_with("listen:")
+                                && let Some(listen) = extract_yaml_value(trimmed, "listen:") {
+                                agent.listen = listen;
                             }
                         }
                         _ => {}
