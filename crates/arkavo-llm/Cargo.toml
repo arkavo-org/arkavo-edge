@@ -6,7 +6,6 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "LLM integration for Arkavo Edge"
-readme = "README.md"
 keywords = ["cli", "ai", "agent", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -56,8 +55,6 @@ arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 
 # Provider dependencies
 url = { version = "2.5.4", optional = true }
-ring = "0.17"
-keyring = "3.0"
 log = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 scopeguard = { workspace = true, optional = true }

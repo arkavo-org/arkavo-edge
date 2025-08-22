@@ -29,7 +29,7 @@ llama-cpp = ["arkavo-llm/llama-cpp"]
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
 arkavo-git = { path = "../arkavo-git" }
-arkavo-llm = { path = "../arkavo-llm", version = "0.28.0" }
+arkavo-llm = { path = "../arkavo-llm" }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
