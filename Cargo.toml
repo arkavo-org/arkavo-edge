@@ -11,6 +11,7 @@ members = [
     "crates/arkavo-mcp-macos",
     "crates/arkavo-llm",
     "crates/arkavo-kimi",
+    "crates/arkavo-deepseek",
     "crates/arkavo-memory",
     "crates/arkavo-mcp",
     "crates/arkavo-mcp-core",

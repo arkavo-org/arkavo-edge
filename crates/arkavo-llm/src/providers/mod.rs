@@ -14,6 +14,8 @@ pub use factory::{
     AnthropicProviderFactory, OllamaProviderFactory, OpenAIProviderFactory, ProviderConfig,
     ProviderFactory, ProviderFactoryRegistry, ProviderType,
 };
+#[cfg(feature = "deepseek")]
+pub use factory::DeepSeekProviderFactory;
 #[cfg(feature = "llm-remote")]
 pub use health::{
     CircuitBreaker, HealthCheckResult, HealthStatus, ProviderHealthMonitor, ProviderMetrics,

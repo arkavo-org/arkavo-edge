@@ -345,6 +345,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-deepseek"
+version = "0.29.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "jsonschema",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "arkavo-encryption"
 version = "0.29.0"
 
@@ -414,6 +437,7 @@ version = "0.29.0"
 dependencies = [
  "accelerate-src",
  "anyhow",
+ "arkavo-deepseek",
  "arkavo-kimi",
  "arkavo-llama-cpp",
  "async-trait",
