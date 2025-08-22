@@ -259,7 +259,40 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
 
             // Track current markdown section
             if trimmed.starts_with("## ") {
-                current_section = Some(trimmed.strip_prefix("## ").unwrap_or("").to_string());
+                let section_name = trimmed.strip_prefix("## ").unwrap_or("").to_string();
+                
+                // Check if this is an agent definition (not a standard section like "Agent Identity")
+                if !matches!(section_name.as_str(), 
+                    "Agent Identity" | "Runtime Configuration" | "Runtime Configuration (example)" |
+                    "Capabilities" | "Tool Requirements" | "MCP Servers") {
+                    
+                    // Save any pending MCP server before switching agents
+                    if let (Some(server), Some(agent)) = (current_mcp_server.take(), current_agent.as_mut()) {
+                        agent.mcp_servers.push(server);
+                    }
+                    
+                    // Save previous agent if exists
+                    if let Some(agent) = current_agent.take() {
+                        agents.push(agent);
+                    }
+                    
+                    // Reset MCP section flag
+                    in_mcp_section = false;
+                    
+                    // Create new agent from ## agent-name header
+                    current_agent = Some(AgentConfig {
+                        name: section_name.clone(),
+                        purpose: String::new(),
+                        model: "ollama://127.0.0.1:11434/qwen3:0.6b".to_string(), // Default model
+                        listen: "0.0.0.0:8342".to_string(), // Default listen address
+                        mdns_enabled: true,
+                        mcp_servers: Vec::new(),
+                        api_keys: std::collections::HashMap::new(),
+                    });
+                    in_agent_section = true;
+                }
+                
+                current_section = Some(section_name);
                 continue;
             }
 
@@ -277,19 +310,20 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                                 }
                             }
                             // Extract mission/purpose
-                            else if trimmed.starts_with("- **Mission:**")
-                                && let Some(mission) =
+                            else if trimmed.starts_with("- **Mission:**") {
+                                if let Some(mission) =
                                     extract_markdown_field_value(trimmed, "**Mission:**")
-                            {
-                                agent.purpose = mission;
+                                {
+                                    agent.purpose = mission;
+                                }
                             }
                         }
                         "Runtime Configuration (example)" => {
                             // Try to extract listen address from YAML block
-                            if trimmed.starts_with("listen:")
-                                && let Some(listen) = extract_yaml_value(trimmed, "listen:")
-                            {
-                                agent.listen = listen;
+                            if trimmed.starts_with("listen:") {
+                                if let Some(listen) = extract_yaml_value(trimmed, "listen:") {
+                                    agent.listen = listen;
+                                }
                             }
                         }
                         _ => {}
