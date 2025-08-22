@@ -8,7 +8,29 @@ Arkavo Edge is an open-source agentic CLI tool that aims to provide developer-ce
 
 **IMPORTANT**: This is a real production implementation, not a prototype, no placeholder, no demo. The codebase is intended for production release and should be maintained with appropriate quality standards.
 
-## Build and Development Commands
+## Project Structure and Organization
+
+- **One crate per capability**: Each major feature should be implemented as a separate Rust crate to maintain clean boundaries and independent functionality.
+- **File size limit**: All source files should be kept under 400 lines of code to promote readability and maintainability.
+- **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
+- **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
+- **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
+- **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
+- **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
+- **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
+- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability. Do not use generic names as a catch-all.
+
+- **Documentation files**: Technical documentation, implementation guides, and historical documents should be placed in the `docs/` directory. The following files should remain in root:
+  - `README.md` - Main project documentation
+  - `CLAUDE.md` - AI assistant instructions
+  - `THIRD-PARTY-LICENSES.md` - License information
+  - Crate-specific `README.md` files remain in their respective crate directories
+- **Test files**:
+  - Integration tests should be placed in the `tests/` directory at the crate level
+  - Unit tests should remain as inline `#[cfg(test)]` modules in source files (standard Rust convention)
+  - Temporary test scripts or debugging utilities should be removed rather than kept in the repository
+
+## Build, Test, and Development Commands
 
 ```bash
 # Build the project
@@ -39,7 +61,19 @@ cargo fmt
 cargo doc --open
 ```
 
-## Architecture
+## Coding Conventions and Style
+
+- **One crate per capability**: Each major feature should be implemented as a separate Rust crate to maintain clean boundaries and independent functionality.
+- **File size limit**: All source files should be kept under 400 lines of code to promote readability and maintainability.
+- **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
+- **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
+- **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
+- **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
+- **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
+- **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
+- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability. Do not use generic names as a catch-all.
+
+## Architecture and Design Patterns
 
 Arkavo Edge consists of several core components:
 
@@ -52,29 +86,27 @@ Arkavo Edge consists of several core components:
 7.  **Edge Vault CE**: Web UI, CRUD APIs, and SQLite driver
 8.  **Test Harness**: Local test runner adapter for various languages
 
-## Code Organization
+## Testing Guidelines
 
-- **One crate per capability**: Each major feature should be implemented as a separate Rust crate to maintain clean boundaries and independent functionality.
-- **File size limit**: All source files should be kept under 400 lines of code to promote readability and maintainability.
-- **Modular design**: Components should be designed with clear interfaces and minimal dependencies between them.
-- **Code comments**: Comments should only explain why code exists or complex logic, not what it does. Avoid temporary, contextual comments like "TODO" or status indicators. Do not use comments to track implementation status or provide documentation that belongs in README or docs.
-- **Documentation format**: Do not use numbered steps in markdown headings (e.g., use "Prerequisites" instead of "1. Prerequisites"). Use bullet points or paragraphs for sequential steps.
-- **Implementation Guidance**: Do not use stubs, placeholders, simulations. implement fully for production.
-- **Response Generation**: Do not hardcode responses in code. No Demo responses. LLM will handle that.
-- **Dead Code Management**: Remove dead code to maintain codebase cleanliness and performance
-- **File Structure**: Keep the file structure flat while splitting large files. Use a naming convention that goes from general to specific capability. Do not use generic names as a catch-all.
+- **Bug fixes MUST have regression tests** - Every bug fix must include a test that would have caught the bug. Add tests to `.github/workflows/regression.yaml` or create issue-specific test files in `tests/` directories.
+- Integration tests should be placed in the `tests/` directory at the crate level.
+- Unit tests should remain as inline `#[cfg(test)]` modules in source files (standard Rust convention).
+- Temporary test scripts or debugging utilities should be removed rather than kept in the repository.
 
-## Documentation and Test Organization
+## Security Considerations
 
-- **Documentation files**: Technical documentation, implementation guides, and historical documents should be placed in the `docs/` directory. The following files should remain in root:
-  - `README.md` - Main project documentation
-  - `CLAUDE.md` - AI assistant instructions
-  - `THIRD-PARTY-LICENSES.md` - License information
-  - Crate-specific `README.md` files remain in their respective crate directories
-- **Test files**:
-  - Integration tests should be placed in the `tests/` directory at the crate level
-  - Unit tests should remain as inline `#[cfg(test)]` modules in source files (standard Rust convention)
-  - Temporary test scripts or debugging utilities should be removed rather than kept in the repository
+- **No OpenSSL dependency** - Use rustls for TLS to ensure cross-compilation compatibility (especially for musl targets).
+- A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
+  - You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
+  - This includes trying to invoke Homebrew or similar to install dependencies at runtime.
+  - Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
+
+## Pull Request Guidelines
+
+- Keep PR titles short and not "feat:". the reason is this is shown prominently in Github next to files and folders.
+- Do not keep a change log file; github handles that functionality.
+- Each feature branch needs to bump the appropriate semver version. No release branches.
+- When version is updated, cargo build, then also git commit the Cargo.lock with the Cargo.toml.
 
 ## Key Command Interfaces
 
