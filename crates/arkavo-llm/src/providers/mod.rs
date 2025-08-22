@@ -9,6 +9,8 @@ pub mod openai;
 
 #[cfg(feature = "llm-remote")]
 pub use anthropic::{AnthropicConfig, AnthropicProvider};
+#[cfg(feature = "deepseek")]
+pub use factory::DeepSeekProviderFactory;
 #[cfg(feature = "llm-remote")]
 pub use factory::{
     AnthropicProviderFactory, OllamaProviderFactory, OpenAIProviderFactory, ProviderConfig,

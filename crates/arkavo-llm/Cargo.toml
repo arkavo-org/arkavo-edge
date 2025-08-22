@@ -6,7 +6,6 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "LLM integration for Arkavo Edge"
-readme = "README.md"
 keywords = ["cli", "ai", "agent", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -16,6 +15,7 @@ default = []
 llm-remote = ["dep:reqwest", "dep:serde_json", "dep:tokio", "dep:async-trait", "dep:log", "dep:thiserror", "dep:anyhow", "dep:url", "dep:futures", "dep:tokio-stream", "dep:bytes", "dep:serde", "dep:tracing"]
 llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:tracing", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
 kimi = ["dep:arkavo-kimi", "dep:reqwest", "dep:serde_json", "dep:tokio", "dep:async-trait", "dep:futures", "dep:tokio-stream", "dep:serde", "dep:thiserror", "dep:log", "dep:anyhow"]
+deepseek = ["dep:arkavo-deepseek", "dep:reqwest", "dep:serde_json", "dep:tokio", "dep:async-trait", "dep:futures", "dep:tokio-stream", "dep:serde", "dep:thiserror", "dep:log", "dep:anyhow"]
 llama-cpp = ["dep:arkavo-llama-cpp", "dep:tokio", "dep:async-trait", "dep:tokio-stream", "dep:tracing", "dep:serde", "dep:thiserror", "dep:scopeguard", "dep:tokio-util"]
 local = ["llm-local"]
 metal = ["candle-core/metal", "candle-transformers/metal"]
@@ -50,14 +50,13 @@ dirs = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 rand = { workspace = true }
 
-# Kimi integration
+# Provider integrations
 arkavo-kimi = { path = "../arkavo-kimi", optional = true }
+arkavo-deepseek = { path = "../arkavo-deepseek", optional = true }
 arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 
 # Provider dependencies
 url = { version = "2.5.4", optional = true }
-ring = "0.17"
-keyring = "3.0"
 log = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 scopeguard = { workspace = true, optional = true }
