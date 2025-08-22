@@ -46,12 +46,11 @@ fn print_usage() {
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
 pub fn extract_agent_role() -> Option<String> {
-    if let Ok(content) = fs::read_to_string("AGENTS.md") {
-        if let Ok(agents) = parse_agents_config(&content) {
-            if let Some(first_agent) = agents.first() {
-                return Some(first_agent.purpose.clone());
-            }
-        }
+    if let Ok(content) = fs::read_to_string("AGENTS.md")
+        && let Ok(agents) = parse_agents_config(&content)
+        && let Some(first_agent) = agents.first()
+    {
+        return Some(first_agent.purpose.clone());
     }
     None
 }
@@ -63,12 +62,10 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("AGENTS.md already exists. Please rename or remove it first.".into());
     }
 
-    // Load the agents_md template using the prompt loader (with fallback)
-    let template_content = crate::prompt_loader::load_prompt(
-        "agents_md",
-        "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\"",
+    // Create a basic AGENTS.md template
+    let template = format!(
+        "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\""
     );
-    let template = template_content.replace("{name}", name);
 
     fs::write(agents_path, template)?;
     println!("Created AGENTS.md with agent configuration for '{name}'");
@@ -154,7 +151,7 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
                 selection,
                 agents.len()
             )
-                .into());
+            .into());
         }
 
         &agents[selection - 1]
@@ -280,20 +277,19 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                                 }
                             }
                             // Extract mission/purpose
-                            else if trimmed.starts_with("- **Mission:**") {
-                                if let Some(mission) =
+                            else if trimmed.starts_with("- **Mission:**")
+                                && let Some(mission) =
                                     extract_markdown_field_value(trimmed, "**Mission:**")
-                                {
-                                    agent.purpose = mission;
-                                }
+                            {
+                                agent.purpose = mission;
                             }
                         }
                         "Runtime Configuration (example)" => {
                             // Try to extract listen address from YAML block
-                            if trimmed.starts_with("listen:") {
-                                if let Some(listen) = extract_yaml_value(trimmed, "listen:") {
-                                    agent.listen = listen;
-                                }
+                            if trimmed.starts_with("listen:")
+                                && let Some(listen) = extract_yaml_value(trimmed, "listen:")
+                            {
+                                agent.listen = listen;
                             }
                         }
                         _ => {}
@@ -421,44 +417,41 @@ fn parse_yaml_properties(
     }
 
     // Parse MCP server properties
-    if *in_mcp_section {
-        if let Some(server) = current_mcp_server.as_mut() {
-            if trimmed.starts_with("command:") {
-                server.command = Some(
-                    trimmed
-                        .strip_prefix("command:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if trimmed.starts_with("args:") {
-                // Parse array format: ["arg1", "arg2"]
-                let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
-                if args_str.starts_with('[') && args_str.ends_with(']') {
-                    let args_content = &args_str[1..args_str.len() - 1];
-                    server.args = args_content
-                        .split(',')
-                        .map(|s| s.trim().trim_matches('"').to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                }
-            } else if trimmed.starts_with("url:") {
-                server.url = Some(
-                    trimmed
-                        .strip_prefix("url:")
-                        .unwrap_or("")
-                        .trim()
-                        .trim_matches('"')
-                        .to_string(),
-                );
-            } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
-            {
-                // End of MCP section
-                *in_mcp_section = false;
-                if let Some(server) = current_mcp_server.take() {
-                    agent.mcp_servers.push(server);
-                }
+    if *in_mcp_section && let Some(server) = current_mcp_server.as_mut() {
+        if trimmed.starts_with("command:") {
+            server.command = Some(
+                trimmed
+                    .strip_prefix("command:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
+        } else if trimmed.starts_with("args:") {
+            // Parse array format: ["arg1", "arg2"]
+            let args_str = trimmed.strip_prefix("args:").unwrap_or("").trim();
+            if args_str.starts_with('[') && args_str.ends_with(']') {
+                let args_content = &args_str[1..args_str.len() - 1];
+                server.args = args_content
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        } else if trimmed.starts_with("url:") {
+            server.url = Some(
+                trimmed
+                    .strip_prefix("url:")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string(),
+            );
+        } else if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-') {
+            // End of MCP section
+            *in_mcp_section = false;
+            if let Some(server) = current_mcp_server.take() {
+                agent.mcp_servers.push(server);
             }
         }
     }

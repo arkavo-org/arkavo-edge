@@ -18,10 +18,11 @@ pub fn load_prompt(prompt_name: &str, default: &str) -> String {
     // Check for user override first
     let user_override_path = get_user_override_path(prompt_name);
     if user_override_path.exists()
-        && let Ok(content) = fs::read_to_string(&user_override_path) {
-            eprintln!("Using custom prompt from: {}", user_override_path.display());
-            return process_prompt_template(content);
-        }
+        && let Ok(content) = fs::read_to_string(&user_override_path)
+    {
+        eprintln!("Using custom prompt from: {}", user_override_path.display());
+        return process_prompt_template(content);
+    }
 
     // Use embedded built-in prompts
     let builtin_content = match prompt_name {
@@ -172,9 +173,7 @@ pub fn load_agent_system_prompt(
 ) -> String {
     let template = load_prompt(
         "agent_system",
-        &format!(
-            "You are {agent_name}, a specialized AI agent. Purpose: {agent_purpose}"
-        ),
+        &format!("You are {agent_name}, a specialized AI agent. Purpose: {agent_purpose}"),
     );
 
     let mut variables = vec![
