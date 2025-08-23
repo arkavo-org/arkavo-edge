@@ -1,0 +1,119 @@
+{
+  "tasks": [
+    {
+      "id": "calc-001",
+      "name": "Calculator Implementation",
+      "description": "Implement a Calculator class with basic arithmetic operations",
+      "assigned_to": "coding-agent",
+      "subtasks": [
+        {
+          "id": "calc-001-impl",
+          "name": "Implement Calculator class",
+          "type": "implementation",
+          "requirements": [
+            "Create Calculator class",
+            "Implement add(a, b) method",
+            "Implement subtract(a, b) method",
+            "Implement multiply(a, b) method",
+            "Implement divide(a, b) method with zero check"
+          ]
+        },
+        {
+          "id": "calc-001-test",
+          "name": "Test Calculator implementation",
+          "type": "testing",
+          "requirements": [
+            "Test all arithmetic operations",
+            "Test edge cases (zero, negative numbers)",
+            "Test division by zero handling",
+            "Achieve > 90% code coverage"
+          ]
+        }
+      ],
+      "status": "pending",
+      "priority": "high"
+    },
+    {
+      "id": "api-001", 
+      "name": "REST API Development",
+      "description": "Create RESTful API endpoints for user management",
+      "assigned_to": "coding-agent",
+      "subtasks": [
+        {
+          "id": "api-001-design",
+          "name": "Design API endpoints",
+          "type": "design",
+          "requirements": [
+            "GET /users - List all users",
+            "GET /users/{id} - Get user by ID",
+            "POST /users - Create new user",
+            "PUT /users/{id} - Update user",
+            "DELETE /users/{id} - Delete user"
+          ]
+        },
+        {
+          "id": "api-001-impl",
+          "name": "Implement API handlers",
+          "type": "implementation",
+          "requirements": [
+            "Use proper HTTP status codes",
+            "Implement request validation",
+            "Add error handling",
+            "Follow RESTful conventions"
+          ]
+        },
+        {
+          "id": "api-001-test",
+          "name": "API Integration tests",
+          "type": "testing",
+          "requirements": [
+            "Test all endpoints",
+            "Test error scenarios",
+            "Test validation rules",
+            "Performance testing"
+          ]
+        }
+      ],
+      "status": "pending",
+      "priority": "medium"
+    },
+    {
+      "id": "db-001",
+      "name": "Database Schema Design",
+      "description": "Design and implement database schema for application",
+      "assigned_to": "coding-agent",
+      "subtasks": [
+        {
+          "id": "db-001-design",
+          "name": "Design database schema",
+          "type": "design",
+          "requirements": [
+            "User table with authentication fields",
+            "Session management table",
+            "Audit log table",
+            "Proper indexes and constraints"
+          ]
+        },
+        {
+          "id": "db-001-migration",
+          "name": "Create migration scripts",
+          "type": "implementation",
+          "requirements": [
+            "Initial schema creation",
+            "Seed data scripts",
+            "Rollback procedures",
+            "Version tracking"
+          ]
+        }
+      ],
+      "status": "pending",
+      "priority": "high"
+    }
+  ],
+  "metadata": {
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "version": "1.0.0",
+    "project": "Agent Collaboration Demo"
+  }
+}
