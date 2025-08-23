@@ -263,8 +263,10 @@ main() {
     fi
 }
 
-# Set up trap to clean up on exit
-trap stop_agents EXIT INT TERM
+# Set up trap to clean up on exit (only for stop command)
+if [ "${1:-}" = "stop" ] || [ "${1:-}" = "restart" ]; then
+    trap stop_agents EXIT INT TERM
+fi
 
 # Run main function
 main "$@"

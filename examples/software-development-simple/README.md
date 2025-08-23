@@ -1,4 +1,4 @@
-# Agent-to-Agent Collaboration Demo
+# Software Development Simple Demo
 
 This example demonstrates sophisticated agent-to-agent communication using the Arkavo A2A (Agent-to-Agent) protocol. Three specialized agents collaborate on software development tasks, showcasing real-world multi-agent orchestration.
 
@@ -36,13 +36,13 @@ The demo implements a software development workflow where:
 cargo build
 ```
 
-2. Ensure Ollama is running with the required model:
+2. Ensure you have a local model or Ollama configured:
 ```bash
-# Check Ollama is accessible
-curl http://127.0.0.1:11434/api/tags
+# For local models, arkavo will auto-detect GGUF files
+arkavo model list
 
-# Pull the model if needed
-ollama pull qwen3:0.6b
+# Or configure Ollama if available
+curl http://ollama:11434/api/tags
 ```
 
 3. Install the AGUI dashboard (optional but recommended):
@@ -55,6 +55,7 @@ arkavo ui
 
 1. **Start all agents:**
 ```bash
+cd examples/software-development-simple
 ./launch_agents.sh
 ```
 
@@ -188,7 +189,7 @@ curl http://localhost:8344/health
 ## Project Structure
 
 ```
-agent-collaboration/
+software-development-simple/
 ├── project-manager/
 │   ├── AGENTS.md          # PM agent configuration
 │   └── workspace/          # Working directory
