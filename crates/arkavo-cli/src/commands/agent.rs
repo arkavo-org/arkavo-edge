@@ -14,7 +14,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "init" => {
             if args.len() < 2 {
                 eprintln!("Error: Agent name required");
-                eprintln!("Usage: arkavo agent init <agent-name>");
+                eprintln!("Usage: arkavo agent init [agent-name]");
                 return Err("Missing agent name".into());
             }
             init_agent(&args[1])
@@ -39,8 +39,8 @@ fn print_usage() {
     println!("    arkavo agent <SUBCOMMAND> [OPTIONS]");
     println!();
     println!("SUBCOMMANDS:");
-    println!("    init <name>    Create a new AGENTS.md configuration file");
-    println!("    run [config]   Run an agent using AGENTS.md (or specified config)");
+    println!("    init [name]    Create a new AGENTS.md configuration file with agent purpose");
+    println!("    run [config]   Run an agent");
     println!("    help           Print this help message");
 }
 
@@ -62,15 +62,114 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err("AGENTS.md already exists. Please rename or remove it first.".into());
     }
 
-    // Create a basic AGENTS.md template
+    println!("Creating AGENTS.md configuration for agent '{name}'...");
+
+    // Create a comprehensive template that matches the expected format
     let template = format!(
-        "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\""
+        r#"# AGENTS.md — {name}
+
+## Agent Identity
+
+- **Name:** {name}
+- **Mission:** "An AI agent that assists with specific tasks and capabilities"
+
+## Runtime Configuration
+
+```yaml
+model: ollama://127.0.0.1:11434/qwen3:0.6b
+listen: 0.0.0.0:8342
+mdns: true
+```
+
+## Capabilities
+
+Define what this agent can do:
+
+- [ ] Code review and analysis
+- [ ] Documentation generation
+- [ ] Test creation
+- [ ] Bug fixing
+- [ ] Performance optimization
+- [ ] Data analysis
+- [ ] System design
+- [ ] Security analysis
+
+## Tool Requirements
+
+Specify which tools this agent needs:
+
+- [ ] Git tools (version control operations)
+- [ ] Filesystem access (read/write files)
+- [ ] Terminal/Shell (execute commands)
+- [ ] Code analysis tools
+- [ ] Database access
+- [ ] Web APIs
+- [ ] Docker/Container management
+
+## MCP Servers
+
+Configure MCP servers that this agent should use:
+
+```yaml
+mcp_servers:
+  - name: filesystem
+    command: mcp-filesystem
+    args: []
+  - name: git
+    command: mcp-git
+    args: []
+```
+
+## Agent Configuration
+
+Customize the following values for your agent:
+
+```yaml
+purpose: "Describe your agent's primary purpose and goals here"
+model: ollama://127.0.0.1:11434/qwen3:0.6b
+listen: 0.0.0.0:8342
+mdns: true
+```
+
+## API Keys (Optional)
+
+If your agent needs to access external services, add API keys here:
+
+```yaml
+# OPENAI_API_KEY: sk-xxx
+# MOONSHOT_API_KEY: sk-xxx
+# DEEPSEEK_API_KEY: sk-xxx
+```
+
+## Notes
+
+1. Edit the **Mission** field to describe what your agent does
+2. Check the capabilities your agent should have
+3. Select the tools your agent needs access to
+4. Configure MCP servers for additional functionality
+5. Update the model if you want to use a different LLM
+6. Change the listen address if needed (default: 0.0.0.0:8342)
+7. Set mdns to false if you don't want network discovery
+
+## Running Your Agent
+
+Once configured, run your agent with:
+
+```bash
+arkavo agent run
+```
+
+Your agent will start and be available at the configured address."#
     );
 
     fs::write(agents_path, template)?;
-    println!("Created AGENTS.md with agent configuration for '{name}'");
-    println!("Edit AGENTS.md to customize your agent, then run:");
-    println!("  arkavo agent run");
+    println!("✓ Created AGENTS.md template for agent '{name}'");
+    println!();
+    println!("Next steps:");
+    println!("1. Edit AGENTS.md to customize your agent's purpose and capabilities");
+    println!("2. Configure the model and listen address as needed");
+    println!("3. Add any required API keys");
+    println!("4. Run your agent with: arkavo agent run");
 
     Ok(())
 }
@@ -78,38 +177,14 @@ fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
 #[allow(clippy::disallowed_methods)]
 fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
-    use std::env;
 
     let config_file = config_path.unwrap_or("AGENTS.md");
     let config_path = Path::new(config_file);
 
     if !config_path.exists() {
-        // Auto-generate AGENTS.md with directory-based naming
-
-        // Get current directory name
-        let current_dir = env::current_dir()?;
-        let dir_name = current_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project")
-            .to_string();
-
-        // Generate a short random ID from UUID (first 7 chars)
-        use uuid::Uuid;
-        let random_id = &Uuid::new_v4().to_string()[..7];
-
-        // Create agent name: directory-randomid
-        let agent_name = format!("{dir_name}-{random_id}");
-
-        // Generate AGENTS.md with defaults using embedded template
-        let template_content = crate::prompt_loader::load_prompt(
-            "agents_md",
-            "# AGENTS.md\n\n## {name}\n\npurpose: \"Agent purpose\"\nmodel: \"ollama://127.0.0.1:11434/qwen3:0.6b\"\nlisten: \"0.0.0.0:8342\"",
-        );
-        let template = template_content.replace("{name}", &agent_name);
-
-        fs::write(config_path, template)?;
-        println!("Auto-generated AGENTS.md with agent '{agent_name}'");
+        // AGENTS.md is only created when an agent is explicitly configured with a purpose
+        // This prevents automatic creation during first initialization
+        return Err("AGENTS.md not found. Please create an agent configuration first with:\n  arkavo agent init <name>\n\nOr specify a configuration file:\n  arkavo agent run path/to/config.md".into());
     }
 
     let config_content = fs::read_to_string(config_path)?;
