@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -232,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -369,11 +369,11 @@ dependencies = [
 
 [[package]]
 name = "arkavo-encryption"
-version = "0.29.1"
+version = "0.29.2"
 
 [[package]]
 name = "arkavo-events"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "bincode",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "git2",
  "tempfile",
@@ -396,7 +396,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -485,7 +485,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -586,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.29.1"
+version = "0.29.2"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
