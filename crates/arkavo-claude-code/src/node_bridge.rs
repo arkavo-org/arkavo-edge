@@ -255,15 +255,42 @@ impl NodeBridge {
                                     event_mapper.handle_sdk_event(params).await;
                                 }
                             }
-                            "tool_request" => {
+                            "tool_use" => {
                                 // Intercept tool request for policy check
-                                if let Some(params) = notification.params {
+                                if let Some(params) = notification.params.clone() {
                                     let interceptor_guard = tool_interceptor.read().await;
                                     if let Some(interceptor) = interceptor_guard.as_ref() {
-                                        let _result = interceptor(params.clone()).await;
-                                        // Send approval/denial back to Node.js
-                                        // TODO: Implement response mechanism
+                                        match interceptor(params.clone()).await {
+                                            Ok(allowed) => {
+                                                if !allowed {
+                                                    // Tool denied - emit a denied result event
+                                                    let denied_event = serde_json::json!({
+                                                        "type": "tool_result",
+                                                        "data": {
+                                                            "result": {
+                                                                "tool": params["data"]["tool"]["name"],
+                                                                "id": params["data"]["tool"]["id"],
+                                                                "success": false,
+                                                                "output": "Tool execution denied by policy",
+                                                                "duration_ms": 0
+                                                            }
+                                                        }
+                                                    });
+                                                    event_mapper
+                                                        .handle_sdk_event(denied_event)
+                                                        .await;
+                                                    continue; // Skip the original tool_use event
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!("Policy check failed: {}", e);
+                                            }
+                                        }
                                     }
+                                    // If allowed or no interceptor, forward the event
+                                    event_mapper
+                                        .handle_sdk_event(notification.params.unwrap())
+                                        .await;
                                 }
                             }
                             _ => {
@@ -312,14 +339,58 @@ impl NodeBridge {
             .map_err(|e| ClaudeCodeError::NodeProcess(format!("Response channel closed: {}", e)))
     }
 
-    /// Open a new Claude Code session
-    pub async fn open_session(&self, context: Option<Value>) -> Result<String> {
+    /// Start a new Claude Code run with streaming
+    pub async fn start_run(
+        &self,
+        prompt: String,
+        run_id: String,
+        context: Option<Value>,
+    ) -> Result<()> {
         let request = self.rpc_client.create_request(
-            "openSession".to_string(),
+            "startRun".to_string(),
             Some(serde_json::json!({
+                "prompt": prompt,
+                "sessionId": run_id,
                 "context": context,
+                "options": {
+                    "planOnly": false,
+                    "requireAccept": false,
+                    "continueSession": false
+                }
             })),
         );
+
+        let response = self.send_request(request).await?;
+
+        if let Some(error) = response.error {
+            return Err(ClaudeCodeError::Sdk(error.message));
+        }
+
+        // The run is now active and streaming events
+        Ok(())
+    }
+
+    /// Stop an active run
+    pub async fn stop_run(&self, run_id: String) -> Result<()> {
+        let request = self.rpc_client.create_request(
+            "stopRun".to_string(),
+            Some(serde_json::json!({
+                "runId": run_id,
+            })),
+        );
+
+        let response = self.send_request(request).await?;
+
+        if let Some(error) = response.error {
+            return Err(ClaudeCodeError::Sdk(error.message));
+        }
+
+        Ok(())
+    }
+
+    /// List active runs
+    pub async fn list_runs(&self) -> Result<Vec<String>> {
+        let request = self.rpc_client.create_request("listRuns".to_string(), None);
 
         let response = self.send_request(request).await?;
 
@@ -330,48 +401,13 @@ impl NodeBridge {
         response
             .result
             .and_then(|r| {
-                r.get("sessionId")
-                    .and_then(|s| s.as_str())
-                    .map(String::from)
+                r.get("runs").and_then(|runs| runs.as_array()).map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
             })
-            .ok_or_else(|| ClaudeCodeError::Sdk("Missing sessionId in response".to_string()))
-    }
-
-    /// Run a task in the session
-    pub async fn stream_run(&self, prompt: String, session_id: String) -> Result<()> {
-        let request = self.rpc_client.create_request(
-            "streamRun".to_string(),
-            Some(serde_json::json!({
-                "sessionId": session_id,
-                "prompt": prompt,
-            })),
-        );
-
-        let response = self.send_request(request).await?;
-
-        if let Some(error) = response.error {
-            return Err(ClaudeCodeError::Sdk(error.message));
-        }
-
-        Ok(())
-    }
-
-    /// Close a session
-    pub async fn close_session(&self, session_id: String) -> Result<()> {
-        let request = self.rpc_client.create_request(
-            "closeSession".to_string(),
-            Some(serde_json::json!({
-                "sessionId": session_id,
-            })),
-        );
-
-        let response = self.send_request(request).await?;
-
-        if let Some(error) = response.error {
-            return Err(ClaudeCodeError::Sdk(error.message));
-        }
-
-        Ok(())
+            .ok_or_else(|| ClaudeCodeError::Sdk("Missing runs in response".to_string()))
     }
 
     /// Set tool interceptor for policy enforcement

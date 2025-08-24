@@ -126,21 +126,8 @@ impl ClaudeCodeCapability {
         Ok(())
     }
 
-    /// Open a new session
-    pub async fn open_session(&self, context: Option<Value>) -> Result<String> {
-        let bridge_guard = self.node_bridge.read().await;
-        let bridge = bridge_guard
-            .as_ref()
-            .ok_or_else(|| ClaudeCodeError::Other("Node bridge not initialized".to_string()))?;
-
-        let session_id = bridge.open_session(context).await?;
-
-        debug!("Opened Claude Code session: {}", session_id);
-        Ok(session_id)
-    }
-
-    /// Run a task in the current session
-    pub async fn stream_run(&self, prompt: String, session_id: String) -> Result<()> {
+    /// Start a Claude Code run with streaming
+    pub async fn start_run(&self, prompt: String, context: Option<Value>) -> Result<String> {
         // Check budget if tracker is available
         if let Some(tracker) = &self.budget_tracker {
             // Estimate cost for this operation (rough estimate)
@@ -170,34 +157,23 @@ impl ClaudeCodeCapability {
             Box::pin(async move { policy_bridge.check_tool_permission(tool_request).await })
         });
 
-        // Run the task
-        bridge.stream_run(prompt, session_id).await?;
+        // Generate a run ID
+        let run_id = format!("run-{}", Uuid::new_v4());
 
-        Ok(())
+        debug!("Starting Claude Code run: {}", run_id);
+
+        // Start the streaming run
+        bridge.start_run(prompt, run_id.clone(), context).await?;
+
+        Ok(run_id)
     }
 
-    /// Close the current session
-    pub async fn close_session(&self, session_id: String) -> Result<()> {
+    /// Stop an active run
+    pub async fn stop_run(&self, run_id: String) -> Result<()> {
         let bridge_guard = self.node_bridge.read().await;
         if let Some(bridge) = bridge_guard.as_ref() {
-            bridge.close_session(session_id).await?;
+            bridge.stop_run(run_id).await?;
         }
-
-        // Emit session ended event
-        self.event_writer
-            .write(Event::new(
-                self.session_id.clone(),
-                0,
-                self.agent_id.clone(),
-                EventPayload::SessionEnded {
-                    reason: "normal".to_string(),
-                    duration_ms: 0, // TODO: Track actual duration
-                    summary: None,
-                },
-            ))
-            .await
-            .map_err(|e| ClaudeCodeError::Other(e.to_string()))?;
-
         Ok(())
     }
 
@@ -267,14 +243,13 @@ impl Tool for ClaudeCodeCapability {
 
                 let context = params.get("context").cloned();
 
-                // Open session, run task, close session
-                let session_id = self.open_session(context).await?;
-                self.stream_run(prompt, session_id.clone()).await?;
-                self.close_session(session_id).await?;
+                // Start a streaming run
+                let run_id = self.start_run(prompt, context).await?;
 
                 Ok(serde_json::json!({
                     "success": true,
-                    "message": "Task completed successfully"
+                    "message": "Run started",
+                    "run_id": run_id
                 }))
             }
             "claude_code_plan" => {
@@ -283,22 +258,23 @@ impl Tool for ClaudeCodeCapability {
                     .ok_or_else(|| anyhow::anyhow!("Missing prompt"))?
                     .to_string();
 
-                let context = params.get("context").cloned();
+                let mut context = params
+                    .get("context")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
 
-                // Open session with plan-only mode
-                let session_id = self.open_session(context).await?;
+                // Set plan-only mode in context
+                context["options"] = serde_json::json!({
+                    "planOnly": true
+                });
 
-                // Run with plan-only prompt prefix to get planning without execution
-                let plan_prompt = format!(
-                    "Create a detailed plan for the following task but DO NOT execute it:\n\n{}",
-                    prompt
-                );
-                self.stream_run(plan_prompt, session_id.clone()).await?;
-                self.close_session(session_id).await?;
+                // Start a streaming run in plan-only mode
+                let run_id = self.start_run(prompt, Some(context)).await?;
 
                 Ok(serde_json::json!({
                     "success": true,
-                    "message": "Plan generated successfully"
+                    "message": "Planning started",
+                    "run_id": run_id
                 }))
             }
             _ => Err(anyhow::anyhow!("Unknown tool: {}", tool_name)),
