@@ -126,10 +126,43 @@ impl PolicyBridge {
         // Resolve relative path
         let resolved = self.config.workspace_root.join(path);
 
-        // Canonicalize to resolve symlinks and ..
-        let canonical = resolved.canonicalize().map_err(|e| {
-            ClaudeCodeError::PolicyViolation(format!("Path resolution error: {}", e))
-        })?;
+        // Try to canonicalize if path exists, otherwise normalize manually
+        let canonical = if resolved.exists() {
+            resolved.canonicalize().map_err(|e| {
+                ClaudeCodeError::PolicyViolation(format!("Path resolution error: {}", e))
+            })?
+        } else {
+            // Normalize the path manually without requiring it to exist
+            let mut components = Vec::new();
+            for component in resolved.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        components.pop();
+                    }
+                    std::path::Component::Normal(c) => {
+                        components.push(c.to_os_string());
+                    }
+                    std::path::Component::RootDir => {
+                        components.clear();
+                        components.push(std::ffi::OsString::from("/"));
+                    }
+                    std::path::Component::CurDir => {}
+                    std::path::Component::Prefix(_) => {
+                        components.push(component.as_os_str().to_os_string());
+                    }
+                }
+            }
+            
+            let mut normalized = PathBuf::new();
+            for component in components {
+                if component == "/" {
+                    normalized = PathBuf::from("/");
+                } else {
+                    normalized.push(component);
+                }
+            }
+            normalized
+        };
 
         // Verify still within workspace after canonicalization
         if !canonical.starts_with(&self.config.workspace_root) {
