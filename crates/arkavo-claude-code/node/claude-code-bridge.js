@@ -9,25 +9,44 @@ const readline = require('readline');
 
 // Try to load Claude Code SDK from multiple locations
 let ClaudeCodeSession;
-try {
-    // Try global installation first
-    ClaudeCodeSession = require('@anthropic-ai/claude-code').ClaudeCodeSession;
-} catch (e1) {
+const path = require('path');
+const possiblePaths = [
+    // Local Claude installation (preferred - standard location)
+    path.join(process.env.HOME, '.claude', 'local', 'node_modules', '@anthropic-ai', 'claude-code'),
+    // Global npm installation
+    '@anthropic-ai/claude-code',
+    // Local node_modules (relative to this script)
+    './node_modules/@anthropic-ai/claude-code',
+    // Alternative global locations
+    '/usr/local/lib/node_modules/@anthropic-ai/claude-code',
+    '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code',
+];
+
+let loadedFrom = null;
+for (const modulePath of possiblePaths) {
     try {
-        // Try local node_modules
-        ClaudeCodeSession = require('./node_modules/@anthropic-ai/claude-code').ClaudeCodeSession;
-    } catch (e2) {
-        // Send error notification and exit
-        console.log(JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'error',
-            params: {
-                error: 'Claude Code SDK not found. Please install it globally:\nnpm install -g @anthropic-ai/claude-code',
-                code: 'SDK_NOT_FOUND'
-            }
-        }));
-        process.exit(1);
+        const module = require(modulePath);
+        ClaudeCodeSession = module.ClaudeCodeSession;
+        loadedFrom = modulePath;
+        // Log to stderr so it doesn't interfere with JSON-RPC
+        process.stderr.write(`Claude Code SDK loaded from: ${modulePath}\n`);
+        break;
+    } catch (error) {
+        // Try next path
     }
+}
+
+if (!ClaudeCodeSession) {
+    // Send error notification and exit
+    console.log(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'error',
+        params: {
+            error: 'Claude Code SDK not found. Please install it:\n1. Via Claude CLI (recommended): Install from https://claude.ai/\n2. Via npm: npm install -g @anthropic-ai/claude-code',
+            code: 'SDK_NOT_FOUND'
+        }
+    }));
+    process.exit(1);
 }
 
 // Configuration from environment
