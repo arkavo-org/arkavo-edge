@@ -152,7 +152,7 @@ impl PolicyBridge {
                     }
                 }
             }
-            
+
             let mut normalized = PathBuf::new();
             for component in components {
                 if component == "/" {
