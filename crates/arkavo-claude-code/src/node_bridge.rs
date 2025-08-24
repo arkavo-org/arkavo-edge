@@ -103,18 +103,18 @@ impl NodeBridge {
                 .map(|p| p.join("../share/arkavo/claude-code-bridge.js"))
                 .unwrap_or_default(),
         ];
-        
+
         // Check Homebrew prefix dynamically
-        if let Ok(output) = std::process::Command::new("brew")
-            .arg("--prefix")
-            .output()
-        {
+        if let Ok(output) = std::process::Command::new("brew").arg("--prefix").output() {
             if output.status.success() {
                 let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                possible_paths.push(PathBuf::from(format!("{}/share/arkavo/claude-code-bridge.js", prefix)));
+                possible_paths.push(PathBuf::from(format!(
+                    "{}/share/arkavo/claude-code-bridge.js",
+                    prefix
+                )));
             }
         }
-        
+
         // Check standard system locations via PATH
         if let Ok(path_var) = std::env::var("PATH") {
             for path_dir in path_var.split(':') {
