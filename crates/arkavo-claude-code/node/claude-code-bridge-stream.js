@@ -24,12 +24,18 @@ function findClaudeExecutable() {
         // Local Claude installation (preferred)
         path.join(process.env.HOME, '.claude', 'local', 'node_modules', '.bin', 'claude'),
         path.join(process.env.HOME, '.claude', 'local', 'claude'),
-        // Global npm installation
-        '/usr/local/bin/claude',
-        '/opt/homebrew/bin/claude',
-        // Fallback to PATH
-        'claude'
     ];
+    
+    // Check PATH for claude executable
+    if (process.env.PATH) {
+        const pathDirs = process.env.PATH.split(path.delimiter);
+        for (const dir of pathDirs) {
+            possiblePaths.push(path.join(dir, 'claude'));
+        }
+    }
+    
+    // Add fallback
+    possiblePaths.push('claude');
     
     // In production, would check each path exists
     // For now, return the most likely

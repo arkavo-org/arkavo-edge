@@ -91,10 +91,7 @@ impl NodeBridge {
         }
 
         // Path to our Node.js bridge script - check multiple possible locations
-        let possible_paths = vec![
-            // Installed location (Homebrew, system install)
-            PathBuf::from("/usr/local/share/arkavo/claude-code-bridge.js"),
-            PathBuf::from("/opt/homebrew/share/arkavo/claude-code-bridge.js"),
+        let mut possible_paths = vec![
             // Development location
             std::env::current_dir()
                 .unwrap_or_default()
@@ -106,6 +103,30 @@ impl NodeBridge {
                 .map(|p| p.join("../share/arkavo/claude-code-bridge.js"))
                 .unwrap_or_default(),
         ];
+        
+        // Check Homebrew prefix dynamically
+        if let Ok(output) = std::process::Command::new("brew")
+            .arg("--prefix")
+            .output()
+        {
+            if output.status.success() {
+                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                possible_paths.push(PathBuf::from(format!("{}/share/arkavo/claude-code-bridge.js", prefix)));
+            }
+        }
+        
+        // Check standard system locations via PATH
+        if let Ok(path_var) = std::env::var("PATH") {
+            for path_dir in path_var.split(':') {
+                let parent = PathBuf::from(path_dir).parent().map(|p| p.to_path_buf());
+                if let Some(p) = parent {
+                    let script = p.join("share/arkavo/claude-code-bridge.js");
+                    if !possible_paths.contains(&script) {
+                        possible_paths.push(script);
+                    }
+                }
+            }
+        }
 
         let script_path = possible_paths
             .into_iter()
