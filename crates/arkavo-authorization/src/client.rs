@@ -172,7 +172,7 @@ impl AuthorizationClient {
         Ok(entity)
     }
 
-    async fn get_decision(
+    pub async fn get_decision(
         &self,
         entity: &EntityIdentifier,
         action: &Action,
