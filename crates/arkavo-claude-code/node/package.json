@@ -1,0 +1,19 @@
+{
+  "name": "arkavo-claude-code-bridge",
+  "version": "0.1.0",
+  "description": "Node.js bridge for Claude Code SDK integration with Arkavo",
+  "main": "claude-code-bridge.js",
+  "private": true,
+  "scripts": {
+    "start": "node claude-code-bridge.js",
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Arkavo Contributors",
+  "license": "MIT OR Apache-2.0"
+}
