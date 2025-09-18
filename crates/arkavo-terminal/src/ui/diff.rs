@@ -437,6 +437,9 @@ impl Renderable for DiffView {
 
         let render_duration = render_start.elapsed();
         self.last_render_duration = Some(render_duration);
+        const RENDER_BUDGET_MS: u64 = 50;
+        const ROUTER_LATENCY_BUDGET_MS: u64 = 50;
+
         histogram!("arkavo_diff_render_ms").record(render_duration.as_secs_f64() * 1000.0);
         trace!(
             target = "arkavo.performance",
@@ -447,13 +450,13 @@ impl Renderable for DiffView {
         );
 
         const RENDER_BUDGET: Duration = Duration::from_millis(50);
-        if render_duration > RENDER_BUDGET {
+        if render_duration > Duration::from_millis(RENDER_BUDGET_MS) {
             warn!(
                 target = "arkavo.performance",
                 event = "diff_render_over_budget",
                 ?render_duration,
                 file = %self.file_path,
-                budget_ms = RENDER_BUDGET.as_millis()
+                budget_ms = RENDER_BUDGET_MS
             );
         }
 
@@ -468,14 +471,13 @@ impl Renderable for DiffView {
                 file = %self.file_path
             );
 
-            const ROUTER_LATENCY_BUDGET: Duration = Duration::from_millis(50);
-            if latency > ROUTER_LATENCY_BUDGET {
+            if latency > Duration::from_millis(ROUTER_LATENCY_BUDGET_MS) {
                 warn!(
                     target = "arkavo.performance",
                     event = "router_to_diff_over_budget",
                     ?latency,
                     file = %self.file_path,
-                    budget_ms = ROUTER_LATENCY_BUDGET.as_millis()
+                    budget_ms = ROUTER_LATENCY_BUDGET_MS
                 );
             }
         }

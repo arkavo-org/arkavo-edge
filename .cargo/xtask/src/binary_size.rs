@@ -10,10 +10,16 @@ pub fn check(limit_mb: u64, package: Option<String>) -> Result<()> {
     let status = Command::new("cargo")
         .args(["build", "--release", "-p", &package_name])
         .status()
-        .context("failed to build release binary")?;
+        .with_context(|| format!("failed to build release binary for '{package_name}'"))?;
 
     if !status.success() {
-        return Err(anyhow!("release build failed"));
+        let code = status.code().map_or_else(
+            || "terminated by signal".to_string(),
+            |c| format!("exit code {c}"),
+        );
+        return Err(anyhow!(
+            "release build failed for package '{package_name}' ({code})"
+        ));
     }
 
     let binary_path = release_binary_path(&package_name)?;
