@@ -449,7 +449,6 @@ impl Renderable for DiffView {
             mode = ?self.view_mode
         );
 
-        const RENDER_BUDGET: Duration = Duration::from_millis(50);
         if render_duration > Duration::from_millis(RENDER_BUDGET_MS) {
             warn!(
                 target = "arkavo.performance",
