@@ -1899,8 +1899,30 @@ Scrolling (when in scroll mode):
 
         let streaming_indicator = if is_streaming { " ● Streaming" } else { "" };
 
+        let diff_render_ms = self
+            .diff_view
+            .last_render_duration()
+            .map(|d| d.as_secs_f64() * 1000.0);
+        let router_latency_ms = self
+            .diff_view
+            .last_router_latency()
+            .map(|d| d.as_secs_f64() * 1000.0);
+
+        let diff_render_text = diff_render_ms
+            .map(|v| format!("{v:.1} ms"))
+            .unwrap_or_else(|| "n/a".to_string());
+
+        let router_latency_text = router_latency_ms
+            .map(|v| format!("{v:.1} ms"))
+            .unwrap_or_else(|| "n/a".to_string());
+
+        self.telemetry.update_diff_metrics(
+            diff_render_ms.map_or(0, |v| v.round() as u64),
+            router_latency_ms.map_or(0, |v| v.round() as u64),
+        );
+
         let perf_text = format!(
-            " {fps} FPS | Sent: {messages_sent} | Received: {messages_received}{streaming_indicator}"
+            " {fps} FPS | Sent: {messages_sent} | Received: {messages_received} | Diff: {diff_render_text} | Router→Diff: {router_latency_text}{streaming_indicator}"
         );
 
         let color = if fps >= 100 {

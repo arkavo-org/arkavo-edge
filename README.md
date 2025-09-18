@@ -115,3 +115,42 @@ cargo build --release
 ```
 
 The default build includes mDNS discovery using a pure Rust implementation (`mdns-sd` crate) that doesn't require system libraries like Avahi or Bonjour. This provides true portability across all platforms.
+
+## Local Development Environment
+
+- **Rust toolchain:** Install the latest stable toolchain with `rustup` and add `rustfmt`/`clippy` components (`rustup component add rustfmt clippy`).
+- **Clone and bootstrap:**
+  ```bash
+  git clone https://github.com/arkavo-org/arkavo-edge.git
+  cd arkavo-edge
+  git submodule update --init --recursive   # pulls vendor/llama.cpp for llama.cpp builds
+  ```
+- **Optional iOS tooling:** macOS builds embed Meta’s idb companion for simulator automation. Download the prebuilt bundle and reuse it locally:
+  ```bash
+  mkdir -p vendor/idb-prebuilt
+  curl -L https://github.com/arkavo-org/idb/releases/download/1.4.0-arkavo/idb_companion-1.4.0-arkavo-macos-arm64.tar.gz \
+    -o vendor/idb-prebuilt/idb_companion-1.4.0-macos-arm64.tar.gz
+  curl -L https://github.com/arkavo-org/idb/releases/download/1.4.0-arkavo/idb_companion-1.4.0-arkavo-macos-arm64.tar.gz.sha256 \
+    -o vendor/idb-prebuilt/idb_companion-1.4.0-macos-arm64.tar.gz.sha256
+  (cd vendor/idb-prebuilt && shasum -c idb_companion-1.4.0-macos-arm64.tar.gz.sha256)
+  tar -xzf vendor/idb-prebuilt/idb_companion-1.4.0-macos-arm64.tar.gz -C vendor/idb-prebuilt
+  ```
+  Then export `ARKAVO_IDB_VENDOR_DIR=$(pwd)/vendor/idb-prebuilt` (or `ARKAVO_SKIP_IDB_DOWNLOAD=1` with the same directory) before building so `build.rs` uses the local artifacts.
+- **Workspace diagnostics:**
+  ```bash
+  cargo fmt
+  cargo check --workspace
+  cargo clippy --workspace --all-features
+  ```
+- **Lightweight checks without optional vendors:** When Metal/llama.cpp or idb assets are unavailable (CI sandboxes, e.g.), you can focus on core crates:
+  ```bash
+  cargo check -p arkavo-terminal
+  cargo check -p arkavo-protocol --features metrics
+  cargo check --workspace --exclude arkavo-mcp-macos --exclude arkavo-llama-cpp-sys
+  ```
+
+### Useful Developer Commands
+
+- Validate release sizes locally: `cargo xtask check-binary-size --limit-mb 60 --package arkavo`
+- Profile diff rendering: `cargo bench -p arkavo-terminal diff_render`
+- Inspect performance telemetry in the TUI by running `arkavo terminal` and watching the status bar for diff and router latency budgets.

@@ -22,6 +22,8 @@ pub struct UITelemetryReport {
     pub key_events: u64,
     pub portrait_mode_time_ms: u64,
     pub tabbed_mode_time_ms: u64,
+    pub last_diff_render_ms: u64,
+    pub last_router_to_diff_ms: u64,
 }
 
 #[derive(Clone)]
@@ -36,6 +38,8 @@ pub struct UITelemetry {
     tabbed_mode_time_ms: Arc<AtomicU64>,
     last_mode_switch: Arc<std::sync::Mutex<DateTime<Utc>>>,
     is_portrait: Arc<std::sync::Mutex<bool>>,
+    last_diff_render_ms: Arc<AtomicU64>,
+    last_router_to_diff_ms: Arc<AtomicU64>,
 }
 
 impl UITelemetry {
@@ -52,6 +56,8 @@ impl UITelemetry {
             tabbed_mode_time_ms: Arc::new(AtomicU64::new(0)),
             last_mode_switch: Arc::new(std::sync::Mutex::new(now)),
             is_portrait: Arc::new(std::sync::Mutex::new(false)),
+            last_diff_render_ms: Arc::new(AtomicU64::new(0)),
+            last_router_to_diff_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -96,6 +102,12 @@ impl UITelemetry {
         self.key_events.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn update_diff_metrics(&self, diff_ms: u64, router_ms: u64) {
+        self.last_diff_render_ms.store(diff_ms, Ordering::Relaxed);
+        self.last_router_to_diff_ms
+            .store(router_ms, Ordering::Relaxed);
+    }
+
     pub fn generate_report(&self) -> UITelemetryReport {
         let now = Utc::now();
         let session_duration = (now - self.session_start).num_milliseconds() as u64;
@@ -125,6 +137,8 @@ impl UITelemetry {
             key_events: self.key_events.load(Ordering::Relaxed),
             portrait_mode_time_ms: portrait_time,
             tabbed_mode_time_ms: tabbed_time,
+            last_diff_render_ms: self.last_diff_render_ms.load(Ordering::Relaxed),
+            last_router_to_diff_ms: self.last_router_to_diff_ms.load(Ordering::Relaxed),
         }
     }
 }
@@ -151,6 +165,7 @@ mod tests {
         telemetry.track_message_sent();
         telemetry.track_message_received();
         telemetry.track_pane_focus_change();
+        telemetry.update_diff_metrics(42, 55);
 
         // Switch layouts
         telemetry.track_layout_switch(true);
@@ -165,5 +180,7 @@ mod tests {
         assert_eq!(report.pane_focus_changes, 1);
         assert_eq!(report.layout_mode_switches, 2);
         assert!(report.portrait_mode_time_ms >= 100);
+        assert_eq!(report.last_diff_render_ms, 42);
+        assert_eq!(report.last_router_to_diff_ms, 55);
     }
 }

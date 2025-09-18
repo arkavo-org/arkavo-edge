@@ -1,5 +1,6 @@
 #![allow(clippy::disallowed_methods)] // False positive in clippy
 
+mod binary_size;
 mod demo;
 mod schema;
 
@@ -34,6 +35,13 @@ enum Commands {
         #[arg(long, help = "Generate wire protocol schemas")]
         wire: bool,
     },
+    #[command(about = "Build release binary and verify size against the workspace budget")]
+    CheckBinarySize {
+        #[arg(long, default_value_t = 60, help = "Maximum allowed size in MiB")]
+        limit_mb: u64,
+        #[arg(long, help = "Package name to build (defaults to arkavo)")]
+        package: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +64,9 @@ async fn main() -> Result<()> {
             wire,
         } => {
             schema::generate_schemas(check, config, wire)?;
+        }
+        Commands::CheckBinarySize { limit_mb, package } => {
+            binary_size::check(limit_mb, package)?;
         }
     }
 

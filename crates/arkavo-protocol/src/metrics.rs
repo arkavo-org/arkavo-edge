@@ -100,12 +100,23 @@ impl MetricsCollector {
         {
             histogram!("rpc_latency_seconds", "method" => method.to_string())
                 .record(duration.as_secs_f64());
+
+            if method == "message/send" {
+                histogram!("arkavo_a2a_round_trip_ms").record(duration.as_secs_f64() * 1000.0);
+            }
         }
 
         #[cfg(not(feature = "metrics"))]
         {
             let _ = (method, duration); // Suppress unused warnings
         }
+
+        tracing::debug!(
+            target = "arkavo.performance",
+            event = "rpc_latency",
+            method,
+            latency_ms = duration.as_secs_f64() * 1000.0
+        );
     }
 
     /// Update rate limiter entry count gauge

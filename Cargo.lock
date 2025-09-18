@@ -698,7 +698,9 @@ dependencies = [
  "arkavo-mcp-tools",
  "arkavo-memory",
  "chrono",
+ "criterion",
  "crossterm",
+ "metrics",
  "ratatui",
  "regex",
  "semver",
@@ -708,6 +710,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
  "unicode-width 0.2.0",
  "uuid",
 ]

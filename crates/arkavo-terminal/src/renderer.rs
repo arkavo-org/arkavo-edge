@@ -1,6 +1,8 @@
+use metrics::histogram;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
+use tracing::trace;
 
 pub struct RenderMetrics {
     pub frame_time: Duration,
@@ -59,6 +61,7 @@ impl Default for DiffRenderer {
 
 impl DiffRenderer {
     pub fn render_diff(&mut self, current: &Buffer, area: Rect) -> Vec<(u16, u16)> {
+        let render_start = Instant::now();
         let mut changed_cells = Vec::new();
 
         if let Some(ref prev) = self.previous_buffer {
@@ -81,6 +84,15 @@ impl DiffRenderer {
 
         self.previous_buffer = Some(current.clone());
         self.metrics.update();
+
+        let duration = render_start.elapsed();
+        histogram!("arkavo_diff_renderer_ms").record(duration.as_secs_f64() * 1000.0);
+        trace!(
+            target = "arkavo.performance",
+            event = "diff_renderer",
+            ?duration,
+            changed = changed_cells.len()
+        );
 
         changed_cells
     }

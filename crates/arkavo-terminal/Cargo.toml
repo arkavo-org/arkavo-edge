@@ -23,6 +23,8 @@ crossterm = { workspace = true }
 syntect = { workspace = true, features = ["parsing", "regex-onig", "default-themes", "default-syntaxes"] }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 anyhow = { workspace = true }
+tracing = { workspace = true }
+metrics = { workspace = true }
 unicode-width = "0.2"
 chrono = { workspace = true }
 serde = { workspace = true }
@@ -40,6 +42,14 @@ uuid = { workspace = true }
 
 # For Helix editor integration
 tempfile = { workspace = true }
+
+# Benchmarks
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "diff_render"
+harness = false
 
 # macOS-only dependency
 [target.'cfg(target_os = "macos")'.dependencies]

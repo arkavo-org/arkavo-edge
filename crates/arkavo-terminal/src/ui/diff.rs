@@ -1,4 +1,5 @@
 use anyhow::Result;
+use metrics::histogram;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -8,6 +9,8 @@ use ratatui::{
 
 use crate::event::AppEvent;
 use crate::renderer::Renderable;
+use std::time::{Duration, Instant};
+use tracing::{trace, warn};
 
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
@@ -70,6 +73,9 @@ pub struct DiffView {
     pub(crate) view_mode: DiffViewMode,
     pub(crate) needs_redraw: bool,
     pub(crate) current_hunk: usize,
+    last_render_duration: Option<Duration>,
+    pending_diff_render: Option<Instant>,
+    last_router_latency: Option<Duration>,
 }
 
 impl DiffView {
@@ -81,6 +87,9 @@ impl DiffView {
             view_mode: DiffViewMode::Unified,
             needs_redraw: true,
             current_hunk: 0,
+            last_render_duration: None,
+            pending_diff_render: None,
+            last_router_latency: None,
         }
     }
 }
@@ -98,6 +107,7 @@ impl DiffView {
         self.scroll_offset = 0;
         self.current_hunk = 0;
         self.needs_redraw = true;
+        self.pending_diff_render = Some(Instant::now());
     }
 
     pub fn parse_unified_diff(&mut self, diff_text: &str) {
@@ -200,6 +210,15 @@ impl DiffView {
 
         self.hunks = hunks;
         self.needs_redraw = true;
+        self.pending_diff_render = Some(Instant::now());
+    }
+
+    pub fn last_render_duration(&self) -> Option<Duration> {
+        self.last_render_duration
+    }
+
+    pub fn last_router_latency(&self) -> Option<Duration> {
+        self.last_router_latency
     }
 
     fn render_unified(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -407,12 +426,59 @@ impl DiffView {
 
 impl Renderable for DiffView {
     fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let render_start = Instant::now();
+
         match self.view_mode {
             DiffViewMode::Unified => self.render_unified(frame, area),
             DiffViewMode::SideBySide => self.render_side_by_side(frame, area),
         }
 
         self.needs_redraw = false;
+
+        let render_duration = render_start.elapsed();
+        self.last_render_duration = Some(render_duration);
+        histogram!("arkavo_diff_render_ms").record(render_duration.as_secs_f64() * 1000.0);
+        trace!(
+            target = "arkavo.performance",
+            event = "diff_render",
+            ?render_duration,
+            file = %self.file_path,
+            mode = ?self.view_mode
+        );
+
+        const RENDER_BUDGET: Duration = Duration::from_millis(50);
+        if render_duration > RENDER_BUDGET {
+            warn!(
+                target = "arkavo.performance",
+                event = "diff_render_over_budget",
+                ?render_duration,
+                file = %self.file_path,
+                budget_ms = RENDER_BUDGET.as_millis()
+            );
+        }
+
+        if let Some(start) = self.pending_diff_render.take() {
+            let latency = render_start.duration_since(start);
+            self.last_router_latency = Some(latency);
+            histogram!("arkavo_router_to_diff_ms").record(latency.as_secs_f64() * 1000.0);
+            trace!(
+                target = "arkavo.performance",
+                event = "router_to_diff",
+                ?latency,
+                file = %self.file_path
+            );
+
+            const ROUTER_LATENCY_BUDGET: Duration = Duration::from_millis(50);
+            if latency > ROUTER_LATENCY_BUDGET {
+                warn!(
+                    target = "arkavo.performance",
+                    event = "router_to_diff_over_budget",
+                    ?latency,
+                    file = %self.file_path,
+                    budget_ms = ROUTER_LATENCY_BUDGET.as_millis()
+                );
+            }
+        }
     }
 
     fn needs_redraw(&self) -> bool {

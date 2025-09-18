@@ -59,7 +59,38 @@ fn setup_idb_companion() {
     let idb_binary = out_path.join("idb_companion");
     let frameworks_archive = out_path.join("frameworks.tar.gz");
 
-    if !idb_binary.exists() || !frameworks_archive.exists() {
+    let mut populated_from_local = false;
+    if let Some(local_vendor_dir) = env::var("ARKAVO_IDB_VENDOR_DIR").ok() {
+        let local_path = Path::new(&local_vendor_dir);
+        if try_copy_from_local(local_path, &idb_binary, &frameworks_archive) {
+            populated_from_local = true;
+        } else {
+            eprintln!(
+                "[build.rs] ARKAVO_IDB_VENDOR_DIR provided, but expected files were not found in {}",
+                local_path.display()
+            );
+        }
+    }
+
+    if !populated_from_local && (!idb_binary.exists() || !frameworks_archive.exists()) {
+        let skip_download = env::var("ARKAVO_SKIP_IDB_DOWNLOAD")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "y"
+                )
+            })
+            .unwrap_or(false);
+
+        if skip_download {
+            panic!(
+                "ARKAVO_SKIP_IDB_DOWNLOAD is set, but idb_companion artifacts are missing. \
+Provide ARKAVO_IDB_VENDOR_DIR or pre-populate {} and {} before building.",
+                idb_binary.display(),
+                frameworks_archive.display()
+            );
+        }
+
         download_and_extract_idb(&idb_binary, &frameworks_archive);
     }
 
@@ -78,7 +109,7 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
     eprintln!("Downloading IDB companion and frameworks...");
 
     // Download the combined archive
-    let download_url = "https://github.com/arkavo-org/idb/releases/download/1.2.0-arkavo.0/idb_companion-1.2.0-arkavo.0-macos-arm64.tar.gz";
+    let download_url = "https://github.com/arkavo-org/idb/releases/download/1.4.0-arkavo/idb_companion-1.4.0-arkavo-macos-arm64.tar.gz";
     let temp_dir = env::temp_dir();
     let tar_path = temp_dir.join("idb-companion-combined.tar.gz");
 
@@ -186,4 +217,58 @@ fn download_and_extract_idb(binary_path: &Path, frameworks_archive_path: &Path) 
     let _ = fs::remove_dir_all(&extract_dir);
 
     eprintln!("Successfully downloaded and extracted IDB companion");
+}
+
+fn try_copy_from_local(
+    local_dir: &Path,
+    binary_path: &Path,
+    frameworks_archive_path: &Path,
+) -> bool {
+    let local_binary = local_dir.join("bin").join("idb_companion");
+    if !local_binary.exists() {
+        return false;
+    }
+
+    if let Some(parent) = binary_path.parent() {
+        fs::create_dir_all(parent).expect("Failed to create output directory for idb_companion");
+    }
+
+    fs::copy(&local_binary, binary_path)
+        .expect("Failed to copy idb_companion binary from ARKAVO_IDB_VENDOR_DIR");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(binary_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(binary_path, perms).unwrap();
+    }
+
+    let local_frameworks_archive = local_dir.join("frameworks.tar.gz");
+    if local_frameworks_archive.exists() {
+        fs::copy(local_frameworks_archive, frameworks_archive_path)
+            .expect("Failed to copy frameworks archive from ARKAVO_IDB_VENDOR_DIR");
+        return true;
+    }
+
+    let frameworks_dir = local_dir.join("Frameworks");
+    if !frameworks_dir.exists() {
+        return false;
+    }
+
+    let status = Command::new("tar")
+        .current_dir(local_dir)
+        .args([
+            "-czf",
+            frameworks_archive_path.to_str().unwrap(),
+            "Frameworks",
+        ])
+        .status()
+        .expect("Failed to create frameworks archive from ARKAVO_IDB_VENDOR_DIR");
+
+    if !status.success() {
+        panic!("Failed to create frameworks archive from ARKAVO_IDB_VENDOR_DIR");
+    }
+
+    true
 }
