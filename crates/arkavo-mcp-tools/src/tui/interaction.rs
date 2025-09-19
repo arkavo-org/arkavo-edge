@@ -345,13 +345,8 @@ impl TuiInteractionKit {
                 .to_string();
 
             // Check expected content
-            let mut all_checks_passed = true;
-
-            if let Some(expected) = expected_content
-                && !last_content.contains(expected)
-            {
-                all_checks_passed = false;
-            }
+            let mut all_checks_passed =
+                expected_content.is_none_or(|expected| last_content.contains(expected));
 
             if let Some(texts) = contains_text {
                 for text in texts {
