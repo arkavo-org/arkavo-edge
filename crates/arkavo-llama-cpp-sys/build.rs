@@ -52,11 +52,6 @@ fn main() {
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
         .define("LLAMA_CURL", "OFF"); // Disable CURL requirement (not needed for local inference)
 
-    if env::var("GGML_CCACHE").is_err() {
-        env::set_var("GGML_CCACHE", "OFF");
-        config.define("GGML_CCACHE", "OFF");
-    }
-
     let dst = config.build();
 
     let lib_dir = dst.join("lib");
