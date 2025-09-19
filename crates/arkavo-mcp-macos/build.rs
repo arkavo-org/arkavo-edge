@@ -60,7 +60,7 @@ fn setup_idb_companion() {
     let frameworks_archive = out_path.join("frameworks.tar.gz");
 
     let mut populated_from_local = false;
-    if let Some(local_vendor_dir) = env::var("ARKAVO_IDB_VENDOR_DIR").ok() {
+    if let Ok(local_vendor_dir) = env::var("ARKAVO_IDB_VENDOR_DIR") {
         let local_path = Path::new(&local_vendor_dir);
         if try_copy_from_local(local_path, &idb_binary, &frameworks_archive) {
             populated_from_local = true;
@@ -82,14 +82,13 @@ fn setup_idb_companion() {
             })
             .unwrap_or(false);
 
-        if skip_download {
-            panic!(
-                "ARKAVO_SKIP_IDB_DOWNLOAD is set, but idb_companion artifacts are missing. \
+        assert!(
+            !skip_download,
+            "ARKAVO_SKIP_IDB_DOWNLOAD is set, but idb_companion artifacts are missing. \
 Provide ARKAVO_IDB_VENDOR_DIR or pre-populate {} and {} before building.",
-                idb_binary.display(),
-                frameworks_archive.display()
-            );
-        }
+            idb_binary.display(),
+            frameworks_archive.display()
+        );
 
         download_and_extract_idb(&idb_binary, &frameworks_archive);
     }
@@ -266,9 +265,10 @@ fn try_copy_from_local(
         .status()
         .expect("Failed to create frameworks archive from ARKAVO_IDB_VENDOR_DIR");
 
-    if !status.success() {
-        panic!("Failed to create frameworks archive from ARKAVO_IDB_VENDOR_DIR");
-    }
+    assert!(
+        status.success(),
+        "Failed to create frameworks archive from ARKAVO_IDB_VENDOR_DIR"
+    );
 
     true
 }
