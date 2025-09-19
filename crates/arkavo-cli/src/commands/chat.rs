@@ -1647,11 +1647,11 @@ fn list_files(path: &str) -> Option<String> {
 async fn initialize_llm_client(
     print_mode: bool,
     model_name: &str,
-    temperature: f32,
-    top_p: f32,
-    top_k: i32,
-    max_tokens: u32,
-    seed: u32,
+    _temperature: f32,
+    _top_p: f32,
+    _top_k: i32,
+    _max_tokens: u32,
+    _seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Check if model_name specifies a provider directly
     if model_name == "deepseek" {
