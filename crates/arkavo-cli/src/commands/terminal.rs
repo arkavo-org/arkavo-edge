@@ -267,11 +267,11 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 async fn initialize_llm_client(
     print_mode: bool,
     model_name: &str,
-    _temperature: f32,
-    _top_p: f32,
-    _top_k: i32,
-    _max_tokens: u32,
-    _seed: u32,
+    temperature: f32,
+    top_p: f32,
+    top_k: i32,
+    max_tokens: u32,
+    seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     #[cfg(not(feature = "llama-cpp"))]
     let _ = model_name;
@@ -345,6 +345,7 @@ async fn initialize_llm_client(
 
     #[cfg(not(feature = "llama-cpp"))]
     {
+        let _ = (model_name, temperature, top_p, top_k, max_tokens, seed);
         Err(
             "No LLM provider available. Please install Ollama or enable the 'llama-cpp' feature."
                 .into(),
