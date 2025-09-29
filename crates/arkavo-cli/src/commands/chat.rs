@@ -1647,11 +1647,11 @@ fn list_files(path: &str) -> Option<String> {
 async fn initialize_llm_client(
     print_mode: bool,
     model_name: &str,
-    temperature: f32,
-    top_p: f32,
-    top_k: i32,
-    max_tokens: u32,
-    seed: u32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] temperature: f32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] top_p: f32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] top_k: i32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] max_tokens: u32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Check if model_name specifies a provider directly
     if model_name == "deepseek" {
