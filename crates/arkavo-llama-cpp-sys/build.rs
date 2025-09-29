@@ -32,7 +32,8 @@ fn main() {
         config
             .define("GGML_METAL", "ON") // Enable Metal for GPU on macOS
             .define("GGML_ACCELERATE", "ON") // use Apple Accelerate
-            .define("GGML_INTERNAL_MATMUL_INT8", "OFF"); // Disable i8mm to ensure compatibility with all GitHub ARM runners
+            .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection to ensure compatibility
+            .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Use baseline ARM arch without i8mm
     } else if cfg!(target_os = "windows") {
         // Windows can use Vulkan or CUDA if available
         config

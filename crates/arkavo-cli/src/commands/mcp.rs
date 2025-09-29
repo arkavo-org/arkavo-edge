@@ -125,13 +125,6 @@ struct JsonRpcRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct JsonRpcNotification {
-    jsonrpc: String,
-    method: String,
-    params: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum JsonRpcId {
     Number(i64),
