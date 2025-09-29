@@ -63,7 +63,7 @@ fn bench_parse_stream_100_completions(c: &mut Criterion) {
 
             let mut count = 0;
             while let Some(result) = parser.next().await {
-                if let Ok(_) = result {
+                if result.is_ok() {
                     count += 1;
                 }
             }
@@ -106,7 +106,7 @@ fn bench_parse_split_chunks(c: &mut Criterion) {
 
             let mut count = 0;
             while let Some(result) = parser.next().await {
-                if let Ok(_) = result {
+                if result.is_ok() {
                     count += 1;
                 }
             }

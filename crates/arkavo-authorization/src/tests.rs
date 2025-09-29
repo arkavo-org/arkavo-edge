@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use crate::types::McpToolMapping;
 use crate::*;
 use wiremock::matchers::{header, method, path};
