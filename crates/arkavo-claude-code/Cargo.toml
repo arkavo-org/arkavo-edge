@@ -3,7 +3,7 @@ name = "arkavo-claude-code"
 version = "0.1.0"
 edition = "2021"
 authors = ["Arkavo Contributors"]
-description = "Claude Code SDK integration for Arkavo Edge"
+description = "Claude Agent SDK integration for Arkavo Edge"
 license = "MIT OR Apache-2.0"
 
 [dependencies]

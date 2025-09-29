@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Test Claude Code SDK Connection
-# Verifies that the Claude Code capability is working
+# Test Claude Agent SDK Connection
+# Verifies that the Claude Agent capability is working
 
 set -e
 
@@ -33,16 +33,16 @@ else
     exit 1
 fi
 
-# Check Claude Code SDK
-print_test "Checking Claude Code SDK..."
+# Check Claude Agent SDK
+print_test "Checking Claude Agent SDK..."
 SDK_FOUND=false
 SDK_LOCATION=""
 
 # Check local Claude installation first (preferred)
-if [ -d "$HOME/.claude/local/node_modules/@anthropic-ai/claude-code" ]; then
-    SDK_VERSION=$(node -e "console.log(require('$HOME/.claude/local/node_modules/@anthropic-ai/claude-code/package.json').version)" 2>/dev/null)
+if [ -d "$HOME/.claude/local/node_modules/@anthropic-ai/claude-agent-sdk" ]; then
+    SDK_VERSION=$(node -e "console.log(require('$HOME/.claude/local/node_modules/@anthropic-ai/claude-agent-sdk/package.json').version)" 2>/dev/null)
     if [ -n "$SDK_VERSION" ]; then
-        print_pass "Claude Code SDK installed (local): v$SDK_VERSION"
+        print_pass "Claude Agent SDK installed (local): v$SDK_VERSION"
         SDK_LOCATION="$HOME/.claude/local"
         SDK_FOUND=true
     fi
@@ -50,19 +50,19 @@ fi
 
 # Check global npm installation as fallback
 if [ "$SDK_FOUND" = false ]; then
-    if npm list -g @anthropic-ai/claude-code &> /dev/null; then
-        SDK_VERSION=$(npm list -g @anthropic-ai/claude-code --depth=0 | grep @anthropic-ai/claude-code | awk '{print $2}')
-        print_pass "Claude Code SDK installed (global npm): $SDK_VERSION"
+    if npm list -g @anthropic-ai/claude-agent-sdk &> /dev/null; then
+        SDK_VERSION=$(npm list -g @anthropic-ai/claude-agent-sdk --depth=0 | grep @anthropic-ai/claude-agent-sdk | awk '{print $2}')
+        print_pass "Claude Agent SDK installed (global npm): $SDK_VERSION"
         SDK_LOCATION="global"
         SDK_FOUND=true
     fi
 fi
 
 if [ "$SDK_FOUND" = false ]; then
-    print_fail "Claude Code SDK not installed"
+    print_fail "Claude Agent SDK not installed"
     echo "Install via one of these methods:"
     echo "  1. Claude CLI (recommended): Install from https://claude.ai/"
-    echo "  2. npm: npm install -g @anthropic-ai/claude-code"
+    echo "  2. npm: npm install -g @anthropic-ai/claude-agent-sdk"
     exit 1
 fi
 
@@ -98,23 +98,23 @@ else
 fi
 
 # Test simple SDK functionality
-print_test "Testing Claude Code SDK functionality..."
+print_test "Testing Claude Agent SDK functionality..."
 
 # Create test script with path detection
-cat > /tmp/test-claude-code.js << 'EOF'
+cat > /tmp/test-claude-agent.js << 'EOF'
 const path = require('path');
 let sdk;
 
 // Try loading from multiple locations
 const possiblePaths = [
-    path.join(process.env.HOME, '.claude', 'local', 'node_modules', '@anthropic-ai', 'claude-code'),
-    '@anthropic-ai/claude-code'
+    path.join(process.env.HOME, '.claude', 'local', 'node_modules', '@anthropic-ai', 'claude-agent-sdk'),
+    '@anthropic-ai/claude-agent-sdk'
 ];
 
 for (const modulePath of possiblePaths) {
     try {
         sdk = require(modulePath);
-        console.log('Claude Code SDK loaded successfully from:', modulePath);
+        console.log('Claude Agent SDK loaded successfully from:', modulePath);
         break;
     } catch (e) {
         // Try next
@@ -122,7 +122,7 @@ for (const modulePath of possiblePaths) {
 }
 
 if (!sdk) {
-    console.error('Failed to load Claude Code SDK');
+    console.error('Failed to load Claude Agent SDK');
     process.exit(1);
 }
 
@@ -136,20 +136,20 @@ if (typeof sdk === 'object') {
 }
 EOF
 
-if node /tmp/test-claude-code.js 2>/dev/null; then
-    print_pass "Claude Code SDK functional"
+if node /tmp/test-claude-agent.js 2>/dev/null; then
+    print_pass "Claude Agent SDK functional"
 else
-    print_fail "Claude Code SDK test failed"
+    print_fail "Claude Agent SDK test failed"
     exit 1
 fi
 
-rm -f /tmp/test-claude-code.js
+rm -f /tmp/test-claude-agent.js
 
 # Summary
 echo ""
 echo -e "${GREEN}════════════════════════════════════════${NC}"
 echo -e "${GREEN}  All tests passed! ✓${NC}"
-echo -e "${GREEN}  Claude Code capability is ready to use${NC}"
+echo -e "${GREEN}  Claude Agent capability is ready to use${NC}"
 echo -e "${GREEN}════════════════════════════════════════${NC}"
 echo ""
 echo "Next steps:"
