@@ -1,11 +1,11 @@
 # Claude Code Agent Example
 
-This example demonstrates an Arkavo agent using the Claude Code SDK capability to perform sophisticated coding tasks with full file system access and code generation capabilities.
+This example demonstrates an Arkavo agent using the Claude Agent SDK capability to perform sophisticated coding tasks with full file system access and code generation capabilities.
 
 ## Overview
 
 The Claude Code Agent showcases:
-- Integration with the Claude Code SDK (`@anthropic-ai/claude-code`)
+- Integration with the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
 - Policy-controlled file operations and code generation
 - Budget tracking for API usage
 - Event streaming for real-time progress updates
@@ -13,7 +13,7 @@ The Claude Code Agent showcases:
 
 ## Prerequisites
 
-### 1. Install Node.js and Claude Code SDK
+### 1. Install Node.js and Claude Agent SDK
 
 ```bash
 # Install Node.js >= 18.0.0
@@ -22,8 +22,8 @@ brew install node
 
 # Or download from https://nodejs.org/
 
-# Install Claude Code SDK globally
-npm install -g @anthropic-ai/claude-code
+# Install Claude Agent SDK globally
+npm install -g @anthropic-ai/claude-agent-sdk
 ```
 
 ### 2. Set API Credentials
@@ -240,14 +240,14 @@ claude_code:
 
 ## Troubleshooting
 
-### Claude Code SDK Not Found
+### Claude Agent SDK Not Found
 
 ```bash
 # Check if installed
-npm list -g @anthropic-ai/claude-code
+npm list -g @anthropic-ai/claude-agent-sdk
 
 # If not, install it
-npm install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-agent-sdk
 ```
 
 ### API Key Issues
@@ -328,8 +328,8 @@ curl -X POST http://localhost:8342/v1/agent/message \
 
 ## Learn More
 
-- [Claude Code SDK Documentation](https://github.com/anthropics/claude-code)
-- [Arkavo Claude Code Integration](../../crates/arkavo-claude-code/README.md)
+- [Claude Agent SDK Documentation](https://docs.claude.com/en/api/agent-sdk/overview)
+- [Arkavo Claude Agent Integration](../../crates/arkavo-claude-code/README.md)
 - [DeepSeek API Documentation](https://platform.deepseek.com/docs)
 - [Arkavo Documentation](../../README.md)
 

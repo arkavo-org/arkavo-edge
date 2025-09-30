@@ -266,12 +266,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
 async fn initialize_llm_client(
     print_mode: bool,
-    model_name: &str,
-    temperature: f32,
-    top_p: f32,
-    top_k: i32,
-    max_tokens: u32,
-    seed: u32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] model_name: &str,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] temperature: f32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] top_p: f32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] top_k: i32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] max_tokens: u32,
+    #[cfg_attr(not(feature = "llama-cpp"), allow(unused_variables))] seed: u32,
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Try to connect to Ollama first
     if let Ok(client) = LlmClient::from_env()

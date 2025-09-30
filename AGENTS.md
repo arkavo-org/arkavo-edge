@@ -96,10 +96,6 @@ Arkavo Edge consists of several core components:
 ## Security Considerations
 
 - **No OpenSSL dependency** - Use rustls for TLS to ensure cross-compilation compatibility (especially for musl targets).
-- A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
-  - You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
-  - This includes trying to invoke Homebrew or similar to install dependencies at runtime.
-  - Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
 
 ## Pull Request Guidelines
 
@@ -235,10 +231,6 @@ When `ARKAVO_DEBUG_CHAT=1`:
 - Faking success is worse than an honest failure
 - do not use conventional commits
 - **Bug fixes MUST have regression tests** - Every bug fix must include a test that would have caught the bug. Add tests to `.github/workflows/regression.yaml` or create issue-specific test files in `tests/` directories
-- A future requirement will be Mac App Store. Mac App Store-distributed apps, bundling, downloading, or installing additional executable code at runtime is strictly forbidden by App Store Review Guidelines (section 2.5.2):
-  - You cannot download or install binaries, frameworks, or tools that were not bundled in the app's signed package.
-  - This includes trying to invoke Homebrew or similar to install dependencies at runtime.
-  - Attempting to auto-install or download an external executable is a rejection risk for Mac App Store apps.
 - **IMPORTANT: simctl does NOT support tap/touch/swipe commands**. The following commands are INVALID and do not exist:
   - `xcrun simctl io <device> tap <x> <y>` - DOES NOT EXIST
   - `xcrun simctl io <device> touch <x>,<y>` - DOES NOT EXIST

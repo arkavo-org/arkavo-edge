@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_events::{Event, EventPayload};
 use arkavo_memory::event_store::SerializedEvent;
 use arkavo_memory::storage::MemoryStorage;
