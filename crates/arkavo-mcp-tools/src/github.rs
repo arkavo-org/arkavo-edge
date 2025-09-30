@@ -818,10 +818,10 @@ mod tests {
     #[test]
     fn test_pr_body_formatting() {
         // Test that PR body gets attribution footer
-        let pr_create = GitHubPrCreateKit::new();
+        let _pr_create = GitHubPrCreateKit::new();
 
         // Simulate parameters with body
-        let params_with_body = json!({
+        let _params_with_body = json!({
             "title": "Test PR",
             "body": "This is a test PR description"
         });

@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 
 /**
- * Claude Code SDK Bridge for Arkavo
- * Provides JSON-RPC interface to Claude Code SDK
+ * Claude Agent SDK Bridge for Arkavo
+ * Provides JSON-RPC interface to Claude Agent SDK
  */
 
 const readline = require('readline');
 
-// Try to load Claude Code SDK from multiple locations
+// Try to load Claude Agent SDK from multiple locations
 let ClaudeCodeSession;
 const path = require('path');
 const possiblePaths = [
     // Local Claude installation (preferred - standard location)
-    path.join(process.env.HOME, '.claude', 'local', 'node_modules', '@anthropic-ai', 'claude-code'),
+    path.join(process.env.HOME, '.claude', 'local', 'node_modules', '@anthropic-ai', 'claude-agent-sdk'),
     // Global npm installation
-    '@anthropic-ai/claude-code',
+    '@anthropic-ai/claude-agent-sdk',
     // Local node_modules (relative to this script)
-    './node_modules/@anthropic-ai/claude-code',
+    './node_modules/@anthropic-ai/claude-agent-sdk',
     // Alternative global locations
-    '/usr/local/lib/node_modules/@anthropic-ai/claude-code',
-    '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code',
+    '/usr/local/lib/node_modules/@anthropic-ai/claude-agent-sdk',
+    '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-agent-sdk',
 ];
 
 let loadedFrom = null;
@@ -42,7 +42,7 @@ if (!ClaudeCodeSession) {
         jsonrpc: '2.0',
         method: 'error',
         params: {
-            error: 'Claude Code SDK not found. Please install it:\n1. Via Claude CLI (recommended): Install from https://claude.ai/\n2. Via npm: npm install -g @anthropic-ai/claude-code',
+            error: 'Claude Agent SDK not found. Please install it:\n1. Via Claude CLI (recommended): Install from https://claude.ai/\n2. Via npm: npm install -g @anthropic-ai/claude-agent-sdk',
             code: 'SDK_NOT_FOUND'
         }
     }));
@@ -317,6 +317,6 @@ sendNotification('ready', {
 });
 
 // Log to stderr for debugging
-console.error('Claude Code Bridge started');
+console.error('Claude Agent SDK Bridge started');
 console.error(`Model: ${ANTHROPIC_MODEL}`);
 console.error(`API Key: ${ANTHROPIC_API_KEY ? 'Set' : 'Not set'}`);

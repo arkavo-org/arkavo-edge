@@ -63,7 +63,7 @@ impl ConversationManager {
 
         // Count and balance triple backticks
         let fence_count = sanitized.matches("```").count();
-        if fence_count % 2 != 0 {
+        if !fence_count.is_multiple_of(2) {
             // Odd number of fences - close the last one
             sanitized.push_str("\n```\n");
         }

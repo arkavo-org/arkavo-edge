@@ -1,10 +1,10 @@
 # arkavo-claude-code
 
-Claude Code SDK integration for Arkavo Edge, providing secure and policy-controlled access to Claude's advanced coding capabilities.
+Claude Agent SDK integration for Arkavo Edge, providing secure and policy-controlled access to Claude's advanced coding capabilities.
 
 ## Overview
 
-This crate integrates the Claude Code SDK (`@anthropic-ai/claude-code` npm package) into Arkavo Edge through a secure Node.js bridge. It provides:
+This crate integrates the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk` npm package) into Arkavo Edge through a secure Node.js bridge. It provides:
 
 - **Secure Tool Execution**: All SDK operations are subject to Arkavo's policy engine
 - **Workspace Sandboxing**: File operations are confined to configured workspace roots
@@ -17,7 +17,7 @@ This crate integrates the Claude Code SDK (`@anthropic-ai/claude-code` npm packa
 The integration uses a three-layer architecture:
 
 1. **Rust Capability Layer**: Implements the MCP tool interface and manages the lifecycle
-2. **Node.js Bridge**: Runs the Claude Code SDK in a subprocess with JSON-RPC communication
+2. **Node.js Bridge**: Runs the Claude Agent SDK in a subprocess with JSON-RPC communication
 3. **Policy Layer**: Enforces security policies on all tool operations
 
 ## Configuration
@@ -135,7 +135,7 @@ capability.close_session(session_id).await?;
 
 ## Event Mapping
 
-Claude Code SDK events are mapped to Arkavo event types:
+Claude Agent SDK events are mapped to Arkavo event types:
 
 | SDK Event | Arkavo Event |
 |-----------|--------------|

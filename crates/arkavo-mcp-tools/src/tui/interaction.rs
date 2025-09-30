@@ -345,22 +345,15 @@ impl TuiInteractionKit {
                 .to_string();
 
             // Check expected content
-            let mut all_checks_passed = true;
-
-            if let Some(expected) = expected_content
+            let all_checks_passed = if let Some(expected) = expected_content
                 && !last_content.contains(expected)
             {
-                all_checks_passed = false;
-            }
-
-            if let Some(texts) = contains_text {
-                for text in texts {
-                    if !last_content.contains(text) {
-                        all_checks_passed = false;
-                        break;
-                    }
-                }
-            }
+                false
+            } else if let Some(texts) = contains_text {
+                texts.iter().all(|text| last_content.contains(text))
+            } else {
+                true
+            };
 
             if all_checks_passed {
                 return Ok(json!({
