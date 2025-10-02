@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
 // Debug flag for llama.cpp provider
@@ -39,7 +38,6 @@ impl Default for SamplingConfig {
 
 pub struct LlamaCppProvider {
     model: Arc<LlamaModel>,
-    context: Arc<Mutex<LlamaContext>>,
     name: String,
     config: SamplingConfig,
 }
@@ -70,12 +68,8 @@ impl LlamaCppProvider {
         let model = LlamaModel::from_file(&model_path)
             .map_err(|e| Error::Config(format!("Failed to load model: {e}")))?;
 
-        let context = LlamaContext::new(&model)
-            .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
-
         Ok(Self {
             model: Arc::new(model),
-            context: Arc::new(Mutex::new(context)),
             name: model_name,
             config,
         })
@@ -107,7 +101,6 @@ impl LlamaCppProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
-        let context = self.context.clone();
         let config = self.config.clone();
 
         tokio::spawn(async move {
@@ -117,10 +110,9 @@ impl LlamaCppProvider {
 
             #[allow(clippy::significant_drop_tightening)]
             let result = async {
-                let ctx = context.lock().await;
-
-                // Clear KV cache for fresh conversation - prevents position mismatch errors
-                ctx.clear_kv_cache();
+                // Create fresh context for each request
+                let ctx = LlamaContext::new(&model)
+                    .map_err(|e| Error::Config(format!("Failed to create context: {e}")))?;
 
                 // Get vocab and tokenize inside the lock to avoid Send issues
                 let vocab = model.get_vocab();
@@ -190,7 +182,7 @@ impl LlamaCppProvider {
 
                 // Generation loop - limit to reasonable context window
                 let max_generation = std::cmp::min(config.max_tokens, 30000); // Max generation within 32K context
-                let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0); // Track position for new tokens
+                let mut pos = i32::try_from(input_tokens.len()).unwrap_or(0); // Start from input length
 
                 if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {
                     eprintln!(
