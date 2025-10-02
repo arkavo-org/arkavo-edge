@@ -525,8 +525,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let _ = crate::prompt_loader::init_prompt_override_dir();
 
     // Build base system prompt (without repo context initially)
-    let base_system_prompt = if mcp_client.is_some() {
-        // Load chat system prompt with MCP tools info
+    let base_system_prompt = if mcp_client.is_some() && model_size_hint != Some("270M") {
+        // Load chat system prompt with MCP tools info (skip for tiny models)
         let tools_info = format!(
             "EXAMPLES:
 Q: \"What git branch am I on?\" → A: @git_status
@@ -538,7 +538,8 @@ Q: \"Recent commits?\" → A: @git_status
         );
         crate::prompt_loader::load_chat_system_prompt(true, Some(&tools_info))
     } else {
-        crate::prompt_loader::load_chat_system_prompt(false, None)
+        // For 270M models or when MCP not available, use no system prompt
+        String::new()
     };
 
     // Determine whether to inject repo context
@@ -606,22 +607,24 @@ Q: \"Recent commits?\" → A: @git_status
         base_system_prompt
     };
 
-    // Get conversation context with system message
-    let system_message = if print_mode && mcp_client.is_none() {
-        // Use minimal system prompt only when MCP is not available
-        Message::system("You are a helpful AI assistant.")
+    // Get conversation context with system message (only if non-empty)
+    let system_message = if !system_prompt.is_empty() {
+        Some(Message::system(&system_prompt))
     } else {
-        // Use full system prompt with MCP tools when available
-        Message::system(&system_prompt)
+        None
     };
 
     let mut messages = if print_mode {
         // In print mode, just create a simple message list
-        vec![system_message.clone()]
+        if let Some(msg) = system_message.clone() {
+            vec![msg]
+        } else {
+            vec![]
+        }
     } else {
         // In interactive mode, get context with appropriate history limits
         let history_limit = if model_size_hint == Some("270M") {
-            Some(2) // Very limited for tiny models
+            Some(0) // No history for tiny models - fresh context each time
         } else if let Some("1B" | "2B") = model_size_hint {
             Some(4)
         } else {
@@ -630,7 +633,7 @@ Q: \"Recent commits?\" → A: @git_status
 
         runtime.block_on(
             conversation_manager
-                .get_context_messages_with_limits(Some(system_message.clone()), history_limit),
+                .get_context_messages_with_limits(system_message.clone(), history_limit),
         )?
     };
 
@@ -690,7 +693,11 @@ Q: \"Recent commits?\" → A: @git_status
         // Handle /new command - start fresh session
         if input == "/new" {
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
-            messages = vec![system_message.clone()];
+            messages = if let Some(msg) = system_message.clone() {
+                vec![msg]
+            } else {
+                vec![]
+            };
             println!("Started new conversation session");
             continue;
         }
@@ -699,7 +706,11 @@ Q: \"Recent commits?\" → A: @git_status
         if input == "/clear" {
             conversation_manager.clear_session()?;
             let _ = runtime.block_on(conversation_manager.start_session(client.provider_name()))?;
-            messages = vec![system_message.clone()];
+            messages = if let Some(msg) = system_message.clone() {
+                vec![msg]
+            } else {
+                vec![]
+            };
             println!("Cleared conversation history");
             continue;
         }
@@ -819,8 +830,7 @@ Q: \"Recent commits?\" → A: @git_status
                     match runtime.block_on(conversation_manager.switch_session(session_id)) {
                         Ok(()) => {
                             messages = runtime.block_on(
-                                conversation_manager
-                                    .get_context_messages(Some(system_message.clone())),
+                                conversation_manager.get_context_messages(system_message.clone()),
                             )?;
                             println!("Switched to session: {}", &session_id.to_string()[..8]);
                         }

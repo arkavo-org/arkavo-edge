@@ -126,24 +126,16 @@ pub fn render_prompt(template: &str, variables: &[(String, String)]) -> String {
 
 /// Load the chat system prompt
 pub fn load_chat_system_prompt(mcp_available: bool, available_tools: Option<&str>) -> String {
-    let template = load_prompt(
-        "chat_system",
-        if mcp_available {
-            "You are an AI assistant with MCP tools for development tasks. Be concise and direct."
+    // For small models, minimal or no system prompt works best
+    if mcp_available {
+        if let Some(tools) = available_tools {
+            format!("Available tools:\n{}", tools)
         } else {
-            "You are a helpful AI assistant. Be concise and direct in your responses."
-        },
-    );
-
-    let mut variables = vec![("mcp_available".to_string(), mcp_available.to_string())];
-
-    if let Some(tools) = available_tools {
-        variables.push(("available_tools".to_string(), tools.to_string()));
+            String::new()
+        }
     } else {
-        variables.push(("available_tools".to_string(), String::new()));
+        String::new()
     }
-
-    render_prompt(&template, &variables)
 }
 
 /// Load the terminal system prompt
