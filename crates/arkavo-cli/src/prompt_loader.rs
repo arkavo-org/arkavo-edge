@@ -129,7 +129,7 @@ pub fn load_chat_system_prompt(mcp_available: bool, available_tools: Option<&str
     // For small models, minimal or no system prompt works best
     if mcp_available {
         if let Some(tools) = available_tools {
-            format!("Available tools:\n{}", tools)
+            format!("Available tools:\n{tools}")
         } else {
             String::new()
         }
