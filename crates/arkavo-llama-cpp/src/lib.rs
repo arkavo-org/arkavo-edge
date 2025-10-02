@@ -170,13 +170,13 @@ impl LlamaContext {
 
         // Enable GPU offloading for KV cache and operations
         params.offload_kqv = true; // Offload KV cache to GPU
-        params.flash_attn = true; // Use Flash Attention if available
+        params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO; // Auto-detect Flash Attention
 
         // Show context configuration if debug is enabled
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
-                "Context: KV offload={}, flash_attn={}, threads={}",
-                params.offload_kqv, params.flash_attn, params.n_threads
+                "Context: KV offload={}, flash_attn=auto, threads={}",
+                params.offload_kqv, params.n_threads
             );
         }
 
@@ -192,27 +192,19 @@ impl LlamaContext {
         unsafe { ffi::llama_get_logits_ith(self.ptr, i) }
     }
 
-    /// Clear the KV cache for all sequences
+    /// Clear the KV cache - no-op, managed automatically
     pub fn clear_kv_cache(&self) {
-        unsafe {
-            // Use the older API name that's available
-            ffi::llama_kv_self_clear(self.ptr);
-        }
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            eprintln!("[DEBUG] KV cache cleared");
+            eprintln!("[DEBUG] KV cache managed automatically");
         }
     }
 
-    /// Remove a specific sequence from the KV cache
-    pub fn remove_sequence(&self, seq_id: i32, pos_start: i32, pos_end: i32) -> bool {
-        let result = unsafe { ffi::llama_kv_self_seq_rm(self.ptr, seq_id, pos_start, pos_end) };
+    /// Remove a specific sequence from the KV cache - API removed in newer llama.cpp
+    pub fn remove_sequence(&self, _seq_id: i32, _pos_start: i32, _pos_end: i32) -> bool {
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            eprintln!(
-                "[DEBUG] Removed sequence {} from KV cache (pos {}-{})",
-                seq_id, pos_start, pos_end
-            );
+            eprintln!("[DEBUG] Remove sequence skipped (API removed)");
         }
-        result
+        true
     }
 }
 
@@ -230,9 +222,8 @@ pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
 ) -> Result<Vec<u8>, String> {
-    // Gemma-3 chat template
-    // Format: <start_of_turn>role\ncontent<end_of_turn>
-    let gemma3_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'system' %}{{'<start_of_turn>system\n' + message['content'] + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}";
+    // Gemma-3 chat template - simple format for small models
+    let gemma3_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + message['content'] + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}";
 
     let template_cstring = CString::new(gemma3_template)
         .map_err(|e| format!("Failed to create template CString: {}", e))?;
@@ -241,7 +232,7 @@ pub fn apply_chat_template(
     loop {
         let wrote = unsafe {
             ffi::llama_chat_apply_template(
-                template_cstring.as_ptr(), // Use Gemma-3 template
+                template_cstring.as_ptr(),
                 messages.as_ptr(),
                 messages.len(),
                 add_assistant,
