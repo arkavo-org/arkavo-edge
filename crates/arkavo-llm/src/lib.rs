@@ -33,6 +33,11 @@ mod deepseek_adapter;
 #[cfg(feature = "deepseek")]
 pub use deepseek_adapter::DeepSeekProvider;
 
+#[cfg(feature = "qwen")]
+mod qwen_adapter;
+#[cfg(feature = "qwen")]
+pub use qwen_adapter::QwenProvider;
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 mod llamacpp_provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
