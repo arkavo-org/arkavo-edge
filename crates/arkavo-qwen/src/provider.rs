@@ -3,7 +3,7 @@ use crate::error::{QwenError, Result};
 use crate::models::QwenModel;
 use crate::stream::StreamResponse;
 use crate::types::{ChatMessage, MessageContent, Role};
-use crate::vision::create_image_part;
+use crate::vision::{create_image_part, validate_image_size};
 use async_trait::async_trait;
 use futures::Stream;
 
@@ -99,6 +99,7 @@ impl QwenProvider {
             }
 
             for image in images {
+                validate_image_size(&image, 10)?;
                 parts.push(create_image_part(&image));
             }
 

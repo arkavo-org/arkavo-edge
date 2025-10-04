@@ -7,7 +7,7 @@ Qwen-3 (Instruct + Vision) provider for Arkavo Edge via DashScope's OpenAI-compa
 - **Text/Instruct Models**: Full Qwen-3 series support (qwen3-235b-a22b, qwen3-32b, qwen3-14b, etc.)
 - **Vision Models**: Qwen-VL and Qwen3-VL support for image understanding
 - **Streaming**: Server-sent events (SSE) streaming for real-time responses
-- **Function Calling**: Tool/function calling support for agentic workflows
+- **Function Calling**: Type definitions and low-level API support (high-level integration planned)
 - **Regional Endpoints**: Support for both International and China regions
 - **OpenAI-Compatible**: Uses DashScope's OpenAI-compatible API
 
@@ -250,6 +250,22 @@ validate_image_size(&base64_data, 10)?;
 // Create vision content part
 let part = create_image_part(&base64_data);
 ```
+
+## Limitations
+
+### Tool Calling / Function Calling
+
+The crate includes type definitions and infrastructure for tool/function calling (`Tool`, `ToolChoice`, `ToolCall`), but the high-level provider API does not yet expose methods to pass tools to requests. Tool calling can be accessed through the low-level `QwenClient` API:
+
+```rust
+use arkavo_qwen::{QwenClient, QwenConfig, Tool, ToolChoice};
+
+let client = QwenClient::new(config)?;
+let tools = vec![/* your tool definitions */];
+let response = client.complete(messages, Some(tools), Some(ToolChoice::Auto)).await?;
+```
+
+Integration with the `Provider` trait for tool calling is planned for a future release.
 
 ## Testing
 

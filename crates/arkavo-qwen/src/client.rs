@@ -93,11 +93,15 @@ impl QwenClient {
             .and_then(|r| QwenRegion::parse(&r))
             .unwrap_or_default();
 
-        let base_url =
-            std::env::var("DASHSCOPE_BASE_URL").unwrap_or_else(|_| region.base_url().to_string());
+        let base_url = match std::env::var("DASHSCOPE_BASE_URL") {
+            Ok(url) => url,
+            Err(_) => region.base_url().to_string(),
+        };
 
-        let model = std::env::var("QWEN_MODEL")
-            .unwrap_or_else(|_| QwenModel::default().as_str().to_string());
+        let model = match std::env::var("QWEN_MODEL") {
+            Ok(m) => m,
+            Err(_) => QwenModel::default().as_str().to_string(),
+        };
 
         let config = QwenConfig {
             api_key,
@@ -173,6 +177,32 @@ impl QwenClient {
     }
 
     async fn send_request(&self, request: ChatCompletionRequest) -> Result<ChatCompletionResponse> {
+        let mut last_error = None;
+
+        for attempt in 0..=self.config.max_retries {
+            if attempt > 0 {
+                let backoff = self.calculate_backoff(attempt, last_error.as_ref());
+                debug!("Retry attempt {}/{}, waiting {}ms", attempt, self.config.max_retries, backoff.as_millis());
+                tokio::time::sleep(backoff).await;
+            }
+
+            match self.try_send_request(&request).await {
+                Ok(response) => return Ok(response),
+                Err(e) if e.is_retryable() && attempt < self.config.max_retries => {
+                    debug!("Request failed with retryable error: {}", e);
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| QwenError::ApiError {
+            status: 500,
+            message: "Max retries exceeded".to_string(),
+        }))
+    }
+
+    async fn try_send_request(&self, request: &ChatCompletionRequest) -> Result<ChatCompletionResponse> {
         let url = format!("{}/chat/completions", self.config.base_url);
 
         debug!("Sending request to Qwen API: {}", url);
@@ -182,17 +212,18 @@ impl QwenClient {
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
-            .json(&request)
+            .json(request)
             .send()
             .await?;
 
         let status = response.status();
+        let headers = response.headers().clone();
 
         if !status.is_success() {
             let error_text = response.text().await?;
 
             if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(self.map_api_error(status, error_response));
+                return Err(self.map_api_error(status, error_response, &headers));
             }
 
             return Err(QwenError::ApiError {
@@ -203,6 +234,18 @@ impl QwenClient {
 
         let completion: ChatCompletionResponse = response.json().await?;
         Ok(completion)
+    }
+
+    fn calculate_backoff(&self, attempt: u32, error: Option<&QwenError>) -> Duration {
+        if let Some(QwenError::RateLimitExceeded { retry_after: Some(seconds), .. }) = error {
+            return Duration::from_secs(*seconds);
+        }
+
+        let base_ms = 1000u64;
+        let backoff_ms = base_ms * 2u64.pow(attempt - 1);
+        let max_backoff_ms = 60_000u64;
+
+        Duration::from_millis(backoff_ms.min(max_backoff_ms))
     }
 
     async fn send_stream_request(&self, request: ChatCompletionRequest) -> Result<SseStream> {
@@ -220,12 +263,13 @@ impl QwenClient {
             .await?;
 
         let status = response.status();
+        let headers = response.headers().clone();
 
         if !status.is_success() {
             let error_text = response.text().await?;
 
             if let Ok(error_response) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                return Err(self.map_api_error(status, error_response));
+                return Err(self.map_api_error(status, error_response, &headers));
             }
 
             return Err(QwenError::ApiError {
@@ -238,14 +282,21 @@ impl QwenClient {
         Ok(SseStream::new(stream))
     }
 
-    fn map_api_error(&self, status: StatusCode, error: ErrorResponse) -> QwenError {
+    fn map_api_error(&self, status: StatusCode, error: ErrorResponse, headers: &reqwest::header::HeaderMap) -> QwenError {
         match status {
             StatusCode::UNAUTHORIZED => QwenError::AuthenticationFailed {
                 message: error.error.message,
             },
-            StatusCode::TOO_MANY_REQUESTS => QwenError::RateLimitExceeded {
-                message: error.error.message,
-                retry_after: None,
+            StatusCode::TOO_MANY_REQUESTS => {
+                let retry_after = headers
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+
+                QwenError::RateLimitExceeded {
+                    message: error.error.message,
+                    retry_after,
+                }
             },
             StatusCode::NOT_FOUND => {
                 if error.error.message.to_lowercase().contains("model") {

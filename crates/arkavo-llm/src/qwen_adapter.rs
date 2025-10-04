@@ -1,4 +1,5 @@
 use crate::{Message, Provider, Result, Role, StreamResponse};
+use arkavo_qwen::Provider as QwenProviderTrait;
 use async_trait::async_trait;
 use tokio_stream::Stream;
 
@@ -87,10 +88,10 @@ impl Provider for QwenProvider {
                 .map_err(|e| crate::Error::Stream(e.to_string()))
         });
 
-        Ok(Box::new(Box::pin(mapped_stream)))
+        Ok(Box::new(futures::stream::StreamExt::boxed(mapped_stream)))
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "qwen"
     }
 }
