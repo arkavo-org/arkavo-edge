@@ -182,7 +182,12 @@ impl QwenClient {
         for attempt in 0..=self.config.max_retries {
             if attempt > 0 {
                 let backoff = self.calculate_backoff(attempt, last_error.as_ref());
-                debug!("Retry attempt {}/{}, waiting {}ms", attempt, self.config.max_retries, backoff.as_millis());
+                debug!(
+                    "Retry attempt {}/{}, waiting {}ms",
+                    attempt,
+                    self.config.max_retries,
+                    backoff.as_millis()
+                );
                 tokio::time::sleep(backoff).await;
             }
 
@@ -202,7 +207,10 @@ impl QwenClient {
         }))
     }
 
-    async fn try_send_request(&self, request: &ChatCompletionRequest) -> Result<ChatCompletionResponse> {
+    async fn try_send_request(
+        &self,
+        request: &ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse> {
         let url = format!("{}/chat/completions", self.config.base_url);
 
         debug!("Sending request to Qwen API: {}", url);
@@ -237,7 +245,11 @@ impl QwenClient {
     }
 
     fn calculate_backoff(&self, attempt: u32, error: Option<&QwenError>) -> Duration {
-        if let Some(QwenError::RateLimitExceeded { retry_after: Some(seconds), .. }) = error {
+        if let Some(QwenError::RateLimitExceeded {
+            retry_after: Some(seconds),
+            ..
+        }) = error
+        {
             return Duration::from_secs(*seconds);
         }
 
@@ -282,7 +294,12 @@ impl QwenClient {
         Ok(SseStream::new(stream))
     }
 
-    fn map_api_error(&self, status: StatusCode, error: ErrorResponse, headers: &reqwest::header::HeaderMap) -> QwenError {
+    fn map_api_error(
+        &self,
+        status: StatusCode,
+        error: ErrorResponse,
+        headers: &reqwest::header::HeaderMap,
+    ) -> QwenError {
         match status {
             StatusCode::UNAUTHORIZED => QwenError::AuthenticationFailed {
                 message: error.error.message,
@@ -297,7 +314,7 @@ impl QwenClient {
                     message: error.error.message,
                     retry_after,
                 }
-            },
+            }
             StatusCode::NOT_FOUND => {
                 if error.error.message.to_lowercase().contains("model") {
                     QwenError::ModelNotFound {
