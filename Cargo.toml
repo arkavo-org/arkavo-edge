@@ -12,6 +12,7 @@ members = [
     "crates/arkavo-llm",
     "crates/arkavo-kimi",
     "crates/arkavo-deepseek",
+    "crates/arkavo-qwen",
     "crates/arkavo-memory",
     "crates/arkavo-mcp",
     "crates/arkavo-mcp-core",
@@ -32,7 +33,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.31.1"
+version = "0.32.0"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
