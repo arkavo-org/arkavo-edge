@@ -946,23 +946,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Install CMake and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "no-openssl"
 
       - name: Check for OpenSSL in musl dependency tree
         run: |
           echo "Checking musl target for OpenSSL dependencies..."
 
-          # Check for openssl
-          if cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1 | grep -v "error: package ID specification"; then
+          # Check for openssl - if grep finds nothing (exit 1), that's good
+          if cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1 | grep -v "error: package ID specification" | grep .; then
             echo "::error::Found OpenSSL dependency in musl build! This will cause cross-compilation failures."
             echo "::error::Use rustls instead of native-tls for all TLS dependencies."
             exit 1
           fi
 
-          # Check for native-tls
-          if cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1 | grep -v "error: package ID specification"; then
+          # Check for native-tls - if grep finds nothing (exit 1), that's good
+          if cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1 | grep -v "error: package ID specification" | grep .; then
             echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
             echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
             exit 1
