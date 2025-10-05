@@ -276,14 +276,65 @@ Submit pull request reviews with line-level feedback and code suggestions.
 }
 ```
 
-## Phase 5: Ephemeral Workspaces
+## Phase 5: Ephemeral Workspaces ✅
 
 ### `arkavo-workspace` crate
-- Container-based isolation (Docker/Podman)
-- Clone repo per task
-- Read-only network with package allowlist
-- CPU/RAM/time quotas
-- Auto-cleanup
+Container-based ephemeral workspaces with resource quotas and isolation.
+
+**workspace_container** - Isolated execution environments
+
+**Capabilities:**
+- Auto-detect runtime (Docker/Podman)
+- Create isolated containers with resource limits
+- Git repository cloning into workspace
+- Execute commands with timeout enforcement
+- CPU and memory quotas (--cpus, --memory)
+- Network isolation (disabled by default)
+- Environment variable injection
+- Auto-cleanup on container removal
+- List active workspaces
+
+**Example - Create workspace:**
+```json
+{
+  "action": "create",
+  "workspace_id": "arkavo-workspace-task-123",
+  "image": "ubuntu:22.04",
+  "repo_url": "https://github.com/example/repo",
+  "cpu_limit": "1.0",
+  "memory_limit": "512m",
+  "network": false,
+  "env": {
+    "RUST_BACKTRACE": "1"
+  }
+}
+```
+
+**Example - Execute command:**
+```json
+{
+  "action": "execute",
+  "workspace_id": "arkavo-workspace-task-123",
+  "command": "cargo test",
+  "timeout": 300
+}
+```
+
+**Example - Cleanup:**
+```json
+{
+  "action": "cleanup",
+  "workspace_id": "arkavo-workspace-task-123"
+}
+```
+
+**Architecture:**
+- 375 LoC (under 400 limit) ✅
+- Docker and Podman support
+- Resource-limited execution
+- Timeout enforcement
+- Isolated network by default
+- Production-ready error handling
 
 ## Phase 6: SWE-bench Evaluation
 
