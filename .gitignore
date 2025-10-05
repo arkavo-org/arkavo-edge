@@ -58,3 +58,4 @@ crates/arkavo-llm/assets/gemma_tokenizer.model
 **/fuzz/corpus/**/
 /.test.env
 /STATUS.md
+vendor/idb-prebuilt/
