@@ -1,7 +1,7 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -15,7 +15,9 @@ impl TestRunnerTool {
         Self {
             schema: ToolSchema {
                 name: "test_run".to_string(),
-                description: "Multi-language test runner for pytest, jest, go test, cargo test, xcodebuild".to_string(),
+                description:
+                    "Multi-language test runner for pytest, jest, go test, cargo test, xcodebuild"
+                        .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -193,7 +195,7 @@ impl TestRunnerTool {
             _ => {
                 return Err(ToolError::Mcp(format!(
                     "Unsupported framework: {framework}"
-                )))
+                )));
             }
         };
 

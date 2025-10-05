@@ -1,7 +1,7 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -15,7 +15,8 @@ impl SemgrepTool {
         Self {
             schema: ToolSchema {
                 name: "sec_semgrep".to_string(),
-                description: "SAST security scanning with Semgrep for vulnerability detection".to_string(),
+                description: "SAST security scanning with Semgrep for vulnerability detection"
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -58,7 +59,10 @@ impl SemgrepTool {
 
     async fn execute_semgrep(&self, params: &Value) -> Result<String> {
         let path = params.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let config = params.get("config").and_then(|v| v.as_str()).unwrap_or("auto");
+        let config = params
+            .get("config")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto");
 
         let mut cmd = Command::new("semgrep");
 
@@ -146,8 +150,8 @@ impl Tool for SemgrepTool {
     async fn execute(&self, params: Value) -> Result<Value> {
         let output = self.execute_semgrep(&params).await?;
 
-        let result: Value = serde_json::from_str(&output)
-            .unwrap_or_else(|_| json!({ "raw_output": output }));
+        let result: Value =
+            serde_json::from_str(&output).unwrap_or_else(|_| json!({ "raw_output": output }));
 
         if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
             let summary = json!({

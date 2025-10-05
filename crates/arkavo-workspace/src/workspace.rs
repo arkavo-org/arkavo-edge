@@ -15,7 +15,9 @@ impl WorkspaceTool {
         Self {
             schema: ToolSchema {
                 name: "workspace_container".to_string(),
-                description: "Create and manage ephemeral containerized workspaces with resource quotas".to_string(),
+                description:
+                    "Create and manage ephemeral containerized workspaces with resource quotas"
+                        .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -162,9 +164,10 @@ impl WorkspaceTool {
                 .map_err(WorkspaceError::Io)?;
         }
 
-        let status = child.wait().await.map_err(|e| {
-            WorkspaceError::CreationFailed(format!("Wait failed: {e}"))
-        })?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| WorkspaceError::CreationFailed(format!("Wait failed: {e}")))?;
 
         if !status.success() {
             return Err(WorkspaceError::CreationFailed(format!(
@@ -183,9 +186,10 @@ impl WorkspaceTool {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
-            let output = exec.output().await.map_err(|e| {
-                WorkspaceError::CreationFailed(format!("Git clone failed: {e}"))
-            })?;
+            let output = exec
+                .output()
+                .await
+                .map_err(|e| WorkspaceError::CreationFailed(format!("Git clone failed: {e}")))?;
 
             if !output.status.success() {
                 let error = String::from_utf8_lossy(&output.stderr);
@@ -241,15 +245,16 @@ impl WorkspaceTool {
             }
 
             if let Some(mut stderr_stream) = child.stderr.take() {
-            stderr_stream
+                stderr_stream
                     .read_to_string(&mut stderr)
                     .await
                     .map_err(WorkspaceError::Io)?;
             }
 
-            let status = child.wait().await.map_err(|e| {
-                WorkspaceError::ContainerRuntime(format!("Wait failed: {e}"))
-            })?;
+            let status = child
+                .wait()
+                .await
+                .map_err(|e| WorkspaceError::ContainerRuntime(format!("Wait failed: {e}")))?;
 
             Ok::<_, WorkspaceError>(json!({
                 "stdout": stdout,

@@ -1,7 +1,7 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -153,7 +153,8 @@ impl Tool for OsvTool {
                                     .and_then(|s| s.as_str())
                                 {
                                     let key = severity.to_lowercase();
-                                    if let Some(count) = by_severity.get(&key).and_then(|c| c.as_u64())
+                                    if let Some(count) =
+                                        by_severity.get(&key).and_then(|c| c.as_u64())
                                     {
                                         by_severity[&key] = json!(count + 1);
                                     }

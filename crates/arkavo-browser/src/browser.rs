@@ -87,9 +87,11 @@ impl BrowserTool {
             }
         }
 
-        let (browser, mut handler) = Browser::launch(config.build().map_err(|e| {
-            BrowserError::Playwright(format!("Failed to build config: {e}"))
-        })?)
+        let (browser, mut handler) = Browser::launch(
+            config
+                .build()
+                .map_err(|e| BrowserError::Playwright(format!("Failed to build config: {e}")))?,
+        )
         .await
         .map_err(|e| BrowserError::Playwright(format!("Failed to launch browser: {e}")))?;
 
@@ -165,9 +167,12 @@ impl BrowserTool {
 
             "console" => {
                 let mut console_messages = Vec::new();
-                let mut events = page.event_listener::<EventConsoleApiCalled>().await.map_err(|e| {
-                    BrowserError::Playwright(format!("Failed to listen to console: {e}"))
-                })?;
+                let mut events = page
+                    .event_listener::<EventConsoleApiCalled>()
+                    .await
+                    .map_err(|e| {
+                        BrowserError::Playwright(format!("Failed to listen to console: {e}"))
+                    })?;
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
@@ -184,9 +189,12 @@ impl BrowserTool {
 
             "network" => {
                 let mut network_events = Vec::new();
-                let mut requests = page.event_listener::<EventRequestWillBeSent>().await.map_err(|e| {
-                    BrowserError::Network(format!("Failed to listen to network: {e}"))
-                })?;
+                let mut requests = page
+                    .event_listener::<EventRequestWillBeSent>()
+                    .await
+                    .map_err(|e| {
+                        BrowserError::Network(format!("Failed to listen to network: {e}"))
+                    })?;
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 

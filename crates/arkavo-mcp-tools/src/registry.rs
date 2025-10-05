@@ -48,7 +48,9 @@ impl ToolRegistry {
     }
 
     pub fn list_tools(&self) -> Vec<ToolInfo> {
-        self.tools.values().map(|tool| {
+        self.tools
+            .values()
+            .map(|tool| {
                 let schema = tool.schema();
                 ToolInfo {
                     name: schema.name.clone(),

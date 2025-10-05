@@ -1,7 +1,7 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -87,10 +87,7 @@ impl SyftTool {
         }
 
         if let Some(catalogers) = params.get("catalogers").and_then(|v| v.as_array()) {
-            let cataloger_list: Vec<&str> = catalogers
-                .iter()
-                .filter_map(|c| c.as_str())
-                .collect();
+            let cataloger_list: Vec<&str> = catalogers.iter().filter_map(|c| c.as_str()).collect();
             if !cataloger_list.is_empty() {
                 cmd.arg("--catalogers").arg(cataloger_list.join(","));
             }

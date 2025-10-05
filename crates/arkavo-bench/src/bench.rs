@@ -66,7 +66,11 @@ impl SweBenchTool {
         }
     }
 
-    async fn load_instances(&self, subset: &str, limit: Option<usize>) -> Result<Vec<SweBenchInstance>> {
+    async fn load_instances(
+        &self,
+        subset: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<SweBenchInstance>> {
         let url = match subset {
             "lite" => "https://raw.githubusercontent.com/princeton-nlp/SWE-bench/main/swebench/lite.json",
             "verified" => "https://raw.githubusercontent.com/princeton-nlp/SWE-bench/main/swebench/verified.json",
@@ -162,11 +166,7 @@ impl SweBenchTool {
         Ok(())
     }
 
-    async fn evaluate_solution(
-        &self,
-        instance: &SweBenchInstance,
-        solution: &str,
-    ) -> Result<bool> {
+    async fn evaluate_solution(&self, instance: &SweBenchInstance, solution: &str) -> Result<bool> {
         let workspace_id = format!("swe-bench-eval-{}", instance.instance_id);
 
         let create_params = json!({
@@ -178,9 +178,10 @@ impl SweBenchTool {
             "network": true
         });
 
-        self.workspace.execute(create_params).await.map_err(|e| {
-            BenchError::ExecutionFailed(format!("Workspace creation failed: {e}"))
-        })?;
+        self.workspace
+            .execute(create_params)
+            .await
+            .map_err(|e| BenchError::ExecutionFailed(format!("Workspace creation failed: {e}")))?;
 
         let checkout_cmd = format!("git -C /workspace checkout {}", instance.base_commit);
         let checkout_params = json!({
@@ -190,9 +191,10 @@ impl SweBenchTool {
             "timeout": 60
         });
 
-        self.workspace.execute(checkout_params).await.map_err(|e| {
-            BenchError::ExecutionFailed(format!("Git checkout failed: {e}"))
-        })?;
+        self.workspace
+            .execute(checkout_params)
+            .await
+            .map_err(|e| BenchError::ExecutionFailed(format!("Git checkout failed: {e}")))?;
 
         let apply_solution_cmd = format!("cd /workspace && echo '{}' | git apply", solution);
         let apply_params = json!({
@@ -202,9 +204,10 @@ impl SweBenchTool {
             "timeout": 30
         });
 
-        self.workspace.execute(apply_params).await.map_err(|e| {
-            BenchError::ExecutionFailed(format!("Solution apply failed: {e}"))
-        })?;
+        self.workspace
+            .execute(apply_params)
+            .await
+            .map_err(|e| BenchError::ExecutionFailed(format!("Solution apply failed: {e}")))?;
 
         let test_params = json!({
             "action": "execute",
@@ -213,9 +216,11 @@ impl SweBenchTool {
             "timeout": 300
         });
 
-        let result = self.workspace.execute(test_params).await.map_err(|e| {
-            BenchError::ExecutionFailed(format!("Test execution failed: {e}"))
-        })?;
+        let result = self
+            .workspace
+            .execute(test_params)
+            .await
+            .map_err(|e| BenchError::ExecutionFailed(format!("Test execution failed: {e}")))?;
 
         let _ = self.cleanup_workspace(&workspace_id).await;
 
@@ -240,7 +245,10 @@ impl SweBenchTool {
                     .and_then(|v| v.as_str())
                     .unwrap_or("lite");
 
-                let limit = params.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+                let limit = params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize);
 
                 let instances = self.load_instances(subset, limit).await?;
 
@@ -257,7 +265,10 @@ impl SweBenchTool {
                     .and_then(|v| v.as_str())
                     .unwrap_or("lite");
 
-                let limit = params.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+                let limit = params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize);
 
                 let instances = self.load_instances(subset, limit).await?;
                 let mut all_metrics = Vec::new();

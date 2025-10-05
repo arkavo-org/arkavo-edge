@@ -1,7 +1,7 @@
 use crate::server::{Tool, ToolSchema};
 use crate::{Result, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::process::Command;
 
 fn check_gh_installed() -> Result<()> {
@@ -27,7 +27,8 @@ fn execute_gh_api(endpoint: &str, method: &str, data: Option<&str>) -> Result<St
 
     if data.is_some() {
         cmd.arg("--input").arg("-");
-        cmd.arg("--header").arg("Accept: application/vnd.github+json");
+        cmd.arg("--header")
+            .arg("Accept: application/vnd.github+json");
     }
 
     let output = if let Some(json_data) = data {
