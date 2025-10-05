@@ -148,19 +148,67 @@ Software Bill of Materials generation with Syft.
 }
 ```
 
-## Phase 3: Test & Automation
+## Phase 3: Test & Automation ✅
 
 ### `arkavo-browser` crate
-- Playwright integration (Chromium/WebKit/Firefox)
-- Screenshot/video recording
-- Network mocking
-- E2E test assertions
+Browser automation using Chrome DevTools Protocol via chromiumoxide.
+
+**browser_cdp** - Chrome DevTools Protocol automation
+
+**Capabilities:**
+- Navigate to URLs with headless/headed modes
+- Screenshot capture (PNG format)
+- JavaScript evaluation
+- HTML content extraction
+- Console API monitoring
+- Network request tracking
+- Custom viewport configuration
+
+**Example:**
+```json
+{
+  "action": "screenshot",
+  "url": "https://example.com",
+  "screenshot_path": "/tmp/screenshot.png",
+  "headless": true,
+  "viewport": {"width": 1920, "height": 1080}
+}
+```
+
+Compatible with [Chrome DevTools MCP Server](https://github.com/ChromeDevTools/chrome-devtools-mcp/)
 
 ### Multi-language test runner
-- Unified interface: `build.test`
-- Support for pytest, jest, go test, cargo test
-- iOS/macOS: xcodebuild orchestration
-- Structured results (pass/fail/skip counts)
+
+**test_run** - Unified test execution across languages
+
+**Capabilities:**
+- Auto-detect framework from project structure
+- Supported frameworks: pytest, jest, go test, cargo test, xcodebuild
+- Test pattern filtering
+- Verbose output mode
+- Coverage reporting
+- Parallel execution
+- Structured results with pass/fail/skip counts
+- Framework-specific argument passthrough
+
+**Example:**
+```json
+{
+  "framework": "auto",
+  "path": ".",
+  "pattern": "test_auth",
+  "verbose": true,
+  "coverage": true,
+  "parallel": true
+}
+```
+
+**Framework Detection:**
+- Cargo.toml → cargo test
+- go.mod → go test
+- package.json → jest
+- pytest.ini/setup.py → pytest
+- *.xcodeproj/*.xcworkspace → xcodebuild
 
 ## Phase 4: GitHub Integration
 
