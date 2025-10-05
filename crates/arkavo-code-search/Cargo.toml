@@ -14,7 +14,7 @@ arkavo-mcp = { path = "../arkavo-mcp" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["process", "io-util", "fs"] }
+tokio = { workspace = true, features = ["process", "io-util", "fs", "test-util", "macros"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }

@@ -7,14 +7,6 @@ use streaming_iterator::StreamingIteratorMut;
 use tokio::fs;
 use tree_sitter::{Language, Parser, Query, QueryCursor};
 
-unsafe extern "C" {
-    fn tree_sitter_rust() -> Language;
-    fn tree_sitter_python() -> Language;
-    fn tree_sitter_javascript() -> Language;
-    fn tree_sitter_typescript() -> Language;
-    fn tree_sitter_go() -> Language;
-}
-
 pub struct TreeSitterTool {
     schema: ToolSchema,
 }
@@ -55,17 +47,15 @@ impl TreeSitterTool {
     }
 
     fn get_language(lang: &str) -> Result<Language> {
-        unsafe {
-            match lang {
-                "rust" => Ok(tree_sitter_rust()),
-                "python" => Ok(tree_sitter_python()),
-                "javascript" => Ok(tree_sitter_javascript()),
-                "typescript" => Ok(tree_sitter_typescript()),
-                "go" => Ok(tree_sitter_go()),
-                _ => Err(CodeSearchError::ToolError(format!(
-                    "Unsupported language: {lang}"
-                ))),
-            }
+        match lang {
+            "rust" => Ok(tree_sitter_rust::LANGUAGE.into()),
+            "python" => Ok(tree_sitter_python::LANGUAGE.into()),
+            "javascript" => Ok(tree_sitter_javascript::LANGUAGE.into()),
+            "typescript" => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            "go" => Ok(tree_sitter_go::LANGUAGE.into()),
+            _ => Err(CodeSearchError::ToolError(format!(
+                "Unsupported language: {lang}"
+            ))),
         }
     }
 
