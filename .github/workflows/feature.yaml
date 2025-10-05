@@ -962,17 +962,21 @@ jobs:
         run: |
           echo "Checking musl target for OpenSSL dependencies..."
 
-          # Check for openssl - if grep finds nothing (exit 1), that's good
-          if cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1 | grep -v "error: package ID specification" | grep .; then
+          # Check for openssl - if it's found in the tree (not the error message), fail
+          OPENSSL_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1)
+          if echo "$OPENSSL_CHECK" | grep -q "openssl v" ; then
             echo "::error::Found OpenSSL dependency in musl build! This will cause cross-compilation failures."
             echo "::error::Use rustls instead of native-tls for all TLS dependencies."
+            echo "$OPENSSL_CHECK"
             exit 1
           fi
 
-          # Check for native-tls - if grep finds nothing (exit 1), that's good
-          if cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1 | grep -v "error: package ID specification" | grep .; then
+          # Check for native-tls - if it's found in the tree (not the error message), fail
+          NATIVE_TLS_CHECK=$(cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1)
+          if echo "$NATIVE_TLS_CHECK" | grep -q "native-tls v" ; then
             echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
             echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
+            echo "$NATIVE_TLS_CHECK"
             exit 1
           fi
 
