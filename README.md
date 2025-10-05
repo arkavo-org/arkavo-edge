@@ -95,6 +95,36 @@ Configure with environment variables:
 - `OIDC_ISSUER`: Token issuer for validation
 - `AUD`: Expected audience claim
 
+## Coding Agent Toolset
+
+Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
+
+### Code Search & Intelligence
+- **codegrep_search**: Fast repository-wide code search with ripgrep
+- **struct_find_replace**: Language-aware structural search and replace with Comby
+- **syntax_tree**: AST parsing for syntax-aware code analysis with tree-sitter
+
+### Security & Quality
+- **sec_semgrep**: SAST scanning with Semgrep
+- **deps_osv**: Dependency vulnerability scanning with OSV-Scanner
+- **sbom_syft**: SBOM generation with Syft
+
+### Test & Automation
+- **browser_cdp**: Chrome DevTools Protocol automation via chromiumoxide
+- **test_run**: Multi-language test runner (pytest, jest, go test, cargo test, xcodebuild)
+
+### GitHub Integration
+- **gh_checks**: GitHub Checks API integration with inline annotations
+- **gh_pr_review**: PR reviews with line-level comments
+
+### Ephemeral Workspaces
+- **workspace_container**: Container-based isolated execution with resource quotas (Docker/Podman)
+
+### SWE-bench Evaluation
+- **swe_bench**: Objective benchmarking harness with metrics tracking
+
+See [docs/coding-agent-toolset.md](docs/coding-agent-toolset.md) for complete tool documentation.
+
 ## Platform Support
 
 | Platform | Architecture | Features |

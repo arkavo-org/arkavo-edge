@@ -4,13 +4,21 @@ pub mod code_analysis;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod github_checks;
+pub mod github_review;
 pub mod mcp_connection;
+pub mod osv;
+pub mod registry;
+pub mod semgrep;
 pub mod server;
 pub mod state;
 pub mod state_store;
+pub mod syft;
+pub mod test_runner;
 pub mod tui;
 
 // Re-export commonly used types
+pub use registry::ToolRegistry;
 pub use server::{Tool, ToolSchema};
 
 // Re-export error types
