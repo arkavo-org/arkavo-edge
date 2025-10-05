@@ -14,6 +14,21 @@ Fast repository-wide code search with support for:
 - Line numbers
 - Result limits
 
+### Comby (structural search/replace)
+Language-aware structural refactoring:
+- Template-based patterns with holes (`:[ var]`)
+- Rewrite templates
+- Language-specific matching (Rust, Go, Python, JS, TS, Java, C, C++)
+- In-place or preview mode
+- Directory exclusions
+
+### TreeSitter (AST parsing)
+Syntax-aware code analysis:
+- Parse files to AST (Rust, Python, JavaScript, TypeScript, Go)
+- Multiple output formats (tree, nodes, captures)
+- Tree-sitter query support for pattern matching
+- Precise node positions for surgical edits
+
 ## Usage
 
 ```rust
