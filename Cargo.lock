@@ -320,6 +320,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-code-search"
+version = "0.32.0"
+dependencies = [
+ "arkavo-mcp",
+ "async-trait",
+ "glob",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "arkavo-dataflow"
 version = "0.32.0"
 dependencies = [

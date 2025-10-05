@@ -27,6 +27,7 @@ members = [
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
     "crates/arkavo-llama-cpp",
+    "crates/arkavo-code-search",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
