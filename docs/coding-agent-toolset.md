@@ -411,13 +411,61 @@ Objective benchmarking harness for coding agent evaluation using SWE-bench datas
 - Async task execution
 - Production-ready error handling
 
-## Phase 7: MCP Consolidation
+## Phase 7: MCP Consolidation ✅
 
 ### Unified tool registry
-- All tools as MCP servers (JSON-RPC)
-- Standardized schemas
-- Model-agnostic (Claude, GPT, Qwen, etc.)
-- Tool discovery
+Centralized registry for all MCP tools with discovery and categorization.
+
+**ToolRegistry** - MCP tool management (147 LoC)
+
+**Features:**
+- Centralized tool registration
+- Auto-categorization by tool name prefix
+- Tool discovery by name or category
+- Schema export in MCP-compatible JSON
+- Model-agnostic architecture
+
+**Registered Tools:**
+- **Security**: sec_semgrep, deps_osv, sbom_syft
+- **GitHub**: gh_checks, gh_pr_review
+- **Testing**: test_run
+
+**Usage:**
+```rust
+use arkavo_mcp_tools::ToolRegistry;
+
+let registry = ToolRegistry::new();
+
+// Get tool by name
+if let Some(tool) = registry.get("sec_semgrep") {
+    let result = tool.execute(params).await;
+}
+
+// List all tools
+let tools = registry.list_tools();
+
+// List by category
+let by_category = registry.list_by_category();
+
+// Export schemas
+let schemas = registry.export_schemas();
+```
+
+**Categorization Rules:**
+- `sec_*` → Security
+- `deps_*` → Security
+- `sbom_*` → Security
+- `gh_*` → GitHub
+- `test_*` → Testing
+
+**Architecture:**
+- HashMap-based tool storage
+- Dynamic dispatch via trait objects
+- Compile-time registration
+- Runtime discovery
+- JSON schema export
+
+All tools implement the unified `Tool` trait from `arkavo-mcp`, ensuring consistent interface across languages, models, and frameworks.
 
 ## Usage
 

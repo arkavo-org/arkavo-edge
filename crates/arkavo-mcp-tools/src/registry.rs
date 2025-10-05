@@ -1,0 +1,147 @@
+use crate::github_checks::GitHubChecksTool;
+use crate::github_review::GitHubReviewTool;
+use crate::osv::OsvTool;
+use crate::semgrep::SemgrepTool;
+use crate::server::Tool;
+use crate::syft::SyftTool;
+use crate::test_runner::TestRunnerTool;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolInfo {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub schema: serde_json::Value,
+}
+
+pub struct ToolRegistry {
+    tools: HashMap<String, Box<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn new() -> Self {
+        let mut registry = Self {
+            tools: HashMap::new(),
+        };
+
+        registry.register_all();
+        registry
+    }
+
+    fn register_all(&mut self) {
+        self.register("gh_checks", Box::new(GitHubChecksTool::new()));
+        self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
+        self.register("deps_osv", Box::new(OsvTool::new()));
+        self.register("sec_semgrep", Box::new(SemgrepTool::new()));
+        self.register("sbom_syft", Box::new(SyftTool::new()));
+        self.register("test_run", Box::new(TestRunnerTool::new()));
+    }
+
+    pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
+        self.tools.insert(name.to_string(), tool);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
+        self.tools.get(name).map(|boxed| &**boxed)
+    }
+
+    pub fn list_tools(&self) -> Vec<ToolInfo> {
+        self.tools.values().map(|tool| {
+                let schema = tool.schema();
+                ToolInfo {
+                    name: schema.name.clone(),
+                    category: Self::categorize_tool(&schema.name),
+                    description: schema.description.clone(),
+                    schema: serde_json::to_value(&schema.parameters).unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
+    fn categorize_tool(name: &str) -> String {
+        match name {
+            n if n.starts_with("sec_") => "Security".to_string(),
+            n if n.starts_with("deps_") => "Security".to_string(),
+            n if n.starts_with("sbom_") => "Security".to_string(),
+            n if n.starts_with("gh_") => "GitHub".to_string(),
+            n if n.starts_with("github_") => "GitHub".to_string(),
+            n if n.starts_with("test_") => "Testing".to_string(),
+            n if n.starts_with("git") => "Git".to_string(),
+            n if n.starts_with("code_") => "Code Analysis".to_string(),
+            n if n.starts_with("filesystem") => "File System".to_string(),
+            _ => "General".to_string(),
+        }
+    }
+
+    pub fn list_by_category(&self) -> HashMap<String, Vec<ToolInfo>> {
+        let mut categorized: HashMap<String, Vec<ToolInfo>> = HashMap::new();
+
+        for tool_info in self.list_tools() {
+            categorized
+                .entry(tool_info.category.clone())
+                .or_default()
+                .push(tool_info);
+        }
+
+        categorized
+    }
+
+    pub fn export_schemas(&self) -> serde_json::Value {
+        let tools: Vec<_> = self.list_tools();
+        serde_json::json!({
+            "version": "1.0",
+            "tool_count": tools.len(),
+            "tools": tools,
+            "categories": self.list_by_category().keys().collect::<Vec<_>>()
+        })
+    }
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_creation() {
+        let registry = ToolRegistry::new();
+        assert!(registry.tools.len() > 0);
+    }
+
+    #[test]
+    fn test_tool_retrieval() {
+        let registry = ToolRegistry::new();
+        assert!(registry.get("sec_semgrep").is_some());
+        assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_list_tools() {
+        let registry = ToolRegistry::new();
+        let tools = registry.list_tools();
+        assert!(tools.len() > 0);
+    }
+
+    #[test]
+    fn test_categorization() {
+        let registry = ToolRegistry::new();
+        let categories = registry.list_by_category();
+        assert!(categories.contains_key("Security"));
+        assert!(categories.contains_key("GitHub"));
+    }
+
+    #[test]
+    fn test_export_schemas() {
+        let registry = ToolRegistry::new();
+        let schemas = registry.export_schemas();
+        assert!(schemas.get("version").is_some());
+        assert!(schemas.get("tools").is_some());
+    }
+}
