@@ -336,15 +336,80 @@ Container-based ephemeral workspaces with resource quotas and isolation.
 - Isolated network by default
 - Production-ready error handling
 
-## Phase 6: SWE-bench Evaluation
+## Phase 6: SWE-bench Evaluation ✅
 
 ### `arkavo-bench` crate
-- SWE-bench Lite/Verified/Live harness
+Objective benchmarking harness for coding agent evaluation using SWE-bench datasets.
+
+**swe_bench** - Automated evaluation tool
+
+**Capabilities:**
+- Load instances from SWE-bench datasets (lite/verified/test)
 - Containerized execution per instance
-- Metrics: Resolved %, wall-time, cost
-- Plan-then-act loop tracking
-- Nightly CI runs
-- Dashboard in `docs/benchmarks/`
+- Automatic git repository cloning
+- Test-based resolution evaluation
+- Comprehensive metrics tracking:
+  - Resolved percentage
+  - Wall-time per instance
+  - API call counts
+  - Token usage
+  - Estimated cost (USD)
+- Solution evaluation with patch application
+- JSON metrics export/import
+- Summary statistics generation
+
+**Example - Load instances:**
+```json
+{
+  "action": "load",
+  "subset": "lite",
+  "limit": 10
+}
+```
+
+**Example - Run benchmark:**
+```json
+{
+  "action": "run",
+  "subset": "lite",
+  "limit": 5,
+  "metrics_file": "results/swe-bench-lite.json"
+}
+```
+
+**Example - Evaluate solution:**
+```json
+{
+  "action": "evaluate",
+  "subset": "lite",
+  "instance_id": "django__django-12345",
+  "solution": "diff --git a/file.py..."
+}
+```
+
+**Example - Generate summary:**
+```json
+{
+  "action": "summary",
+  "metrics_file": "results/swe-bench-lite.json"
+}
+```
+
+**Metrics Tracked:**
+- `resolved`: Boolean success indicator
+- `wall_time_ms`: Execution time
+- `api_calls`: Number of LLM calls
+- `total_tokens`: Token usage
+- `estimated_cost_usd`: Cost estimation
+- `error_message`: Failure details
+
+**Architecture:**
+- 368 LoC bench.rs (under 400 limit) ✅
+- 96 LoC metrics.rs ✅
+- 30 LoC error.rs ✅
+- Integrates with arkavo-workspace for isolation
+- Async task execution
+- Production-ready error handling
 
 ## Phase 7: MCP Consolidation
 

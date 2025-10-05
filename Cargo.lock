@@ -231,6 +231,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-bench"
+version = "0.32.0"
+dependencies = [
+ "arkavo-mcp",
+ "arkavo-workspace",
+ "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+]
+
+[[package]]
 name = "arkavo-browser"
 version = "0.32.0"
 dependencies = [

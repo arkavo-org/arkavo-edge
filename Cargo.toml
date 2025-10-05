@@ -30,6 +30,7 @@ members = [
     "crates/arkavo-code-search",
     "crates/arkavo-browser",
     "crates/arkavo-workspace",
+    "crates/arkavo-bench",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
