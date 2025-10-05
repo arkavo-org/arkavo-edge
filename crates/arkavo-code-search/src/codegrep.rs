@@ -12,6 +12,7 @@ pub struct CodeGrepTool {
 
 impl CodeGrepTool {
     pub fn new() -> Self {
+        Self::validate_dependencies();
         Self {
             schema: ToolSchema {
                 name: "codegrep_search".to_string(),
@@ -61,6 +62,19 @@ impl CodeGrepTool {
                     "required": ["pattern"]
                 }),
             },
+        }
+    }
+
+    fn validate_dependencies() {
+        if std::process::Command::new("rg")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            tracing::warn!(
+                "ripgrep (rg) not found. Install with: brew install ripgrep (macOS) or cargo install ripgrep"
+            );
         }
     }
 

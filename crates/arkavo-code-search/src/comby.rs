@@ -12,6 +12,7 @@ pub struct CombyTool {
 
 impl CombyTool {
     pub fn new() -> Self {
+        Self::validate_dependencies();
         Self {
             schema: ToolSchema {
                 name: "struct_find_replace".to_string(),
@@ -60,6 +61,19 @@ impl CombyTool {
                     "required": ["match_template"]
                 }),
             },
+        }
+    }
+
+    fn validate_dependencies() {
+        if std::process::Command::new("comby")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            tracing::warn!(
+                "comby not found. Install with: brew install comby (macOS) or see https://comby.dev"
+            );
         }
     }
 

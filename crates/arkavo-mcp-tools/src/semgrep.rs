@@ -12,6 +12,7 @@ pub struct SemgrepTool {
 
 impl SemgrepTool {
     pub fn new() -> Self {
+        Self::validate_dependencies();
         Self {
             schema: ToolSchema {
                 name: "sec_semgrep".to_string(),
@@ -54,6 +55,19 @@ impl SemgrepTool {
                     "required": []
                 }),
             },
+        }
+    }
+
+    fn validate_dependencies() {
+        if std::process::Command::new("semgrep")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            tracing::warn!(
+                "semgrep not found. Install with: pip install semgrep or brew install semgrep"
+            );
         }
     }
 

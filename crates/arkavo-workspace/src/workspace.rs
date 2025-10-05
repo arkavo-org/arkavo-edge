@@ -12,6 +12,11 @@ pub struct WorkspaceTool {
 
 impl WorkspaceTool {
     pub fn new() -> Self {
+        if Self::detect_runtime().is_err() {
+            eprintln!(
+                "Warning: Neither Docker nor Podman found. Install Docker Desktop (macOS/Windows) or podman"
+            );
+        }
         Self {
             schema: ToolSchema {
                 name: "workspace_container".to_string(),

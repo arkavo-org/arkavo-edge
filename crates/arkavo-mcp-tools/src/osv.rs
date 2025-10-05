@@ -12,6 +12,7 @@ pub struct OsvTool {
 
 impl OsvTool {
     pub fn new() -> Self {
+        Self::validate_dependencies();
         Self {
             schema: ToolSchema {
                 name: "deps_osv".to_string(),
@@ -48,6 +49,19 @@ impl OsvTool {
                     "required": []
                 }),
             },
+        }
+    }
+
+    fn validate_dependencies() {
+        if std::process::Command::new("osv-scanner")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            tracing::warn!(
+                "osv-scanner not found. Install with: go install github.com/google/osv-scanner/cmd/osv-scanner@latest"
+            );
         }
     }
 

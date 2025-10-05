@@ -12,6 +12,7 @@ pub struct SyftTool {
 
 impl SyftTool {
     pub fn new() -> Self {
+        Self::validate_dependencies();
         Self {
             schema: ToolSchema {
                 name: "sbom_syft".to_string(),
@@ -51,6 +52,19 @@ impl SyftTool {
                     "required": ["source"]
                 }),
             },
+        }
+    }
+
+    fn validate_dependencies() {
+        if std::process::Command::new("syft")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            tracing::warn!(
+                "syft not found. Install with: brew install syft or curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh"
+            );
         }
     }
 
