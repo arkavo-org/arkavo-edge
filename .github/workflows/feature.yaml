@@ -938,10 +938,42 @@ jobs:
             exit 1
           fi
 
+  # Verify no OpenSSL dependency for musl builds
+  no-openssl-check:
+    name: Verify No OpenSSL Dependency
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Check for OpenSSL in musl dependency tree
+        run: |
+          echo "Checking musl target for OpenSSL dependencies..."
+
+          # Check for openssl
+          if cargo tree --target x86_64-unknown-linux-musl -e normal -i openssl 2>&1 | grep -v "error: package ID specification"; then
+            echo "::error::Found OpenSSL dependency in musl build! This will cause cross-compilation failures."
+            echo "::error::Use rustls instead of native-tls for all TLS dependencies."
+            exit 1
+          fi
+
+          # Check for native-tls
+          if cargo tree --target x86_64-unknown-linux-musl -e normal -i native-tls 2>&1 | grep -v "error: package ID specification"; then
+            echo "::error::Found native-tls dependency in musl build! This will cause cross-compilation failures."
+            echo "::error::Configure reqwest and other HTTP clients with default-features = false, features = [\"rustls-tls\"]"
+            exit 1
+          fi
+
+          echo "✅ No OpenSSL or native-tls dependencies found in musl build"
+
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema]
+    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -959,7 +991,8 @@ jobs:
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \
                 "${{ needs.regression-tests.result }}" != "success" || \
                 "${{ needs.zero-config-check.result }}" != "success" || \
-                "${{ needs.validate-xtask-schema.result }}" != "success" ]]; then
+                "${{ needs.validate-xtask-schema.result }}" != "success" || \
+                "${{ needs.no-openssl-check.result }}" != "success" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
