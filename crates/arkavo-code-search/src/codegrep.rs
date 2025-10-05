@@ -246,27 +246,42 @@ impl Tool for CodeGrepTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_codegrep_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test.rs");
+        fs::write(&test_file, "async fn test() {}\n").await.unwrap();
+
         let tool = CodeGrepTool::new();
         let params = json!({
             "pattern": "async fn",
-            "path": ".",
+            "path": temp_dir.path().to_str().unwrap(),
             "output_mode": "files",
             "glob": ["*.rs"]
         });
 
         let result = tool.execute(params).await;
         assert!(result.is_ok());
+        if let Ok(value) = result {
+            assert!(value.get("files").is_some());
+        }
     }
 
     #[tokio::test]
     async fn test_codegrep_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test.rs");
+        fs::write(&test_file, "use std::collections::HashMap;\nfn main() {}\n")
+            .await
+            .unwrap();
+
         let tool = CodeGrepTool::new();
         let params = json!({
             "pattern": "use ",
-            "path": "src",
+            "path": temp_dir.path().to_str().unwrap(),
             "output_mode": "content",
             "line_numbers": true,
             "max_results": 5
@@ -274,5 +289,8 @@ mod tests {
 
         let result = tool.execute(params).await;
         assert!(result.is_ok());
+        if let Ok(value) = result {
+            assert!(value.get("lines").is_some());
+        }
     }
 }
