@@ -94,8 +94,56 @@ apt-get install ripgrep
 pacman -S ripgrep
 ```
 
-## Roadmap
+## MCP Tool Schemas
 
-- [ ] Comby structural search/replace
-- [ ] tree-sitter AST parsing
-- [ ] Language-aware symbol search
+### `codegrep_search`
+```json
+{
+  "pattern": "async fn",
+  "path": ".",
+  "output_mode": "files",
+  "glob": ["*.rs"],
+  "case_insensitive": false,
+  "context_before": 2,
+  "context_after": 2,
+  "line_numbers": true,
+  "max_results": 100
+}
+```
+
+### `struct_find_replace`
+```json
+{
+  "match_template": "fn :[name](:[args]) -> :[ret]",
+  "rewrite_template": "async fn :[name](:[args]) -> Result<:[ret]>",
+  "path": "src",
+  "language": "rust",
+  "in_place": false
+}
+```
+
+### `syntax_tree`
+```json
+{
+  "file_path": "src/lib.rs",
+  "language": "rust",
+  "output_format": "captures",
+  "query": "(function_item name: (identifier) @fn.name)"
+}
+```
+
+## Installation
+
+Requires external tools:
+
+```bash
+# ripgrep (required for codegrep_search)
+brew install ripgrep  # macOS
+apt-get install ripgrep  # Linux
+
+# comby (required for struct_find_replace)
+brew install comby  # macOS
+# Or download from https://comby.dev
+
+# tree-sitter grammars are bundled
+```
