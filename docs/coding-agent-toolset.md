@@ -210,19 +210,71 @@ Compatible with [Chrome DevTools MCP Server](https://github.com/ChromeDevTools/c
 - pytest.ini/setup.py → pytest
 - *.xcodeproj/*.xcworkspace → xcodebuild
 
-## Phase 4: GitHub Integration
+## Phase 4: GitHub Integration ✅
 
-### Enhanced `github.rs` in `arkavo-mcp-tools`
+### Enhanced GitHub tools in `arkavo-mcp-tools`
 
-#### 1. `gh.checks` - GitHub Checks API
-- Create/update check runs
-- Post inline annotations (file:line:message)
-- Conclusion states (success/failure/neutral)
+Two new tools for GitHub CI/CD and code review workflows:
 
-#### 2. PR review enhancements
-- Line-level review comments
-- Request changes, approve, comment
-- Code suggestions
+#### 1. `gh_checks` - GitHub Checks API
+Create and update check runs with inline code annotations.
+
+**Capabilities:**
+- Create check runs with status (queued/in_progress/completed)
+- Update existing check runs
+- Set conclusions (success/failure/neutral/cancelled/skipped/timed_out/action_required)
+- Post inline annotations (file:line:message with notice/warning/failure levels)
+- List check runs for commits
+- Custom output (title/summary/text)
+
+**Example:**
+```json
+{
+  "action": "create",
+  "repo": "owner/repo",
+  "name": "Code Quality",
+  "head_sha": "abc123",
+  "status": "completed",
+  "conclusion": "success",
+  "output": {
+    "title": "All checks passed",
+    "summary": "No issues found"
+  },
+  "annotations": [{
+    "path": "src/main.rs",
+    "start_line": 42,
+    "end_line": 42,
+    "annotation_level": "warning",
+    "message": "Consider using Result instead of unwrap()"
+  }]
+}
+```
+
+#### 2. `gh_pr_review` - PR review with line comments
+Submit pull request reviews with line-level feedback and code suggestions.
+
+**Capabilities:**
+- Submit reviews (COMMENT/APPROVE/REQUEST_CHANGES)
+- Line-level code comments
+- Side selection (LEFT for old code, RIGHT for new)
+- Auto-fetch latest commit SHA
+- Batch comments in single review
+
+**Example:**
+```json
+{
+  "repo": "owner/repo",
+  "pr_number": 123,
+  "event": "REQUEST_CHANGES",
+  "body": "Please address the issues below",
+  "comments": [{
+    "path": "src/auth.rs",
+    "line": 56,
+    "body": "This function needs error handling",
+    "side": "RIGHT"
+  }]
+}
+```
 
 ## Phase 5: Ephemeral Workspaces
 

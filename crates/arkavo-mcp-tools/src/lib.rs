@@ -4,6 +4,8 @@ pub mod code_analysis;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod github_checks;
+pub mod github_review;
 pub mod mcp_connection;
 pub mod osv;
 pub mod semgrep;
