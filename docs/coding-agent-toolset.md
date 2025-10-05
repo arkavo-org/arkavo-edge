@@ -81,27 +81,72 @@ AST parsing for syntax-aware code analysis.
 }
 ```
 
-## Phase 2: Security & Quality (In Progress)
+## Phase 2: Security & Quality ✅
 
 ### `arkavo-mcp-tools` enhancements
 
-#### 1. `sec.semgrep` - SAST scanning
-- Security rule packs (OWASP, CWE)
-- Language-specific patterns
-- Custom rule support
-- CI/local modes
+Three security tools integrated into the MCP toolset:
 
-#### 2. `deps.osv` - Dependency vulnerabilities
-- OSV-Scanner integration
-- SBOM-aware scanning
-- Severity scoring
-- Remediation suggestions
+#### 1. `sec_semgrep` - SAST scanning
+Static Application Security Testing with Semgrep.
 
-#### 3. `sbom.syft` - SBOM generation
-- CycloneDX and SPDX formats
-- Container image support
-- Dependency graphs
-- License detection
+**Capabilities:**
+- Multiple rule configurations (auto, p/security-audit, p/owasp-top-ten, p/cwe-top-25, p/ci)
+- Severity filtering (ERROR, WARNING, INFO)
+- Path exclusion support
+- Performance metrics tracking
+- JSON output with summary statistics
+
+**Example:**
+```json
+{
+  "path": "src",
+  "config": "p/owasp-top-ten",
+  "severity": ["ERROR", "WARNING"],
+  "exclude": ["vendor/", "test/"]
+}
+```
+
+#### 2. `deps_osv` - Dependency vulnerabilities
+Vulnerability scanning with OSV-Scanner.
+
+**Capabilities:**
+- Lockfile scanning (Cargo.lock, package-lock.json, go.mod, etc.)
+- Multiple output formats (json, table, sarif, markdown)
+- Call analysis for reduced false positives (experimental)
+- Recursive directory scanning
+- Offline mode with local database
+- Severity-based vulnerability grouping
+
+**Example:**
+```json
+{
+  "lockfile": "Cargo.lock",
+  "format": "json",
+  "call_analysis": true
+}
+```
+
+#### 3. `sbom_syft` - SBOM generation
+Software Bill of Materials generation with Syft.
+
+**Capabilities:**
+- Multiple SBOM formats (CycloneDX JSON/XML, SPDX JSON/TagValue, GitHub JSON)
+- Container image analysis
+- Multi-platform image support
+- Path exclusions
+- Cataloger selection (Cargo, npm, Go, etc.)
+- Package statistics by type and language
+
+**Example:**
+```json
+{
+  "source": ".",
+  "format": "cyclonedx-json",
+  "scope": "squashed",
+  "catalogers": ["cargo", "npm"]
+}
+```
 
 ## Phase 3: Test & Automation
 

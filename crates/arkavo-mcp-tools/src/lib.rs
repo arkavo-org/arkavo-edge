@@ -5,9 +5,12 @@ pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod mcp_connection;
+pub mod osv;
+pub mod semgrep;
 pub mod server;
 pub mod state;
 pub mod state_store;
+pub mod syft;
 pub mod tui;
 
 // Re-export commonly used types
