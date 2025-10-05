@@ -249,8 +249,21 @@ mod tests {
     use tempfile::TempDir;
     use tokio::fs;
 
+    fn is_ripgrep_available() -> bool {
+        std::process::Command::new("rg")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     #[tokio::test]
     async fn test_codegrep_files() {
+        if !is_ripgrep_available() {
+            eprintln!("Skipping test: ripgrep not installed");
+            return;
+        }
+
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "async fn test() {}\n").await.unwrap();
@@ -264,7 +277,7 @@ mod tests {
         });
 
         let result = tool.execute(params).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Expected Ok but got: {:?}", result);
         if let Ok(value) = result {
             assert!(value.get("files").is_some());
         }
@@ -272,6 +285,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_codegrep_content() {
+        if !is_ripgrep_available() {
+            eprintln!("Skipping test: ripgrep not installed");
+            return;
+        }
+
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join("test.rs");
         fs::write(&test_file, "use std::collections::HashMap;\nfn main() {}\n")
@@ -288,7 +306,7 @@ mod tests {
         });
 
         let result = tool.execute(params).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Expected Ok but got: {:?}", result);
         if let Ok(value) = result {
             assert!(value.get("lines").is_some());
         }
