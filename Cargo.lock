@@ -498,6 +498,8 @@ name = "arkavo-llama-cpp"
 version = "0.0.0"
 dependencies = [
  "arkavo-llama-cpp-sys",
+ "criterion",
+ "glob",
 ]
 
 [[package]]

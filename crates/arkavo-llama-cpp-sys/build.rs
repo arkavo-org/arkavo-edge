@@ -34,6 +34,12 @@ fn main() {
             .define("GGML_ACCELERATE", "ON") // use Apple Accelerate
             .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection to ensure compatibility
             .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Use baseline ARM arch without i8mm
+
+        // Disable Metal debug overhead in release builds
+        let is_release = env::var("PROFILE").unwrap_or_default() == "release";
+        if is_release {
+            config.define("GGML_METAL_NDEBUG", "ON");
+        }
     } else if cfg!(target_os = "windows") {
         // Windows can use Vulkan or CUDA if available
         config
