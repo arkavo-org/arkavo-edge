@@ -1,0 +1,34 @@
+[package]
+name = "arkavo-gemini"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Gemini Live API integration for Arkavo Edge"
+keywords = ["gemini", "llm", "websocket", "api"]
+categories = ["api-bindings", "web-programming::websocket"]
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tokio-tungstenite = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+anyhow = { workspace = true }
+dashmap = { workspace = true }
+rustls = { workspace = true, features = ["ring"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

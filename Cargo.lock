@@ -463,6 +463,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-gemini"
+version = "0.33.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dashmap",
+ "futures",
+ "rustls 0.23.31",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.16",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite 0.24.0",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-git"
 version = "0.33.2"
 dependencies = [
@@ -517,6 +540,7 @@ dependencies = [
  "accelerate-src",
  "anyhow",
  "arkavo-deepseek",
+ "arkavo-gemini",
  "arkavo-kimi",
  "arkavo-llama-cpp",
  "arkavo-qwen",

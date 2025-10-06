@@ -13,6 +13,7 @@ members = [
     "crates/arkavo-kimi",
     "crates/arkavo-deepseek",
     "crates/arkavo-qwen",
+    "crates/arkavo-gemini",
     "crates/arkavo-memory",
     "crates/arkavo-mcp",
     "crates/arkavo-mcp-core",
