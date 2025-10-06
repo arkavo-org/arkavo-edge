@@ -45,6 +45,18 @@ impl SetupConfig {
             tools: None,
         }
     }
+
+    pub fn new_audio(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            generation_config: Some(GenerationConfig {
+                response_modalities: vec!["AUDIO".to_string()],
+                temperature: None,
+                max_output_tokens: None,
+            }),
+            tools: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +152,15 @@ pub struct ServerContent {
     pub model_turn: Option<ModelTurn>,
     #[serde(rename = "turnComplete")]
     pub turn_complete: bool,
+}
+
+impl ServerContent {
+    pub fn extract_text(&self) -> Option<String> {
+        self.model_turn.as_ref()?.parts.first().map(|part| {
+            let Part::Text { text } = part;
+            text.clone()
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

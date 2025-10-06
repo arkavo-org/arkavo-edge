@@ -229,7 +229,18 @@ impl LiveSessionClient {
                 if v.get("setupComplete").is_some() {
                     info!("Setup complete");
                 } else if let Some(sc) = v.get("serverContent") {
-                    info!("Server content: {}", sc);
+                    match serde_json::from_value::<crate::types::ServerContent>(sc.clone()) {
+                        Ok(content) => {
+                            if let Some(text) = content.extract_text() {
+                                info!("Model response: {}", text);
+                            } else {
+                                info!("Server content (no text): {}", sc);
+                            }
+                        }
+                        Err(_) => {
+                            info!("Server content: {}", sc);
+                        }
+                    }
                 } else if let Some(tc) = v.get("toolCall") {
                     match serde_json::from_value::<ToolCall>(tc.clone()) {
                         Ok(tool_call) => {

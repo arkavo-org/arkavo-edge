@@ -470,6 +470,7 @@ dependencies = [
  "async-trait",
  "dashmap",
  "futures",
+ "reqwest",
  "rustls 0.23.31",
  "serde",
  "serde_json",

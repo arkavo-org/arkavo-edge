@@ -1,12 +1,11 @@
 # arkavo-gemini
 
-Gemini Live API WebSocket integration for Arkavo Edge.
+Gemini API integration for Arkavo Edge with function calling support.
 
 ## Features
 
-- ✅ Text-only WebSocket sessions with Gemini Live API
-- ✅ Tool/function declaration in setup message
-- ✅ Automatic reconnection with exponential backoff
+- ✅ REST API client with function calling (`generateContent`)
+- ✅ WebSocket Live API client (audio-focused, experimental)
 - ✅ Tool call dispatcher with configurable concurrency limits
 - ✅ Idempotency via `requestId` deduplication
 - ✅ Schema validation for tool arguments
@@ -14,64 +13,89 @@ Gemini Live API WebSocket integration for Arkavo Edge.
 
 ## Implementation Status
 
-**Code**: Complete (~760 LOC across 5 files, all <400 LOC)
+**Code**: Complete (~900 LOC across 6 files, all <400 LOC)
 **Tests**: All passing (6 unit + integration tests)
 **Quality**: Clippy clean, formatted
 
-### Tool Declaration Implementation ✅
+## API Comparison
 
-The client now correctly sends tool declarations in the setup message:
+### REST API (Recommended for Text + Tools)
 
-```json
-{
-  "setup": {
-    "model": "gemini-2.5-flash-live-preview",
-    "generationConfig": {"responseModalities": ["TEXT"]},
-    "tools": [{
-      "functionDeclarations": [{
-        "name": "create_stream",
-        "description": "Creates a new stream with specified name and openness level",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "name": {"type": "string", "description": "..."},
-            "openness": {"type": "string", "enum": ["PreApproved", "Apply", "Open"]}
-          },
-          "required": ["name", "openness"]
-        }
-      }]
-    }]
-  }
-}
+**Use Case**: Text-based interactions with function calling
+
+**Pros**:
+- ✅ Reliable function calling support
+- ✅ Text-native responses
+- ✅ Works with all Gemini models
+- ✅ Simple HTTP requests
+- ✅ Proven, stable API
+
+**Cons**:
+- ❌ Higher latency than WebSocket
+- ❌ No real-time streaming
+
+**Example**:
+```rust
+use arkavo_gemini::{RestClient, FunctionDeclaration};
+use serde_json::json;
+
+let client = RestClient::new("api-key", "models/gemini-2.0-flash-exp");
+
+let tools = vec![FunctionDeclaration {
+    name: "create_stream".to_string(),
+    description: "Creates a new stream".to_string(),
+    parameters: json!({
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "openness": {"type": "string"}
+        },
+        "required": ["name", "openness"]
+    }),
+}];
+
+let (text, calls) = client
+    .generate_content("Create a stream called 'test'", Some(tools))
+    .await?;
+
+// Execute tool calls
+let results = dispatcher.dispatch(calls).await;
 ```
 
-### API Testing Status
+### Live API (Audio-Focused, Experimental)
 
-**Connection**: ✅ WebSocket connects successfully
-**Setup Message**: ✅ Sent with correct format including tools
-**Issue**: Server closes connection immediately after receiving setup message
+**Use Case**: Real-time audio/video conversations
 
-This suggests:
-1. The API may be in experimental/preview state with limited availability
-2. Additional configuration or permissions may be required for the API key
-3. The model name format may need verification against latest API documentation
+**Pros**:
+- ✅ Low-latency WebSocket connection
+- ✅ Real-time audio streaming
+- ✅ Supports video input
+
+**Cons**:
+- ❌ Requires audio modality
+- ❌ Limited model availability (`gemini-2.5-flash-native-audio-preview-09-2025`)
+- ❌ TEXT-only mode not fully supported
+- ❌ Beta/experimental status
+
+**Status**: The Live API WebSocket client is implemented but requires AUDIO response modality. For text-based tool calling, use the REST API instead.
 
 ## Architecture
 
 - **`error.rs`** (42 LOC) - Error types for WebSocket and API errors
-- **`types.rs`** (157 LOC) - Gemini Live API message type definitions including Tool and FunctionDeclaration
-- **`live_client.rs`** (235 LOC) - WebSocket client with auto-reconnect and tool support
+- **`types.rs`** (180 LOC) - Message type definitions for both APIs
+- **`rest_client.rs`** (155 LOC) - REST API client for text-based tool calling
+- **`live_client.rs`** (270 LOC) - WebSocket client for audio conversations
 - **`dispatcher.rs`** (224 LOC) - Tool call dispatcher with concurrency control
-- **`lib.rs`** (12 LOC) - Public API exports
+- **`lib.rs`** (15 LOC) - Public API exports
 
-## Usage Example
+## Usage Example (REST API with Tools)
 
 ```rust
-use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
+use arkavo_gemini::{RestClient, ToolDispatcher, ToolRegistry, FunctionDeclaration};
 use serde_json::json;
 
-// 1. Register tools first
-let dispatcher = ToolDispatcher::new(4); // max 4 concurrent
+// 1. Register tools
+let dispatcher = ToolDispatcher::new(4);
 let mut registry = ToolRegistry::new();
 
 registry.register(
@@ -86,35 +110,41 @@ registry.register(
         "required": ["name", "openness"]
     }),
     |args| {
-        // Tool handler implementation
-        Ok(json!({"status": "created"}))
+        let name = args["name"].as_str().unwrap();
+        Ok(json!({
+            "status": "created",
+            "name": name
+        }))
     },
 );
 
 registry.build(&dispatcher);
 
-// 2. Get tool schemas
-let tool_schemas = dispatcher.list_tools();
+// 2. Create REST client
+let client = RestClient::new("api-key", "models/gemini-2.0-flash-exp");
 
-// 3. Create client with tools
-let client = LiveSessionClient::new_with_tools(
-    "api-key",
-    "gemini-2.5-flash-live-preview",
-    tool_schemas
-);
+// 3. Convert tool schemas to FunctionDeclarations
+let tools: Vec<FunctionDeclaration> = dispatcher
+    .list_tools()
+    .iter()
+    .map(|t| FunctionDeclaration {
+        name: t["name"].as_str().unwrap().to_string(),
+        description: t["description"].as_str().unwrap().to_string(),
+        parameters: t["parameters"].clone(),
+    })
+    .collect();
 
-client.connect().await?;
+// 4. Send request with tools
+let (text, calls) = client
+    .generate_content("Create a stream called 'test'", Some(tools))
+    .await?;
 
-// 4. Send prompt - tools are already declared
-client.send_prompt("create a stream called 'test'").await?;
-
-// 5. Receive and execute tool calls
-let calls = client.receive_tool_calls().await?;
-let results = dispatcher.dispatch(calls).await;
-
-// 6. Send responses
-for (id, result) in results {
-    client.send_tool_response(id, result?).await?;
+// 5. Execute tool calls
+if !calls.is_empty() {
+    let results = dispatcher.dispatch(calls).await;
+    for (id, result) in results {
+        println!("Tool {} result: {:?}", id, result);
+    }
 }
 ```
 
@@ -129,42 +159,58 @@ All tests pass (6 tests total):
 - Tool registration
 - Tool execution
 - Idempotency checking
-- Client creation (with and without tools)
+- Client creation
 - Dispatcher functionality
+
+Run the REST API example:
+```bash
+GEMINI_API_KEY=your-key cargo run -p arkavo-gemini --example rest_tool_test
+```
 
 ## Integration
 
-Already integrated with `arkavo-llm` via feature flag:
+Integrated with `arkavo-llm` via feature flag:
 ```toml
 [features]
 gemini = ["arkavo-gemini", ...]
 ```
 
-## Next Steps for Production Use
+## Recommended Approach for Issue #249
 
-1. **Verify API Access**: Confirm API key has Live API access (may require enrollment)
-2. **Check Model Availability**: Verify which models support the Live API endpoint
-3. **Review Error Messages**: Check if server sends error details before closing
-4. **Test Alternative Endpoints**: Try Vertex AI endpoint if available
+For **text-based fast tool calling** (sub-second latency):
 
-## Implementation Details
+1. **Use REST API** (`generateContent`) - Proven, reliable function calling
+2. **Tool Dispatcher** - Concurrent execution with semaphore limiting
+3. **Local Gemma-3** - For routing/fallback (separate implementation)
 
-### Key Changes from Initial Implementation
+The Live API is audio-focused and requires AUDIO modality, making it unsuitable for pure text-based tool calling workflows.
 
-1. **Added Tool Declaration Types** (~40 LOC):
-   - `Tool` struct with `functionDeclarations`
-   - `FunctionDeclaration` with name, description, parameters
-   - Updated `SetupConfig` to include optional `tools` field
+## Key Findings
 
-2. **Enhanced LiveSessionClient** (~30 LOC):
-   - `new_with_tools()` constructor accepting tool schemas
-   - `send_setup()` now constructs and sends tool declarations
-   - Backward compatible with `new()` for tool-less sessions
+### Live API vs REST API
 
-3. **Integration Pattern**:
-   - Tools registered via `ToolRegistry`
-   - Schemas extracted via `dispatcher.list_tools()`
-   - Passed to client constructor before connecting
+**Live API (WebSocket)**:
+- Designed for **audio/video conversations**
+- Requires `AUDIO` response modality
+- TEXT-only mode is not fully supported for `gemini-2.0-flash-exp`
+- Server accepts TEXT setup but doesn't generate responses
+- Best for: Real-time voice interactions
+
+**REST API (HTTP)**:
+- Designed for **text-based interactions**
+- Full function calling support
+- Works with all Gemini models
+- Reliable and proven
+- Best for: Text-based tool calling workflows
+
+### Implementation Details
+
+The crate provides both APIs:
+
+1. **RestClient** - HTTP-based `generateContent` with function calling (recommended for text)
+2. **LiveSessionClient** - WebSocket-based Live API (for audio conversations)
+3. **ToolDispatcher** - Concurrent tool execution with idempotency
+4. **ToolRegistry** - Fluent API for registering tools
 
 ## License
 
