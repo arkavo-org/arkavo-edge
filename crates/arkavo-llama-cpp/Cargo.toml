@@ -4,3 +4,11 @@ edition = "2021"
 
 [dependencies]
 arkavo-llama-cpp-sys = { path = "../arkavo-llama-cpp-sys" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+glob = { workspace = true }
+
+[[bench]]
+name = "performance"
+harness = false
