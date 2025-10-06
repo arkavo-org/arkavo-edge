@@ -150,10 +150,10 @@ impl LlamaCppProvider {
                     );
                 }
 
-                // Try smaller batch processing to avoid hanging issues
-                if input_tokens.len() > 32 {
-                    // Process tokens in smaller chunks with proper position offsets
-                    let chunk_size = 16;
+                // Process tokens in chunks with optimized chunk size
+                if input_tokens.len() > 64 {
+                    // Process tokens in larger chunks for better throughput (increased from 16 to 64)
+                    let chunk_size = 64;
                     let mut pos_offset = 0i32;
                     for (i, chunk) in input_tokens.chunks(chunk_size).enumerate() {
                         if DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed) {

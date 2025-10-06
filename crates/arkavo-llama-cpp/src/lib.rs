@@ -160,13 +160,19 @@ impl LlamaContext {
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
         let mut params = unsafe { ffi::llama_context_default_params() };
 
+        // Auto-detect CPU cores for optimal thread count
+        let num_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8); // Fallback to 8 if detection fails
+        let thread_count = num_cores.min(16) as i32; // Cap at 16 for diminishing returns
+
         // Set context size to utilize the full capacity of the model
         params.n_ctx = 32768; // Context window: 32K tokens (full model capacity)
-        params.n_batch = 512; // Batch size for processing
-        params.n_ubatch = 512; // Micro-batch size
+        params.n_batch = 2048; // Increased batch size for prefill optimization
+        params.n_ubatch = 512; // Micro-batch size (keep reasonable for memory)
         params.n_seq_max = 1; // Single sequence
-        params.n_threads = 8; // CPU threads (use more for M4)
-        params.n_threads_batch = 8; // Batch processing threads
+        params.n_threads = thread_count; // Auto-detected CPU threads
+        params.n_threads_batch = thread_count; // Batch processing threads
 
         // Enable GPU offloading for KV cache and operations
         params.offload_kqv = true; // Offload KV cache to GPU
@@ -175,8 +181,8 @@ impl LlamaContext {
         // Show context configuration if debug is enabled
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
             eprintln!(
-                "Context: KV offload={}, flash_attn=auto, threads={}",
-                params.offload_kqv, params.n_threads
+                "Context: cores={}, threads={}, n_batch={}, KV offload={}, flash_attn=auto",
+                num_cores, thread_count, params.n_batch, params.offload_kqv
             );
         }
 
