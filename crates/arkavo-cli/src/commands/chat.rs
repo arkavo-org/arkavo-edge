@@ -1692,6 +1692,23 @@ async fn initialize_llm_client(
         } else if !print_mode {
             println!("Failed to connect to Kimi. Check MOONSHOT_API_KEY environment variable.");
         }
+    } else if model_name == "gemini" || model_name.starts_with("gemini-") {
+        // Set environment variable for Gemini provider
+        // SAFETY: This is safe as we're only setting the env var once during initialization
+        unsafe {
+            std::env::set_var("LLM_PROVIDER", "gemini");
+            if model_name.starts_with("gemini-") {
+                std::env::set_var("GEMINI_MODEL", model_name);
+            }
+        }
+        if let Ok(client) = LlmClient::from_env() {
+            if !print_mode {
+                println!("✓ Connected to Gemini API");
+            }
+            return Ok(client);
+        } else if !print_mode {
+            println!("Failed to connect to Gemini. Check GEMINI_API_KEY environment variable.");
+        }
     }
 
     // Try to connect to Ollama for other models

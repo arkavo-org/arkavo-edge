@@ -23,6 +23,7 @@ metal = ["arkavo-cli/metal"]
 llm-remote = ["arkavo-cli/llm-remote"]
 kimi = ["arkavo-cli/kimi"]
 deepseek = ["arkavo-cli/deepseek"]
+gemini = ["arkavo-cli/gemini"]
 llama-cpp = ["arkavo-cli/llama-cpp"]
 test-harness = ["arkavo-cli/test-harness"]
 
