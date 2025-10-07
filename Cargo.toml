@@ -24,6 +24,7 @@ members = [
     "crates/arkavo-agui",
     "crates/arkavo-observability",
     "crates/arkavo-budget",
+    "crates/arkavo-router",
     "crates/arkavo-events",
     "crates/arkavo-debugger",
     "crates/arkavo-llama-cpp-sys",
