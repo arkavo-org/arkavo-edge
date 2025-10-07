@@ -188,3 +188,48 @@ pub enum ClientMessage {
         tool_response: ToolResponse,
     },
 }
+
+// Streaming API types
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamChunk {
+    pub candidates: Vec<StreamCandidate>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamCandidate {
+    pub content: StreamContent,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamContent {
+    #[serde(default)]
+    pub parts: Vec<StreamPart>,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum StreamPart {
+    Text {
+        text: String,
+    },
+    FunctionCall {
+        #[serde(rename = "functionCall")]
+        function_call: StreamFunctionCall,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamFunctionCall {
+    pub name: String,
+    pub args: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamResponse {
+    pub text: Option<String>,
+    pub function_calls: Vec<FunctionCall>,
+    pub done: bool,
+}

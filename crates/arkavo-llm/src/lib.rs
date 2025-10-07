@@ -38,6 +38,11 @@ mod qwen_adapter;
 #[cfg(feature = "qwen")]
 pub use qwen_adapter::QwenProvider;
 
+#[cfg(feature = "gemini")]
+mod gemini_adapter;
+#[cfg(feature = "gemini")]
+pub use gemini_adapter::GeminiProvider;
+
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 mod llamacpp_provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

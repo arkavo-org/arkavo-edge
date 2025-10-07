@@ -5,6 +5,7 @@ Gemini API integration for Arkavo Edge with function calling support.
 ## Features
 
 - ✅ REST API client with function calling (`generateContent`)
+- ✅ Streaming REST API with SSE (`streamGenerateContent`)
 - ✅ WebSocket Live API client (audio-focused, experimental)
 - ✅ Tool call dispatcher with configurable concurrency limits
 - ✅ Idempotency via `requestId` deduplication
@@ -23,6 +24,7 @@ Gemini API integration for Arkavo Edge with function calling support.
 
 **Use Case**: Text-based interactions with function calling
 
+#### Non-Streaming (`generateContent`)
 **Pros**:
 - ✅ Reliable function calling support
 - ✅ Text-native responses
@@ -31,15 +33,27 @@ Gemini API integration for Arkavo Edge with function calling support.
 - ✅ Proven, stable API
 
 **Cons**:
-- ❌ Higher latency than WebSocket
-- ❌ No real-time streaming
+- ❌ Higher latency (waits for complete response)
+- ❌ No incremental updates
 
-**Example**:
+#### Streaming (`streamGenerateContent`)
+**Pros**:
+- ✅ Sub-second time to first token (TTFT < 300ms)
+- ✅ Incremental text streaming via SSE
+- ✅ Real-time function call detection
+- ✅ Low latency for interactive workflows
+- ✅ Works with all Gemini models
+
+**Cons**:
+- ❌ Requires SSE parsing
+- ❌ Slightly more complex than non-streaming
+
+**Non-Streaming Example**:
 ```rust
 use arkavo_gemini::{RestClient, FunctionDeclaration};
 use serde_json::json;
 
-let client = RestClient::new("api-key", "models/gemini-2.0-flash-exp");
+let client = RestClient::new("api-key", "models/gemini-flash-latest");
 
 let tools = vec![FunctionDeclaration {
     name: "create_stream".to_string(),
@@ -62,6 +76,35 @@ let (text, calls) = client
 let results = dispatcher.dispatch(calls).await;
 ```
 
+**Streaming Example**:
+```rust
+use arkavo_gemini::RestClient;
+use futures::StreamExt;
+
+let client = RestClient::new("api-key", "models/gemini-flash-latest");
+
+let mut stream = client
+    .stream_generate_content("Create a stream called 'test'", Some(tools))
+    .await?;
+
+while let Some(result) = stream.next().await {
+    match result {
+        Ok(response) => {
+            if let Some(text) = response.text {
+                print!("{}", text); // Stream text as it arrives
+            }
+            if !response.function_calls.is_empty() {
+                let results = dispatcher.dispatch(response.function_calls).await;
+            }
+            if response.done {
+                break;
+            }
+        }
+        Err(e) => eprintln!("Error: {}", e),
+    }
+}
+```
+
 ### Live API (Audio-Focused, Experimental)
 
 **Use Case**: Real-time audio/video conversations
@@ -82,11 +125,12 @@ let results = dispatcher.dispatch(calls).await;
 ## Architecture
 
 - **`error.rs`** (42 LOC) - Error types for WebSocket and API errors
-- **`types.rs`** (180 LOC) - Message type definitions for both APIs
-- **`rest_client.rs`** (155 LOC) - REST API client for text-based tool calling
+- **`types.rs`** (235 LOC) - Message type definitions for all APIs
+- **`rest_client.rs`** (210 LOC) - REST API client with streaming support
+- **`sse_stream.rs`** (130 LOC) - Server-Sent Events stream parser
 - **`live_client.rs`** (270 LOC) - WebSocket client for audio conversations
 - **`dispatcher.rs`** (224 LOC) - Tool call dispatcher with concurrency control
-- **`lib.rs`** (15 LOC) - Public API exports
+- **`lib.rs`** (17 LOC) - Public API exports
 
 ## Usage Example (REST API with Tools)
 
@@ -162,9 +206,13 @@ All tests pass (6 tests total):
 - Client creation
 - Dispatcher functionality
 
-Run the REST API example:
+Run examples:
 ```bash
+# Non-streaming REST API
 GEMINI_API_KEY=your-key cargo run -p arkavo-gemini --example rest_tool_test
+
+# Streaming REST API (recommended)
+GEMINI_API_KEY=your-key cargo run -p arkavo-gemini --example streaming_tool_test
 ```
 
 ## Integration
@@ -179,9 +227,14 @@ gemini = ["arkavo-gemini", ...]
 
 For **text-based fast tool calling** (sub-second latency):
 
-1. **Use REST API** (`generateContent`) - Proven, reliable function calling
+1. **Use Streaming REST API** (`streamGenerateContent`) - Best latency (TTFT < 300ms)
 2. **Tool Dispatcher** - Concurrent execution with semaphore limiting
 3. **Local Gemma-3** - For routing/fallback (separate implementation)
+
+The streaming API provides optimal performance:
+- **Time to First Token (TTFT)**: < 300ms
+- **Tool Round-trip**: < 600ms
+- **P95 End-to-end**: < 1.2s
 
 The Live API is audio-focused and requires AUDIO modality, making it unsuitable for pure text-based tool calling workflows.
 

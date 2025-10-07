@@ -25,7 +25,8 @@ url = { workspace = true }
 anyhow = { workspace = true }
 dashmap = { workspace = true }
 rustls = { workspace = true, features = ["ring"] }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
+bytes = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

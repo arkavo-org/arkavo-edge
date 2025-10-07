@@ -1,4 +1,5 @@
 use crate::error::{GeminiError, Result};
+use crate::sse_stream::GeminiSseStream;
 use crate::types::{FunctionCall, FunctionDeclaration, Tool};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -159,5 +160,50 @@ impl RestClient {
         }
 
         Ok((text_response, function_calls))
+    }
+
+    pub async fn stream_generate_content(
+        &self,
+        prompt: impl Into<String>,
+        tools: Option<Vec<FunctionDeclaration>>,
+    ) -> Result<GeminiSseStream> {
+        let request = GenerateContentRequest {
+            contents: vec![Content {
+                role: "user".to_string(),
+                parts: vec![Part::Text {
+                    text: prompt.into(),
+                }],
+            }],
+            tools: tools.map(|t| {
+                vec![Tool {
+                    function_declarations: t,
+                }]
+            }),
+            generation_config: None,
+        };
+
+        let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
+        let url = format!(
+            "{}/models/{}:streamGenerateContent?alt=sse&key={}",
+            GEMINI_REST_ENDPOINT, model_name, self.api_key
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| GeminiError::ApiError(format!("HTTP request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(GeminiError::ApiError(format!(
+                "HTTP {status}: {error_text}"
+            )));
+        }
+
+        Ok(GeminiSseStream::new(response.bytes_stream()))
     }
 }

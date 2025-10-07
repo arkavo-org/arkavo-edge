@@ -120,7 +120,7 @@ impl LiveSessionClient {
         let setup = SetupConfig {
             model: self.model.clone(),
             generation_config: Some(GenerationConfig {
-                response_modalities: vec!["TEXT".to_string()],
+                response_modalities: vec!["AUDIO".to_string()],
                 temperature: None,
                 max_output_tokens: None,
             }),
