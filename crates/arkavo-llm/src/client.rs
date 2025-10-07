@@ -47,7 +47,12 @@ impl LlmClient {
                 Ok(Self::new(provider))
             }
             _ => {
-                #[cfg(any(feature = "llm-remote", feature = "kimi", feature = "deepseek", feature = "gemini"))]
+                #[cfg(any(
+                    feature = "llm-remote",
+                    feature = "kimi",
+                    feature = "deepseek",
+                    feature = "gemini"
+                ))]
                 return Err(Error::Config(format!("Unknown provider: {provider_name}")));
 
                 #[cfg(not(any(feature = "llm-remote", feature = "kimi", feature = "deepseek", feature = "gemini")))]
