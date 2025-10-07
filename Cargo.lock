@@ -372,6 +372,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-context"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arkavo-llm",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-dataflow"
 version = "0.34.0"
 dependencies = [
@@ -789,6 +803,25 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "arkavo-router"
+version = "0.34.0"
+dependencies = [
+ "anyhow",
+ "arkavo-budget",
+ "arkavo-context",
+ "arkavo-gemini",
+ "arkavo-llm",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "tokio-test",
+ "tracing",
 ]
 
 [[package]]

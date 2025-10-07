@@ -21,6 +21,7 @@ chrono = { workspace = true }
 arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-gemini = { path = "../arkavo-gemini" }
+arkavo-context = { path = "../arkavo-context" }
 
 [dev-dependencies]
 tokio-test = "0.4"

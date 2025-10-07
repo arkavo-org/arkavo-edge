@@ -43,6 +43,8 @@ pub struct RoutingDecision {
     pub estimated_cost_usd: f64,
     pub estimated_time: Duration,
     pub task_category: TaskCategory,
+    pub should_compress: bool,
+    pub compression_target: Option<f64>,
 }
 
 impl RoutingDecision {
@@ -55,6 +57,7 @@ impl RoutingDecision {
         let fallback_chain = Self::default_fallback_chain(&model, &category);
         let estimated_cost = Self::estimate_cost(&model, &category);
         let estimated_time = Self::estimate_time(&model, &category);
+        let (should_compress, compression_target) = Self::should_use_compression(&model, &category);
 
         Self {
             recommended_model: model,
@@ -64,6 +67,24 @@ impl RoutingDecision {
             estimated_cost_usd: estimated_cost,
             estimated_time,
             task_category: category,
+            should_compress,
+            compression_target,
+        }
+    }
+
+    fn should_use_compression(model: &ModelChoice, category: &TaskCategory) -> (bool, Option<f64>) {
+        if model.is_local() {
+            return (false, None);
+        }
+
+        match category {
+            TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::TestGeneration => {
+                (true, Some(0.6))
+            }
+            TaskCategory::Refactoring | TaskCategory::General => {
+                (true, Some(0.5))
+            }
+            _ => (false, None),
         }
     }
 
