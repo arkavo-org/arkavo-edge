@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 chrono = { workspace = true }
+reqwest = { workspace = true }
 
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }

@@ -97,6 +97,14 @@ impl RoutingMetrics {
         (local_routes as f64 / self.total_routes as f64) * 100.0
     }
 
+    pub fn average_cost(&self) -> f64 {
+        if self.total_routes == 0 {
+            0.0
+        } else {
+            self.total_estimated_cost / self.total_routes as f64
+        }
+    }
+
     pub fn summary(&self) -> String {
         format!(
             "Routing Metrics:\n\
