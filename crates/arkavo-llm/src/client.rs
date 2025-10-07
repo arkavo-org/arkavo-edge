@@ -40,13 +40,24 @@ impl LlmClient {
                 let provider = Box::new(DeepSeekProvider::from_env()?);
                 Ok(Self::new(provider))
             }
+            #[cfg(feature = "gemini")]
+            "gemini" => {
+                use crate::GeminiProvider;
+                let provider = Box::new(GeminiProvider::new()?);
+                Ok(Self::new(provider))
+            }
             _ => {
-                #[cfg(any(feature = "llm-remote", feature = "kimi", feature = "deepseek"))]
+                #[cfg(any(
+                    feature = "llm-remote",
+                    feature = "kimi",
+                    feature = "deepseek",
+                    feature = "gemini"
+                ))]
                 return Err(Error::Config(format!("Unknown provider: {provider_name}")));
 
-                #[cfg(not(any(feature = "llm-remote", feature = "kimi", feature = "deepseek")))]
+                #[cfg(not(any(feature = "llm-remote", feature = "kimi", feature = "deepseek", feature = "gemini")))]
                 return Err(Error::Config(
-                    "No LLM providers available. Build with 'llm-remote', 'kimi', 'deepseek', or 'llm-local' feature enabled.".to_string()
+                    "No LLM providers available. Build with 'llm-remote', 'kimi', 'deepseek', 'gemini', or 'llm-local' feature enabled.".to_string()
                 ));
             }
         }
