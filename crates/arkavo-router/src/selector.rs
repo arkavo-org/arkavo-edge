@@ -144,7 +144,6 @@ mod tests {
 
         let decision = selector
             .select(&classification, "Build a React component")
-            .await
             .unwrap();
 
         assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
@@ -163,7 +162,6 @@ mod tests {
 
         let decision = selector
             .select(&classification, "Find all uses of")
-            .await
             .unwrap();
 
         assert_eq!(decision.recommended_model, ModelChoice::LocalGemma4B);

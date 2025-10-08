@@ -6,6 +6,8 @@ pub mod connectivity;
 pub mod decision;
 pub mod error;
 pub mod metrics;
+pub mod orchestrator;
+pub mod prediction;
 pub mod selector;
 
 pub use classifier::{TaskCategory, TaskClassifier};
@@ -13,6 +15,8 @@ pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
 pub use error::{Error, Result};
 pub use metrics::RoutingMetrics;
+pub use orchestrator::{CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision};
+pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use selector::ModelSelector;
 
 use std::sync::Arc;

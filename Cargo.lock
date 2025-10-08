@@ -195,6 +195,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-protocol",
+ "arkavo-router",
  "bincode",
  "chrono",
  "futures",

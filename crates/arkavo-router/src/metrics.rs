@@ -134,6 +134,7 @@ impl Default for RoutingMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decision::ModelChoice;
 
     #[test]
     fn test_metrics_recording() {

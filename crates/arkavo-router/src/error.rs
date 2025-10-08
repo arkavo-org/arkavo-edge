@@ -15,7 +15,10 @@ pub enum Error {
     Provider(#[from] arkavo_llm::Error),
 
     #[error("Budget error: {0}")]
-    Budget(String),
+    BudgetError(String),
+
+    #[error("Budget exceeded: {0}")]
+    BudgetExceeded(String),
 
     #[error("Configuration error: {0}")]
     Config(String),
