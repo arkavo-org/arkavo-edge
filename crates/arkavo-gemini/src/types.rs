@@ -57,6 +57,18 @@ impl SetupConfig {
             tools: None,
         }
     }
+
+    pub fn new_multimodal(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            generation_config: Some(GenerationConfig {
+                response_modalities: vec!["TEXT".to_string()],
+                temperature: Some(0.7),
+                max_output_tokens: Some(4096),
+            }),
+            tools: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +88,43 @@ impl ClientContent {
             turn_complete: true,
         }
     }
+
+    pub fn from_text_and_image(
+        text: impl Into<String>,
+        image_base64: String,
+        mime_type: String,
+    ) -> Self {
+        Self {
+            turns: vec![Turn {
+                role: "USER".to_string(),
+                parts: vec![
+                    Part::Text { text: text.into() },
+                    Part::InlineData {
+                        inline_data: InlineData {
+                            mime_type,
+                            data: image_base64,
+                        },
+                    },
+                ],
+            }],
+            turn_complete: true,
+        }
+    }
+
+    pub fn from_image(image_base64: String, mime_type: String) -> Self {
+        Self {
+            turns: vec![Turn {
+                role: "USER".to_string(),
+                parts: vec![Part::InlineData {
+                    inline_data: InlineData {
+                        mime_type,
+                        data: image_base64,
+                    },
+                }],
+            }],
+            turn_complete: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +136,20 @@ pub struct Turn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
-    Text { text: String },
+    Text {
+        text: String,
+    },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: InlineData,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineData {
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,10 +218,30 @@ pub struct ServerContent {
 
 impl ServerContent {
     pub fn extract_text(&self) -> Option<String> {
-        self.model_turn.as_ref()?.parts.first().map(|part| {
-            let Part::Text { text } = part;
-            text.clone()
-        })
+        self.model_turn
+            .as_ref()?
+            .parts
+            .iter()
+            .find_map(|part| match part {
+                Part::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+    }
+
+    pub fn extract_all_text(&self) -> String {
+        self.model_turn
+            .as_ref()
+            .map(|turn| {
+                turn.parts
+                    .iter()
+                    .filter_map(|part| match part {
+                        Part::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
     }
 }
 

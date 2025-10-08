@@ -27,6 +27,7 @@ arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-budget = { path = "../arkavo-budget" }
+arkavo-router = { path = "../arkavo-router" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }
