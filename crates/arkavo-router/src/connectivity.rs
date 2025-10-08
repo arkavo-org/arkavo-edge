@@ -27,10 +27,7 @@ impl ConnectivityChecker {
         ];
 
         for host in hosts {
-            if let Ok(result) = tokio::time::timeout(
-                self.timeout,
-                reqwest::get(host)
-            ).await {
+            if let Ok(result) = tokio::time::timeout(self.timeout, reqwest::get(host)).await {
                 if result.is_ok() {
                     tracing::debug!("Online: Connectivity check succeeded to {}", host);
                     return true;
@@ -43,12 +40,11 @@ impl ConnectivityChecker {
     }
 
     pub async fn check_api_availability(&self, api_url: &str) -> bool {
-        match tokio::time::timeout(
-            self.timeout,
-            reqwest::Client::new().head(api_url).send()
-        ).await {
+        match tokio::time::timeout(self.timeout, reqwest::Client::new().head(api_url).send()).await
+        {
             Ok(Ok(response)) => {
-                let available = response.status().is_success() || response.status().is_redirection();
+                let available =
+                    response.status().is_success() || response.status().is_redirection();
                 tracing::debug!("API {} availability: {}", api_url, available);
                 available
             }

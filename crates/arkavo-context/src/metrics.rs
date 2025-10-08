@@ -11,11 +11,7 @@ pub struct CompressionMetrics {
 }
 
 impl CompressionMetrics {
-    pub fn new(
-        original_tokens: u32,
-        compressed_tokens: u32,
-        compression_time_ms: u64,
-    ) -> Self {
+    pub fn new(original_tokens: u32, compressed_tokens: u32, compression_time_ms: u64) -> Self {
         let reduction_percent = if original_tokens > 0 {
             ((original_tokens - compressed_tokens) as f64 / original_tokens as f64) * 100.0
         } else {
@@ -23,8 +19,8 @@ impl CompressionMetrics {
         };
 
         let cost_per_million_input = 0.30;
-        let cost_saved = ((original_tokens - compressed_tokens) as f64 / 1_000_000.0)
-            * cost_per_million_input;
+        let cost_saved =
+            ((original_tokens - compressed_tokens) as f64 / 1_000_000.0) * cost_per_million_input;
 
         Self {
             original_tokens,
@@ -68,12 +64,10 @@ impl CompressionStats {
         self.total_cost_saved += metrics.cost_saved;
 
         let n = self.total_compressions as f64;
-        self.average_reduction = ((self.average_reduction * (n - 1.0))
-            + metrics.reduction_percent)
-            / n;
-        self.average_quality = ((self.average_quality * (n - 1.0))
-            + metrics.information_retention)
-            / n;
+        self.average_reduction =
+            ((self.average_reduction * (n - 1.0)) + metrics.reduction_percent) / n;
+        self.average_quality =
+            ((self.average_quality * (n - 1.0)) + metrics.information_retention) / n;
     }
 }
 

@@ -15,7 +15,9 @@ pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
 pub use error::{Error, Result};
 pub use metrics::RoutingMetrics;
-pub use orchestrator::{CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision};
+pub use orchestrator::{
+    CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision,
+};
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use selector::ModelSelector;
 

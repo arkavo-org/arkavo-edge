@@ -117,11 +117,18 @@ impl WorkflowCostPredictor {
         let runway = Duration::from_secs((hours_remaining * 3600.0) as u64);
 
         let recommendation = if hours_remaining < 2.0 {
-            "URGENT: Less than 2 hours of budget remaining. Switch to local models immediately.".to_string()
+            "URGENT: Less than 2 hours of budget remaining. Switch to local models immediately."
+                .to_string()
         } else if hours_remaining < 8.0 {
-            format!("WARNING: {:.1} hours remaining. Consider reducing cloud model usage.", hours_remaining)
+            format!(
+                "WARNING: {:.1} hours remaining. Consider reducing cloud model usage.",
+                hours_remaining
+            )
         } else {
-            format!("Budget healthy with {:.1} hours remaining at current rate.", hours_remaining)
+            format!(
+                "Budget healthy with {:.1} hours remaining at current rate.",
+                hours_remaining
+            )
         };
 
         Some(BudgetRunway {
@@ -198,11 +205,7 @@ impl WorkflowCostPredictor {
         }
     }
 
-    fn generate_recommendations(
-        &self,
-        total_cost: f64,
-        tasks: &[TaskCostEstimate],
-    ) -> Vec<String> {
+    fn generate_recommendations(&self, total_cost: f64, tasks: &[TaskCostEstimate]) -> Vec<String> {
         let mut recommendations = Vec::new();
 
         if total_cost > 0.10 {
@@ -241,7 +244,8 @@ impl WorkflowCostPredictor {
 
         if tasks.len() > 10 {
             recommendations.push(
-                "Large workflow detected. Enable context compression to reduce token costs by 60%.".to_string()
+                "Large workflow detected. Enable context compression to reduce token costs by 60%."
+                    .to_string(),
             );
         }
 
@@ -317,10 +321,12 @@ mod tests {
         let prediction = predictor.predict(&tasks);
 
         assert!(!prediction.recommendations.is_empty());
-        assert!(prediction
-            .recommendations
-            .iter()
-            .any(|r| r.contains("code search")));
+        assert!(
+            prediction
+                .recommendations
+                .iter()
+                .any(|r| r.contains("code search"))
+        );
     }
 
     #[test]

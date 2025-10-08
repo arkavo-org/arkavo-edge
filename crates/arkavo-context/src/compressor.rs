@@ -29,13 +29,11 @@ impl ContextCompressor {
 
         let prompt = self.create_compression_prompt(text, target_words);
 
-        let messages = vec![
-            Message {
-                role: Role::User,
-                content: prompt,
-                images: None,
-            },
-        ];
+        let messages = vec![Message {
+            role: Role::User,
+            content: prompt,
+            images: None,
+        }];
 
         let compressed = self
             .provider
@@ -56,11 +54,7 @@ impl ContextCompressor {
         )
     }
 
-    pub async fn compress_to_tokens(
-        &self,
-        text: &str,
-        target_tokens: u32,
-    ) -> Result<String> {
+    pub async fn compress_to_tokens(&self, text: &str, target_tokens: u32) -> Result<String> {
         let words_per_token = 0.75;
         let target_words = (target_tokens as f64 * words_per_token) as usize;
 

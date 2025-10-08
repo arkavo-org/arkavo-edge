@@ -95,11 +95,8 @@ impl ROICalculator {
         let budget_health =
             Self::calculate_budget_health(routing_metrics, session_limit, session_spent);
 
-        let recommendations = Self::generate_recommendations(
-            routing_metrics,
-            &budget_health,
-            orchestrator_metrics,
-        );
+        let recommendations =
+            Self::generate_recommendations(routing_metrics, &budget_health, orchestrator_metrics);
 
         ROIDashboard {
             session_stats,

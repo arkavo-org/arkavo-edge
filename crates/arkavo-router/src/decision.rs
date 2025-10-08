@@ -81,9 +81,7 @@ impl RoutingDecision {
             TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::TestGeneration => {
                 (true, Some(0.6))
             }
-            TaskCategory::Refactoring | TaskCategory::General => {
-                (true, Some(0.5))
-            }
+            TaskCategory::Refactoring | TaskCategory::General => (true, Some(0.5)),
             _ => (false, None),
         }
     }

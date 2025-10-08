@@ -38,10 +38,7 @@ impl CompressionPipeline {
         tracing::debug!("Chunked text into {} chunks", chunks.len());
 
         let deduplicated = self.deduplicator.deduplicate(chunks);
-        tracing::debug!(
-            "Deduplicated to {} unique chunks",
-            deduplicated.len()
-        );
+        tracing::debug!("Deduplicated to {} unique chunks", deduplicated.len());
 
         let mut compressed_chunks = Vec::new();
         for (i, chunk) in deduplicated.iter().enumerate() {
@@ -60,11 +57,8 @@ impl CompressionPipeline {
 
         let compression_time_ms = start_time.elapsed().as_millis() as u64;
 
-        let metrics = CompressionMetrics::new(
-            original_tokens,
-            compressed_tokens,
-            compression_time_ms,
-        );
+        let metrics =
+            CompressionMetrics::new(original_tokens, compressed_tokens, compression_time_ms);
 
         tracing::info!(
             "Compression complete: {} → {} tokens ({:.1}% reduction) in {}ms",

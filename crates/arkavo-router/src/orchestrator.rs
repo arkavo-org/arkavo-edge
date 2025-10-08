@@ -3,8 +3,8 @@ use crate::decision::RoutingDecision;
 use crate::metrics::RoutingMetrics;
 use crate::selector::ModelSelector;
 use crate::{Error, Result};
-use arkavo_budget::tracker::{BudgetTracker, SpendingRecord};
 use arkavo_budget::TokenCost;
+use arkavo_budget::tracker::{BudgetTracker, SpendingRecord};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -84,11 +84,7 @@ impl CostOrchestrator {
         })
     }
 
-    pub async fn route_with_budget(
-        &self,
-        task: &str,
-        agent_id: &str,
-    ) -> Result<RoutingDecision> {
+    pub async fn route_with_budget(&self, task: &str, agent_id: &str) -> Result<RoutingDecision> {
         let classification = self.classifier.classify(task).await?;
 
         let budget_usage = self.calculate_budget_usage().await?;
@@ -192,7 +188,10 @@ impl CostOrchestrator {
         let projected_cost = average_cost * projected_tasks;
 
         let status = self.budget_tracker.get_status().await;
-        let session_limit = status.session_limit.map(|l| l.as_dollars()).unwrap_or(f64::MAX);
+        let session_limit = status
+            .session_limit
+            .map(|l| l.as_dollars())
+            .unwrap_or(f64::MAX);
         let session_spent = status.session_spent.as_dollars();
         let projected_usage = (session_spent + projected_cost) / session_limit;
 

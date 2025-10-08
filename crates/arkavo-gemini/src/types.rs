@@ -89,7 +89,11 @@ impl ClientContent {
         }
     }
 
-    pub fn from_text_and_image(text: impl Into<String>, image_base64: String, mime_type: String) -> Self {
+    pub fn from_text_and_image(
+        text: impl Into<String>,
+        image_base64: String,
+        mime_type: String,
+    ) -> Self {
         Self {
             turns: vec![Turn {
                 role: "USER".to_string(),
@@ -132,7 +136,9 @@ pub struct Turn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     InlineData {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,
@@ -212,12 +218,14 @@ pub struct ServerContent {
 
 impl ServerContent {
     pub fn extract_text(&self) -> Option<String> {
-        self.model_turn.as_ref()?.parts.iter().find_map(|part| {
-            match part {
+        self.model_turn
+            .as_ref()?
+            .parts
+            .iter()
+            .find_map(|part| match part {
                 Part::Text { text } => Some(text.clone()),
                 _ => None,
-            }
-        })
+            })
     }
 
     pub fn extract_all_text(&self) -> String {
