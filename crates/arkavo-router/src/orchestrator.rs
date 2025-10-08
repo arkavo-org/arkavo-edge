@@ -152,8 +152,7 @@ impl CostOrchestrator {
         if local_usage < 30.0 {
             recommendations.push(CostRecommendation {
                 suggestion: format!(
-                    "Only {:.1}% of tasks use local models. Increase local routing for code search and security tasks.",
-                    local_usage
+                    "Only {local_usage:.1}% of tasks use local models. Increase local routing for code search and security tasks."
                 ),
                 estimated_savings: routing_metrics.total_estimated_cost * 0.4,
                 impact: "Medium cost reduction, maintains quality".to_string(),

@@ -54,10 +54,10 @@ impl RoutingDecision {
         confidence: f32,
         reasoning: String,
     ) -> Self {
-        let fallback_chain = Self::default_fallback_chain(&model, &category);
-        let estimated_cost = Self::estimate_cost(&model, &category);
-        let estimated_time = Self::estimate_time(&model, &category);
-        let (should_compress, compression_target) = Self::should_use_compression(&model, &category);
+        let fallback_chain = Self::default_fallback_chain(&model, category);
+        let estimated_cost = Self::estimate_cost(&model, category);
+        let estimated_time = Self::estimate_time(&model, category);
+        let (should_compress, compression_target) = Self::should_use_compression(&model, category);
 
         Self {
             recommended_model: model,
@@ -72,7 +72,7 @@ impl RoutingDecision {
         }
     }
 
-    fn should_use_compression(model: &ModelChoice, category: &TaskCategory) -> (bool, Option<f64>) {
+    fn should_use_compression(model: &ModelChoice, category: TaskCategory) -> (bool, Option<f64>) {
         if model.is_local() {
             return (false, None);
         }
@@ -86,7 +86,7 @@ impl RoutingDecision {
         }
     }
 
-    fn default_fallback_chain(model: &ModelChoice, category: &TaskCategory) -> Vec<ModelChoice> {
+    fn default_fallback_chain(model: &ModelChoice, category: TaskCategory) -> Vec<ModelChoice> {
         match (model, category) {
             (ModelChoice::GeminiFlash, TaskCategory::FrontendUI) => {
                 vec![ModelChoice::GeminiPro, ModelChoice::LocalGemma4B]
@@ -102,7 +102,7 @@ impl RoutingDecision {
         }
     }
 
-    fn estimate_cost(model: &ModelChoice, category: &TaskCategory) -> f64 {
+    fn estimate_cost(model: &ModelChoice, category: TaskCategory) -> f64 {
         let token_estimate = category.estimated_tokens();
 
         match model {
@@ -122,7 +122,7 @@ impl RoutingDecision {
         }
     }
 
-    fn estimate_time(model: &ModelChoice, _category: &TaskCategory) -> Duration {
+    fn estimate_time(model: &ModelChoice, _category: TaskCategory) -> Duration {
         match model {
             ModelChoice::GeminiFlash => Duration::from_secs(3),
             ModelChoice::GeminiPro => Duration::from_secs(10),

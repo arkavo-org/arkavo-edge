@@ -20,7 +20,7 @@ pub enum TaskCategory {
 }
 
 impl TaskCategory {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "frontend_ui" | "frontend" | "ui" => Self::FrontendUI,
             "backend_api" | "backend" | "api" => Self::BackendAPI,
@@ -107,12 +107,12 @@ impl TaskClassifier {
             "gemma-3-270m-it".to_string(),
             Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
         )
-        .map_err(|e| Error::Provider(e))?;
+        .map_err(Error::Provider)?;
 
         provider
             .initialize()
             .await
-            .map_err(|e| Error::Provider(e))?;
+            .map_err(Error::Provider)?;
 
         Ok(Self {
             provider: Arc::new(Mutex::new(provider)),
@@ -275,12 +275,11 @@ Categories:
 - refactoring: Code cleanup, optimization, restructuring
 - general: Other coding tasks
 
-Task: {}
+Task: {task}
 
 Reply with ONLY the category name and confidence (0-100):
 Category: [category]
-Confidence: [0-100]"#,
-            task
+Confidence: [0-100]"#
         )
     }
 
@@ -299,14 +298,12 @@ Confidence: [0-100]"#,
                     .unwrap_or("")
                     .trim()
                     .to_lowercase();
-                category = TaskCategory::from_str(&cat_str);
-            } else if line.starts_with("Confidence:") {
-                if let Some(conf_str) = line.strip_prefix("Confidence:") {
-                    if let Ok(conf) = conf_str.trim().parse::<f32>() {
+                category = TaskCategory::from_string(&cat_str);
+            } else if line.starts_with("Confidence:")
+                && let Some(conf_str) = line.strip_prefix("Confidence:")
+                    && let Ok(conf) = conf_str.trim().parse::<f32>() {
                         confidence = (conf / 100.0).clamp(0.0, 1.0);
                     }
-                }
-            }
         }
 
         Ok(Classification {
@@ -324,11 +321,11 @@ mod tests {
     #[test]
     fn test_task_category_from_str() {
         assert_eq!(
-            TaskCategory::from_str("frontend_ui"),
+            TaskCategory::from_string("frontend_ui"),
             TaskCategory::FrontendUI
         );
-        assert_eq!(TaskCategory::from_str("backend"), TaskCategory::BackendAPI);
-        assert_eq!(TaskCategory::from_str("unknown"), TaskCategory::General);
+        assert_eq!(TaskCategory::from_string("backend"), TaskCategory::BackendAPI);
+        assert_eq!(TaskCategory::from_string("unknown"), TaskCategory::General);
     }
 
     #[test]

@@ -45,18 +45,17 @@ impl RoutingMetrics {
 
         self.total_estimated_cost += decision.estimated_cost_usd;
 
-        let cost_saved = self.calculate_cost_saved(&classification.category, decision);
+        let cost_saved = self.calculate_cost_saved(classification.category, decision);
         self.total_cost_saved += cost_saved;
 
-        self.average_confidence = ((self.average_confidence * (self.total_routes - 1) as f64)
-            + classification.confidence as f64)
+        self.average_confidence = self.average_confidence.mul_add((self.total_routes - 1) as f64, classification.confidence as f64)
             / self.total_routes as f64;
 
         self.last_updated = Utc::now();
     }
 
-    fn calculate_cost_saved(&self, category: &TaskCategory, decision: &RoutingDecision) -> f64 {
-        let baseline_cost = self.baseline_cost(*category);
+    fn calculate_cost_saved(&self, category: TaskCategory, decision: &RoutingDecision) -> f64 {
+        let baseline_cost = self.baseline_cost(category);
 
         if decision.recommended_model.is_local() {
             baseline_cost - decision.estimated_cost_usd

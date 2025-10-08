@@ -67,9 +67,9 @@ impl Router {
 
         let mut decision = self.selector.select(&classification, task_description)?;
 
-        if self.offline_mode || !self.connectivity.is_online().await {
-            if decision.recommended_model.is_cloud() {
-                let local_model = self.get_local_fallback(&classification.category);
+        if (self.offline_mode || !self.connectivity.is_online().await)
+            && decision.recommended_model.is_cloud() {
+                let local_model = self.get_local_fallback(classification.category);
 
                 decision.reasoning = format!(
                     "Offline mode: Using local {}. Original: {}",
@@ -81,7 +81,6 @@ impl Router {
                 decision.estimated_cost_usd = 0.0;
                 decision.should_compress = false;
             }
-        }
 
         self.metrics
             .write()
@@ -91,7 +90,7 @@ impl Router {
         Ok(decision)
     }
 
-    fn get_local_fallback(&self, category: &TaskCategory) -> ModelChoice {
+    fn get_local_fallback(&self, category: TaskCategory) -> ModelChoice {
         match category {
             TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
                 ModelChoice::LocalGemma4B

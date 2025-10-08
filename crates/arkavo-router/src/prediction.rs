@@ -121,13 +121,11 @@ impl WorkflowCostPredictor {
                 .to_string()
         } else if hours_remaining < 8.0 {
             format!(
-                "WARNING: {:.1} hours remaining. Consider reducing cloud model usage.",
-                hours_remaining
+                "WARNING: {hours_remaining:.1} hours remaining. Consider reducing cloud model usage."
             )
         } else {
             format!(
-                "Budget healthy with {:.1} hours remaining at current rate.",
-                hours_remaining
+                "Budget healthy with {hours_remaining:.1} hours remaining at current rate."
             )
         };
 
@@ -175,7 +173,7 @@ impl WorkflowCostPredictor {
             base_cost * 1.2
         };
 
-        let estimated_time = self.estimate_task_time(&classification.category);
+        let estimated_time = self.estimate_task_time(classification.category);
 
         TaskCostEstimate {
             task_description: format!("{} task", classification.category.as_str()),
@@ -191,7 +189,7 @@ impl WorkflowCostPredictor {
         input_cost + output_cost
     }
 
-    fn estimate_task_time(&self, category: &TaskCategory) -> Duration {
+    fn estimate_task_time(&self, category: TaskCategory) -> Duration {
         match category {
             TaskCategory::FrontendUI => Duration::from_secs(3),
             TaskCategory::BackendAPI => Duration::from_secs(10),
@@ -221,8 +219,7 @@ impl WorkflowCostPredictor {
 
         if code_search_count > 2 {
             recommendations.push(format!(
-                "{} code search tasks detected. Use local Gemma 4B (free) instead of cloud models.",
-                code_search_count
+                "{code_search_count} code search tasks detected. Use local Gemma 4B (free) instead of cloud models."
             ));
         }
 

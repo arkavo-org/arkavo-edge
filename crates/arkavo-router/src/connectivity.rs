@@ -27,12 +27,11 @@ impl ConnectivityChecker {
         ];
 
         for host in hosts {
-            if let Ok(result) = tokio::time::timeout(self.timeout, reqwest::get(host)).await {
-                if result.is_ok() {
+            if let Ok(result) = tokio::time::timeout(self.timeout, reqwest::get(host)).await
+                && result.is_ok() {
                     tracing::debug!("Online: Connectivity check succeeded to {}", host);
                     return true;
                 }
-            }
         }
 
         tracing::info!("Offline: All connectivity checks failed");
