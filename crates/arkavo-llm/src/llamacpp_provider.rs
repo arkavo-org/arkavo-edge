@@ -386,7 +386,7 @@ impl Provider for LlamaCppProvider {
         Ok(Box::new(stream))
     }
 
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         &self.name
     }
 }

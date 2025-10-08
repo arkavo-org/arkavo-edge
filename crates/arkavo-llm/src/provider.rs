@@ -12,5 +12,5 @@ pub trait Provider: Send + Sync {
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>>;
 
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &str;
 }

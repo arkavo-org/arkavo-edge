@@ -32,7 +32,8 @@ impl Default for GeminiProvider {
 
 #[async_trait]
 impl Provider for GeminiProvider {
-    fn name(&self) -> &'static str {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
         "gemini"
     }
 
