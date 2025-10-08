@@ -18,9 +18,7 @@ impl Deduplicator {
         for chunk in chunks {
             let hash = Self::simple_hash(&chunk);
 
-            if !seen_hashes.contains(&hash)
-                && !self.is_similar_to_any(&chunk, &unique_chunks)
-            {
+            if !seen_hashes.contains(&hash) && !self.is_similar_to_any(&chunk, &unique_chunks) {
                 seen_hashes.insert(hash);
                 unique_chunks.push(chunk);
             }

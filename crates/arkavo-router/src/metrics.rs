@@ -48,8 +48,10 @@ impl RoutingMetrics {
         let cost_saved = self.calculate_cost_saved(classification.category, decision);
         self.total_cost_saved += cost_saved;
 
-        self.average_confidence = self.average_confidence.mul_add((self.total_routes - 1) as f64, classification.confidence as f64)
-            / self.total_routes as f64;
+        self.average_confidence = self.average_confidence.mul_add(
+            (self.total_routes - 1) as f64,
+            classification.confidence as f64,
+        ) / self.total_routes as f64;
 
         self.last_updated = Utc::now();
     }

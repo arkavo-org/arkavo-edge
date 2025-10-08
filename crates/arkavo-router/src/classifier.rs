@@ -109,10 +109,7 @@ impl TaskClassifier {
         )
         .map_err(Error::Provider)?;
 
-        provider
-            .initialize()
-            .await
-            .map_err(Error::Provider)?;
+        provider.initialize().await.map_err(Error::Provider)?;
 
         Ok(Self {
             provider: Arc::new(Mutex::new(provider)),
@@ -301,9 +298,10 @@ Confidence: [0-100]"#
                 category = TaskCategory::from_string(&cat_str);
             } else if line.starts_with("Confidence:")
                 && let Some(conf_str) = line.strip_prefix("Confidence:")
-                    && let Ok(conf) = conf_str.trim().parse::<f32>() {
-                        confidence = (conf / 100.0).clamp(0.0, 1.0);
-                    }
+                && let Ok(conf) = conf_str.trim().parse::<f32>()
+            {
+                confidence = (conf / 100.0).clamp(0.0, 1.0);
+            }
         }
 
         Ok(Classification {
@@ -324,7 +322,10 @@ mod tests {
             TaskCategory::from_string("frontend_ui"),
             TaskCategory::FrontendUI
         );
-        assert_eq!(TaskCategory::from_string("backend"), TaskCategory::BackendAPI);
+        assert_eq!(
+            TaskCategory::from_string("backend"),
+            TaskCategory::BackendAPI
+        );
         assert_eq!(TaskCategory::from_string("unknown"), TaskCategory::General);
     }
 

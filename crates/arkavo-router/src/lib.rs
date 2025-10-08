@@ -68,19 +68,20 @@ impl Router {
         let mut decision = self.selector.select(&classification, task_description)?;
 
         if (self.offline_mode || !self.connectivity.is_online().await)
-            && decision.recommended_model.is_cloud() {
-                let local_model = self.get_local_fallback(classification.category);
+            && decision.recommended_model.is_cloud()
+        {
+            let local_model = self.get_local_fallback(classification.category);
 
-                decision.reasoning = format!(
-                    "Offline mode: Using local {}. Original: {}",
-                    local_model.name(),
-                    decision.reasoning
-                );
+            decision.reasoning = format!(
+                "Offline mode: Using local {}. Original: {}",
+                local_model.name(),
+                decision.reasoning
+            );
 
-                decision.recommended_model = local_model;
-                decision.estimated_cost_usd = 0.0;
-                decision.should_compress = false;
-            }
+            decision.recommended_model = local_model;
+            decision.estimated_cost_usd = 0.0;
+            decision.should_compress = false;
+        }
 
         self.metrics
             .write()

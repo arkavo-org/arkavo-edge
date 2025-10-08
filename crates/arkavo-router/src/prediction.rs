@@ -124,9 +124,7 @@ impl WorkflowCostPredictor {
                 "WARNING: {hours_remaining:.1} hours remaining. Consider reducing cloud model usage."
             )
         } else {
-            format!(
-                "Budget healthy with {hours_remaining:.1} hours remaining at current rate."
-            )
+            format!("Budget healthy with {hours_remaining:.1} hours remaining at current rate.")
         };
 
         Some(BudgetRunway {
