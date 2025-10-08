@@ -1,0 +1,31 @@
+[package]
+name = "arkavo-router"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Intelligent model routing for cost-optimized AI agent execution"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+
+# Internal dependencies
+arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-gemini = { path = "../arkavo-gemini" }
+arkavo-context = { path = "../arkavo-context" }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[lints]
+workspace = true

@@ -280,6 +280,39 @@ impl LiveSessionClient {
         .await
     }
 
+    pub async fn send_image_prompt(
+        &self,
+        text: impl Into<String>,
+        image_base64: String,
+        mime_type: String,
+    ) -> Result<()> {
+        let content = ClientContent::from_text_and_image(text, image_base64, mime_type);
+        self.send_message(ClientMessage::ClientContent {
+            client_content: content,
+        })
+        .await
+    }
+
+    pub async fn analyze_screenshot(&self, image_base64: String) -> Result<()> {
+        let prompt = "Analyze this screenshot and describe the UI components, layout, and any visible functionality. Be detailed and specific.";
+        self.send_image_prompt(prompt, image_base64, "image/png".to_string())
+            .await
+    }
+
+    pub async fn extract_ui_components(&self, image_base64: String) -> Result<()> {
+        let prompt = "Extract all UI components from this screenshot. For each component, identify: type (button, input, card, etc.), position, styling, and any text content. Format as JSON.";
+        self.send_image_prompt(prompt, image_base64, "image/png".to_string())
+            .await
+    }
+
+    pub async fn screenshot_to_code(&self, image_base64: String, framework: &str) -> Result<()> {
+        let prompt = format!(
+            "Convert this screenshot into {framework} code. Generate clean, production-ready code that recreates this UI. Include all components, styling, and layout."
+        );
+        self.send_image_prompt(prompt, image_base64, "image/png".to_string())
+            .await
+    }
+
     pub async fn send_tool_response(
         &self,
         id: impl Into<String>,

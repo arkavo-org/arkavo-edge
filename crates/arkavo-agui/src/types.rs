@@ -212,6 +212,31 @@ pub enum AgUiEvent {
     ResetBudgetWindow {
         window: String,
     },
+
+    // Cost orchestrator events
+    GetCostMetrics {
+        #[serde(rename = "timeRange")]
+        time_range: String,
+    },
+    CostMetricsUpdate {
+        metrics: crate::roi_metrics::CostMetrics,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    GetROIDashboard,
+    ROIDashboardUpdate {
+        dashboard: crate::roi_metrics::ROIDashboard,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
+    GetCostPrediction {
+        tasks: Vec<String>,
+    },
+    CostPredictionUpdate {
+        prediction: arkavo_router::WorkflowCostPrediction,
+        #[serde(rename = "eventId")]
+        event_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
