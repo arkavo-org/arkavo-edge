@@ -76,11 +76,12 @@ impl RoutingMetrics {
     }
 
     pub fn cost_savings_percent(&self) -> f64 {
-        if self.total_estimated_cost == 0.0 {
+        let total_baseline = self.total_estimated_cost + self.total_cost_saved;
+        if total_baseline == 0.0 {
             return 0.0;
         }
 
-        (self.total_cost_saved / (self.total_estimated_cost + self.total_cost_saved)) * 100.0
+        (self.total_cost_saved / total_baseline) * 100.0
     }
 
     pub fn local_model_usage_percent(&self) -> f64 {
