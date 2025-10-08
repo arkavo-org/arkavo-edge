@@ -56,6 +56,8 @@ impl ModelSelector {
                 ModelChoice::GeminiFlash
             }
 
+            TaskCategory::VisionAnalysis => ModelChoice::GeminiFlash,
+
             _ => ModelChoice::GeminiFlash,
         }
     }
@@ -69,6 +71,7 @@ impl ModelSelector {
             TaskCategory::TestGeneration => "Test generation: Gemini Pro for comprehensive tests",
             TaskCategory::Documentation => "Documentation: Local Gemma 4B sufficient",
             TaskCategory::Refactoring => "Refactoring: Gemini Flash for quick iterations",
+            TaskCategory::VisionAnalysis => "Vision analysis: Gemini Flash with multimodal support",
             TaskCategory::General => "General task: Gemini Flash as balanced default",
         };
 

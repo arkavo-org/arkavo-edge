@@ -15,6 +15,7 @@ pub enum TaskCategory {
     TestGeneration,
     Documentation,
     Refactoring,
+    VisionAnalysis,
     General,
 }
 
@@ -28,6 +29,7 @@ impl TaskCategory {
             "test_generation" | "tests" | "testing" => Self::TestGeneration,
             "documentation" | "docs" => Self::Documentation,
             "refactoring" | "refactor" => Self::Refactoring,
+            "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
             _ => Self::General,
         }
     }
@@ -41,6 +43,7 @@ impl TaskCategory {
             Self::TestGeneration => "test_generation",
             Self::Documentation => "documentation",
             Self::Refactoring => "refactoring",
+            Self::VisionAnalysis => "vision_analysis",
             Self::General => "general",
         }
     }
@@ -74,6 +77,10 @@ impl TaskCategory {
             Self::Refactoring => TokenEstimate {
                 input: 400,
                 output: 1200,
+            },
+            Self::VisionAnalysis => TokenEstimate {
+                input: 2000,
+                output: 3000,
             },
             Self::General => TokenEstimate {
                 input: 300,
@@ -209,6 +216,17 @@ impl TaskClassifier {
                 TaskCategory::Refactoring,
                 0.75,
                 "Keywords match refactoring".to_string(),
+            )
+        } else if task_lower.contains("screenshot")
+            || task_lower.contains("image")
+            || task_lower.contains("vision")
+            || task_lower.contains("analyze ui")
+            || task_lower.contains("ui from")
+        {
+            (
+                TaskCategory::VisionAnalysis,
+                0.90,
+                "Keywords match vision/screenshot analysis".to_string(),
             )
         } else {
             (
