@@ -32,7 +32,7 @@ impl Default for GeminiProvider {
 
 #[async_trait]
 impl Provider for GeminiProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "gemini"
     }
 
