@@ -307,8 +307,7 @@ impl LiveSessionClient {
 
     pub async fn screenshot_to_code(&self, image_base64: String, framework: &str) -> Result<()> {
         let prompt = format!(
-            "Convert this screenshot into {} code. Generate clean, production-ready code that recreates this UI. Include all components, styling, and layout.",
-            framework
+            "Convert this screenshot into {framework} code. Generate clean, production-ready code that recreates this UI. Include all components, styling, and layout."
         );
         self.send_image_prompt(prompt, image_base64, "image/png".to_string())
             .await
