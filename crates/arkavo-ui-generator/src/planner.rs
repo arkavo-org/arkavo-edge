@@ -76,9 +76,39 @@ Return ONLY the JSON array, nothing else."#
 
     fn parse_plan(&self, response: &str) -> Result<BuildPlan> {
         let trimmed = response.trim();
-        let json_str = if let Some(start) = trimmed.find('[') {
-            if let Some(end) = trimmed.rfind(']') {
-                &trimmed[start..=end]
+
+        // Try to extract JSON from markdown code fences first
+        let json_str = if let Some(json_start) = trimmed.find("```json") {
+            // Look for the end of the code fence
+            let after_fence = &trimmed[json_start + 7..]; // Skip past ```json
+            if let Some(fence_end) = after_fence.find("```") {
+                after_fence[..fence_end].trim()
+            } else {
+                // No closing fence, try to find JSON array
+                after_fence.trim()
+            }
+        } else if let Some(start) = trimmed.find('[') {
+            // Find the matching closing bracket for the first array
+            let after_start = &trimmed[start..];
+            let mut depth = 0;
+            let mut end_pos = 0;
+
+            for (i, ch) in after_start.chars().enumerate() {
+                match ch {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end_pos = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if end_pos > 0 {
+                &after_start[..end_pos]
             } else {
                 trimmed
             }
@@ -86,7 +116,8 @@ Return ONLY the JSON array, nothing else."#
             trimmed
         };
 
-        let parts: Vec<ComponentPart> = serde_json::from_str(json_str)?;
+        let parts: Vec<ComponentPart> = serde_json::from_str(json_str)
+            .map_err(|e| anyhow::anyhow!("Failed to parse JSON plan: {}. JSON was: {}", e, json_str))?;
 
         if parts.is_empty() || parts.len() > 10 {
             anyhow::bail!("Invalid number of parts: {}", parts.len());
