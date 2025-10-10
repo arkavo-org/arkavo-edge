@@ -36,15 +36,16 @@ impl UiPlanner {
     }
 
     pub async fn plan(&self, user_prompt: &str) -> Result<BuildPlan> {
-        if self.router.is_some() {
-            if let Ok(plan) = self.try_llm_plan(user_prompt).await {
-                println!("UiPlanner: Using LLM-generated plan");
-                return Ok(plan);
-            }
-            eprintln!("UiPlanner: LLM planning failed, using fallback");
+        if self.router.is_none() {
+            anyhow::bail!("Router not available - cannot generate UI plan");
         }
 
-        self.fallback_plan(user_prompt)
+        let plan = self.try_llm_plan(user_prompt).await?;
+        println!("UiPlanner: Using LLM-generated plan with {} parts", plan.parts.len());
+        for part in &plan.parts {
+            println!("  - {} ({}): {}", part.name, part.id, part.description);
+        }
+        Ok(plan)
     }
 
     async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
@@ -107,166 +108,6 @@ Return ONLY the JSON array, nothing else."#
         Ok(BuildPlan { parts })
     }
 
-    fn fallback_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
-        let keywords = user_prompt.to_lowercase();
-        let mut parts = Vec::new();
-        let mut part_id = 1;
-
-        // Always start with header
-        parts.push(ComponentPart {
-            id: format!("part-{part_id}"),
-            name: "Page Header".to_string(),
-            description: "Top navigation bar with logo and menu".to_string(),
-            priority: part_id,
-        });
-        part_id += 1;
-
-        // Domain-specific components
-        if keywords.contains("bank") || keywords.contains("account") {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Account Summary Card".to_string(),
-                description: "Display account balance, account number, and quick stats".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Recent Transactions".to_string(),
-                description: "Table showing recent account activity with dates and amounts".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        if keywords.contains("portfolio") || keywords.contains("stock") {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Portfolio Overview".to_string(),
-                description: "Summary of total portfolio value, gains/losses, and allocation".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Holdings Table".to_string(),
-                description: "List of stocks/assets with current prices, quantities, and values".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Performance Chart".to_string(),
-                description: "Line chart showing portfolio value over time".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        if keywords.contains("calculator") || keywords.contains("calc") {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Calculator Display".to_string(),
-                description: "Numeric display showing current value and operations".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Number Pad".to_string(),
-                description: "Grid of buttons for digits 0-9".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Operation Buttons".to_string(),
-                description: "Buttons for +, -, *, /, =, and clear".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        // Generic patterns
-        if keywords.contains("chart") || keywords.contains("graph") {
-            if !parts.iter().any(|p| p.name.contains("Chart")) {
-                parts.push(ComponentPart {
-                    id: format!("part-{part_id}"),
-                    name: "Data Visualization".to_string(),
-                    description: "Interactive charts and graphs".to_string(),
-                    priority: part_id,
-                });
-                part_id += 1;
-            }
-        }
-
-        if keywords.contains("table") || keywords.contains("list") {
-            if !parts.iter().any(|p| p.name.contains("Table") || p.name.contains("Transactions")) {
-                parts.push(ComponentPart {
-                    id: format!("part-{part_id}"),
-                    name: "Data Table".to_string(),
-                    description: "Sortable and filterable data table".to_string(),
-                    priority: part_id,
-                });
-                part_id += 1;
-            }
-        }
-
-        if keywords.contains("form") || keywords.contains("input") {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Input Form".to_string(),
-                description: "User input controls and validation".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        if keywords.contains("dashboard") {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Dashboard Widgets".to_string(),
-                description: "Grid of summary cards and metrics".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        // Add action buttons if we have a reasonable number of parts
-        if parts.len() >= 3 {
-            parts.push(ComponentPart {
-                id: format!("part-{part_id}"),
-                name: "Action Buttons".to_string(),
-                description: "Primary actions like Transfer, Buy/Sell, Export".to_string(),
-                priority: part_id,
-            });
-            part_id += 1;
-        }
-
-        // Footer for completeness
-        parts.push(ComponentPart {
-            id: format!("part-{part_id}"),
-            name: "Page Footer".to_string(),
-            description: "Footer with links, disclaimers, and copyright".to_string(),
-            priority: part_id,
-        });
-
-        println!(
-            "UiPlanner: Generated {} parts for prompt: '{}'",
-            parts.len(),
-            user_prompt
-        );
-        for part in &parts {
-            println!("  - {} ({}): {}", part.name, part.id, part.description);
-        }
-
-        Ok(BuildPlan { parts })
-    }
 }
 
 #[cfg(test)]
@@ -288,17 +129,5 @@ mod tests {
         let plan = result.unwrap();
         assert_eq!(plan.parts.len(), 2);
         assert_eq!(plan.parts[0].name, "Header");
-    }
-
-    #[test]
-    fn test_fallback_plan() {
-        let planner = UiPlanner { router: None };
-
-        let result = planner.fallback_plan("dashboard with charts");
-        assert!(result.is_ok());
-
-        let plan = result.unwrap();
-        assert!(!plan.parts.is_empty());
-        assert!(plan.parts.iter().any(|p| p.name.contains("Visualization")));
     }
 }

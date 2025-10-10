@@ -441,44 +441,6 @@ async fn test_incremental_updates() -> Result<()> {
     Ok(())
 }
 
-/// Regression test: Verify calculator UI generates required components
-/// This test addresses BUG #2 from BUG_REPORT.md - missing calculator keyword
-#[tokio::test]
-async fn test_calculator_has_required_components() -> Result<()> {
-    let planner = UiPlanner::new().await?;
-    let plan = planner.plan("Build a calculator").await?;
-
-    let component_names: Vec<_> = plan.parts.iter().map(|p| p.name.to_lowercase()).collect();
-
-    println!("Calculator plan generated {} components:", component_names.len());
-    for name in &component_names {
-        println!("  - {}", name);
-    }
-
-    assert!(
-        component_names.iter().any(|n| n.contains("button")
-            || n.contains("pad")
-            || n.contains("keypad")
-            || n.contains("number")),
-        "Calculator should have button/keypad component, got: {:?}",
-        component_names
-    );
-
-    assert!(
-        component_names.iter().any(|n| n.contains("display") || n.contains("screen")),
-        "Calculator should have display component, got: {:?}",
-        component_names
-    );
-
-    assert!(
-        component_names.iter().any(|n| n.contains("operation") || n.contains("operator")),
-        "Calculator should have operation buttons, got: {:?}",
-        component_names
-    );
-
-    Ok(())
-}
-
 /// Helper: Sanitize filename for cross-platform compatibility
 fn sanitize_filename(name: &str) -> String {
     name.chars()
