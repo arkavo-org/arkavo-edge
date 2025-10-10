@@ -31,6 +31,7 @@ arkavo-router = { path = "../arkavo-router" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }
+arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 anyhow = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 

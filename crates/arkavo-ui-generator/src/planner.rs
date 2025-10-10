@@ -17,20 +17,28 @@ pub struct ComponentPart {
 }
 
 pub struct UiPlanner {
-    router: Arc<Router>,
+    router: Option<Arc<Router>>,
 }
 
 impl UiPlanner {
     pub async fn new() -> Result<Self> {
-        Ok(Self {
-            router: Arc::new(Router::new().await?),
-        })
+        let router = match Router::new().await {
+            Ok(r) => Some(Arc::new(r)),
+            Err(e) => {
+                eprintln!("UiPlanner: Router initialization failed (using fallback only): {e}");
+                None
+            }
+        };
+
+        Ok(Self { router })
     }
 
     pub async fn plan(&self, user_prompt: &str) -> Result<BuildPlan> {
         let _planning_prompt = self.build_planning_prompt(user_prompt);
 
-        let _decision = self.router.route(user_prompt).await?;
+        if let Some(router) = &self.router {
+            let _decision = router.route(user_prompt).await.ok();
+        }
 
         self.fallback_plan(user_prompt)
     }
@@ -82,56 +90,134 @@ Return ONLY the JSON array, nothing else."#
 
     fn fallback_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
         let keywords = user_prompt.to_lowercase();
+        let mut parts = Vec::new();
+        let mut part_id = 1;
 
-        let mut parts = vec![
-            ComponentPart {
-                id: "part-1".to_string(),
-                name: "Page Header".to_string(),
-                description: "Navigation and title section".to_string(),
-                priority: 1,
-            },
-            ComponentPart {
-                id: "part-2".to_string(),
-                name: "Main Content Area".to_string(),
-                description: format!("Primary content for: {user_prompt}"),
-                priority: 2,
-            },
-        ];
+        // Always start with header
+        parts.push(ComponentPart {
+            id: format!("part-{part_id}"),
+            name: "Page Header".to_string(),
+            description: "Top navigation bar with logo and menu".to_string(),
+            priority: part_id,
+        });
+        part_id += 1;
 
-        if keywords.contains("chart") || keywords.contains("graph") {
+        // Domain-specific components
+        if keywords.contains("bank") || keywords.contains("account") {
             parts.push(ComponentPart {
-                id: "part-3".to_string(),
-                name: "Data Visualization".to_string(),
-                description: "Charts and graphs".to_string(),
-                priority: 3,
+                id: format!("part-{part_id}"),
+                name: "Account Summary Card".to_string(),
+                description: "Display account balance, account number, and quick stats".to_string(),
+                priority: part_id,
             });
+            part_id += 1;
+
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Recent Transactions".to_string(),
+                description: "Table showing recent account activity with dates and amounts".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+        }
+
+        if keywords.contains("portfolio") || keywords.contains("stock") {
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Portfolio Overview".to_string(),
+                description: "Summary of total portfolio value, gains/losses, and allocation".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Holdings Table".to_string(),
+                description: "List of stocks/assets with current prices, quantities, and values".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Performance Chart".to_string(),
+                description: "Line chart showing portfolio value over time".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+        }
+
+        // Generic patterns
+        if keywords.contains("chart") || keywords.contains("graph") {
+            if !parts.iter().any(|p| p.name.contains("Chart")) {
+                parts.push(ComponentPart {
+                    id: format!("part-{part_id}"),
+                    name: "Data Visualization".to_string(),
+                    description: "Interactive charts and graphs".to_string(),
+                    priority: part_id,
+                });
+                part_id += 1;
+            }
         }
 
         if keywords.contains("table") || keywords.contains("list") {
-            parts.push(ComponentPart {
-                id: "part-4".to_string(),
-                name: "Data Table".to_string(),
-                description: "Tabular data display".to_string(),
-                priority: 4,
-            });
+            if !parts.iter().any(|p| p.name.contains("Table") || p.name.contains("Transactions")) {
+                parts.push(ComponentPart {
+                    id: format!("part-{part_id}"),
+                    name: "Data Table".to_string(),
+                    description: "Sortable and filterable data table".to_string(),
+                    priority: part_id,
+                });
+                part_id += 1;
+            }
         }
 
         if keywords.contains("form") || keywords.contains("input") {
             parts.push(ComponentPart {
-                id: "part-5".to_string(),
+                id: format!("part-{part_id}"),
                 name: "Input Form".to_string(),
-                description: "User input controls".to_string(),
-                priority: 5,
+                description: "User input controls and validation".to_string(),
+                priority: part_id,
             });
+            part_id += 1;
         }
 
-        if parts.len() == 2 {
+        if keywords.contains("dashboard") {
             parts.push(ComponentPart {
-                id: "part-3".to_string(),
-                name: "Interactive Controls".to_string(),
-                description: "Buttons and actions".to_string(),
-                priority: 3,
+                id: format!("part-{part_id}"),
+                name: "Dashboard Widgets".to_string(),
+                description: "Grid of summary cards and metrics".to_string(),
+                priority: part_id,
             });
+            part_id += 1;
+        }
+
+        // Add action buttons if we have a reasonable number of parts
+        if parts.len() >= 3 {
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Action Buttons".to_string(),
+                description: "Primary actions like Transfer, Buy/Sell, Export".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+        }
+
+        // Footer for completeness
+        parts.push(ComponentPart {
+            id: format!("part-{part_id}"),
+            name: "Page Footer".to_string(),
+            description: "Footer with links, disclaimers, and copyright".to_string(),
+            priority: part_id,
+        });
+
+        println!(
+            "UiPlanner: Generated {} parts for prompt: '{}'",
+            parts.len(),
+            user_prompt
+        );
+        for part in &parts {
+            println!("  - {} ({}): {}", part.name, part.id, part.description);
         }
 
         Ok(BuildPlan { parts })
@@ -144,9 +230,7 @@ mod tests {
 
     #[test]
     fn test_parse_plan() {
-        let planner = UiPlanner {
-            router: Arc::new(Router::new().unwrap()),
-        };
+        let planner = UiPlanner { router: None };
 
         let json = r#"[
             {"id": "part-1", "name": "Header", "description": "Top bar", "priority": 1},
@@ -163,9 +247,7 @@ mod tests {
 
     #[test]
     fn test_fallback_plan() {
-        let planner = UiPlanner {
-            router: Arc::new(Router::new().unwrap()),
-        };
+        let planner = UiPlanner { router: None };
 
         let result = planner.fallback_plan("dashboard with charts");
         assert!(result.is_ok());

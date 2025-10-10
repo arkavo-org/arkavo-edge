@@ -163,6 +163,7 @@ impl AgUiGateway {
         let agents_for_ws = discovered_agents.clone();
         let agent_connections_for_ws = self.agent_connections.clone();
         let budget_handler_for_ws = self.budget_handler.clone();
+        let initial_prompt_for_ws = Arc::new(RwLock::new(self.initial_prompt.clone()));
 
         let websocket = warp::path("ws")
             .and(warp::ws())
@@ -170,8 +171,9 @@ impl AgUiGateway {
             .and(warp::any().map(move || agents_for_ws.clone()))
             .and(warp::any().map(move || agent_connections_for_ws.clone()))
             .and(warp::any().map(move || budget_handler_for_ws.clone()))
+            .and(warp::any().map(move || initial_prompt_for_ws.clone()))
             .map(
-                |ws: warp::ws::Ws, connections, agents, agent_connections, budget_handler| {
+                |ws: warp::ws::Ws, connections, agents, agent_connections, budget_handler, initial_prompt| {
                     ws.on_upgrade(move |socket| {
                         handle_websocket(
                             socket,
@@ -179,6 +181,7 @@ impl AgUiGateway {
                             agents,
                             agent_connections,
                             budget_handler,
+                            initial_prompt,
                         )
                     })
                 },
@@ -295,6 +298,7 @@ async fn handle_websocket(
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
+    initial_prompt: Arc<RwLock<Option<String>>>,
 ) {
     use futures::StreamExt;
 
@@ -319,6 +323,30 @@ async fn handle_websocket(
     });
 
     println!("AG-UI: New WebSocket connection: {session_id}");
+
+    // If there's an initial prompt, send it automatically
+    let prompt_guard = initial_prompt.read().await;
+    if let Some(prompt_text) = prompt_guard.as_ref() {
+        println!("AG-UI: Auto-submitting initial prompt: {prompt_text}");
+        let submit_event = AgUiEvent::SubmitPrompt {
+            text: prompt_text.clone(),
+        };
+        drop(prompt_guard);
+
+        if let Err(e) = handle_event(
+            submit_event,
+            &session_id,
+            &connections,
+            &agents,
+            &agent_connections,
+            &budget_handler,
+            &tx,
+        )
+        .await
+        {
+            eprintln!("AG-UI: Error auto-submitting initial prompt: {e}");
+        }
+    }
 
     // Handle incoming messages
     while let Some(result) = ws_stream.next().await {
@@ -687,6 +715,29 @@ async fn handle_event(
                 };
                 tx.send(error).await?;
             }
+        }
+
+        // UI Generation events
+        AgUiEvent::SubmitPrompt { text } => {
+            println!("AG-UI: Received SubmitPrompt: {text}");
+
+            use arkavo_ui_generator::planner::UiPlanner;
+
+            let planner = UiPlanner::new().await?;
+            let plan = planner.plan(&text).await?;
+
+            let parts: Vec<crate::types::UiPlanPart> = plan.parts.iter().map(|p| {
+                crate::types::UiPlanPart {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    description: p.description.clone(),
+                }
+            }).collect();
+
+            println!("AG-UI: Sending Plan event with {} parts to frontend", parts.len());
+            let plan_event = AgUiEvent::Plan { parts };
+            tx.send(plan_event).await?;
+            println!("AG-UI: Plan event sent successfully");
         }
 
         _ => {

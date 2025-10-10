@@ -237,6 +237,57 @@ pub enum AgUiEvent {
         #[serde(rename = "eventId")]
         event_id: String,
     },
+
+    // UI Generation events
+    SubmitPrompt {
+        text: String,
+    },
+    Plan {
+        parts: Vec<UiPlanPart>,
+    },
+    PartStream {
+        #[serde(rename = "partId")]
+        part_id: String,
+        #[serde(rename = "chunkType")]
+        chunk_type: String,
+        content: String,
+        done: bool,
+    },
+    ApplyPart {
+        #[serde(rename = "partId")]
+        part_id: String,
+    },
+    AppliedPart {
+        #[serde(rename = "partId")]
+        part_id: String,
+        #[serde(rename = "versionId")]
+        version_id: String,
+    },
+    CancelGeneration,
+    Undo,
+    Redo,
+    UndoAvailable {
+        #[serde(rename = "canUndo")]
+        can_undo: bool,
+        #[serde(rename = "canRedo")]
+        can_redo: bool,
+    },
+    UserEdit {
+        selector: String,
+        action: String,
+        before: String,
+        after: String,
+    },
+    SaveSession {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPlanPart {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
