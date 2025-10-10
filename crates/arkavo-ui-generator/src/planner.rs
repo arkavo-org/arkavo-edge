@@ -1,4 +1,6 @@
 use anyhow::Result;
+use arkavo_llm::local::LocalProvider;
+use arkavo_llm::{Message, Provider};
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -34,13 +36,31 @@ impl UiPlanner {
     }
 
     pub async fn plan(&self, user_prompt: &str) -> Result<BuildPlan> {
-        let _planning_prompt = self.build_planning_prompt(user_prompt);
-
-        if let Some(router) = &self.router {
-            let _decision = router.route(user_prompt).await.ok();
+        if self.router.is_some() {
+            if let Ok(plan) = self.try_llm_plan(user_prompt).await {
+                println!("UiPlanner: Using LLM-generated plan");
+                return Ok(plan);
+            }
+            eprintln!("UiPlanner: LLM planning failed, using fallback");
         }
 
         self.fallback_plan(user_prompt)
+    }
+
+    async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
+        let planning_prompt = self.build_planning_prompt(user_prompt);
+
+        let provider = LocalProvider::new(
+            "gemma-3-270m-it".to_string(),
+            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+        )?;
+        provider.initialize().await?;
+
+        let response = provider
+            .complete(vec![Message::user(planning_prompt)])
+            .await?;
+
+        self.parse_plan(&response)
     }
 
     fn build_planning_prompt(&self, user_prompt: &str) -> String {
@@ -66,7 +86,6 @@ Return ONLY the JSON array, nothing else."#
         )
     }
 
-    #[allow(dead_code)]
     fn parse_plan(&self, response: &str) -> Result<BuildPlan> {
         let trimmed = response.trim();
         let json_str = if let Some(start) = trimmed.find('[') {
@@ -142,6 +161,32 @@ Return ONLY the JSON array, nothing else."#
                 id: format!("part-{part_id}"),
                 name: "Performance Chart".to_string(),
                 description: "Line chart showing portfolio value over time".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+        }
+
+        if keywords.contains("calculator") || keywords.contains("calc") {
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Calculator Display".to_string(),
+                description: "Numeric display showing current value and operations".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Number Pad".to_string(),
+                description: "Grid of buttons for digits 0-9".to_string(),
+                priority: part_id,
+            });
+            part_id += 1;
+
+            parts.push(ComponentPart {
+                id: format!("part-{part_id}"),
+                name: "Operation Buttons".to_string(),
+                description: "Buttons for +, -, *, /, =, and clear".to_string(),
                 priority: part_id,
             });
             part_id += 1;

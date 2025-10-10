@@ -18,7 +18,7 @@ tracing = { workspace = true }
 
 # Arkavo dependencies
 arkavo-router = { path = "../arkavo-router" }
-arkavo-llm = { path = "../arkavo-llm" }
+arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 
