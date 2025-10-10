@@ -34,6 +34,45 @@ pub struct LocalProvider {
 }
 
 impl LocalProvider {
+    /// Resolve a HuggingFace repo ID to an actual .gguf file path in the cache
+    fn resolve_hf_repo_to_path(repo_id: &str) -> Option<String> {
+        // Convert repo ID like "unsloth/gemma-3-270m-it-GGUF" to cache directory name
+        // "models--unsloth--gemma-3-270m-it-GGUF"
+        let cache_dir_name = format!("models--{}", repo_id.replace('/', "--"));
+
+        // Get HuggingFace cache directory
+        let home = dirs::home_dir()?;
+        let cache_base = home.join(".cache/huggingface/hub");
+        let repo_path = cache_base.join(&cache_dir_name);
+
+        if !repo_path.exists() {
+            tracing::warn!("HuggingFace cache directory not found: {}", repo_path.display());
+            return None;
+        }
+
+        // Look in snapshots directory
+        let snapshots_dir = repo_path.join("snapshots");
+        if let Ok(entries) = std::fs::read_dir(&snapshots_dir) {
+            for entry in entries.flatten() {
+                let snapshot_path = entry.path();
+                // Find first .gguf file in this snapshot
+                if let Ok(files) = std::fs::read_dir(&snapshot_path) {
+                    for file in files.flatten() {
+                        let file_path = file.path();
+                        if file_path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+                            let path_str = file_path.to_string_lossy().to_string();
+                            tracing::info!("Resolved repo ID '{}' to model file: {}", repo_id, path_str);
+                            return Some(path_str);
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::warn!("No .gguf file found for repo ID: {}", repo_id);
+        None
+    }
+
     pub fn new(model_name: String, model_path: Option<String>) -> Result<Self> {
         #[cfg(not(feature = "llm-local"))]
         {
@@ -44,7 +83,18 @@ impl LocalProvider {
 
         #[cfg(feature = "llm-local")]
         {
-            let model_loader = ModelLoader::new(&model_name, model_path.as_deref())?;
+            // Resolve model path - if it contains '/', it's likely a repo ID
+            let resolved_path = model_path.as_ref().and_then(|path| {
+                if path.contains('/') && !path.starts_with('/') {
+                    // Looks like a repo ID (e.g., "unsloth/gemma-3-270m-it-GGUF")
+                    Self::resolve_hf_repo_to_path(path)
+                } else {
+                    // It's already a file path
+                    Some(path.clone())
+                }
+            }).or(model_path);
+
+            let model_loader = ModelLoader::new(&model_name, resolved_path.as_deref())?;
 
             Ok(Self {
                 inner: Arc::new(Mutex::new(Inner {

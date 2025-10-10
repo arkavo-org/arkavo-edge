@@ -38,7 +38,7 @@ pub struct GeneratedComponent {
 }
 
 pub struct StreamingGenerator {
-    router: Arc<Router>,
+    router: Option<Arc<Router>>,
     html_pattern: Regex,
     css_pattern: Regex,
     js_pattern: Regex,
@@ -47,7 +47,16 @@ pub struct StreamingGenerator {
 impl StreamingGenerator {
     pub fn new(router: Arc<Router>) -> Result<Self> {
         Ok(Self {
-            router,
+            router: Some(router),
+            html_pattern: Regex::new(r"(?s)```html\s*(.*?)```")?,
+            css_pattern: Regex::new(r"(?s)```css\s*(.*?)```")?,
+            js_pattern: Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```")?,
+        })
+    }
+
+    pub fn new_without_router() -> Result<Self> {
+        Ok(Self {
+            router: None,
             html_pattern: Regex::new(r"(?s)```html\s*(.*?)```")?,
             css_pattern: Regex::new(r"(?s)```css\s*(.*?)```")?,
             js_pattern: Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```")?,
@@ -70,7 +79,9 @@ impl StreamingGenerator {
         let js_pattern = self.js_pattern.clone();
 
         tokio::spawn(async move {
-            let _decision = router.route(&prompt).await;
+            if let Some(router_instance) = router {
+                let _decision = router_instance.route(&prompt).await;
+            }
 
             if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
                 use arkavo_gemini::RestClient;

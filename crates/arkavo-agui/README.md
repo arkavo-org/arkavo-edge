@@ -70,13 +70,36 @@ The system will:
 
 - `mdns`: Enable mDNS service discovery (enabled by default)
 
-## Development
+## Testing
+
+### Integration Tests
+
+Comprehensive E2E tests with browser screenshot validation:
+
+```bash
+# Set Gemini API key
+export GEMINI_API_KEY="your-api-key"
+
+# Run all integration tests
+cd crates/arkavo-ui-generator
+./run_integration_tests.sh
+
+# Run specific test
+cargo test --test integration_test test_calculator_ui_generation -- --ignored --nocapture
+```
+
+Tests generate screenshots in `target/test-output/` for visual validation.
+
+See [arkavo-ui-generator/TESTING.md](../arkavo-ui-generator/TESTING.md) for complete testing guide.
+
+### Development
 
 Build and run tests:
 
 ```bash
 cargo build -p arkavo-agui
 cargo test -p arkavo-agui
+cargo test -p arkavo-ui-generator  # Unit tests
 ```
 
 ## Dependencies

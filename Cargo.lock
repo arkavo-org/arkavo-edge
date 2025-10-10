@@ -859,10 +859,13 @@ name = "arkavo-ui-generator"
 version = "0.36.0"
 dependencies = [
  "anyhow",
+ "arkavo-browser",
  "arkavo-events",
  "arkavo-gemini",
  "arkavo-llm",
  "arkavo-router",
+ "chromiumoxide",
+ "futures",
  "handlebars",
  "regex",
  "serde",
