@@ -104,9 +104,15 @@ impl Router {
         self.metrics.read().await.clone()
     }
 
-    /// Get a reference to the local provider for direct LLM completions
+    /// Get a reference to the local provider for simple classification tasks
     pub fn get_local_provider(&self) -> Arc<TaskClassifier> {
         self.classifier.clone()
+    }
+
+    /// Get a Gemini provider for complex planning/thinking tasks
+    pub fn get_planning_provider(&self) -> crate::Result<arkavo_llm::GeminiProvider> {
+        arkavo_llm::GeminiProvider::new()
+            .map_err(crate::Error::Provider)
     }
 }
 

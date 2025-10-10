@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_llm::Message;
+use arkavo_llm::{Message, Provider};
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -41,12 +41,14 @@ impl UiPlanner {
     async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
         let planning_prompt = self.build_planning_prompt(user_prompt);
 
-        let classifier = self.router.get_local_provider();
+        let gemini_provider = self.router
+            .get_planning_provider()
+            .map_err(|e| anyhow::anyhow!("Failed to get planning provider: {e}"))?;
 
-        let response = classifier
+        let response = gemini_provider
             .complete(vec![Message::user(planning_prompt)])
             .await
-            .map_err(|e| anyhow::anyhow!("LLM planning failed: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Gemini planning failed: {e}"))?;
 
         self.parse_plan(&response)
     }

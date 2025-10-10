@@ -20,7 +20,7 @@ reqwest = { workspace = true }
 hf-hub = { workspace = true }
 
 # Internal dependencies
-arkavo-llm = { path = "../arkavo-llm", features = ["llm-local", "llama-cpp"] }
+arkavo-llm = { path = "../arkavo-llm", features = ["llm-local", "llama-cpp", "gemini"] }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-context = { path = "../arkavo-context" }
