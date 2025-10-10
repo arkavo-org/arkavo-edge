@@ -28,6 +28,8 @@ pub struct AgUiGateway {
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
+    blank_mode: bool,
+    initial_prompt: Option<String>,
 }
 
 impl AgUiGateway {
@@ -43,7 +45,17 @@ impl AgUiGateway {
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
             debug_handler: None,
+            blank_mode: false,
+            initial_prompt: None,
         }
+    }
+
+    pub fn set_blank_mode(&mut self, blank: bool) {
+        self.blank_mode = blank;
+    }
+
+    pub fn set_initial_prompt(&mut self, prompt: String) {
+        self.initial_prompt = Some(prompt);
     }
 
     pub async fn with_debug_handler(
@@ -120,9 +132,27 @@ impl AgUiGateway {
         });
 
         // Serve static files
+        let blank_mode = self.blank_mode;
         let index_file = warp::get()
             .and(warp::path::end())
-            .map(|| warp::reply::html(include_str!("../static/dashboard.html")));
+            .map(move || {
+                if blank_mode {
+                    warp::reply::html(include_str!("../static/shell.html"))
+                } else {
+                    warp::reply::html(include_str!("../static/dashboard.html"))
+                }
+            });
+
+        let static_js = warp::path("static")
+            .and(warp::path("toolbar.js"))
+            .and(warp::get())
+            .map(|| {
+                warp::reply::with_header(
+                    include_str!("../static/toolbar.js"),
+                    "Content-Type",
+                    "application/javascript"
+                )
+            });
 
         let chat_ui = warp::path("chat")
             .and(warp::get())
@@ -235,6 +265,7 @@ impl AgUiGateway {
             );
 
         let routes = index_file
+            .or(static_js)
             .or(chat_ui)
             .or(websocket)
             .or(agent_events)

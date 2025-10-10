@@ -1,0 +1,27 @@
+[package]
+name = "arkavo-ui-generator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AI-driven UI code generation for Arkavo Edge"
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Arkavo dependencies
+arkavo-router = { path = "../arkavo-router" }
+arkavo-llm = { path = "../arkavo-llm" }
+arkavo-events = { path = "../arkavo-events" }
+
+# Template rendering
+handlebars = { workspace = true }
+regex = { workspace = true }
+uuid = { workspace = true }
