@@ -1,10 +1,14 @@
 use crate::decision::TokenEstimate;
 use crate::{Error, Result};
-use arkavo_llm::local::LocalProvider;
 use arkavo_llm::{Message, Provider, Role};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+#[cfg(feature = "llama-cpp")]
+use arkavo_llm::LlamaCppProvider;
+#[cfg(not(feature = "llama-cpp"))]
+use arkavo_llm::local::LocalProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum TaskCategory {
@@ -98,22 +102,58 @@ pub struct Classification {
 }
 
 pub struct TaskClassifier {
+    #[cfg(feature = "llama-cpp")]
+    provider: Arc<Mutex<LlamaCppProvider>>,
+    #[cfg(not(feature = "llama-cpp"))]
     provider: Arc<Mutex<LocalProvider>>,
 }
 
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        let provider = LocalProvider::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
-        )
-        .map_err(Error::Provider)?;
+        #[cfg(feature = "llama-cpp")]
+        {
+            // Use llama.cpp provider which has built-in tokenizer support
+            use hf_hub::api::tokio::Api;
 
-        provider.initialize().await.map_err(Error::Provider)?;
+            let api = Api::new().map_err(|e| {
+                Error::Provider(arkavo_llm::Error::Config(format!(
+                    "Failed to initialize HF API: {e}"
+                )))
+            })?;
+            let repo = api.repo(hf_hub::Repo::model(
+                "unsloth/gemma-3-270m-it-GGUF".to_string(),
+            ));
+            let model_path = repo.get("gemma-3-270m-it-Q4_0.gguf").await.map_err(|e| {
+                Error::Provider(arkavo_llm::Error::Config(format!(
+                    "Failed to download model: {e}"
+                )))
+            })?;
 
-        Ok(Self {
-            provider: Arc::new(Mutex::new(provider)),
-        })
+            let provider = LlamaCppProvider::new(
+                "gemma-3-270m-it".to_string(),
+                model_path.to_string_lossy().to_string(),
+            )
+            .map_err(Error::Provider)?;
+
+            Ok(Self {
+                provider: Arc::new(Mutex::new(provider)),
+            })
+        }
+
+        #[cfg(not(feature = "llama-cpp"))]
+        {
+            let provider = LocalProvider::new(
+                "gemma-3-270m-it".to_string(),
+                Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+            )
+            .map_err(Error::Provider)?;
+
+            provider.initialize().await.map_err(Error::Provider)?;
+
+            Ok(Self {
+                provider: Arc::new(Mutex::new(provider)),
+            })
+        }
     }
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {

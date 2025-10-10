@@ -60,12 +60,10 @@ impl Default for UiHandler {
 pub fn create_ui_routes(
     _handler: Arc<UiHandler>,
 ) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    let generate_route = warp::path!("api" / "ui" / "generate")
+    warp::path!("api" / "ui" / "generate")
         .and(warp::post())
         .and(warp::body::json())
-        .and_then(UiHandler::handle_generate);
-
-    generate_route
+        .and_then(UiHandler::handle_generate)
 }
 
 #[cfg(test)]

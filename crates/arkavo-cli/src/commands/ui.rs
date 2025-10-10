@@ -53,7 +53,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if let Some(prompt) = initial_prompt {
-            println!("Starting UI with initial prompt: {}", prompt);
+            println!("Starting UI with initial prompt: {prompt}");
             println!("UI will generate incrementally - you can interrupt and modify at any time");
             gateway.set_initial_prompt(prompt);
         }

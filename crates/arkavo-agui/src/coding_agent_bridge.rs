@@ -65,7 +65,7 @@ impl CodingAgentBridge {
             ChangeType::NewComponent => "User added a new component",
         };
 
-        let mut prompt = format!("Task: Review and improve this UI code change\n\n");
+        let mut prompt = "Task: Review and improve this UI code change\n\n".to_string();
         prompt.push_str(&format!("Change Type: {change_desc}\n\n"));
 
         if let Some(desc) = &request.user_description {
