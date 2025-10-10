@@ -4,6 +4,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+// StreamExt trait provides .next() method for stream iteration
+#[allow(unused_imports)]
+use tokio_stream::StreamExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamChunk {
@@ -90,47 +93,68 @@ impl StreamingGenerator {
                     std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
                 let client = RestClient::new(api_key, model);
 
-                match client.generate_content(&prompt, None).await {
-                    Ok((Some(response_text), _)) => {
-                        let component = Self::parse_component(
-                            &response_text,
-                            &html_pattern,
-                            &css_pattern,
-                            &js_pattern,
-                        );
+                // Use streaming API for real-time incremental generation
+                match client.stream_generate_content(&prompt, None).await {
+                    Ok(mut stream) => {
+                        let mut accumulated_text = String::new();
 
-                        if !component.html.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::Html,
-                                    content: component.html.clone(),
-                                    done: false,
-                                })
-                                .await;
-                        }
+                        while let Some(result) = stream.next().await {
+                            match result {
+                                Ok(chunk) => {
+                                    if let Some(text) = chunk.text {
+                                        accumulated_text.push_str(&text);
+                                    }
 
-                        if !component.css.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::Css,
-                                    content: component.css.clone(),
-                                    done: false,
-                                })
-                                .await;
-                        }
+                                    // Parse accumulated text to extract HTML/CSS/JS incrementally
+                                    let component = Self::parse_component(
+                                        &accumulated_text,
+                                        &html_pattern,
+                                        &css_pattern,
+                                        &js_pattern,
+                                    );
 
-                        if !component.javascript.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::JavaScript,
-                                    content: component.javascript.clone(),
-                                    done: false,
-                                })
-                                .await;
+                                    // Send incremental updates as they become available
+                                    if !component.html.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::Html,
+                                                content: component.html.clone(),
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+
+                                    if !component.css.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::Css,
+                                                content: component.css.clone(),
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+
+                                    if !component.javascript.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::JavaScript,
+                                                content: component.javascript.clone(),
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+
+                                    // Check if stream is done
+                                    if chunk.done {
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Gemini streaming error: {e}");
+                                    break;
+                                }
+                            }
                         }
-                    }
-                    Ok((None, _)) => {
-                        eprintln!("Gemini returned no text");
                     }
                     Err(e) => {
                         eprintln!("Gemini API error: {e}");
@@ -140,6 +164,7 @@ impl StreamingGenerator {
                 eprintln!("GEMINI_API_KEY not set, using fallback");
             }
 
+            // Send final done signal
             let _ = tx
                 .send(StreamChunk {
                     chunk_type: ChunkType::Html,
@@ -161,32 +186,54 @@ Overall Context: {context}
 
 Requirements:
 - Provide complete, production-ready HTML, CSS, and JavaScript
-- Use semantic HTML5
-- Make it accessible (ARIA labels, keyboard navigation)
-- Use modern CSS (flexbox/grid, no hardcoded sizes)
-- Dark theme by default
-- No placeholders or TODOs
-- No external dependencies (vanilla JS only)
-- Include realistic sample data
+- Use semantic HTML5 with proper structure
+- Make it fully accessible (ARIA labels, keyboard navigation, screen reader support)
+- Use modern CSS (flexbox/grid, CSS variables for theming)
+- Dark theme by default with these colors:
+  - Background: #0f172a (slate-900)
+  - Secondary: #1e293b (slate-800)
+  - Text: #e2e8f0 (slate-200)
+  - Accent: #3b82f6 (blue-500)
+  - Border: #334155 (slate-700)
+- NO placeholders, TODOs, or "Add your X here" comments
+- NO external dependencies (vanilla JS only, no frameworks)
+- Include realistic sample data that demonstrates functionality
+- Responsive design (works on mobile and desktop)
+- Smooth animations and transitions (use CSS transitions)
+- Interactive elements should have hover/focus states
+- If data-driven, show at least 3-5 realistic examples
+
+CSS Best Practices:
+- Use CSS custom properties for colors/spacing
+- Mobile-first responsive design
+- Proper spacing with consistent units (rem/em)
+- Smooth transitions (0.2s ease-in-out)
+
+JavaScript Best Practices:
+- Use modern ES6+ syntax (const/let, arrow functions, template literals)
+- Add event listeners properly (no inline handlers)
+- Handle edge cases (empty states, loading states)
+- Use meaningful variable names
 
 Format your response as:
 ```html
 <div class="component-name">
-  <!-- Your HTML here -->
+  <!-- Your complete HTML structure here -->
 </div>
 ```
 
 ```css
 .component-name {{
-  /* Your CSS here */
+  /* Your complete CSS with custom properties */
 }}
 ```
 
 ```javascript
-// Your JavaScript here (if needed)
+// Your complete JavaScript implementation (if needed)
+// Include event handlers, data manipulation, etc.
 ```
 
-Generate now:"#
+Generate the complete, production-ready component now:"#
         )
     }
 

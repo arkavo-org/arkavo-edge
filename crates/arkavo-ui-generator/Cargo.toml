@@ -10,6 +10,7 @@ description = "AI-driven UI code generation for Arkavo Edge"
 [dependencies]
 # Core dependencies
 tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
