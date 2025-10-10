@@ -8,7 +8,7 @@ use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test directory for screenshots and artifacts
 fn test_output_dir() -> PathBuf {
@@ -34,21 +34,22 @@ async fn test_calculator_ui_generation() -> Result<()> {
     )
     .await?;
 
-    let browser_handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let browser_handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page("about:blank").await?;
     let injector = LiveInjector::new(page.clone());
 
-    // Step 1: Plan the UI
-    println!("📋 Step 1: Planning UI components...");
-    let planner = UiPlanner::new().await?;
+    // Step 1: Create router once
+    println!("📋 Step 1: Initializing Router...");
+    let router = Arc::new(Router::new().await?);
+
+    // Step 2: Plan the UI
+    println!("📋 Step 2: Planning UI components...");
+    let planner = UiPlanner::new(router.clone());
     let plan = planner.plan("Build a calculator").await?;
     println!("   Generated {} components", plan.parts.len());
 
-    // Step 2: Generate each component
-    let router = Arc::new(Router::new().await?);
+    // Step 3: Generate each component
     let generator = StreamingGenerator::new(router)?;
 
     for (i, part) in plan.parts.iter().enumerate() {
@@ -91,24 +92,21 @@ async fn test_calculator_ui_generation() -> Result<()> {
         sleep(Duration::from_millis(500)).await;
 
         // Take screenshot
-        let screenshot_path = test_output_dir()
-            .join(format!("calculator_step_{:02}_{}.png", i + 2, sanitize_filename(&part.name)));
+        let screenshot_path = test_output_dir().join(format!(
+            "calculator_step_{:02}_{}.png",
+            i + 2,
+            sanitize_filename(&part.name)
+        ));
         let screenshot = page.screenshot(ScreenshotParams::default()).await?;
         tokio::fs::write(&screenshot_path, screenshot).await?;
-        println!(
-            "   📸 Screenshot saved: {}",
-            screenshot_path.display()
-        );
+        println!("   📸 Screenshot saved: {}", screenshot_path.display());
     }
 
     // Final screenshot
     let final_screenshot_path = test_output_dir().join("calculator_final.png");
     let final_screenshot = page.screenshot(ScreenshotParams::default()).await?;
     tokio::fs::write(&final_screenshot_path, final_screenshot).await?;
-    println!(
-        "\n✅ Final screenshot: {}",
-        final_screenshot_path.display()
-    );
+    println!("\n✅ Final screenshot: {}", final_screenshot_path.display());
 
     browser_handle.abort();
     Ok(())
@@ -128,9 +126,7 @@ async fn test_dashboard_ui_generation() -> Result<()> {
     )
     .await?;
 
-    let browser_handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let browser_handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page("about:blank").await?;
     let injector = LiveInjector::new(page.clone());
@@ -151,17 +147,22 @@ async fn test_dashboard_ui_generation() -> Result<()> {
         )
         .await?;
 
-    let planner = UiPlanner::new().await?;
+    let router = Arc::new(Router::new().await?);
+    let planner = UiPlanner::new(router.clone());
     let plan = planner
         .plan("Build a dashboard with charts and metrics")
         .await?;
     println!("   Generated {} components", plan.parts.len());
 
-    let router = Arc::new(Router::new().await?);
     let generator = StreamingGenerator::new(router)?;
 
     for (i, part) in plan.parts.iter().enumerate() {
-        println!("\n🎨 Generating component {}/{}: {}", i + 1, plan.parts.len(), part.name);
+        println!(
+            "\n🎨 Generating component {}/{}: {}",
+            i + 1,
+            plan.parts.len(),
+            part.name
+        );
 
         let mut stream = generator
             .generate_part(
@@ -198,8 +199,11 @@ async fn test_dashboard_ui_generation() -> Result<()> {
 
         sleep(Duration::from_millis(500)).await;
 
-        let screenshot_path = test_output_dir()
-            .join(format!("dashboard_part_{:02}_{}.png", i + 1, sanitize_filename(&part.name)));
+        let screenshot_path = test_output_dir().join(format!(
+            "dashboard_part_{:02}_{}.png",
+            i + 1,
+            sanitize_filename(&part.name)
+        ));
         let screenshot = page.screenshot(ScreenshotParams::default()).await?;
         tokio::fs::write(&screenshot_path, screenshot).await?;
         println!("   📸 Screenshot: {}", screenshot_path.display());
@@ -228,19 +232,17 @@ async fn test_form_ui_generation() -> Result<()> {
     )
     .await?;
 
-    let browser_handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let browser_handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page("about:blank").await?;
     let injector = LiveInjector::new(page.clone());
 
-    let planner = UiPlanner::new().await?;
+    let router = Arc::new(Router::new().await?);
+    let planner = UiPlanner::new(router.clone());
     let plan = planner
         .plan("Build a user registration form with validation")
         .await?;
 
-    let router = Arc::new(Router::new().await?);
     let generator = StreamingGenerator::new(router)?;
 
     for (i, part) in plan.parts.iter().enumerate() {
@@ -281,8 +283,11 @@ async fn test_form_ui_generation() -> Result<()> {
 
         sleep(Duration::from_millis(500)).await;
 
-        let screenshot_path = test_output_dir()
-            .join(format!("form_part_{:02}_{}.png", i + 1, sanitize_filename(&part.name)));
+        let screenshot_path = test_output_dir().join(format!(
+            "form_part_{:02}_{}.png",
+            i + 1,
+            sanitize_filename(&part.name)
+        ));
         let screenshot = page.screenshot(ScreenshotParams::default()).await?;
         tokio::fs::write(&screenshot_path, screenshot).await?;
         println!("   📸 Screenshot: {}", screenshot_path.display());
@@ -306,9 +311,7 @@ async fn test_bank_portfolio_ui() -> Result<()> {
     )
     .await?;
 
-    let browser_handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let browser_handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page("about:blank").await?;
     let injector = LiveInjector::new(page.clone());
@@ -328,18 +331,23 @@ async fn test_bank_portfolio_ui() -> Result<()> {
         )
         .await?;
 
-    let planner = UiPlanner::new().await?;
+    let router = Arc::new(Router::new().await?);
+    let planner = UiPlanner::new(router.clone());
     let plan = planner
         .plan("Build a bank account and stock portfolio page")
         .await?;
 
     println!("   Generated {} components", plan.parts.len());
 
-    let router = Arc::new(Router::new().await?);
     let generator = StreamingGenerator::new(router)?;
 
     for (i, part) in plan.parts.iter().enumerate() {
-        println!("\n🎨 Component {}/{}: {}", i + 1, plan.parts.len(), part.name);
+        println!(
+            "\n🎨 Component {}/{}: {}",
+            i + 1,
+            plan.parts.len(),
+            part.name
+        );
 
         let mut stream = generator
             .generate_part(
@@ -376,8 +384,11 @@ async fn test_bank_portfolio_ui() -> Result<()> {
 
         sleep(Duration::from_millis(500)).await;
 
-        let screenshot_path = test_output_dir()
-            .join(format!("bank_portfolio_{:02}_{}.png", i + 1, sanitize_filename(&part.name)));
+        let screenshot_path = test_output_dir().join(format!(
+            "bank_portfolio_{:02}_{}.png",
+            i + 1,
+            sanitize_filename(&part.name)
+        ));
         let screenshot = page.screenshot(ScreenshotParams::default()).await?;
         tokio::fs::write(&screenshot_path, screenshot).await?;
         println!("   📸 Saved: {}", screenshot_path.display());
@@ -399,9 +410,7 @@ async fn test_incremental_updates() -> Result<()> {
     println!("\n🧪 Testing: Incremental UI Updates");
 
     let (browser, mut handler) = Browser::launch(BrowserConfig::builder().build().unwrap()).await?;
-    let browser_handle = tokio::spawn(async move {
-        while handler.next().await.is_some() {}
-    });
+    let browser_handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let page = browser.new_page("about:blank").await?;
     let injector = LiveInjector::new(page.clone());
@@ -435,7 +444,10 @@ async fn test_incremental_updates() -> Result<()> {
 
     // Check changes were captured
     let changes = injector.get_captured_changes().await?;
-    println!("   Captured {} DOM changes", changes.as_array().map(|a| a.len()).unwrap_or(0));
+    println!(
+        "   Captured {} DOM changes",
+        changes.as_array().map(|a| a.len()).unwrap_or(0)
+    );
 
     browser_handle.abort();
     Ok(())
@@ -467,8 +479,14 @@ mod screenshot_validation {
 
     #[test]
     fn test_filename_sanitization() {
-        assert_eq!(sanitize_filename("Account Summary Card"), "account_summary_card");
+        assert_eq!(
+            sanitize_filename("Account Summary Card"),
+            "account_summary_card"
+        );
         assert_eq!(sanitize_filename("Header (Top)"), "header__top_");
-        assert_eq!(sanitize_filename("Portfolio Chart 📊"), "portfolio_chart___");
+        assert_eq!(
+            sanitize_filename("Portfolio Chart 📊"),
+            "portfolio_chart___"
+        );
     }
 }

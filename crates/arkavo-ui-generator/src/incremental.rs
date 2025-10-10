@@ -101,7 +101,8 @@ impl IncrementalUiBuilder {
             <span class="last-updated">Last updated: <span id="lastUpdate">Just now</span></span>
         </div>
     </div>
-</div>"#.to_string();
+</div>"#
+            .to_string();
 
         let css = r#"
 .account-header {
@@ -124,12 +125,14 @@ impl IncrementalUiBuilder {
     align-items: center;
     font-size: 0.9rem;
     opacity: 0.9;
-}"#.to_string();
+}"#
+        .to_string();
 
         let js = r#"
 setInterval(() => {
     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-}, 1000);"#.to_string();
+}, 1000);"#
+            .to_string();
 
         (html, css, js)
     }
@@ -152,7 +155,8 @@ setInterval(() => {
         <div class="card-amount">$123,456.78</div>
         <div class="card-change negative">-1.3% this month</div>
     </div>
-</div>"#.to_string();
+</div>"#
+            .to_string();
 
         let css = r#"
 .balance-cards {
@@ -198,7 +202,8 @@ setInterval(() => {
 
 .card-change.negative {
     color: #ef4444;
-}"#.to_string();
+}"#
+        .to_string();
 
         (html, css, String::new())
     }
@@ -233,7 +238,8 @@ setInterval(() => {
             <div class="transaction-amount negative">-$234.56</div>
         </div>
     </div>
-</div>"#.to_string();
+</div>"#
+            .to_string();
 
         let css = r#"
 .transactions-section {
@@ -297,7 +303,8 @@ setInterval(() => {
 
 .transaction-amount.negative {
     color: #ef4444;
-}"#.to_string();
+}"#
+        .to_string();
 
         (html, css, String::new())
     }
@@ -340,7 +347,8 @@ setInterval(() => {
             </tr>
         </tbody>
     </table>
-</div>"#.to_string();
+</div>"#
+            .to_string();
 
         let css = r#"
 .portfolio-section {
@@ -391,7 +399,8 @@ setInterval(() => {
 .negative {
     color: #ef4444;
     font-weight: 500;
-}"#.to_string();
+}"#
+        .to_string();
 
         (html, css, String::new())
     }
@@ -401,7 +410,8 @@ setInterval(() => {
 <div class="chart-section">
     <h2>Portfolio Performance</h2>
     <canvas id="performanceChart" width="800" height="400"></canvas>
-</div>"#.to_string();
+</div>"#
+            .to_string();
 
         let css = r#"
 .chart-section {
@@ -419,7 +429,8 @@ setInterval(() => {
 #performanceChart {
     max-width: 100%;
     height: auto;
-}"#.to_string();
+}"#
+        .to_string();
 
         let js = r#"
 const ctx = document.getElementById('performanceChart').getContext('2d');
@@ -439,7 +450,8 @@ points.forEach((y, i) => {
     if (i === 0) ctx.moveTo(x, 400 - y);
     else ctx.lineTo(x, 400 - y);
 });
-ctx.stroke();"#.to_string();
+ctx.stroke();"#
+            .to_string();
 
         (html, css, js)
     }
@@ -475,8 +487,16 @@ ctx.stroke();"#.to_string();
     pub async fn combine_parts(&self) -> (String, String, String) {
         let parts = self.get_all_parts().await;
 
-        let html = parts.iter().map(|p| p.html.as_str()).collect::<Vec<_>>().join("\n");
-        let css = parts.iter().map(|p| p.css.as_str()).collect::<Vec<_>>().join("\n");
+        let html = parts
+            .iter()
+            .map(|p| p.html.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let css = parts
+            .iter()
+            .map(|p| p.css.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let js = parts
             .iter()
             .map(|p| p.javascript.as_str())

@@ -138,6 +138,15 @@ impl TaskClassifier {
         Ok(llm_classification)
     }
 
+    /// Complete an LLM prompt using the local provider
+    pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+        let provider = self.provider.lock().await;
+        provider
+            .complete(messages)
+            .await
+            .map_err(|e| Error::Classification(format!("LLM completion failed: {e}")))
+    }
+
     fn try_rule_based_classification(&self, task: &str) -> Classification {
         let task_lower = task.to_lowercase();
 

@@ -46,7 +46,10 @@ impl LocalProvider {
         let repo_path = cache_base.join(&cache_dir_name);
 
         if !repo_path.exists() {
-            tracing::warn!("HuggingFace cache directory not found: {}", repo_path.display());
+            tracing::warn!(
+                "HuggingFace cache directory not found: {}",
+                repo_path.display()
+            );
             return None;
         }
 
@@ -61,7 +64,11 @@ impl LocalProvider {
                         let file_path = file.path();
                         if file_path.extension().and_then(|s| s.to_str()) == Some("gguf") {
                             let path_str = file_path.to_string_lossy().to_string();
-                            tracing::info!("Resolved repo ID '{}' to model file: {}", repo_id, path_str);
+                            tracing::info!(
+                                "Resolved repo ID '{}' to model file: {}",
+                                repo_id,
+                                path_str
+                            );
                             return Some(path_str);
                         }
                     }
@@ -84,15 +91,18 @@ impl LocalProvider {
         #[cfg(feature = "llm-local")]
         {
             // Resolve model path - if it contains '/', it's likely a repo ID
-            let resolved_path = model_path.as_ref().and_then(|path| {
-                if path.contains('/') && !path.starts_with('/') {
-                    // Looks like a repo ID (e.g., "unsloth/gemma-3-270m-it-GGUF")
-                    Self::resolve_hf_repo_to_path(path)
-                } else {
-                    // It's already a file path
-                    Some(path.clone())
-                }
-            }).or(model_path);
+            let resolved_path = model_path
+                .as_ref()
+                .and_then(|path| {
+                    if path.contains('/') && !path.starts_with('/') {
+                        // Looks like a repo ID (e.g., "unsloth/gemma-3-270m-it-GGUF")
+                        Self::resolve_hf_repo_to_path(path)
+                    } else {
+                        // It's already a file path
+                        Some(path.clone())
+                    }
+                })
+                .or(model_path);
 
             let model_loader = ModelLoader::new(&model_name, resolved_path.as_deref())?;
 

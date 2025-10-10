@@ -275,3 +275,4 @@ When `ARKAVO_DEBUG_CHAT=1`:
   verbose debug statements are suppressed. To enable them for debugging, users can run:
 
   ARKAVO_DEBUG_CHAT=1 arkavo chat --prompt "test"
+- don't build --release while we are in development mode, use debug

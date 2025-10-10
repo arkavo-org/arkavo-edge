@@ -103,6 +103,11 @@ impl Router {
     pub async fn get_metrics(&self) -> RoutingMetrics {
         self.metrics.read().await.clone()
     }
+
+    /// Get a reference to the local provider for direct LLM completions
+    pub fn get_local_provider(&self) -> Arc<TaskClassifier> {
+        self.classifier.clone()
+    }
 }
 
 #[cfg(test)]

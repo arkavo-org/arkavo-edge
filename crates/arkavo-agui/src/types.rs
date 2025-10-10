@@ -245,6 +245,15 @@ pub enum AgUiEvent {
     Plan {
         parts: Vec<UiPlanPart>,
     },
+    RequestStatus,
+    StatusUpdate {
+        system: SystemStatus,
+        #[serde(rename = "mcpTools")]
+        mcp_tools: McpToolsStatus,
+        #[serde(rename = "remoteLlm")]
+        remote_llm: RemoteLlmStatus,
+        timestamp: String,
+    },
     PartStream {
         #[serde(rename = "partId")]
         part_id: String,
@@ -418,4 +427,25 @@ pub enum ConfigErrorInfo {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemStatus {
+    pub uptime: String,
+    pub memory_usage: String,
+    pub active_connections: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolsStatus {
+    pub browser_available: bool,
+    pub tools_count: usize,
+    pub last_used: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteLlmStatus {
+    pub connected: bool,
+    pub model: String,
+    pub requests_today: u32,
 }

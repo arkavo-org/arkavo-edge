@@ -12,6 +12,7 @@ categories = ["development-tools"]
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-git = { path = "../arkavo-git" }
+arkavo-browser = { path = "../arkavo-browser" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -1,5 +1,6 @@
 #![allow(clippy::uninlined_format_args)]
 
+pub mod browser;
 pub mod code_analysis;
 pub mod filesystem;
 pub mod git;

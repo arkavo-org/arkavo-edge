@@ -7,23 +7,60 @@ use warp::ws::{Message, WebSocket};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum WsMessage {
-    SubmitPrompt { text: String },
-    Plan { parts: Vec<PlanPart> },
-    PartStream { part_id: String, chunk_type: String, content: String, done: bool },
-    ApplyPart { part_id: String },
-    AppliedPart { part_id: String, version_id: String },
+    SubmitPrompt {
+        text: String,
+    },
+    Plan {
+        parts: Vec<PlanPart>,
+    },
+    PartStream {
+        part_id: String,
+        chunk_type: String,
+        content: String,
+        done: bool,
+    },
+    ApplyPart {
+        part_id: String,
+    },
+    AppliedPart {
+        part_id: String,
+        version_id: String,
+    },
     CancelGeneration,
     Undo,
     Redo,
-    UndoAvailable { can_undo: bool, can_redo: bool },
-    UserEdit { selector: String, action: String, before: String, after: String },
-    SaveSession { name: String },
-    Error { message: String },
-    CodeUpdate { update: CodeUpdate },
-    HistoryRequest { limit: usize },
-    HistoryResponse { versions: Vec<String> },
-    RollbackRequest { version_id: String },
-    RollbackResponse { success: bool, message: String },
+    UndoAvailable {
+        can_undo: bool,
+        can_redo: bool,
+    },
+    UserEdit {
+        selector: String,
+        action: String,
+        before: String,
+        after: String,
+    },
+    SaveSession {
+        name: String,
+    },
+    Error {
+        message: String,
+    },
+    CodeUpdate {
+        update: CodeUpdate,
+    },
+    HistoryRequest {
+        limit: usize,
+    },
+    HistoryResponse {
+        versions: Vec<String>,
+    },
+    RollbackRequest {
+        version_id: String,
+    },
+    RollbackResponse {
+        success: bool,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,40 +84,40 @@ pub async fn handle_live_reload_ws(ws: WebSocket, manager: Arc<LiveReloadManager
                 && let Ok(ws_msg) = serde_json::from_str::<WsMessage>(text)
             {
                 match ws_msg {
-                            WsMessage::HistoryRequest { limit } => {
-                                let versions = manager_for_recv.get_version_history(limit).await;
-                                let version_ids: Vec<String> =
-                                    versions.iter().map(|v| v.version_id.clone()).collect();
+                    WsMessage::HistoryRequest { limit } => {
+                        let versions = manager_for_recv.get_version_history(limit).await;
+                        let version_ids: Vec<String> =
+                            versions.iter().map(|v| v.version_id.clone()).collect();
 
-                                let response = WsMessage::HistoryResponse {
-                                    versions: version_ids,
-                                };
+                        let response = WsMessage::HistoryResponse {
+                            versions: version_ids,
+                        };
 
-                                if let Ok(json) = serde_json::to_string(&response) {
-                                    tracing::debug!("History response: {json}");
-                                }
-                            }
-                            WsMessage::RollbackRequest { version_id } => {
-                                let result = manager_for_recv.rollback(&version_id).await;
-                                let response = match result {
-                                    Ok(()) => WsMessage::RollbackResponse {
-                                        success: true,
-                                        message: "Rollback successful".to_string(),
-                                    },
-                                    Err(e) => WsMessage::RollbackResponse {
-                                        success: false,
-                                        message: e.to_string(),
-                                    },
-                                };
-
-                                if let Ok(json) = serde_json::to_string(&response) {
-                                    tracing::debug!("Rollback response: {json}");
-                                }
-                            }
-                            _ => {}
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            tracing::debug!("History response: {json}");
                         }
+                    }
+                    WsMessage::RollbackRequest { version_id } => {
+                        let result = manager_for_recv.rollback(&version_id).await;
+                        let response = match result {
+                            Ok(()) => WsMessage::RollbackResponse {
+                                success: true,
+                                message: "Rollback successful".to_string(),
+                            },
+                            Err(e) => WsMessage::RollbackResponse {
+                                success: false,
+                                message: e.to_string(),
+                            },
+                        };
+
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            tracing::debug!("Rollback response: {json}");
+                        }
+                    }
+                    _ => {}
                 }
             }
+        }
     });
 
     let send_task = tokio::spawn(async move {

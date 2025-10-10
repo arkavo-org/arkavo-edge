@@ -1,6 +1,5 @@
 use anyhow::Result;
-use arkavo_llm::local::LocalProvider;
-use arkavo_llm::{Message, Provider};
+use arkavo_llm::Message;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -19,29 +18,20 @@ pub struct ComponentPart {
 }
 
 pub struct UiPlanner {
-    router: Option<Arc<Router>>,
+    router: Arc<Router>,
 }
 
 impl UiPlanner {
-    pub async fn new() -> Result<Self> {
-        let router = match Router::new().await {
-            Ok(r) => Some(Arc::new(r)),
-            Err(e) => {
-                eprintln!("UiPlanner: Router initialization failed (using fallback only): {e}");
-                None
-            }
-        };
-
-        Ok(Self { router })
+    pub fn new(router: Arc<Router>) -> Self {
+        Self { router }
     }
 
     pub async fn plan(&self, user_prompt: &str) -> Result<BuildPlan> {
-        if self.router.is_none() {
-            anyhow::bail!("Router not available - cannot generate UI plan");
-        }
-
         let plan = self.try_llm_plan(user_prompt).await?;
-        println!("UiPlanner: Using LLM-generated plan with {} parts", plan.parts.len());
+        println!(
+            "UiPlanner: Using LLM-generated plan with {} parts",
+            plan.parts.len()
+        );
         for part in &plan.parts {
             println!("  - {} ({}): {}", part.name, part.id, part.description);
         }
@@ -51,15 +41,12 @@ impl UiPlanner {
     async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
         let planning_prompt = self.build_planning_prompt(user_prompt);
 
-        let provider = LocalProvider::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
-        )?;
-        provider.initialize().await?;
+        let classifier = self.router.get_local_provider();
 
-        let response = provider
+        let response = classifier
             .complete(vec![Message::user(planning_prompt)])
-            .await?;
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM planning failed: {e}"))?;
 
         self.parse_plan(&response)
     }
@@ -107,16 +94,16 @@ Return ONLY the JSON array, nothing else."#
 
         Ok(BuildPlan { parts })
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_plan() {
-        let planner = UiPlanner { router: None };
+    #[tokio::test]
+    async fn test_parse_plan() {
+        let router = Arc::new(Router::new().await.unwrap());
+        let planner = UiPlanner::new(router);
 
         let json = r#"[
             {"id": "part-1", "name": "Header", "description": "Top bar", "priority": 1},

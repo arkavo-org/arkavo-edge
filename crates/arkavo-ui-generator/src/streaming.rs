@@ -86,12 +86,18 @@ impl StreamingGenerator {
             if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
                 use arkavo_gemini::RestClient;
 
-                let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+                let model =
+                    std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
                 let client = RestClient::new(api_key, model);
 
                 match client.generate_content(&prompt, None).await {
                     Ok((Some(response_text), _)) => {
-                        let component = Self::parse_component(&response_text, &html_pattern, &css_pattern, &js_pattern);
+                        let component = Self::parse_component(
+                            &response_text,
+                            &html_pattern,
+                            &css_pattern,
+                            &js_pattern,
+                        );
 
                         if !component.html.is_empty() {
                             let _ = tx
@@ -242,12 +248,8 @@ mod tests {
         ```
         "#;
 
-        let component = StreamingGenerator::parse_component(
-            response,
-            &html_pattern,
-            &css_pattern,
-            &js_pattern,
-        );
+        let component =
+            StreamingGenerator::parse_component(response, &html_pattern, &css_pattern, &js_pattern);
 
         assert!(component.html.contains("test"));
         assert!(component.css.contains("color"));

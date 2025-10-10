@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use warp::Reply;
+use warp::{Filter, Reply};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiGenerateRequest {
@@ -36,7 +36,6 @@ impl UiHandler {
     }
 
     pub async fn handle_generate(
-        &self,
         request: UiGenerateRequest,
     ) -> Result<impl Reply, warp::Rejection> {
         let response = UiGenerateResponse {
@@ -59,17 +58,12 @@ impl Default for UiHandler {
 }
 
 pub fn create_ui_routes(
-    handler: Arc<UiHandler>,
+    _handler: Arc<UiHandler>,
 ) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     let generate_route = warp::path!("api" / "ui" / "generate")
         .and(warp::post())
         .and(warp::body::json())
-        .and(warp::any().map(move || handler.clone()))
-        .and_then(
-            |request: UiGenerateRequest, handler: Arc<UiHandler>| async move {
-                handler.handle_generate(request).await
-            },
-        );
+        .and_then(UiHandler::handle_generate);
 
     generate_route
 }

@@ -135,15 +135,13 @@ impl AgUiGateway {
 
         // Serve static files
         let blank_mode = self.blank_mode;
-        let index_file = warp::get()
-            .and(warp::path::end())
-            .map(move || {
-                if blank_mode {
-                    warp::reply::html(include_str!("../static/shell.html"))
-                } else {
-                    warp::reply::html(include_str!("../static/dashboard.html"))
-                }
-            });
+        let index_file = warp::get().and(warp::path::end()).map(move || {
+            if blank_mode {
+                warp::reply::html(include_str!("../static/shell.html"))
+            } else {
+                warp::reply::html(include_str!("../static/dashboard.html"))
+            }
+        });
 
         let static_js = warp::path("static")
             .and(warp::path("toolbar.js"))
@@ -152,7 +150,7 @@ impl AgUiGateway {
                 warp::reply::with_header(
                     include_str!("../static/toolbar.js"),
                     "Content-Type",
-                    "application/javascript"
+                    "application/javascript",
                 )
             });
 
@@ -175,7 +173,12 @@ impl AgUiGateway {
             .and(warp::any().map(move || budget_handler_for_ws.clone()))
             .and(warp::any().map(move || initial_prompt_for_ws.clone()))
             .map(
-                |ws: warp::ws::Ws, connections, agents, agent_connections, budget_handler, initial_prompt| {
+                |ws: warp::ws::Ws,
+                 connections,
+                 agents,
+                 agent_connections,
+                 budget_handler,
+                 initial_prompt| {
                     ws.on_upgrade(move |socket| {
                         handle_websocket(
                             socket,
@@ -727,9 +730,11 @@ async fn handle_event(
         AgUiEvent::SubmitPrompt { text } => {
             println!("AG-UI: Received SubmitPrompt: {text}");
 
+            use arkavo_router::Router;
             use arkavo_ui_generator::planner::UiPlanner;
 
-            let planner = UiPlanner::new().await?;
+            let router = Arc::new(Router::new().await?);
+            let planner = UiPlanner::new(router);
             let plan = planner.plan(&text).await?;
 
             let mut conn_guard = connections.write().await;
@@ -739,15 +744,20 @@ async fn handle_event(
             }
             drop(conn_guard);
 
-            let parts: Vec<crate::types::UiPlanPart> = plan.parts.iter().map(|p| {
-                crate::types::UiPlanPart {
+            let parts: Vec<crate::types::UiPlanPart> = plan
+                .parts
+                .iter()
+                .map(|p| crate::types::UiPlanPart {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     description: p.description.clone(),
-                }
-            }).collect();
+                })
+                .collect();
 
-            println!("AG-UI: Sending Plan event with {} parts to frontend", parts.len());
+            println!(
+                "AG-UI: Sending Plan event with {} parts to frontend",
+                parts.len()
+            );
             let plan_event = AgUiEvent::Plan { parts };
             tx.send(plan_event).await?;
             println!("AG-UI: Plan event sent successfully");
@@ -763,7 +773,13 @@ async fn handle_event(
             let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
 
             let system_status = SystemStatus {
-                uptime: format!("{} seconds", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()),
+                uptime: format!(
+                    "{} seconds",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                ),
                 memory_usage: "N/A".to_string(),
                 active_connections: connections.read().await.len() as u32,
             };
@@ -775,7 +791,8 @@ async fn handle_event(
             };
 
             let gemini_connected = std::env::var("GEMINI_API_KEY").is_ok();
-            let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+            let model =
+                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
             let remote_llm_status = RemoteLlmStatus {
                 connected: gemini_connected,
                 model,
@@ -805,12 +822,20 @@ async fn handle_event(
                 let part = plan.and_then(|p| p.iter().find(|part| part.id == part_id));
 
                 (
-                    part.map(|p| p.name.clone()).unwrap_or_else(|| "Component".to_string()),
-                    part.map(|p| p.description.clone()).unwrap_or_else(|| "UI Component".to_string()),
-                    prompt.cloned().unwrap_or_else(|| "Build a modern web component".to_string())
+                    part.map(|p| p.name.clone())
+                        .unwrap_or_else(|| "Component".to_string()),
+                    part.map(|p| p.description.clone())
+                        .unwrap_or_else(|| "UI Component".to_string()),
+                    prompt
+                        .cloned()
+                        .unwrap_or_else(|| "Build a modern web component".to_string()),
                 )
             } else {
-                ("Component".to_string(), "UI Component".to_string(), "Build a modern web component".to_string())
+                (
+                    "Component".to_string(),
+                    "UI Component".to_string(),
+                    "Build a modern web component".to_string(),
+                )
             };
             drop(conn_guard);
 
@@ -820,11 +845,9 @@ async fn handle_event(
             let router = Arc::new(Router::new().await?);
             let generator = StreamingGenerator::new(router)?;
 
-            let mut stream_rx = generator.generate_part(
-                &part_name,
-                &part_description,
-                &overall_prompt
-            ).await?;
+            let mut stream_rx = generator
+                .generate_part(&part_name, &part_description, &overall_prompt)
+                .await?;
 
             let tx_clone = tx.clone();
             let part_id_clone = part_id.clone();
@@ -835,7 +858,9 @@ async fn handle_event(
                         chunk_type: match chunk.chunk_type {
                             arkavo_ui_generator::streaming::ChunkType::Html => "html".to_string(),
                             arkavo_ui_generator::streaming::ChunkType::Css => "css".to_string(),
-                            arkavo_ui_generator::streaming::ChunkType::JavaScript => "js".to_string(),
+                            arkavo_ui_generator::streaming::ChunkType::JavaScript => {
+                                "js".to_string()
+                            }
                         },
                         content: chunk.content,
                         done: chunk.done,

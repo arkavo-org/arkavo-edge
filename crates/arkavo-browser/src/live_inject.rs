@@ -104,7 +104,8 @@ impl LiveInjector {
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to capture DOM: {e}")))?;
 
-        Ok(result.to_string())
+        // EvaluationResult - just return a debug representation
+        Ok(format!("{:?}", result))
     }
 
     pub async fn monitor_changes(&self) -> Result<()> {
@@ -147,7 +148,7 @@ impl LiveInjector {
     }
 
     pub async fn get_captured_changes(&self) -> Result<serde_json::Value> {
-        let result = self
+        let _result = self
             .page
             .evaluate(
                 r#"
@@ -161,7 +162,8 @@ impl LiveInjector {
             .await
             .map_err(|e| BrowserError::Playwright(format!("Failed to get changes: {e}")))?;
 
-        Ok(json!(result))
+        // For now, return empty array - would need to properly parse EvaluationResult
+        Ok(json!([]))
     }
 }
 

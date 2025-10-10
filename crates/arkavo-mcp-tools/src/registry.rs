@@ -1,3 +1,4 @@
+use crate::browser::BrowserTool;
 use crate::github_checks::GitHubChecksTool;
 use crate::github_review::GitHubReviewTool;
 use crate::osv::OsvTool;
@@ -31,6 +32,7 @@ impl ToolRegistry {
     }
 
     fn register_all(&mut self) {
+        self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
         self.register("deps_osv", Box::new(OsvTool::new()));
@@ -64,6 +66,7 @@ impl ToolRegistry {
 
     fn categorize_tool(name: &str) -> String {
         match name {
+            n if n.starts_with("browser_") => "Browser".to_string(),
             n if n.starts_with("sec_") => "Security".to_string(),
             n if n.starts_with("deps_") => "Security".to_string(),
             n if n.starts_with("sbom_") => "Security".to_string(),
