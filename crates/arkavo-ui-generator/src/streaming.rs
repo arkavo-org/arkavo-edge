@@ -72,37 +72,55 @@ impl StreamingGenerator {
         tokio::spawn(async move {
             let _decision = router.route(&prompt).await;
 
-            let response = prompt.clone();
-            let component = Self::parse_component(&response, &html_pattern, &css_pattern, &js_pattern);
+            if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+                use arkavo_gemini::RestClient;
 
-            if !component.html.is_empty() {
-                let _ = tx
-                    .send(StreamChunk {
-                        chunk_type: ChunkType::Html,
-                        content: component.html.clone(),
-                        done: false,
-                    })
-                    .await;
-            }
+                let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+                let client = RestClient::new(api_key, model);
 
-            if !component.css.is_empty() {
-                let _ = tx
-                    .send(StreamChunk {
-                        chunk_type: ChunkType::Css,
-                        content: component.css.clone(),
-                        done: false,
-                    })
-                    .await;
-            }
+                match client.generate_content(&prompt, None).await {
+                    Ok((Some(response_text), _)) => {
+                        let component = Self::parse_component(&response_text, &html_pattern, &css_pattern, &js_pattern);
 
-            if !component.javascript.is_empty() {
-                let _ = tx
-                    .send(StreamChunk {
-                        chunk_type: ChunkType::JavaScript,
-                        content: component.javascript.clone(),
-                        done: false,
-                    })
-                    .await;
+                        if !component.html.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::Html,
+                                    content: component.html.clone(),
+                                    done: false,
+                                })
+                                .await;
+                        }
+
+                        if !component.css.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::Css,
+                                    content: component.css.clone(),
+                                    done: false,
+                                })
+                                .await;
+                        }
+
+                        if !component.javascript.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::JavaScript,
+                                    content: component.javascript.clone(),
+                                    done: false,
+                                })
+                                .await;
+                        }
+                    }
+                    Ok((None, _)) => {
+                        eprintln!("Gemini returned no text");
+                    }
+                    Err(e) => {
+                        eprintln!("Gemini API error: {e}");
+                    }
+                }
+            } else {
+                eprintln!("GEMINI_API_KEY not set, using fallback");
             }
 
             let _ = tx

@@ -16,6 +16,8 @@ struct ConnectionInfo {
     _ws_tx: mpsc::Sender<AgUiEvent>,
     _agent_id: Option<String>,
     subscriptions: Vec<SubscriptionHandle>,
+    current_plan: Option<Vec<arkavo_ui_generator::planner::ComponentPart>>,
+    current_prompt: Option<String>,
 }
 
 pub struct AgUiGateway {
@@ -431,12 +433,16 @@ async fn handle_event(
                     _ws_tx: tx.clone(),
                     _agent_id: Some(agent_id.clone()),
                     subscriptions: Vec::new(),
+                    current_plan: None,
+                    current_prompt: None,
                 };
 
                 connections
                     .write()
                     .await
                     .insert(session_id.to_string(), conn_info);
+
+                println!("AG-UI: Stored connection info for session {session_id}");
 
                 // Send initial snapshots
                 let state_snapshot = AgUiEvent::StateSnapshot {
@@ -726,6 +732,13 @@ async fn handle_event(
             let planner = UiPlanner::new().await?;
             let plan = planner.plan(&text).await?;
 
+            let mut conn_guard = connections.write().await;
+            if let Some(conn_info) = conn_guard.get_mut(session_id) {
+                conn_info.current_plan = Some(plan.parts.clone());
+                conn_info.current_prompt = Some(text.clone());
+            }
+            drop(conn_guard);
+
             let parts: Vec<crate::types::UiPlanPart> = plan.parts.iter().map(|p| {
                 crate::types::UiPlanPart {
                     id: p.id.clone(),
@@ -738,6 +751,108 @@ async fn handle_event(
             let plan_event = AgUiEvent::Plan { parts };
             tx.send(plan_event).await?;
             println!("AG-UI: Plan event sent successfully");
+        }
+
+        AgUiEvent::RequestStatus => {
+            println!("AG-UI: Received RequestStatus");
+
+            use arkavo_mcp_tools::registry::ToolRegistry;
+
+            let registry = ToolRegistry::new();
+            let tools = registry.list_tools();
+            let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+            let system_status = SystemStatus {
+                uptime: format!("{} seconds", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()),
+                memory_usage: "N/A".to_string(),
+                active_connections: connections.read().await.len() as u32,
+            };
+
+            let mcp_tools_status = McpToolsStatus {
+                browser_available: browser_tool.is_some(),
+                tools_count: tools.len(),
+                last_used: None,
+            };
+
+            let gemini_connected = std::env::var("GEMINI_API_KEY").is_ok();
+            let model = std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+            let remote_llm_status = RemoteLlmStatus {
+                connected: gemini_connected,
+                model,
+                requests_today: 0,
+            };
+
+            let status_event = AgUiEvent::StatusUpdate {
+                system: system_status,
+                mcp_tools: mcp_tools_status,
+                remote_llm: remote_llm_status,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            tx.send(status_event).await?;
+        }
+
+        AgUiEvent::ApplyPart { part_id } => {
+            println!("AG-UI: Received ApplyPart: {part_id}");
+
+            let conn_guard = connections.read().await;
+            let conn_info = conn_guard.get(session_id);
+
+            let (part_name, part_description, overall_prompt) = if let Some(info) = conn_info {
+                let plan = info.current_plan.as_ref();
+                let prompt = info.current_prompt.as_ref();
+
+                let part = plan.and_then(|p| p.iter().find(|part| part.id == part_id));
+
+                (
+                    part.map(|p| p.name.clone()).unwrap_or_else(|| "Component".to_string()),
+                    part.map(|p| p.description.clone()).unwrap_or_else(|| "UI Component".to_string()),
+                    prompt.cloned().unwrap_or_else(|| "Build a modern web component".to_string())
+                )
+            } else {
+                ("Component".to_string(), "UI Component".to_string(), "Build a modern web component".to_string())
+            };
+            drop(conn_guard);
+
+            use arkavo_router::Router;
+            use arkavo_ui_generator::streaming::StreamingGenerator;
+
+            let router = Arc::new(Router::new().await?);
+            let generator = StreamingGenerator::new(router)?;
+
+            let mut stream_rx = generator.generate_part(
+                &part_name,
+                &part_description,
+                &overall_prompt
+            ).await?;
+
+            let tx_clone = tx.clone();
+            let part_id_clone = part_id.clone();
+            tokio::spawn(async move {
+                while let Some(chunk) = stream_rx.recv().await {
+                    let stream_event = AgUiEvent::PartStream {
+                        part_id: part_id_clone.clone(),
+                        chunk_type: match chunk.chunk_type {
+                            arkavo_ui_generator::streaming::ChunkType::Html => "html".to_string(),
+                            arkavo_ui_generator::streaming::ChunkType::Css => "css".to_string(),
+                            arkavo_ui_generator::streaming::ChunkType::JavaScript => "js".to_string(),
+                        },
+                        content: chunk.content,
+                        done: chunk.done,
+                    };
+                    let _ = tx_clone.send(stream_event).await;
+
+                    if chunk.done {
+                        let version_id = uuid::Uuid::new_v4().to_string();
+                        let applied_event = AgUiEvent::AppliedPart {
+                            part_id: part_id_clone.clone(),
+                            version_id,
+                        };
+                        let _ = tx_clone.send(applied_event).await;
+                        break;
+                    }
+                }
+            });
         }
 
         _ => {

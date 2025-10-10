@@ -192,6 +192,7 @@ dependencies = [
  "arkavo-dataflow",
  "arkavo-debugger",
  "arkavo-events",
+ "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-protocol",
@@ -665,6 +666,7 @@ dependencies = [
 name = "arkavo-mcp-tools"
 version = "0.36.0"
 dependencies = [
+ "arkavo-browser",
  "arkavo-git",
  "arkavo-mcp",
  "async-trait",
@@ -858,6 +860,7 @@ version = "0.36.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
+ "arkavo-gemini",
  "arkavo-llm",
  "arkavo-router",
  "handlebars",

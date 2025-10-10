@@ -20,6 +20,7 @@ tracing = { workspace = true }
 arkavo-router = { path = "../arkavo-router" }
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-events = { path = "../arkavo-events" }
+arkavo-gemini = { path = "../arkavo-gemini" }
 
 # Template rendering
 handlebars = { workspace = true }

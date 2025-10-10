@@ -100,6 +100,17 @@
             padding: 20px;
         }
 
+        #status-panel {
+            width: 280px;
+            background: #2a2a2a;
+            border-right: 1px solid #3a3a3a;
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
         #plan-panel {
             width: 300px;
             background: #2a2a2a;
@@ -111,6 +122,63 @@
 
         #plan-panel.visible {
             display: block;
+        }
+
+        .status-section {
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .status-section h4 {
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a2a2a;
+            font-size: 13px;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            color: #aaa;
+        }
+
+        .status-value {
+            color: #e0e0e0;
+            font-weight: 500;
+        }
+
+        .status-value.good {
+            color: #4ade80;
+        }
+
+        .status-value.warning {
+            color: #fbbf24;
+        }
+
+        .status-value.error {
+            color: #ef4444;
+        }
+
+        .status-update-time {
+            font-size: 10px;
+            color: #666;
+            text-align: right;
+            margin-top: 8px;
         }
 
         .plan-item {
@@ -181,6 +249,39 @@
     </div>
 
     <div id="main-container">
+        <aside id="status-panel">
+            <div class="status-section">
+                <h4>System Status</h4>
+                <div id="system-status-content">
+                    <div class="status-item">
+                        <span class="status-label">Loading...</span>
+                        <span class="status-value">...</span>
+                    </div>
+                </div>
+                <div class="status-update-time" id="status-update-time">Never</div>
+            </div>
+
+            <div class="status-section">
+                <h4>MCP Tools</h4>
+                <div id="mcp-status-content">
+                    <div class="status-item">
+                        <span class="status-label">Loading...</span>
+                        <span class="status-value">...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <h4>Remote LLM</h4>
+                <div id="remote-llm-status-content">
+                    <div class="status-item">
+                        <span class="status-label">Loading...</span>
+                        <span class="status-value">...</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
         <main id="stage">
             <div id="hint-overlay">
                 <h1>Blank Canvas</h1>
@@ -196,6 +297,10 @@
 
     <div id="sandbox"></div>
 
+    <script>
+        // Initial prompt injected by server (if provided via --prompt flag)
+        window.INITIAL_PROMPT = null;
+    </script>
     <script src="/static/toolbar.js"></script>
 </body>
 </html>
