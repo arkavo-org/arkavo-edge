@@ -239,10 +239,23 @@ impl AgUiGateway {
                         })
                         .collect();
 
+                    let health_data = HealthData {
+                        status: format!("{:?}", overall_health),
+                        components: health_reports
+                            .iter()
+                            .map(|r| ComponentHealth {
+                                component: r.component.clone(),
+                                status: format!("{:?}", r.status),
+                                message: r.message.clone(),
+                            })
+                            .collect(),
+                    };
+
                     let status_event = AgUiEvent::StatusUpdate {
                         system: system_status,
                         mcp_tools: mcp_tools_status,
                         llms,
+                        health: health_data,
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
 
@@ -888,6 +901,12 @@ async fn handle_event(
                     last_used: None,
                 };
 
+                // Get health data
+                use arkavo_observability::health_reporter::HealthRegistry;
+                let health_registry = HealthRegistry::global();
+                let health_reports = health_registry.check_all().await;
+                let overall_health = health_registry.get_overall_status().await;
+
                 let router = Router::new().await?;
                 let llms = router
                     .get_available_llms()
@@ -901,10 +920,23 @@ async fn handle_event(
                     })
                     .collect();
 
+                let health_data = HealthData {
+                    status: format!("{:?}", overall_health),
+                    components: health_reports
+                        .iter()
+                        .map(|r| ComponentHealth {
+                            component: r.component.clone(),
+                            status: format!("{:?}", r.status),
+                            message: r.message.clone(),
+                        })
+                        .collect(),
+                };
+
                 let status_event = AgUiEvent::StatusUpdate {
                     system: system_status,
                     mcp_tools: mcp_tools_status,
                     llms,
+                    health: health_data,
                     timestamp: chrono::Utc::now().to_rfc3339(),
                 };
 
@@ -992,10 +1024,23 @@ async fn handle_event(
                 })
                 .collect();
 
+            let health_data = HealthData {
+                status: format!("{:?}", overall_health),
+                components: health_reports
+                    .iter()
+                    .map(|r| ComponentHealth {
+                        component: r.component.clone(),
+                        status: format!("{:?}", r.status),
+                        message: r.message.clone(),
+                    })
+                    .collect(),
+            };
+
             let status_event = AgUiEvent::StatusUpdate {
                 system: system_status,
                 mcp_tools: mcp_tools_status,
                 llms,
+                health: health_data,
                 timestamp: chrono::Utc::now().to_rfc3339(),
             };
 

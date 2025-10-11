@@ -146,17 +146,13 @@ impl HealthReporter for UiGeneratorHealthReporter {
 
         // Determine health status based on metrics
         let status = if !metrics.recent_errors.is_empty()
-            && metrics
-                .recent_errors
-                .iter()
-                .any(|e| {
-                    e.error_type.contains("API")
-                        || e.error_type.contains("auth")
-                        || e.error_type.contains("Streaming")
-                        || e.context.contains("decoding response body")
-                        || e.context.contains("Stream error")
-                })
-        {
+            && metrics.recent_errors.iter().any(|e| {
+                e.error_type.contains("API")
+                    || e.error_type.contains("auth")
+                    || e.error_type.contains("Streaming")
+                    || e.context.contains("decoding response body")
+                    || e.context.contains("Stream error")
+            }) {
             HealthStatus::Unhealthy
         } else if metrics.queue_depth > 10
             || (metrics.failed_generations > 0

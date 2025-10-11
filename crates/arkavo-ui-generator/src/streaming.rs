@@ -166,7 +166,9 @@ impl StreamingGenerator {
 
                                     // If no accumulated text, fall back to local model
                                     if accumulated_text.is_empty() {
-                                        eprintln!("Stream failed with no accumulated text, falling back to local model");
+                                        eprintln!(
+                                            "Stream failed with no accumulated text, falling back to local model"
+                                        );
                                         if let Some(router_instance) = &router {
                                             let classifier = router_instance.get_local_provider();
                                             let messages = vec![arkavo_llm::Message {
@@ -175,7 +177,9 @@ impl StreamingGenerator {
                                                 images: None,
                                             }];
 
-                                            if let Ok(response) = classifier.complete(messages).await {
+                                            if let Ok(response) =
+                                                classifier.complete(messages).await
+                                            {
                                                 accumulated_text = response;
                                             }
                                         }

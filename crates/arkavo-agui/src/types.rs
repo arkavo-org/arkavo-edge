@@ -251,6 +251,7 @@ pub enum AgUiEvent {
         #[serde(rename = "mcpTools")]
         mcp_tools: McpToolsStatus,
         llms: Vec<LlmStatus>,
+        health: HealthData,
         timestamp: String,
     },
     PartStream {
@@ -450,4 +451,17 @@ pub struct LlmStatus {
     pub model: String,
     #[serde(rename = "requestsToday")]
     pub requests_today: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthData {
+    pub status: String,
+    pub components: Vec<ComponentHealth>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentHealth {
+    pub component: String,
+    pub status: String,
+    pub message: String,
 }

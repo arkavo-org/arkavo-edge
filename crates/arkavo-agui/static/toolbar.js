@@ -269,16 +269,33 @@ elements.promptInput.addEventListener('keydown', (e) => {
 });
 
 function handleStatusUpdate(data) {
-    if (elements.systemStatusContent) {
+    if (elements.systemStatusContent && data.health) {
+        const healthStatusClass = data.health.status === 'Healthy' ? 'good' :
+                                   data.health.status === 'Unhealthy' ? 'error' : 'warning';
+
+        let componentsHtml = '';
+        if (data.health.components && data.health.components.length > 0) {
+            componentsHtml = data.health.components.map(comp => {
+                const statusClass = comp.status === 'Healthy' ? 'good' :
+                                   comp.status === 'Unhealthy' ? 'error' : 'warning';
+                return `
+                    <div class="status-item">
+                        <span class="status-label">${comp.component}</span>
+                        <span class="status-value ${statusClass}">${comp.status}</span>
+                    </div>
+                    ${comp.status !== 'Healthy' ? `
+                    <div class="status-message">${comp.message}</div>
+                    ` : ''}
+                `;
+            }).join('');
+        }
+
         elements.systemStatusContent.innerHTML = `
             <div class="status-item">
-                <span class="status-label">Uptime</span>
-                <span class="status-value">${data.system.uptime}</span>
+                <span class="status-label">Health</span>
+                <span class="status-value ${healthStatusClass}">${data.health.status}</span>
             </div>
-            <div class="status-item">
-                <span class="status-label">Memory</span>
-                <span class="status-value">${data.system.memory_usage}</span>
-            </div>
+            ${componentsHtml}
             <div class="status-item">
                 <span class="status-label">Connections</span>
                 <span class="status-value good">${data.system.active_connections}</span>
@@ -402,6 +419,13 @@ function ensureStatusPanelStyles() {
                 color: #666;
                 text-align: right;
                 margin-top: 8px;
+            }
+            .status-message {
+                font-size: 11px;
+                color: #aaa;
+                padding: 4px 0;
+                margin-left: 8px;
+                font-style: italic;
             }
             .llm-entry {
                 background: #2a2a2a;

@@ -96,7 +96,9 @@ impl GeminiSseStream {
 
                                         // For malformed chunks, try to salvage what we have
                                         // Return accumulated text so far and mark as done
-                                        warn!("Malformed SSE chunk, returning accumulated text and ending stream");
+                                        warn!(
+                                            "Malformed SSE chunk, returning accumulated text and ending stream"
+                                        );
 
                                         let salvage_response = StreamResponse {
                                             text: if accumulated_text.is_empty() {
