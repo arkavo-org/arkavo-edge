@@ -72,13 +72,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ui_generation() {
-        let handler = UiHandler::new();
         let request = UiGenerateRequest {
             prompt: "Create a chart".to_string(),
             context: None,
         };
 
-        let result = handler.handle_generate(request).await;
+        let result = UiHandler::handle_generate(request).await;
         assert!(result.is_ok());
     }
 }

@@ -33,7 +33,9 @@ arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }
 arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-llm = { path = "../arkavo-llm" }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
 # UUID for event IDs
@@ -41,6 +43,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+regex = { workspace = true }
 
 # mDNS discovery
 mdns-sd = { workspace = true, optional = true }

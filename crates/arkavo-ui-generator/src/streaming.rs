@@ -82,13 +82,16 @@ impl StreamingGenerator {
         let js_pattern = self.js_pattern.clone();
 
         tokio::spawn(async move {
-            if let Some(router_instance) = router {
-                let _decision = router_instance.route(&prompt).await;
-            }
+            // Try Gemini first (if available via Router), fall back to local model
+            let use_gemini = router
+                .as_ref()
+                .map(|r| r.is_gemini_available())
+                .unwrap_or(false);
 
-            if let Ok(api_key) = std::env::var("GEMINI_API_KEY") {
+            if use_gemini {
                 use arkavo_gemini::RestClient;
 
+                let api_key = std::env::var("GEMINI_API_KEY").unwrap();
                 let model =
                     std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
                 let client = RestClient::new(api_key, model);
@@ -151,6 +154,15 @@ impl StreamingGenerator {
                                 }
                                 Err(e) => {
                                     eprintln!("Gemini streaming error: {e}");
+                                    // Track error in health system
+                                    let health_reporter =
+                                        crate::health::UiGeneratorHealthReporter::global();
+                                    health_reporter
+                                        .record_error(
+                                            "Gemini Streaming Error".to_string(),
+                                            format!("{}", e),
+                                        )
+                                        .await;
                                     break;
                                 }
                             }
@@ -158,10 +170,76 @@ impl StreamingGenerator {
                     }
                     Err(e) => {
                         eprintln!("Gemini API error: {e}");
+                        // Track error in health system
+                        let health_reporter = crate::health::UiGeneratorHealthReporter::global();
+                        health_reporter
+                            .record_error("Gemini API Error".to_string(), format!("{}", e))
+                            .await;
+                    }
+                }
+            } else if let Some(router_instance) = router {
+                // Use local model via Router
+                eprintln!("GEMINI_API_KEY not set, using local model");
+
+                let classifier = router_instance.get_local_provider();
+                let messages = vec![arkavo_llm::Message {
+                    role: arkavo_llm::Role::User,
+                    content: prompt.clone(),
+                    images: None,
+                }];
+
+                match classifier.complete(messages).await {
+                    Ok(response) => {
+                        // Parse the complete response
+                        let component = Self::parse_component(
+                            &response,
+                            &html_pattern,
+                            &css_pattern,
+                            &js_pattern,
+                        );
+
+                        // Send complete chunks (local model doesn't stream)
+                        if !component.html.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::Html,
+                                    content: component.html,
+                                    done: false,
+                                })
+                                .await;
+                        }
+
+                        if !component.css.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::Css,
+                                    content: component.css,
+                                    done: false,
+                                })
+                                .await;
+                        }
+
+                        if !component.javascript.is_empty() {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    chunk_type: ChunkType::JavaScript,
+                                    content: component.javascript,
+                                    done: false,
+                                })
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Local model generation error: {e}");
+                        // Track error in health system
+                        let health_reporter = crate::health::UiGeneratorHealthReporter::global();
+                        health_reporter
+                            .record_error("Local Model Error".to_string(), format!("{}", e))
+                            .await;
                     }
                 }
             } else {
-                eprintln!("GEMINI_API_KEY not set, using fallback");
+                eprintln!("No model available for generation");
             }
 
             // Send final done signal

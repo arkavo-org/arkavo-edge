@@ -63,7 +63,7 @@ function repairStatusPanel() {
             </div>
 
             <div class="status-section">
-                <h4>Remote LLM</h4>
+                <h4>LLMs</h4>
                 <div id="remote-llm-status-content">
                     <div class="status-item">
                         <span class="status-label">Loading...</span>
@@ -159,6 +159,13 @@ function handlePlan(data) {
     if (elements.hintOverlay) {
         elements.hintOverlay.remove();
     }
+
+    // Automatically start generating the first component
+    if (data.parts.length > 0) {
+        const firstPart = data.parts[0];
+        console.log('Starting generation for first part:', firstPart.id);
+        sendMessage({ type: 'applyPart', partId: firstPart.id });
+    }
 }
 
 function handlePartStream(data) {
@@ -168,7 +175,20 @@ function handlePartStream(data) {
         if (data.done) {
             status.className = 'plan-item-status';
             status.textContent = 'Complete';
-            sendMessage({ type: 'applyPart', partId: data.part_id });
+
+            // Find the next component to generate
+            const currentIndex = currentPlan.findIndex(p => p.id === data.part_id);
+            if (currentIndex >= 0 && currentIndex < currentPlan.length - 1) {
+                const nextPart = currentPlan[currentIndex + 1];
+                console.log('Starting generation for next part:', nextPart.id);
+                sendMessage({ type: 'applyPart', partId: nextPart.id });
+            } else {
+                console.log('All components generated');
+                updateStatus('connected', 'Generation complete');
+                isGenerating = false;
+                elements.generateBtn.disabled = false;
+                elements.cancelBtn.disabled = true;
+            }
         } else {
             status.className = 'plan-item-status generating';
             status.textContent = `Generating ${data.chunk_type}...`;
@@ -287,23 +307,28 @@ function handleStatusUpdate(data) {
         `;
     }
 
-    if (elements.remoteLlmStatusContent) {
-        elements.remoteLlmStatusContent.innerHTML = `
-            <div class="status-item">
-                <span class="status-label">Status</span>
-                <span class="status-value ${data.remoteLlm.connected ? 'good' : 'error'}">
-                    ${data.remoteLlm.connected ? 'Connected' : 'Disconnected'}
-                </span>
+    // Display available LLMs
+    if (elements.remoteLlmStatusContent && data.llms) {
+        const llmHtml = data.llms.map(llm => `
+            <div class="llm-entry">
+                <div class="llm-name">${llm.name}</div>
+                <div class="status-item">
+                    <span class="status-label">Provider</span>
+                    <span class="status-value">${llm.provider}</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Model</span>
+                    <span class="status-value">${llm.model}</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Status</span>
+                    <span class="status-value ${llm.connected ? 'good' : 'error'}">
+                        ${llm.connected ? 'Ready' : 'Unavailable'}
+                    </span>
+                </div>
             </div>
-            <div class="status-item">
-                <span class="status-label">Model</span>
-                <span class="status-value">${data.remoteLlm.model}</span>
-            </div>
-            <div class="status-item">
-                <span class="status-label">Requests</span>
-                <span class="status-value">${data.remoteLlm.requests_today}</span>
-            </div>
-        `;
+        `).join('');
+        elements.remoteLlmStatusContent.innerHTML = llmHtml;
     }
 
     if (elements.statusUpdateTime) {
@@ -377,6 +402,24 @@ function ensureStatusPanelStyles() {
                 color: #666;
                 text-align: right;
                 margin-top: 8px;
+            }
+            .llm-entry {
+                background: #2a2a2a;
+                border: 1px solid #3a3a3a;
+                border-radius: 3px;
+                padding: 8px;
+                margin-bottom: 8px;
+            }
+            .llm-entry:last-child {
+                margin-bottom: 0;
+            }
+            .llm-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: #e0e0e0;
+                margin-bottom: 6px;
+                border-bottom: 1px solid #3a3a3a;
+                padding-bottom: 4px;
             }
         `;
         document.head.appendChild(style);

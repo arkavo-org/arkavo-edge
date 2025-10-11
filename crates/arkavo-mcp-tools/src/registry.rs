@@ -1,6 +1,7 @@
 use crate::browser::BrowserTool;
 use crate::github_checks::GitHubChecksTool;
 use crate::github_review::GitHubReviewTool;
+use crate::health_check::HealthCheckTool;
 use crate::osv::OsvTool;
 use crate::semgrep::SemgrepTool;
 use crate::server::Tool;
@@ -39,6 +40,7 @@ impl ToolRegistry {
         self.register("sec_semgrep", Box::new(SemgrepTool::new()));
         self.register("sbom_syft", Box::new(SyftTool::new()));
         self.register("test_run", Box::new(TestRunnerTool::new()));
+        self.register("get_system_health", Box::new(HealthCheckTool::new()));
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {

@@ -82,13 +82,30 @@ impl GeminiSseStream {
                                         }
                                     }
                                     Err(e) => {
-                                        warn!("Failed to parse SSE chunk: {} - data: {}", e, data);
+                                        warn!("Failed to parse SSE chunk: {e} - data: {data}");
+
+                                        // Check if this looks like an HTTP error response
+                                        if data.contains("\"error\"") {
+                                            let _ = tx
+                                                .send(Err(GeminiError::ApiError(format!(
+                                                    "API error response: {data}"
+                                                ))))
+                                                .await;
+                                        } else {
+                                            let _ = tx
+                                                .send(Err(GeminiError::ApiError(format!(
+                                                    "Failed to parse streaming response: {e}"
+                                                ))))
+                                                .await;
+                                        }
+                                        return;
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
+                        warn!("Stream error: {e}");
                         let _ = tx
                             .send(Err(GeminiError::ApiError(format!("Stream error: {e}"))))
                             .await;

@@ -24,6 +24,7 @@ arkavo-llm = { path = "../arkavo-llm", features = ["llm-local", "llama-cpp", "ge
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-context = { path = "../arkavo-context" }
+arkavo-observability = { path = "../arkavo-observability" }
 
 [dev-dependencies]
 tokio-test = "0.4"

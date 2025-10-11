@@ -1,3 +1,4 @@
+pub mod health;
 pub mod incremental;
 pub mod planner;
 pub mod prompt;

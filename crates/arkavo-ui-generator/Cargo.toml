@@ -22,11 +22,14 @@ arkavo-router = { path = "../arkavo-router" }
 arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
+arkavo-observability = { path = "../arkavo-observability" }
 
 # Template rendering
 handlebars = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 arkavo-browser = { path = "../arkavo-browser" }

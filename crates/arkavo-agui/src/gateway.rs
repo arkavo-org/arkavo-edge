@@ -133,6 +133,133 @@ impl AgUiGateway {
             }
         });
 
+        // Register health reporters with global registry
+        {
+            use arkavo_observability::health_reporter::HealthRegistry;
+            use std::sync::Arc;
+
+            let registry = HealthRegistry::global();
+
+            // Register AG-UI health reporter
+            let agui_reporter = Arc::new(crate::health::AguiHealthReporter::new());
+            registry.register(agui_reporter).await;
+
+            // Register Router health reporter
+            use arkavo_router::health::RouterHealthReporter;
+            let connectivity_checker = Arc::new(arkavo_router::ConnectivityChecker::new());
+            let router_reporter = Arc::new(RouterHealthReporter::new(connectivity_checker));
+            registry.register(router_reporter).await;
+
+            // Register UI Generator health reporter (wrapper that delegates to global instance)
+            use arkavo_ui_generator::health::GlobalHealthReporterWrapper;
+            let ui_generator_reporter = Arc::new(GlobalHealthReporterWrapper::default());
+            registry.register(ui_generator_reporter).await;
+
+            println!("AG-UI: Health reporters registered");
+        }
+
+        // Create channel for broadcasting health alerts to all WebSocket connections
+        let (health_alert_tx, mut health_alert_rx) = mpsc::channel::<AgUiEvent>(100);
+
+        // Start intelligent health monitor with local LLM
+        {
+            use arkavo_mcp_tools::registry::ToolRegistry;
+
+            let tool_registry = Arc::new(ToolRegistry::new());
+
+            let health_monitor = crate::health_monitor::HealthMonitor::new(tool_registry)
+                .await?
+                .with_interval(30); // Check every 30 seconds
+
+            let _health_task = health_monitor.start(health_alert_tx.clone()).await?;
+            println!("AG-UI: Health monitor started (30s interval, model selection via router)");
+        }
+
+        // Broadcast health alerts to all connected WebSocket clients
+        let connections_for_health = self.connections.clone();
+        tokio::spawn(async move {
+            while let Some(alert_event) = health_alert_rx.recv().await {
+                let conns = connections_for_health.read().await;
+                for (_, conn_info) in conns.iter() {
+                    let _ = conn_info._ws_tx.send(alert_event.clone()).await;
+                }
+            }
+        });
+
+        // Push periodic status updates every 30 seconds
+        let connections_for_status = self.connections.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_observability::health_reporter::HealthRegistry;
+                use arkavo_router::Router;
+
+                let registry = ToolRegistry::new();
+                let tools = registry.list_tools();
+                let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+                // Get health data
+                let health_registry = HealthRegistry::global();
+                let health_reports = health_registry.check_all().await;
+                let overall_health = health_registry.get_overall_status().await;
+
+                let conns = connections_for_status.read().await;
+
+                let system_status = SystemStatus {
+                    uptime: format!(
+                        "{} seconds",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ),
+                    memory_usage: "N/A".to_string(),
+                    active_connections: conns.len() as u32,
+                };
+
+                let mcp_tools_status = McpToolsStatus {
+                    browser_available: browser_tool.is_some(),
+                    tools_count: tools.len(),
+                    last_used: None,
+                };
+
+                if let Ok(router) = Router::new().await {
+                    let llms = router
+                        .get_available_llms()
+                        .into_iter()
+                        .map(|info| LlmStatus {
+                            name: info.name,
+                            provider: info.provider,
+                            connected: info.available,
+                            model: info.model,
+                            requests_today: 0,
+                        })
+                        .collect();
+
+                    let status_event = AgUiEvent::StatusUpdate {
+                        system: system_status,
+                        mcp_tools: mcp_tools_status,
+                        llms,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    // Broadcast to all connections
+                    for (_, conn_info) in conns.iter() {
+                        let _ = conn_info._ws_tx.send(status_event.clone()).await;
+                    }
+
+                    println!(
+                        "AG-UI: Pushed status update - Health: {:?}, Components: {}",
+                        overall_health,
+                        health_reports.len()
+                    );
+                }
+            }
+        });
+
         // Serve static files
         let blank_mode = self.blank_mode;
         let index_file = warp::get().and(warp::path::end()).map(move || {
@@ -730,17 +857,71 @@ async fn handle_event(
         AgUiEvent::SubmitPrompt { text } => {
             println!("AG-UI: Received SubmitPrompt: {text}");
 
+            // Extract and set any API keys from the prompt
+            let (cleaned_text, api_keys) = crate::api_keys::extract_api_keys(&text);
+            if !api_keys.is_empty() {
+                crate::api_keys::set_api_keys(&api_keys);
+
+                // Send updated status immediately to reflect new LLM availability
+                use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_router::Router;
+
+                let registry = ToolRegistry::new();
+                let tools = registry.list_tools();
+                let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+                let system_status = SystemStatus {
+                    uptime: format!(
+                        "{} seconds",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ),
+                    memory_usage: "N/A".to_string(),
+                    active_connections: connections.read().await.len() as u32,
+                };
+
+                let mcp_tools_status = McpToolsStatus {
+                    browser_available: browser_tool.is_some(),
+                    tools_count: tools.len(),
+                    last_used: None,
+                };
+
+                let router = Router::new().await?;
+                let llms = router
+                    .get_available_llms()
+                    .into_iter()
+                    .map(|info| LlmStatus {
+                        name: info.name,
+                        provider: info.provider,
+                        connected: info.available,
+                        model: info.model,
+                        requests_today: 0,
+                    })
+                    .collect();
+
+                let status_event = AgUiEvent::StatusUpdate {
+                    system: system_status,
+                    mcp_tools: mcp_tools_status,
+                    llms,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+
+                tx.send(status_event).await?;
+            }
+
             use arkavo_router::Router;
             use arkavo_ui_generator::planner::UiPlanner;
 
             let router = Arc::new(Router::new().await?);
             let planner = UiPlanner::new(router);
-            let plan = planner.plan(&text).await?;
+            let plan = planner.plan(&cleaned_text).await?;
 
             let mut conn_guard = connections.write().await;
             if let Some(conn_info) = conn_guard.get_mut(session_id) {
                 conn_info.current_plan = Some(plan.parts.clone());
-                conn_info.current_prompt = Some(text.clone());
+                conn_info.current_prompt = Some(cleaned_text.clone());
             }
             drop(conn_guard);
 
@@ -767,10 +948,17 @@ async fn handle_event(
             println!("AG-UI: Received RequestStatus");
 
             use arkavo_mcp_tools::registry::ToolRegistry;
+            use arkavo_observability::health_reporter::HealthRegistry;
+            use arkavo_router::Router;
 
             let registry = ToolRegistry::new();
             let tools = registry.list_tools();
             let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+            // Get health data from all registered components
+            let health_registry = HealthRegistry::global();
+            let health_reports = health_registry.check_all().await;
+            let overall_health = health_registry.get_overall_status().await;
 
             let system_status = SystemStatus {
                 uptime: format!(
@@ -790,23 +978,41 @@ async fn handle_event(
                 last_used: None,
             };
 
-            let gemini_connected = std::env::var("GEMINI_API_KEY").is_ok();
-            let model =
-                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
-            let remote_llm_status = RemoteLlmStatus {
-                connected: gemini_connected,
-                model,
-                requests_today: 0,
-            };
+            // Get all available LLMs from Router (single source of truth)
+            let router = Router::new().await?;
+            let llms = router
+                .get_available_llms()
+                .into_iter()
+                .map(|info| LlmStatus {
+                    name: info.name,
+                    provider: info.provider,
+                    connected: info.available,
+                    model: info.model,
+                    requests_today: 0,
+                })
+                .collect();
 
             let status_event = AgUiEvent::StatusUpdate {
                 system: system_status,
                 mcp_tools: mcp_tools_status,
-                remote_llm: remote_llm_status,
+                llms,
                 timestamp: chrono::Utc::now().to_rfc3339(),
             };
 
             tx.send(status_event).await?;
+
+            // Log health status for debugging
+            println!(
+                "AG-UI: Health Status - Overall: {:?}, Components: {}",
+                overall_health,
+                health_reports.len()
+            );
+            for report in &health_reports {
+                println!(
+                    "AG-UI:   - {} ({:?}): {}",
+                    report.component, report.status, report.message
+                );
+            }
         }
 
         AgUiEvent::ApplyPart { part_id } => {

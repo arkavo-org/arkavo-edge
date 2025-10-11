@@ -8,7 +8,10 @@ repository.workspace = true
 description = "Observability infrastructure for Arkavo Edge"
 
 [dependencies]
-# Tracing 
+# Async trait
+async-trait.workspace = true
+
+# Tracing
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

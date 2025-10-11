@@ -1,4 +1,5 @@
 pub mod agent_connection;
+pub mod api_keys;
 pub mod budget_handler;
 pub mod coding_agent_bridge;
 pub mod cost_handler;
@@ -7,6 +8,8 @@ pub mod debug_handler;
 pub mod gateway;
 pub mod gateway_mdns;
 pub mod handler;
+pub mod health;
+pub mod health_monitor;
 pub mod mdns_impl;
 pub mod roi_metrics;
 pub mod streaming;

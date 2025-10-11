@@ -250,8 +250,7 @@ pub enum AgUiEvent {
         system: SystemStatus,
         #[serde(rename = "mcpTools")]
         mcp_tools: McpToolsStatus,
-        #[serde(rename = "remoteLlm")]
-        remote_llm: RemoteLlmStatus,
+        llms: Vec<LlmStatus>,
         timestamp: String,
     },
     PartStream {
@@ -444,8 +443,11 @@ pub struct McpToolsStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteLlmStatus {
+pub struct LlmStatus {
+    pub name: String,
+    pub provider: String,
     pub connected: bool,
     pub model: String,
+    #[serde(rename = "requestsToday")]
     pub requests_today: u32,
 }

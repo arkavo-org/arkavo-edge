@@ -41,14 +41,20 @@ impl UiPlanner {
     async fn try_llm_plan(&self, user_prompt: &str) -> Result<BuildPlan> {
         let planning_prompt = self.build_planning_prompt(user_prompt);
 
-        let gemini_provider = self.router
-            .get_planning_provider()
-            .map_err(|e| anyhow::anyhow!("Failed to get planning provider: {e}"))?;
-
-        let response = gemini_provider
-            .complete(vec![Message::user(planning_prompt)])
-            .await
-            .map_err(|e| anyhow::anyhow!("Gemini planning failed: {e}"))?;
+        // Try Gemini first (if available), fall back to local model
+        let response = if let Some(gemini_provider) = self.router.get_planning_provider() {
+            gemini_provider
+                .complete(vec![Message::user(planning_prompt.clone())])
+                .await
+                .map_err(|e| anyhow::anyhow!("Gemini planning failed: {e}"))?
+        } else {
+            // Use local model via Router
+            let local_provider = self.router.get_local_provider();
+            local_provider
+                .complete(vec![Message::user(planning_prompt)])
+                .await
+                .map_err(|e| anyhow::anyhow!("Local model planning failed: {e}"))?
+        };
 
         self.parse_plan(&response)
     }
@@ -118,8 +124,9 @@ Return ONLY the JSON array, nothing else."#
             trimmed
         };
 
-        let parts: Vec<ComponentPart> = serde_json::from_str(json_str)
-            .map_err(|e| anyhow::anyhow!("Failed to parse JSON plan: {}. JSON was: {}", e, json_str))?;
+        let parts: Vec<ComponentPart> = serde_json::from_str(json_str).map_err(|e| {
+            anyhow::anyhow!("Failed to parse JSON plan: {}. JSON was: {}", e, json_str)
+        })?;
 
         if parts.is_empty() || parts.len() > 10 {
             anyhow::bail!("Invalid number of parts: {}", parts.len());
