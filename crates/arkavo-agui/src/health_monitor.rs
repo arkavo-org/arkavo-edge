@@ -62,7 +62,7 @@ impl HealthMonitor {
     }
 
     async fn run_health_check(&self, event_tx: &mpsc::Sender<AgUiEvent>) -> Result<()> {
-        // 1. Gather health reports via MCP tool
+        // 1. Gather health reports via internal MCP tool
         let health_tool = self
             .tool_registry
             .get("get_system_health")
@@ -344,9 +344,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_based_analysis_unhealthy() {
-        let monitor = HealthMonitor::new(Arc::new(ToolRegistry::new()))
-            .await
-            .unwrap();
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
 
         let health_data = serde_json::json!({
             "components": [
@@ -368,9 +367,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_based_analysis_degraded() {
-        let monitor = HealthMonitor::new(Arc::new(ToolRegistry::new()))
-            .await
-            .unwrap();
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
 
         let health_data = serde_json::json!({
             "components": [
@@ -389,9 +387,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_based_analysis_healthy() {
-        let monitor = HealthMonitor::new(Arc::new(ToolRegistry::new()))
-            .await
-            .unwrap();
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
 
         let health_data = serde_json::json!({
             "components": [
