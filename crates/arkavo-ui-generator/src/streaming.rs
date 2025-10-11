@@ -163,6 +163,68 @@ impl StreamingGenerator {
                                             format!("{}", e),
                                         )
                                         .await;
+
+                                    // If no accumulated text, fall back to local model
+                                    if accumulated_text.is_empty() {
+                                        eprintln!("Stream failed with no accumulated text, falling back to local model");
+                                        if let Some(router_instance) = &router {
+                                            let classifier = router_instance.get_local_provider();
+                                            let messages = vec![arkavo_llm::Message {
+                                                role: arkavo_llm::Role::User,
+                                                content: prompt.clone(),
+                                                images: None,
+                                            }];
+
+                                            if let Ok(response) = classifier.complete(messages).await {
+                                                accumulated_text = response;
+                                            }
+                                        }
+                                    }
+
+                                    // Parse and send whatever we have (salvaged or fallback)
+                                    if !accumulated_text.is_empty() {
+                                        eprintln!(
+                                            "Parsing salvaged {} chars of response",
+                                            accumulated_text.len()
+                                        );
+
+                                        let component = Self::parse_component(
+                                            &accumulated_text,
+                                            &html_pattern,
+                                            &css_pattern,
+                                            &js_pattern,
+                                        );
+
+                                        if !component.html.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Html,
+                                                    content: component.html,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+
+                                        if !component.css.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Css,
+                                                    content: component.css,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+
+                                        if !component.javascript.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::JavaScript,
+                                                    content: component.javascript,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+                                    }
                                     break;
                                 }
                             }
@@ -175,6 +237,61 @@ impl StreamingGenerator {
                         health_reporter
                             .record_error("Gemini API Error".to_string(), format!("{}", e))
                             .await;
+
+                        // Fall back to local model
+                        eprintln!("Gemini API failed, falling back to local model");
+                        if let Some(router_instance) = &router {
+                            let classifier = router_instance.get_local_provider();
+                            let messages = vec![arkavo_llm::Message {
+                                role: arkavo_llm::Role::User,
+                                content: prompt.clone(),
+                                images: None,
+                            }];
+
+                            match classifier.complete(messages).await {
+                                Ok(response) => {
+                                    let component = Self::parse_component(
+                                        &response,
+                                        &html_pattern,
+                                        &css_pattern,
+                                        &js_pattern,
+                                    );
+
+                                    if !component.html.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::Html,
+                                                content: component.html,
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+
+                                    if !component.css.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::Css,
+                                                content: component.css,
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+
+                                    if !component.javascript.is_empty() {
+                                        let _ = tx
+                                            .send(StreamChunk {
+                                                chunk_type: ChunkType::JavaScript,
+                                                content: component.javascript,
+                                                done: false,
+                                            })
+                                            .await;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Local model fallback also failed: {e}");
+                                }
+                            }
+                        }
                     }
                 }
             } else if let Some(router_instance) = router {

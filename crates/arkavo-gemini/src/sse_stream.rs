@@ -91,13 +91,24 @@ impl GeminiSseStream {
                                                     "API error response: {data}"
                                                 ))))
                                                 .await;
-                                        } else {
-                                            let _ = tx
-                                                .send(Err(GeminiError::ApiError(format!(
-                                                    "Failed to parse streaming response: {e}"
-                                                ))))
-                                                .await;
+                                            return;
                                         }
+
+                                        // For malformed chunks, try to salvage what we have
+                                        // Return accumulated text so far and mark as done
+                                        warn!("Malformed SSE chunk, returning accumulated text and ending stream");
+
+                                        let salvage_response = StreamResponse {
+                                            text: if accumulated_text.is_empty() {
+                                                None
+                                            } else {
+                                                Some(accumulated_text.clone())
+                                            },
+                                            function_calls: accumulated_calls.clone(),
+                                            done: true,
+                                        };
+
+                                        let _ = tx.send(Ok(salvage_response)).await;
                                         return;
                                     }
                                 }

@@ -57,13 +57,15 @@ impl RouterHealthReporter {
         response_time_ms: Option<u64>,
     ) {
         let mut providers = self.providers.write().await;
-        let health = providers.entry(provider.clone()).or_insert(ProviderHealth {
-            name: provider,
-            available: true,
-            last_check: Utc::now(),
-            response_time_ms: None,
-            consecutive_failures: 0,
-        });
+        let health = providers
+            .entry(provider.clone())
+            .or_insert_with(|| ProviderHealth {
+                name: provider,
+                available: true,
+                last_check: Utc::now(),
+                response_time_ms: None,
+                consecutive_failures: 0,
+            });
 
         health.available = available;
         health.last_check = Utc::now();
@@ -138,11 +140,11 @@ impl HealthReporter for RouterHealthReporter {
         // Determine overall health status
         let status = if !unhealthy_providers.is_empty() {
             HealthStatus::Unhealthy
-        } else if !degraded_providers.is_empty() || !is_online {
-            HealthStatus::Degraded
-        } else if metrics.fallback_activations > 0
-            && metrics.total_routes > 0
-            && (metrics.fallback_activations as f64 / metrics.total_routes as f64) > 0.3
+        } else if !degraded_providers.is_empty()
+            || !is_online
+            || (metrics.fallback_activations > 0
+                && metrics.total_routes > 0
+                && (metrics.fallback_activations as f64 / metrics.total_routes as f64) > 0.3)
         {
             HealthStatus::Degraded
         } else {
