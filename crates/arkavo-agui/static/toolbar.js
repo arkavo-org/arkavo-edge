@@ -168,7 +168,7 @@ function handlePartStream(data) {
         if (data.done) {
             status.className = 'plan-item-status';
             status.textContent = 'Complete';
-            sendMessage({ type: 'ApplyPart', data: { part_id: data.part_id } });
+            sendMessage({ type: 'applyPart', partId: data.part_id });
         } else {
             status.className = 'plan-item-status generating';
             status.textContent = `Generating ${data.chunk_type}...`;
@@ -205,8 +205,8 @@ elements.generateBtn.addEventListener('click', () => {
     if (!prompt) return;
 
     sendMessage({
-        type: 'SubmitPrompt',
-        data: { text: prompt }
+        type: 'submitPrompt',
+        text: prompt
     });
 
     isGenerating = true;
@@ -216,7 +216,7 @@ elements.generateBtn.addEventListener('click', () => {
 });
 
 elements.cancelBtn.addEventListener('click', () => {
-    sendMessage({ type: 'CancelGeneration' });
+    sendMessage({ type: 'cancelGeneration' });
     isGenerating = false;
     elements.generateBtn.disabled = false;
     elements.cancelBtn.disabled = true;
@@ -227,7 +227,7 @@ elements.undoBtn.addEventListener('click', () => {
     if (undoStack.length > 0) {
         const versionId = undoStack.pop();
         redoStack.push(versionId);
-        sendMessage({ type: 'Undo' });
+        sendMessage({ type: 'undo' });
         updateUndoRedoButtons();
     }
 });
@@ -236,7 +236,7 @@ elements.redoBtn.addEventListener('click', () => {
     if (redoStack.length > 0) {
         const versionId = redoStack.pop();
         undoStack.push(versionId);
-        sendMessage({ type: 'Redo' });
+        sendMessage({ type: 'redo' });
         updateUndoRedoButtons();
     }
 });
