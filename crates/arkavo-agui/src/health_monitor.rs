@@ -13,9 +13,9 @@ struct HealthAnalysis {
     status: String,
     notify_user: bool,
     user_message: Option<String>,
-    component_type: Option<String>,
     severity: Option<String>,
     auto_actions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     auto_dismiss_seconds: Option<u32>,
 }
 
@@ -155,7 +155,6 @@ Return this JSON structure:
 "status":"healthy",
 "notify_user":false,
 "user_message":null,
-"component_type":"none",
 "severity":"info",
 "auto_actions":[],
 "auto_dismiss_seconds":null
@@ -163,9 +162,10 @@ Return this JSON structure:
 
 Rules:
 - status: "healthy"|"degraded"|"unhealthy"
-- notify_user: true only for API key errors, persistent failures, security issues
-- user_message: clear 1-sentence message (or null)
+- notify_user: true only if user needs to know (API errors, config issues, etc.)
+- user_message: natural, helpful message explaining impact to user (e.g., "Using local model due to API issues. Generation may be slower.")
 - severity: "info"|"warning"|"critical"
+- Be concise and user-friendly. Focus on what this means for the user, not technical details.
 
 JSON:"#,
             summary
@@ -224,25 +224,38 @@ JSON:"#,
         if let Some(comps) = components {
             for component in comps {
                 let status = component["status"].as_str().unwrap_or("unknown");
+                let component_name = component["component"].as_str().unwrap_or("system");
+                let message = component["message"].as_str().unwrap_or("");
 
                 if status == "unhealthy" {
+                    // Generate contextual message based on component and error
+                    let user_message = if message.contains("API") || message.contains("Gemini") {
+                        format!("Using local model due to API issues. Generation may be slower.")
+                    } else if message.contains("auth") || message.contains("key") {
+                        format!("API key issue detected. Please check your configuration.")
+                    } else {
+                        format!(
+                            "{} is experiencing issues. System may run slower.",
+                            component_name
+                        )
+                    };
+
                     return HealthAnalysis {
                         status: "unhealthy".to_string(),
                         notify_user: true,
-                        user_message: Some("System health issue detected.".to_string()),
-                        component_type: Some("alert-panel".to_string()),
+                        user_message: Some(user_message),
                         severity: Some("warning".to_string()),
                         auto_actions: vec![],
-                        auto_dismiss_seconds: Some(60),
+                        auto_dismiss_seconds: Some(15),
                     };
                 }
 
                 if status == "degraded" {
+                    // Degraded: silent, let auto-fixes handle it
                     return HealthAnalysis {
                         status: "degraded".to_string(),
                         notify_user: false,
                         user_message: None,
-                        component_type: None,
                         severity: Some("info".to_string()),
                         auto_actions: vec![],
                         auto_dismiss_seconds: None,
@@ -256,7 +269,6 @@ JSON:"#,
             status: "healthy".to_string(),
             notify_user: false,
             user_message: None,
-            component_type: None,
             severity: None,
             auto_actions: vec![],
             auto_dismiss_seconds: None,
@@ -297,42 +309,24 @@ JSON:"#,
         analysis: &HealthAnalysis,
         event_tx: &mpsc::Sender<AgUiEvent>,
     ) -> Result<()> {
+        use crate::types::NotificationSeverity;
+
         let message = analysis
             .user_message
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No user message in analysis"))?;
 
-        let component_type = analysis.component_type.as_deref().unwrap_or("alert-panel");
-        let severity = analysis.severity.as_deref().unwrap_or("info");
-
-        // Generate a dynamic UI component using StreamingGenerator
-        // The component type determines what kind of UI we create
-        let component_prompt = match component_type {
-            "status-chart" => {
-                format!(
-                    "Create a status chart showing: {}. Include visual indicators and trends.",
-                    message
-                )
-            }
-            "action-card" => {
-                format!(
-                    "Create an action card for: {}. Include clear call-to-action buttons.",
-                    message
-                )
-            }
-            _ => {
-                // Default: alert-panel
-                format!(
-                    "Create an alert panel with {} severity: {}. Make it dismissible.",
-                    severity, message
-                )
-            }
+        let severity_str = analysis.severity.as_deref().unwrap_or("info");
+        let severity = match severity_str {
+            "critical" => NotificationSeverity::Error,
+            "warning" => NotificationSeverity::Warning,
+            _ => NotificationSeverity::Info,
         };
 
-        // Send a SubmitPrompt event to trigger dynamic UI generation
-        // This reuses the existing streaming generation infrastructure
-        let event = AgUiEvent::SubmitPrompt {
-            text: format!("HEALTH_ALERT:{}", component_prompt),
+        // Send a simple, contextual notification
+        let event = AgUiEvent::SystemNotification {
+            message: message.clone(),
+            severity,
         };
 
         event_tx
@@ -368,7 +362,8 @@ mod tests {
         assert_eq!(analysis.status, "unhealthy");
         assert!(analysis.notify_user);
         assert_eq!(analysis.severity, Some("warning".to_string()));
-        assert!(analysis.user_message.unwrap().contains("Gemini API"));
+        let message = analysis.user_message.unwrap();
+        assert!(message.contains("local model") || message.contains("API"));
     }
 
     #[tokio::test]

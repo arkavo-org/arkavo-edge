@@ -16,10 +16,10 @@ const elements = {
     planItems: document.getElementById('plan-items'),
     hintOverlay: document.getElementById('hint-overlay'),
     sandbox: document.getElementById('sandbox'),
-    get systemStatusContent() { return ensureElement('system-status-content'); },
     get mcpStatusContent() { return ensureElement('mcp-status-content'); },
     get remoteLlmStatusContent() { return ensureElement('remote-llm-status-content'); },
-    get statusUpdateTime() { return ensureElement('status-update-time'); }
+    get statusUpdateTime() { return ensureElement('status-update-time'); },
+    get notificationContainer() { return ensureElement('notification-container'); }
 };
 
 function ensureElement(id) {
@@ -42,17 +42,6 @@ function repairStatusPanel() {
         statusPanel.id = 'status-panel';
         statusPanel.innerHTML = `
             <div class="status-section">
-                <h4>System Status</h4>
-                <div id="system-status-content">
-                    <div class="status-item">
-                        <span class="status-label">Loading...</span>
-                        <span class="status-value">...</span>
-                    </div>
-                </div>
-                <div class="status-update-time" id="status-update-time">Never</div>
-            </div>
-
-            <div class="status-section">
                 <h4>MCP Tools</h4>
                 <div id="mcp-status-content">
                     <div class="status-item">
@@ -70,11 +59,21 @@ function repairStatusPanel() {
                         <span class="status-value">...</span>
                     </div>
                 </div>
+                <div class="status-update-time" id="status-update-time">Never</div>
             </div>
         `;
         mainContainer.insertBefore(statusPanel, mainContainer.firstChild);
         console.log('Status panel repaired');
     }
+
+    // Ensure notification container exists
+    let notificationContainer = document.getElementById('notification-container');
+    if (!notificationContainer) {
+        notificationContainer = document.createElement('div');
+        notificationContainer.id = 'notification-container';
+        document.body.appendChild(notificationContainer);
+    }
+
     return statusPanel;
 }
 
@@ -123,7 +122,8 @@ function handleMessage(message) {
         appliedPart: handleAppliedPart,
         error: handleError,
         undoAvailable: handleUndoAvailable,
-        statusUpdate: handleStatusUpdate
+        statusUpdate: handleStatusUpdate,
+        systemNotification: handleSystemNotification
     };
 
     const handler = handlers[message.type];
@@ -215,6 +215,28 @@ function handleUndoAvailable(data) {
     elements.redoBtn.disabled = !data.can_redo;
 }
 
+function handleSystemNotification(data) {
+    showNotification(data.message, data.severity || 'info');
+}
+
+function showNotification(message, severity) {
+    const container = elements.notificationContainer;
+    if (!container) return;
+
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${severity}`;
+    notification.textContent = message;
+
+    container.appendChild(notification);
+
+    // Auto-dismiss after 8 seconds for info, 15 seconds for warning/error
+    const duration = severity === 'info' ? 8000 : 15000;
+    setTimeout(() => {
+        notification.classList.add('notification-fade-out');
+        setTimeout(() => notification.remove(), 300);
+    }, duration);
+}
+
 function updateUndoRedoButtons() {
     elements.undoBtn.disabled = undoStack.length === 0;
     elements.redoBtn.disabled = redoStack.length === 0;
@@ -269,39 +291,8 @@ elements.promptInput.addEventListener('keydown', (e) => {
 });
 
 function handleStatusUpdate(data) {
-    if (elements.systemStatusContent && data.health) {
-        const healthStatusClass = data.health.status === 'Healthy' ? 'good' :
-                                   data.health.status === 'Unhealthy' ? 'error' : 'warning';
-
-        let componentsHtml = '';
-        if (data.health.components && data.health.components.length > 0) {
-            componentsHtml = data.health.components.map(comp => {
-                const statusClass = comp.status === 'Healthy' ? 'good' :
-                                   comp.status === 'Unhealthy' ? 'error' : 'warning';
-                return `
-                    <div class="status-item">
-                        <span class="status-label">${comp.component}</span>
-                        <span class="status-value ${statusClass}">${comp.status}</span>
-                    </div>
-                    ${comp.status !== 'Healthy' ? `
-                    <div class="status-message">${comp.message}</div>
-                    ` : ''}
-                `;
-            }).join('');
-        }
-
-        elements.systemStatusContent.innerHTML = `
-            <div class="status-item">
-                <span class="status-label">Health</span>
-                <span class="status-value ${healthStatusClass}">${data.health.status}</span>
-            </div>
-            ${componentsHtml}
-            <div class="status-item">
-                <span class="status-label">Connections</span>
-                <span class="status-value good">${data.system.active_connections}</span>
-            </div>
-        `;
-    }
+    // Health monitoring happens silently in background
+    // Only user-facing notifications will be shown via SystemNotification events
 
     if (elements.mcpStatusContent) {
         elements.mcpStatusContent.innerHTML = `
@@ -420,13 +411,6 @@ function ensureStatusPanelStyles() {
                 text-align: right;
                 margin-top: 8px;
             }
-            .status-message {
-                font-size: 11px;
-                color: #aaa;
-                padding: 4px 0;
-                margin-left: 8px;
-                font-style: italic;
-            }
             .llm-entry {
                 background: #2a2a2a;
                 border: 1px solid #3a3a3a;
@@ -444,6 +428,60 @@ function ensureStatusPanelStyles() {
                 margin-bottom: 6px;
                 border-bottom: 1px solid #3a3a3a;
                 padding-bottom: 4px;
+            }
+
+            #notification-container {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                z-index: 1000;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                max-width: 400px;
+            }
+            .notification {
+                background: #1a1a1a;
+                border: 1px solid #3a3a3a;
+                border-radius: 6px;
+                padding: 14px 16px;
+                font-size: 14px;
+                line-height: 1.5;
+                color: #e0e0e0;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                animation: notification-slide-in 0.3s ease-out;
+            }
+            .notification-info {
+                border-left: 3px solid #3b82f6;
+            }
+            .notification-warning {
+                border-left: 3px solid #fbbf24;
+            }
+            .notification-error {
+                border-left: 3px solid #ef4444;
+            }
+            .notification-fade-out {
+                animation: notification-fade-out 0.3s ease-out forwards;
+            }
+            @keyframes notification-slide-in {
+                from {
+                    transform: translateX(400px);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            @keyframes notification-fade-out {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(400px);
+                    opacity: 0;
+                }
             }
         `;
         document.head.appendChild(style);

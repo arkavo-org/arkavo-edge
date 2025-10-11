@@ -254,6 +254,10 @@ pub enum AgUiEvent {
         health: HealthData,
         timestamp: String,
     },
+    SystemNotification {
+        message: String,
+        severity: NotificationSeverity,
+    },
     PartStream {
         #[serde(rename = "partId")]
         part_id: String,
@@ -464,4 +468,12 @@ pub struct ComponentHealth {
     pub component: String,
     pub status: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotificationSeverity {
+    Info,
+    Warning,
+    Error,
 }
