@@ -274,6 +274,7 @@ pub enum ClientMessage {
 // Streaming API types
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamChunk {
+    #[serde(default)]
     pub candidates: Vec<StreamCandidate>,
 }
 
@@ -281,6 +282,7 @@ pub struct StreamChunk {
 #[serde(rename_all = "camelCase")]
 pub struct StreamCandidate {
     pub content: StreamContent,
+    #[serde(default)]
     pub finish_reason: Option<String>,
 }
 
@@ -288,6 +290,7 @@ pub struct StreamCandidate {
 pub struct StreamContent {
     #[serde(default)]
     pub parts: Vec<StreamPart>,
+    #[serde(default)]
     pub role: String,
 }
 
