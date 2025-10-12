@@ -155,14 +155,19 @@ mod tests {
 
         let msg = WsMessage::CodeUpdate { update };
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("codeUpdate"));
+        // With #[serde(tag = "type", content = "data")], the JSON will be:
+        // {"type":"CodeUpdate","data":{...}}
+        assert!(json.contains("CodeUpdate"));
+        assert!(json.contains("\"type\""));
     }
 
     #[test]
     fn test_history_request() {
         let msg = WsMessage::HistoryRequest { limit: 10 };
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("historyRequest"));
+        // With #[serde(tag = "type", content = "data")], the JSON will be:
+        // {"type":"HistoryRequest","data":10}
+        assert!(json.contains("HistoryRequest"));
         assert!(json.contains("10"));
     }
 }
