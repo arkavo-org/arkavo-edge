@@ -486,7 +486,7 @@ mod screenshot_validation {
         assert_eq!(sanitize_filename("Header (Top)"), "header__top_");
         assert_eq!(
             sanitize_filename("Portfolio Chart 📊"),
-            "portfolio_chart___"
+            "portfolio_chart__"
         );
     }
 }
