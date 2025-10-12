@@ -97,7 +97,7 @@ impl HealthMonitor {
             Ok(analysis) => Ok(analysis),
             Err(e) => {
                 eprintln!("LLM analysis failed: {e}, falling back to rule-based");
-                Ok(self.rule_based_analysis(health_data))
+                Ok(Self::rule_based_analysis_impl(health_data))
             }
         }
     }
@@ -217,7 +217,7 @@ JSON:"#,
             .map_err(|e| anyhow::anyhow!("Failed to parse LLM health analysis: {e}"))
     }
 
-    fn rule_based_analysis(&self, health_data: &serde_json::Value) -> HealthAnalysis {
+    fn rule_based_analysis_impl(health_data: &serde_json::Value) -> HealthAnalysis {
         // Simple fallback - just check if any component is unhealthy
         let components = health_data["components"].as_array();
 
@@ -344,9 +344,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_based_analysis_unhealthy() {
-        let tool_registry = Arc::new(ToolRegistry::new());
-        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
-
         let health_data = serde_json::json!({
             "components": [
                 {
@@ -357,7 +354,7 @@ mod tests {
             ]
         });
 
-        let analysis = monitor.rule_based_analysis(&health_data);
+        let analysis = HealthMonitor::rule_based_analysis_impl(&health_data);
         assert_eq!(analysis.status, "unhealthy");
         assert!(analysis.notify_user);
         assert_eq!(analysis.severity, Some("warning".to_string()));
@@ -367,9 +364,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_rule_based_analysis_degraded() {
-        let tool_registry = Arc::new(ToolRegistry::new());
-        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
-
         let health_data = serde_json::json!({
             "components": [
                 {
@@ -380,16 +374,13 @@ mod tests {
             ]
         });
 
-        let analysis = monitor.rule_based_analysis(&health_data);
+        let analysis = HealthMonitor::rule_based_analysis_impl(&health_data);
         assert_eq!(analysis.status, "degraded");
         assert!(!analysis.notify_user); // Silent auto-fix
     }
 
     #[tokio::test]
     async fn test_rule_based_analysis_healthy() {
-        let tool_registry = Arc::new(ToolRegistry::new());
-        let monitor = HealthMonitor::new(tool_registry).await.unwrap();
-
         let health_data = serde_json::json!({
             "components": [
                 {
@@ -400,7 +391,7 @@ mod tests {
             ]
         });
 
-        let analysis = monitor.rule_based_analysis(&health_data);
+        let analysis = HealthMonitor::rule_based_analysis_impl(&health_data);
         assert_eq!(analysis.status, "healthy");
         assert!(!analysis.notify_user);
     }
