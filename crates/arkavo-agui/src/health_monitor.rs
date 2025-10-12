@@ -120,7 +120,7 @@ impl HealthMonitor {
             images: None,
         }];
 
-        let response = provider.complete(messages).await?;
+        let response = provider.complete_with_options(messages, Some(250)).await?;
         self.parse_analysis(&response)
     }
 
@@ -214,7 +214,7 @@ JSON:"#,
         };
 
         serde_json::from_str(json_str)
-            .or_else(|e| Err(anyhow::anyhow!("Failed to parse LLM health analysis: {e}")))
+            .map_err(|e| anyhow::anyhow!("Failed to parse LLM health analysis: {e}"))
     }
 
     fn rule_based_analysis(&self, health_data: &serde_json::Value) -> HealthAnalysis {
@@ -230,9 +230,9 @@ JSON:"#,
                 if status == "unhealthy" {
                     // Generate contextual message based on component and error
                     let user_message = if message.contains("API") || message.contains("Gemini") {
-                        format!("Using local model due to API issues. Generation may be slower.")
+                        "Using local model due to API issues. Generation may be slower.".to_string()
                     } else if message.contains("auth") || message.contains("key") {
-                        format!("API key issue detected. Please check your configuration.")
+                        "API key issue detected. Please check your configuration.".to_string()
                     } else {
                         format!(
                             "{} is experiencing issues. System may run slower.",

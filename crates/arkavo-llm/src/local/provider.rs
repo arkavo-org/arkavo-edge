@@ -145,7 +145,11 @@ impl LocalProvider {
 #[async_trait]
 impl Provider for LocalProvider {
     #[allow(clippy::significant_drop_tightening)]
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<String> {
         #[cfg(not(feature = "llm-local"))]
         {
             return Err(Error::Config(
@@ -248,8 +252,10 @@ impl Provider for LocalProvider {
             let prompt_len = ids.len();
             let context_remaining = context_window.saturating_sub(prompt_len);
 
-            // Use full remaining context window (up to 2048 tokens)
-            let max_tokens = 2048.min(context_remaining);
+            // Use provided max_tokens or default to 2048, capped by remaining context
+            let max_tokens = max_tokens
+                .unwrap_or(2048)
+                .min(context_remaining);
 
             tracing::debug!(
                 "Context window: {}, prompt length: {}, max tokens to generate: {}",

@@ -180,9 +180,18 @@ impl TaskClassifier {
 
     /// Complete an LLM prompt using the local provider
     pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+        self.complete_with_options(messages, None).await
+    }
+
+    /// Complete an LLM prompt with optional max_tokens limit
+    pub async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<String> {
         let provider = self.provider.lock().await;
         provider
-            .complete(messages)
+            .complete_with_options(messages, max_tokens)
             .await
             .map_err(|e| Error::Classification(format!("LLM completion failed: {e}")))
     }
