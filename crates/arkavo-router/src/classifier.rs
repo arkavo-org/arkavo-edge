@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(not(feature = "llama-cpp"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 use arkavo_llm::local::LocalProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -102,15 +102,15 @@ pub struct Classification {
 }
 
 pub struct TaskClassifier {
-    #[cfg(feature = "llama-cpp")]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     provider: Arc<Mutex<LlamaCppProvider>>,
-    #[cfg(not(feature = "llama-cpp"))]
+    #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
     provider: Arc<Mutex<LocalProvider>>,
 }
 
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        #[cfg(feature = "llama-cpp")]
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
             // Use llama.cpp provider which has built-in tokenizer support
             use hf_hub::api::tokio::Api;
@@ -140,7 +140,7 @@ impl TaskClassifier {
             })
         }
 
-        #[cfg(not(feature = "llama-cpp"))]
+        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {
             let provider = LocalProvider::new(
                 "gemma-3-270m-it".to_string(),

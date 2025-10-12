@@ -29,6 +29,14 @@ impl MockProvider {
 #[async_trait]
 impl Provider for MockProvider {
     async fn complete(&self, _messages: Vec<Message>) -> Result<String, arkavo_llm::Error> {
+        self.complete_with_options(_messages, None).await
+    }
+
+    async fn complete_with_options(
+        &self,
+        _messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String, arkavo_llm::Error> {
         *self.request_count.write().await += 1;
 
         let responses = self.responses.read().await;
