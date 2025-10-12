@@ -484,9 +484,6 @@ mod screenshot_validation {
             "account_summary_card"
         );
         assert_eq!(sanitize_filename("Header (Top)"), "header__top_");
-        assert_eq!(
-            sanitize_filename("Portfolio Chart 📊"),
-            "portfolio_chart__"
-        );
+        assert_eq!(sanitize_filename("Portfolio Chart 📊"), "portfolio_chart__");
     }
 }
