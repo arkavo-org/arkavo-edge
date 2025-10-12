@@ -152,7 +152,7 @@ impl AgUiGateway {
 
             // Register UI Generator health reporter (wrapper that delegates to global instance)
             use arkavo_ui_generator::health::GlobalHealthReporterWrapper;
-            let ui_generator_reporter = Arc::new(GlobalHealthReporterWrapper::default());
+            let ui_generator_reporter = Arc::new(GlobalHealthReporterWrapper);
             registry.register(ui_generator_reporter).await;
 
             println!("AG-UI: Health reporters registered");
@@ -1103,7 +1103,26 @@ async fn handle_event(
             let tx_clone = tx.clone();
             let part_id_clone = part_id.clone();
             tokio::spawn(async move {
+                println!(
+                    "AG-UI: Starting stream receiver task for part: {}",
+                    part_id_clone
+                );
+                let mut chunk_count = 0;
                 while let Some(chunk) = stream_rx.recv().await {
+                    chunk_count += 1;
+                    println!(
+                        "AG-UI: Received chunk #{} for part {}, type={}, done={}, content_len={}",
+                        chunk_count,
+                        part_id_clone,
+                        match chunk.chunk_type {
+                            arkavo_ui_generator::streaming::ChunkType::Html => "html",
+                            arkavo_ui_generator::streaming::ChunkType::Css => "css",
+                            arkavo_ui_generator::streaming::ChunkType::JavaScript => "js",
+                        },
+                        chunk.done,
+                        chunk.content.len()
+                    );
+
                     let stream_event = AgUiEvent::PartStream {
                         part_id: part_id_clone.clone(),
                         chunk_type: match chunk.chunk_type {
@@ -1116,18 +1135,32 @@ async fn handle_event(
                         content: chunk.content,
                         done: chunk.done,
                     };
-                    let _ = tx_clone.send(stream_event).await;
+
+                    if let Err(e) = tx_clone.send(stream_event).await {
+                        eprintln!("AG-UI: Failed to send stream event: {}", e);
+                        break;
+                    }
 
                     if chunk.done {
+                        println!(
+                            "AG-UI: Stream complete for part {} after {} chunks",
+                            part_id_clone, chunk_count
+                        );
                         let version_id = uuid::Uuid::new_v4().to_string();
                         let applied_event = AgUiEvent::AppliedPart {
                             part_id: part_id_clone.clone(),
                             version_id,
                         };
-                        let _ = tx_clone.send(applied_event).await;
+                        if let Err(e) = tx_clone.send(applied_event).await {
+                            eprintln!("AG-UI: Failed to send applied event: {}", e);
+                        }
                         break;
                     }
                 }
+                println!(
+                    "AG-UI: Stream receiver task ended for part: {}",
+                    part_id_clone
+                );
             });
         }
 

@@ -307,7 +307,11 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
-    async fn complete_with_options(&self, messages: Vec<Message>, _max_tokens: Option<usize>) -> Result<String, crate::Error> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String, crate::Error> {
         let (system_content, api_messages) = self.convert_messages(messages);
 
         let request = CreateMessageRequest {

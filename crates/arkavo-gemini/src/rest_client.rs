@@ -64,6 +64,10 @@ struct GenerationConfig {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "maxOutputTokens")]
     max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseMimeType")]
+    response_mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseSchema")]
+    response_schema: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,6 +171,31 @@ impl RestClient {
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
     ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_impl(prompt, tools, None).await
+    }
+
+    pub async fn stream_generate_content_json(
+        &self,
+        prompt: impl Into<String>,
+        schema: Value,
+    ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_impl(prompt, None, Some(schema))
+            .await
+    }
+
+    async fn stream_generate_content_impl(
+        &self,
+        prompt: impl Into<String>,
+        tools: Option<Vec<FunctionDeclaration>>,
+        json_schema: Option<Value>,
+    ) -> Result<GeminiSseStream> {
+        let generation_config = json_schema.map(|schema| GenerationConfig {
+            temperature: None,
+            max_output_tokens: None,
+            response_mime_type: Some("application/json".to_string()),
+            response_schema: Some(schema),
+        });
+
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: "user".to_string(),
@@ -179,7 +208,7 @@ impl RestClient {
                     function_declarations: t,
                 }]
             }),
-            generation_config: None,
+            generation_config,
         };
 
         let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
@@ -188,8 +217,10 @@ impl RestClient {
             GEMINI_REST_ENDPOINT, model_name, self.api_key
         );
 
-        let response = self
-            .client
+        // Create a new client with no timeout for streaming (SSE keeps connection open)
+        let streaming_client = Client::builder().build().unwrap_or_else(|_| Client::new());
+
+        let response = streaming_client
             .post(&url)
             .json(&request)
             .send()
@@ -214,7 +245,8 @@ impl RestClient {
             }
         }
 
-        Ok(GeminiSseStream::new(response.bytes_stream()))
+        let stream = GeminiSseStream::new(response.bytes_stream());
+        Ok(stream)
     }
 
     pub async fn list_models(&self, page_size: Option<u32>) -> Result<ListModelsResponse> {

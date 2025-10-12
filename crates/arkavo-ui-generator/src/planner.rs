@@ -56,7 +56,9 @@ impl UiPlanner {
                 .map_err(|e| anyhow::anyhow!("Local model planning failed: {e}"))?
         };
 
-        self.parse_plan(&response)
+        let plan = self.parse_plan(&response)?;
+
+        Ok(plan)
     }
 
     fn build_planning_prompt(&self, user_prompt: &str) -> String {

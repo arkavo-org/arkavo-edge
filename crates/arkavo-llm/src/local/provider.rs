@@ -253,9 +253,7 @@ impl Provider for LocalProvider {
             let context_remaining = context_window.saturating_sub(prompt_len);
 
             // Use provided max_tokens or default to 2048, capped by remaining context
-            let max_tokens = max_tokens
-                .unwrap_or(2048)
-                .min(context_remaining);
+            let max_tokens = max_tokens.unwrap_or(2048).min(context_remaining);
 
             tracing::debug!(
                 "Context window: {}, prompt length: {}, max tokens to generate: {}",

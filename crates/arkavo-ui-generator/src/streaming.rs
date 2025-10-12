@@ -2,11 +2,9 @@ use anyhow::Result;
 use arkavo_router::Router;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-// StreamExt trait provides .next() method for stream iteration
-#[allow(unused_imports)]
-use tokio_stream::StreamExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamChunk {
@@ -42,28 +40,17 @@ pub struct GeneratedComponent {
 
 pub struct StreamingGenerator {
     router: Option<Arc<Router>>,
-    html_pattern: Regex,
-    css_pattern: Regex,
-    js_pattern: Regex,
 }
 
 impl StreamingGenerator {
     pub fn new(router: Arc<Router>) -> Result<Self> {
         Ok(Self {
             router: Some(router),
-            html_pattern: Regex::new(r"(?s)```html\s*(.*?)```")?,
-            css_pattern: Regex::new(r"(?s)```css\s*(.*?)```")?,
-            js_pattern: Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```")?,
         })
     }
 
     pub fn new_without_router() -> Result<Self> {
-        Ok(Self {
-            router: None,
-            html_pattern: Regex::new(r"(?s)```html\s*(.*?)```")?,
-            css_pattern: Regex::new(r"(?s)```css\s*(.*?)```")?,
-            js_pattern: Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```")?,
-        })
+        Ok(Self { router: None })
     }
 
     pub async fn generate_part(
@@ -77,9 +64,6 @@ impl StreamingGenerator {
         let prompt = self.build_component_prompt(part_name, part_description, overall_prompt);
 
         let router = self.router.clone();
-        let html_pattern = self.html_pattern.clone();
-        let css_pattern = self.css_pattern.clone();
-        let js_pattern = self.js_pattern.clone();
 
         tokio::spawn(async move {
             // Try Gemini first (if available via Router), fall back to local model
@@ -96,64 +80,121 @@ impl StreamingGenerator {
                     std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
                 let client = RestClient::new(api_key, model);
 
-                // Use streaming API for real-time incremental generation
-                match client.stream_generate_content(&prompt, None).await {
+                // Define JSON schema for structured output
+                let schema = json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "html": {"type": "STRING"},
+                        "css": {"type": "STRING"},
+                        "js": {"type": "STRING"}
+                    },
+                    "required": ["html", "css", "js"]
+                });
+
+                // Use streaming API with JSON mode for real-time incremental generation
+                match client.stream_generate_content_json(&prompt, schema).await {
                     Ok(mut stream) => {
-                        let mut accumulated_text = String::new();
+                        let mut json_buffer = String::new();
+                        let mut last_sent_html = String::new();
+                        let mut last_sent_css = String::new();
+                        let mut last_sent_js = String::new();
 
                         while let Some(result) = stream.next().await {
                             match result {
                                 Ok(chunk) => {
                                     if let Some(text) = chunk.text {
-                                        accumulated_text.push_str(&text);
+                                        json_buffer.push_str(&text);
                                     }
 
-                                    // Parse accumulated text to extract HTML/CSS/JS incrementally
-                                    let component = Self::parse_component(
-                                        &accumulated_text,
-                                        &html_pattern,
-                                        &css_pattern,
-                                        &js_pattern,
-                                    );
+                                    // Try to parse accumulated JSON incrementally
+                                    if let Ok(obj) =
+                                        serde_json::from_str::<serde_json::Value>(&json_buffer)
+                                    {
+                                        let html = obj["html"].as_str().unwrap_or_default();
+                                        let css = obj["css"].as_str().unwrap_or_default();
+                                        let js = obj["js"].as_str().unwrap_or_default();
 
-                                    // Send incremental updates as they become available
-                                    if !component.html.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::Html,
-                                                content: component.html.clone(),
-                                                done: false,
-                                            })
-                                            .await;
-                                    }
+                                        // Send only diffs to avoid UI thrashing
+                                        if html != last_sent_html {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Html,
+                                                    content: html.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                            last_sent_html = html.to_string();
+                                        }
 
-                                    if !component.css.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::Css,
-                                                content: component.css.clone(),
-                                                done: false,
-                                            })
-                                            .await;
-                                    }
+                                        if css != last_sent_css {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Css,
+                                                    content: css.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                            last_sent_css = css.to_string();
+                                        }
 
-                                    if !component.javascript.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::JavaScript,
-                                                content: component.javascript.clone(),
-                                                done: false,
-                                            })
-                                            .await;
+                                        if js != last_sent_js {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::JavaScript,
+                                                    content: js.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                            last_sent_js = js.to_string();
+                                        }
                                     }
 
                                     // Check if stream is done
                                     if chunk.done {
+                                        // Final parse attempt
+                                        if let Ok(obj) =
+                                            serde_json::from_str::<serde_json::Value>(&json_buffer)
+                                        {
+                                            let html = obj["html"].as_str().unwrap_or_default();
+                                            let css = obj["css"].as_str().unwrap_or_default();
+                                            let js = obj["js"].as_str().unwrap_or_default();
+
+                                            // Send final diffs if any
+                                            if html != last_sent_html && !html.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Html,
+                                                        content: html.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+
+                                            if css != last_sent_css && !css.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Css,
+                                                        content: css.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+
+                                            if js != last_sent_js && !js.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::JavaScript,
+                                                        content: js.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+                                        }
+
                                         break;
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("Gemini streaming error: {e}");
                                     // Track error in health system
                                     let health_reporter =
                                         crate::health::UiGeneratorHealthReporter::global();
@@ -165,68 +206,90 @@ impl StreamingGenerator {
                                         .await;
 
                                     // If no accumulated text, fall back to local model
-                                    if accumulated_text.is_empty() {
-                                        eprintln!(
-                                            "Stream failed with no accumulated text, falling back to local model"
-                                        );
-                                        if let Some(router_instance) = &router {
-                                            let classifier = router_instance.get_local_provider();
-                                            let messages = vec![arkavo_llm::Message {
-                                                role: arkavo_llm::Role::User,
-                                                content: prompt.clone(),
-                                                images: None,
-                                            }];
+                                    if json_buffer.is_empty()
+                                        && let Some(router_instance) = &router
+                                    {
+                                        let classifier = router_instance.get_local_provider();
+                                        let messages = vec![arkavo_llm::Message {
+                                            role: arkavo_llm::Role::User,
+                                            content: prompt.clone(),
+                                            images: None,
+                                        }];
 
-                                            if let Ok(response) =
-                                                classifier.complete(messages).await
-                                            {
-                                                accumulated_text = response;
-                                            }
+                                        if let Ok(response) = classifier.complete(messages).await {
+                                            json_buffer = response;
                                         }
                                     }
 
                                     // Parse and send whatever we have (salvaged or fallback)
-                                    if !accumulated_text.is_empty() {
-                                        eprintln!(
-                                            "Parsing salvaged {} chars of response",
-                                            accumulated_text.len()
-                                        );
+                                    if !json_buffer.is_empty() {
+                                        // Try JSON first
+                                        if let Ok(obj) =
+                                            serde_json::from_str::<serde_json::Value>(&json_buffer)
+                                        {
+                                            let html = obj["html"].as_str().unwrap_or_default();
+                                            let css = obj["css"].as_str().unwrap_or_default();
+                                            let js = obj["js"].as_str().unwrap_or_default();
 
-                                        let component = Self::parse_component(
-                                            &accumulated_text,
-                                            &html_pattern,
-                                            &css_pattern,
-                                            &js_pattern,
-                                        );
+                                            if !html.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Html,
+                                                        content: html.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
 
-                                        if !component.html.is_empty() {
-                                            let _ = tx
-                                                .send(StreamChunk {
-                                                    chunk_type: ChunkType::Html,
-                                                    content: component.html,
-                                                    done: false,
-                                                })
-                                                .await;
-                                        }
+                                            if !css.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Css,
+                                                        content: css.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
 
-                                        if !component.css.is_empty() {
-                                            let _ = tx
-                                                .send(StreamChunk {
-                                                    chunk_type: ChunkType::Css,
-                                                    content: component.css,
-                                                    done: false,
-                                                })
-                                                .await;
-                                        }
-
-                                        if !component.javascript.is_empty() {
-                                            let _ = tx
-                                                .send(StreamChunk {
-                                                    chunk_type: ChunkType::JavaScript,
-                                                    content: component.javascript,
-                                                    done: false,
-                                                })
-                                                .await;
+                                            if !js.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::JavaScript,
+                                                        content: js.to_string(),
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+                                        } else if let Some((html, css, js)) =
+                                            Self::try_parse_markdown_fallback(&json_buffer)
+                                        {
+                                            if !html.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Html,
+                                                        content: html,
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+                                            if !css.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::Css,
+                                                        content: css,
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
+                                            if !js.is_empty() {
+                                                let _ = tx
+                                                    .send(StreamChunk {
+                                                        chunk_type: ChunkType::JavaScript,
+                                                        content: js,
+                                                        done: false,
+                                                    })
+                                                    .await;
+                                            }
                                         }
                                     }
                                     break;
@@ -235,7 +298,6 @@ impl StreamingGenerator {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Gemini API error: {e}");
                         // Track error in health system
                         let health_reporter = crate::health::UiGeneratorHealthReporter::global();
                         health_reporter
@@ -243,7 +305,6 @@ impl StreamingGenerator {
                             .await;
 
                         // Fall back to local model
-                        eprintln!("Gemini API failed, falling back to local model");
                         if let Some(router_instance) = &router {
                             let classifier = router_instance.get_local_provider();
                             let messages = vec![arkavo_llm::Message {
@@ -254,45 +315,77 @@ impl StreamingGenerator {
 
                             match classifier.complete(messages).await {
                                 Ok(response) => {
-                                    let component = Self::parse_component(
-                                        &response,
-                                        &html_pattern,
-                                        &css_pattern,
-                                        &js_pattern,
-                                    );
+                                    // Try JSON first, fallback to markdown
+                                    if let Ok(obj) =
+                                        serde_json::from_str::<serde_json::Value>(&response)
+                                    {
+                                        let html = obj["html"].as_str().unwrap_or_default();
+                                        let css = obj["css"].as_str().unwrap_or_default();
+                                        let js = obj["js"].as_str().unwrap_or_default();
 
-                                    if !component.html.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::Html,
-                                                content: component.html,
-                                                done: false,
-                                            })
-                                            .await;
-                                    }
+                                        if !html.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Html,
+                                                    content: html.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
 
-                                    if !component.css.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::Css,
-                                                content: component.css,
-                                                done: false,
-                                            })
-                                            .await;
-                                    }
+                                        if !css.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Css,
+                                                    content: css.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
 
-                                    if !component.javascript.is_empty() {
-                                        let _ = tx
-                                            .send(StreamChunk {
-                                                chunk_type: ChunkType::JavaScript,
-                                                content: component.javascript,
-                                                done: false,
-                                            })
-                                            .await;
+                                        if !js.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::JavaScript,
+                                                    content: js.to_string(),
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+                                    } else if let Some((html, css, js)) =
+                                        Self::try_parse_markdown_fallback(&response)
+                                    {
+                                        if !html.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Html,
+                                                    content: html,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+                                        if !css.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::Css,
+                                                    content: css,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
+                                        if !js.is_empty() {
+                                            let _ = tx
+                                                .send(StreamChunk {
+                                                    chunk_type: ChunkType::JavaScript,
+                                                    content: js,
+                                                    done: false,
+                                                })
+                                                .await;
+                                        }
                                     }
                                 }
-                                Err(e) => {
-                                    eprintln!("Local model fallback also failed: {e}");
+                                Err(_e) => {
+                                    // Local model fallback failed
                                 }
                             }
                         }
@@ -300,7 +393,6 @@ impl StreamingGenerator {
                 }
             } else if let Some(router_instance) = router {
                 // Use local model via Router
-                eprintln!("GEMINI_API_KEY not set, using local model");
 
                 let classifier = router_instance.get_local_provider();
                 let messages = vec![arkavo_llm::Message {
@@ -311,47 +403,75 @@ impl StreamingGenerator {
 
                 match classifier.complete(messages).await {
                     Ok(response) => {
-                        // Parse the complete response
-                        let component = Self::parse_component(
-                            &response,
-                            &html_pattern,
-                            &css_pattern,
-                            &js_pattern,
-                        );
+                        // Try JSON first, fallback to markdown
+                        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&response) {
+                            let html = obj["html"].as_str().unwrap_or_default();
+                            let css = obj["css"].as_str().unwrap_or_default();
+                            let js = obj["js"].as_str().unwrap_or_default();
 
-                        // Send complete chunks (local model doesn't stream)
-                        if !component.html.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::Html,
-                                    content: component.html,
-                                    done: false,
-                                })
-                                .await;
-                        }
+                            // Send complete chunks (local model doesn't stream)
+                            if !html.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::Html,
+                                        content: html.to_string(),
+                                        done: false,
+                                    })
+                                    .await;
+                            }
 
-                        if !component.css.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::Css,
-                                    content: component.css,
-                                    done: false,
-                                })
-                                .await;
-                        }
+                            if !css.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::Css,
+                                        content: css.to_string(),
+                                        done: false,
+                                    })
+                                    .await;
+                            }
 
-                        if !component.javascript.is_empty() {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    chunk_type: ChunkType::JavaScript,
-                                    content: component.javascript,
-                                    done: false,
-                                })
-                                .await;
+                            if !js.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::JavaScript,
+                                        content: js.to_string(),
+                                        done: false,
+                                    })
+                                    .await;
+                            }
+                        } else if let Some((html, css, js)) =
+                            Self::try_parse_markdown_fallback(&response)
+                        {
+                            if !html.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::Html,
+                                        content: html,
+                                        done: false,
+                                    })
+                                    .await;
+                            }
+                            if !css.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::Css,
+                                        content: css,
+                                        done: false,
+                                    })
+                                    .await;
+                            }
+                            if !js.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        chunk_type: ChunkType::JavaScript,
+                                        content: js,
+                                        done: false,
+                                    })
+                                    .await;
+                            }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Local model generation error: {e}");
                         // Track error in health system
                         let health_reporter = crate::health::UiGeneratorHealthReporter::global();
                         health_reporter
@@ -359,8 +479,6 @@ impl StreamingGenerator {
                             .await;
                     }
                 }
-            } else {
-                eprintln!("No model available for generation");
             }
 
             // Send final done signal
@@ -414,39 +532,27 @@ JavaScript Best Practices:
 - Handle edge cases (empty states, loading states)
 - Use meaningful variable names
 
-Format your response as:
-```html
-<div class="component-name">
-  <!-- Your complete HTML structure here -->
-</div>
-```
+IMPORTANT: Return ONLY valid JSON with keys "html", "css", and "js". Do NOT use markdown code fences.
+Your response must be valid JSON that can be parsed directly.
 
-```css
-.component-name {{
-  /* Your complete CSS with custom properties */
-}}
-```
-
-```javascript
-// Your complete JavaScript implementation (if needed)
-// Include event handlers, data manipulation, etc.
-```
+Example format:
+{{"html": "<div class='component'>...</div>", "css": ".component {{ ... }}", "js": "// JavaScript code here"}}
 
 Generate the complete, production-ready component now:"#
         )
     }
 
-    fn parse_component(
-        response: &str,
-        html_pattern: &Regex,
-        css_pattern: &Regex,
-        js_pattern: &Regex,
-    ) -> GeneratedComponent {
+    fn try_parse_markdown_fallback(response: &str) -> Option<(String, String, String)> {
+        let html_pattern = Regex::new(r"(?s)```html\s*(.*?)```").ok()?;
+        let css_pattern = Regex::new(r"(?s)```css\s*(.*?)```").ok()?;
+        let js_pattern = Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```").ok()?;
+
         let html = html_pattern
-            .captures(response)
-            .and_then(|cap| cap.get(1))
-            .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_default();
+            .captures(response)?
+            .get(1)?
+            .as_str()
+            .trim()
+            .to_string();
 
         let css = css_pattern
             .captures(response)
@@ -454,16 +560,16 @@ Generate the complete, production-ready component now:"#
             .map(|m| m.as_str().trim().to_string())
             .unwrap_or_default();
 
-        let javascript = js_pattern
+        let js = js_pattern
             .captures(response)
             .and_then(|cap| cap.get(1))
             .map(|m| m.as_str().trim().to_string())
             .unwrap_or_default();
 
-        GeneratedComponent {
-            html,
-            css,
-            javascript,
+        if html.is_empty() {
+            None
+        } else {
+            Some((html, css, js))
         }
     }
 }
@@ -473,32 +579,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_component() {
-        let html_pattern = Regex::new(r"(?s)```html\s*(.*?)```").unwrap();
-        let css_pattern = Regex::new(r"(?s)```css\s*(.*?)```").unwrap();
-        let js_pattern = Regex::new(r"(?s)```(?:javascript|js)\s*(.*?)```").unwrap();
+    fn test_parse_json_component() {
+        let response = r#"{"html": "<div class=\"test\">Hello</div>", "css": ".test { color: red; }", "js": "console.log('test');"}"#;
 
-        let response = r#"
-        Here's the component:
+        let obj: serde_json::Value = serde_json::from_str(response).unwrap();
+        let html = obj["html"].as_str().unwrap();
+        let css = obj["css"].as_str().unwrap();
+        let js = obj["js"].as_str().unwrap();
 
-        ```html
-        <div class="test">Hello</div>
-        ```
-
-        ```css
-        .test { color: red; }
-        ```
-
-        ```javascript
-        console.log('test');
-        ```
-        "#;
-
-        let component =
-            StreamingGenerator::parse_component(response, &html_pattern, &css_pattern, &js_pattern);
-
-        assert!(component.html.contains("test"));
-        assert!(component.css.contains("color"));
-        assert!(component.javascript.contains("console"));
+        assert!(html.contains("test"));
+        assert!(css.contains("color"));
+        assert!(js.contains("console"));
     }
 }

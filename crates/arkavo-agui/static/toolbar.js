@@ -3,6 +3,7 @@ let currentPlan = null;
 let undoStack = [];
 let redoStack = [];
 let isGenerating = false;
+let componentAccumulator = {};
 
 const elements = {
     promptInput: document.getElementById('prompt-input'),
@@ -169,15 +170,45 @@ function handlePlan(data) {
 }
 
 function handlePartStream(data) {
-    const planItem = document.querySelector(`[data-part-id="${data.part_id}"]`);
+    const planItem = document.querySelector(`[data-part-id="${data.partId}"]`);
     if (planItem) {
         const status = planItem.querySelector('.plan-item-status');
+
+        // Initialize accumulator for this part if needed
+        if (!componentAccumulator[data.partId]) {
+            componentAccumulator[data.partId] = {
+                html: '',
+                css: '',
+                js: ''
+            };
+        }
+
+        // Accumulate content by type
+        if (!data.done && data.content) {
+            if (data.chunkType === 'html') {
+                componentAccumulator[data.partId].html += data.content;
+            } else if (data.chunkType === 'css') {
+                componentAccumulator[data.partId].css += data.content;
+            } else if (data.chunkType === 'js') {
+                componentAccumulator[data.partId].js += data.content;
+            }
+
+            status.className = 'plan-item-status generating';
+            status.textContent = `Generating ${data.chunkType}...`;
+        }
+
         if (data.done) {
             status.className = 'plan-item-status';
             status.textContent = 'Complete';
 
+            // Inject the accumulated code into the DOM
+            const accumulated = componentAccumulator[data.partId];
+            if (accumulated) {
+                injectComponent(data.partId, accumulated);
+            }
+
             // Find the next component to generate
-            const currentIndex = currentPlan.findIndex(p => p.id === data.part_id);
+            const currentIndex = currentPlan.findIndex(p => p.id === data.partId);
             if (currentIndex >= 0 && currentIndex < currentPlan.length - 1) {
                 const nextPart = currentPlan[currentIndex + 1];
                 console.log('Starting generation for next part:', nextPart.id);
@@ -189,18 +220,59 @@ function handlePartStream(data) {
                 elements.generateBtn.disabled = false;
                 elements.cancelBtn.disabled = true;
             }
-        } else {
-            status.className = 'plan-item-status generating';
-            status.textContent = `Generating ${data.chunk_type}...`;
         }
     }
+}
+
+function injectComponent(partId, code) {
+    const stage = elements.stage;
+
+    // Remove hint overlay if it exists
+    if (elements.hintOverlay) {
+        elements.hintOverlay.remove();
+    }
+
+    // Create a container for this component
+    const container = document.createElement('div');
+    container.id = `component-${partId}`;
+    container.className = 'component-container';
+
+    // Inject HTML
+    if (code.html) {
+        container.innerHTML = code.html;
+    }
+
+    // Inject CSS
+    if (code.css) {
+        const style = document.createElement('style');
+        style.id = `style-${partId}`;
+        style.textContent = code.css;
+        document.head.appendChild(style);
+    }
+
+    // Append to stage
+    stage.appendChild(container);
+
+    // Inject JavaScript (after HTML is in DOM)
+    if (code.js) {
+        const script = document.createElement('script');
+        script.id = `script-${partId}`;
+        script.textContent = code.js;
+        document.body.appendChild(script);
+    }
+
+    console.log(`Injected component ${partId} into DOM`);
 }
 
 function handleAppliedPart(data) {
     undoStack.push(data.version_id);
     redoStack = [];
     updateUndoRedoButtons();
-    updateStatus('connected', `Applied ${data.part_id}`);
+
+    // Find the part name from the current plan
+    const part = currentPlan && currentPlan.find(p => p.id === data.part_id);
+    const partName = part ? part.name : data.part_id;
+    updateStatus('connected', `Applied ${partName}`);
 }
 
 function handleError(data) {

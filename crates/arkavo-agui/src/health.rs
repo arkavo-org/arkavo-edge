@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct WebSocketMetrics {
     active_connections: usize,
     total_connections: u64,
@@ -15,38 +15,13 @@ struct WebSocketMetrics {
     last_error: Option<(DateTime<Utc>, String)>,
 }
 
-impl Default for WebSocketMetrics {
-    fn default() -> Self {
-        Self {
-            active_connections: 0,
-            total_connections: 0,
-            failed_connections: 0,
-            message_queue_depth: 0,
-            last_connection_time: None,
-            last_error: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct McpToolsStatus {
     tools_count: usize,
     browser_available: bool,
     github_available: bool,
     last_tool_usage: Option<DateTime<Utc>>,
     tool_failures: u32,
-}
-
-impl Default for McpToolsStatus {
-    fn default() -> Self {
-        Self {
-            tools_count: 0,
-            browser_available: false,
-            github_available: false,
-            last_tool_usage: None,
-            tool_failures: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -155,11 +130,10 @@ impl HealthReporter for AguiHealthReporter {
             } else {
                 HealthStatus::Degraded
             }
-        } else if ws_metrics.message_queue_depth > 100 {
-            HealthStatus::Degraded
-        } else if ws_metrics.active_connections == 0 && ws_metrics.total_connections > 0 {
-            HealthStatus::Degraded
-        } else if mcp_status.tool_failures > 5 {
+        } else if ws_metrics.message_queue_depth > 100
+            || (ws_metrics.active_connections == 0 && ws_metrics.total_connections > 0)
+            || mcp_status.tool_failures > 5
+        {
             HealthStatus::Degraded
         } else {
             HealthStatus::Healthy
