@@ -145,6 +145,7 @@ mod tests {
         status: HealthStatus,
     }
 
+    #[async_trait]
     impl HealthReporter for TestReporter {
         async fn check_health(&self) -> HealthReport {
             HealthReport {

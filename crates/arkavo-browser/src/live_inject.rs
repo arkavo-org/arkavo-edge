@@ -178,8 +178,6 @@ pub async fn create_injector_for_browser(browser: &Browser) -> Result<LiveInject
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_injector_creation() {
         assert!(true);
