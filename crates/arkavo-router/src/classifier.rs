@@ -7,7 +7,10 @@ use tokio::sync::Mutex;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(all(not(all(feature = "llama-cpp", not(target_env = "musl"))), feature = "llm-local"))]
+#[cfg(all(
+    not(all(feature = "llama-cpp", not(target_env = "musl"))),
+    feature = "llm-local"
+))]
 use arkavo_llm::local::LocalProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -106,7 +109,10 @@ pub struct TaskClassifier {
     provider: Arc<Mutex<LlamaCppProvider>>,
 }
 
-#[cfg(all(not(all(feature = "llama-cpp", not(target_env = "musl"))), feature = "llm-local"))]
+#[cfg(all(
+    not(all(feature = "llama-cpp", not(target_env = "musl"))),
+    feature = "llm-local"
+))]
 pub struct TaskClassifier {
     provider: Arc<Mutex<LocalProvider>>,
 }
@@ -363,7 +369,10 @@ Confidence: [0-100]"#
     }
 }
 
-#[cfg(all(not(all(feature = "llama-cpp", not(target_env = "musl"))), feature = "llm-local"))]
+#[cfg(all(
+    not(all(feature = "llama-cpp", not(target_env = "musl"))),
+    feature = "llm-local"
+))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         let provider = LocalProvider::new(
