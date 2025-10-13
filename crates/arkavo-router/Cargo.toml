@@ -31,7 +31,8 @@ tokio-test = "0.4"
 
 [features]
 default = ["llama-cpp", "gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-llm/llm-local", "arkavo-context/llm-local"]
+llama-cpp = ["arkavo-llm/llama-cpp", "llm-local"]
+llm-local = ["arkavo-llm/llm-local", "arkavo-context/llm-local"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 # Windows compatible features (no C++ dependencies)
