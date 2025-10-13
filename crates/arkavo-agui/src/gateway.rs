@@ -5,17 +5,23 @@ use crate::debug_handler::DebugHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::types::ConfigError;
+use axum::{
+    Json, Router,
+    extract::{
+        Path as AxumPath, State,
+        ws::{Message, WebSocket},
+    },
+    response::{
+        Html, IntoResponse, Response,
+        sse::{Event, Sse},
+    },
+    routing::{get, post},
+};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use axum::{
-    extract::{ws::{Message, WebSocket}, State, Path as AxumPath},
-    response::{Html, IntoResponse, Response, sse::{Event, Sse}},
-    routing::{get, post},
-    Router, Json,
-};
-use std::convert::Infallible;
 
 /// Connection information for active WebSocket clients
 struct ConnectionInfo {
@@ -348,7 +354,7 @@ async fn index_handler(State(state): State<AppState>) -> Html<&'static str> {
 }
 
 async fn static_js_handler() -> Response {
-    use axum::{http::header, body::Body};
+    use axum::{body::Body, http::header};
     Response::builder()
         .header(header::CONTENT_TYPE, "application/javascript")
         .body(Body::from(include_str!("../static/toolbar.js")))
@@ -376,7 +382,9 @@ async fn websocket_handler(
     })
 }
 
-async fn sse_handler(State(state): State<AppState>) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+async fn sse_handler(
+    State(state): State<AppState>,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     use futures::stream;
 
     let agents = state.agents;
@@ -494,33 +502,31 @@ async fn handle_websocket(
         };
 
         match msg {
-            Some(Ok(Message::Text(text))) => {
-                match serde_json::from_str::<AgUiEvent>(&text) {
-                    Ok(event) => {
-                        if let Err(e) = handle_event(
-                            event,
-                            &session_id,
-                            &connections,
-                            &agents,
-                            &agent_connections,
-                            &budget_handler,
-                            &tx,
-                        )
-                        .await
-                        {
-                            eprintln!("AG-UI: Error handling event: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("AG-UI: Failed to parse event: {e}");
-                        let error = AgUiEvent::Error {
-                            code: "INVALID_EVENT".to_string(),
-                            message: format!("Failed to parse event: {e}"),
-                        };
-                        let _ = tx.send(error).await;
+            Some(Ok(Message::Text(text))) => match serde_json::from_str::<AgUiEvent>(&text) {
+                Ok(event) => {
+                    if let Err(e) = handle_event(
+                        event,
+                        &session_id,
+                        &connections,
+                        &agents,
+                        &agent_connections,
+                        &budget_handler,
+                        &tx,
+                    )
+                    .await
+                    {
+                        eprintln!("AG-UI: Error handling event: {e}");
                     }
                 }
-            }
+                Err(e) => {
+                    eprintln!("AG-UI: Failed to parse event: {e}");
+                    let error = AgUiEvent::Error {
+                        code: "INVALID_EVENT".to_string(),
+                        message: format!("Failed to parse event: {e}"),
+                    };
+                    let _ = tx.send(error).await;
+                }
+            },
             Some(Ok(Message::Close(_))) | None => {
                 break;
             }
@@ -1254,10 +1260,10 @@ async fn handle_telemetry_websocket(
 
     // Forward telemetry events to WebSocket
     while let Some(event) = rx.recv().await {
-        if let Ok(json) = serde_json::to_string(&event) {
-            if ws.send(Message::Text(json)).await.is_err() {
-                break;
-            }
+        if let Ok(json) = serde_json::to_string(&event)
+            && ws.send(Message::Text(json)).await.is_err()
+        {
+            break;
         }
     }
 
