@@ -128,15 +128,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "clippy"
+          prefix-key: "workspace"
       - name: Run clippy
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test
+    needs: [clippy]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -154,7 +155,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test"
+          prefix-key: "workspace"
       # No system dependencies needed for pure Rust build
       - name: Run tests
         env:
