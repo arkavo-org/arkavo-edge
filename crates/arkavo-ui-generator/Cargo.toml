@@ -18,8 +18,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Arkavo dependencies
-arkavo-router = { path = "../arkavo-router" }
-arkavo-llm = { path = "../arkavo-llm", features = ["llm-local"] }
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
