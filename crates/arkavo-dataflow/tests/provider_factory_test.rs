@@ -123,7 +123,11 @@ async fn test_provider_factory_registry() {
     // (Local, DeepSeek, etc.) may be registered even if not directly enabled.
     // This is expected behavior when other crates in the workspace enable those features.
     // We just verify the minimum required providers are present.
-    assert!(types.len() >= 3, "Expected at least 3 providers (Ollama, OpenAI, Anthropic), got {}", types.len());
+    assert!(
+        types.len() >= 3,
+        "Expected at least 3 providers (Ollama, OpenAI, Anthropic), got {}",
+        types.len()
+    );
 }
 
 #[tokio::test]
