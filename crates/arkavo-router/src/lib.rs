@@ -5,6 +5,7 @@ pub mod classifier;
 pub mod connectivity;
 pub mod decision;
 pub mod error;
+pub mod health;
 pub mod metrics;
 pub mod orchestrator;
 pub mod prediction;
@@ -103,6 +104,58 @@ impl Router {
     pub async fn get_metrics(&self) -> RoutingMetrics {
         self.metrics.read().await.clone()
     }
+
+    /// Get a reference to the local provider for simple classification tasks
+    pub fn get_local_provider(&self) -> Arc<TaskClassifier> {
+        self.classifier.clone()
+    }
+
+    /// Get a Gemini provider for complex planning/thinking tasks
+    /// Returns None if Gemini is not available (no API key)
+    pub fn get_planning_provider(&self) -> Option<arkavo_llm::GeminiProvider> {
+        arkavo_llm::GeminiProvider::new().ok()
+    }
+
+    /// Check if Gemini API is available
+    pub fn is_gemini_available(&self) -> bool {
+        std::env::var("GEMINI_API_KEY").is_ok()
+    }
+
+    /// Get the list of available LLMs for status reporting
+    pub fn get_available_llms(&self) -> Vec<LlmInfo> {
+        let mut llms = Vec::new();
+
+        // Check for Gemini
+        if self.is_gemini_available() {
+            let model =
+                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+            llms.push(LlmInfo {
+                name: "Gemini".to_string(),
+                provider: "Google".to_string(),
+                model,
+                available: true,
+            });
+        }
+
+        // Always include local model
+        llms.push(LlmInfo {
+            name: "Local (Gemma)".to_string(),
+            provider: "Local".to_string(),
+            model: "gemma-3-270m-it".to_string(),
+            available: true,
+        });
+
+        llms
+    }
+}
+
+/// Information about an available LLM
+#[derive(Debug, Clone)]
+pub struct LlmInfo {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+    pub available: bool,
 }
 
 #[cfg(test)]

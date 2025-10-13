@@ -1,0 +1,3 @@
+[[bin]]
+name = "demo_incremental_ui"
+path = "demo_incremental_ui.rs"

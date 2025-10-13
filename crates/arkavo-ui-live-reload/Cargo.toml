@@ -1,0 +1,30 @@
+[package]
+name = "arkavo-ui-live-reload"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Live code reload and hot-swap system for Arkavo Edge UI"
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+# WebSocket
+warp = { workspace = true, features = ["websocket"] }
+tokio-stream = { workspace = true }
+
+# Code diffing
+similar = "2.6"
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Arkavo dependencies
+arkavo-events = { path = "../arkavo-events" }

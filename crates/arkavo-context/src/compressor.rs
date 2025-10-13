@@ -1,14 +1,22 @@
 use crate::{Error, Result};
+#[cfg(feature = "llm-local")]
 use arkavo_llm::local::LocalProvider;
 use arkavo_llm::{Message, Provider, Role};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[cfg(feature = "llm-local")]
 pub struct ContextCompressor {
     provider: Arc<Mutex<LocalProvider>>,
     model_name: String,
 }
 
+#[cfg(not(feature = "llm-local"))]
+pub struct ContextCompressor {
+    _phantom: std::marker::PhantomData<()>,
+}
+
+#[cfg(feature = "llm-local")]
 impl ContextCompressor {
     pub async fn new(model_name: String, model_path: Option<String>) -> Result<Self> {
         let provider = LocalProvider::new(model_name.clone(), model_path)?;
@@ -82,6 +90,31 @@ impl ContextCompressor {
 
     pub fn model_name(&self) -> &str {
         &self.model_name
+    }
+}
+
+#[cfg(not(feature = "llm-local"))]
+impl ContextCompressor {
+    pub async fn new(_model_name: String, _model_path: Option<String>) -> Result<Self> {
+        Err(Error::Model(
+            "ContextCompressor requires llm-local feature".to_string(),
+        ))
+    }
+
+    pub async fn compress(&self, _text: &str, _target_ratio: f64) -> Result<String> {
+        Err(Error::Model(
+            "ContextCompressor requires llm-local feature".to_string(),
+        ))
+    }
+
+    pub async fn compress_to_tokens(&self, _text: &str, _target_tokens: u32) -> Result<String> {
+        Err(Error::Model(
+            "ContextCompressor requires llm-local feature".to_string(),
+        ))
+    }
+
+    pub fn model_name(&self) -> &str {
+        ""
     }
 }
 

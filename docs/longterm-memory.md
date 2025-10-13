@@ -36,11 +36,20 @@ This document outlines the core architectural principles and long-term vision fo
 - The system is built around a **multi-provider LLM architecture** that supports multiple LLM providers (Ollama, OpenAI, Anthropic) simultaneously.
 - A central **LLM Router** dynamically selects the best provider/model for a given request based on capabilities (vision, function calling), cost, and availability.
 - The architecture is designed to be extensible, allowing new providers to be added with minimal friction.
+- **IMPORTANT**: Never hardcode specific models in component code. Always route LLM tasks through the Router with descriptive task hints (e.g., "Analyze system health data and generate structured JSON response"). This ensures the system adapts as models come and go.
 
 ### 3.2. Local LLM Support
-- Arkavo Edge supports running language models locally using the Candle ML framework for privacy-first, offline-capable inference.
+- Arkavo Edge supports running language models locally using llama.cpp for GGUF model inference with privacy-first, offline-capable operation.
 - **Hardware Acceleration**: It automatically uses Metal Performance Shaders on macOS and CPU-based inference on other platforms.
 - **Model Download Manager**: A secure download manager acquires GGUF models from Hugging Face, performs SHA-256 verification, and ensures license compliance.
+- **Model Agnostic Architecture**: Components request LLM capabilities through the router, not specific models. The router selects appropriate models (e.g., 270M for simple tasks, 4B for complex analysis, cloud for specialized needs) based on task requirements.
+
+### 3.3. Health Monitoring Architecture
+- **Intelligent Health Monitoring**: The system uses local LLM (via Router) to analyze component health and decide when to notify users.
+- **Router-Based Selection**: Health analysis tasks are routed through the Router with descriptive hints, allowing intelligent model selection without hardcoding.
+- **Auto-Fix First**: The system attempts to automatically fix transient issues (connectivity, cache, restarts) before alerting users.
+- **User Notification Policy**: Only notify users for issues requiring human intervention (API key errors, persistent failures, security issues).
+- **Minimal Fallback**: Simple rule-based fallback only checks healthy/degraded/unhealthy if LLM analysis fails completely.
 
 ## 4. iOS Testing & Automation Architecture
 

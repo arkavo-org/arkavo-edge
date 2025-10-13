@@ -37,7 +37,11 @@ impl Provider for GeminiProvider {
         "gemini"
     }
 
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
         if messages.is_empty() {
             return Err(Error::Provider("No messages provided".into()));
         }

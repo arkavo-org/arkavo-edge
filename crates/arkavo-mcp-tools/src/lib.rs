@@ -1,11 +1,13 @@
 #![allow(clippy::uninlined_format_args)]
 
+pub mod browser;
 pub mod code_analysis;
 pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod github_checks;
 pub mod github_review;
+pub mod health_check;
 pub mod mcp_connection;
 pub mod osv;
 pub mod registry;

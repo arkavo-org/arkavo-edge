@@ -25,9 +25,9 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 
 # Internal dependencies
-arkavo-llm = { path = "../arkavo-llm" }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llm-remote"] }
 arkavo-memory = { path = "../arkavo-memory" }
-arkavo-dataflow = { path = "../arkavo-dataflow" }
+arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox", "llm-remote"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

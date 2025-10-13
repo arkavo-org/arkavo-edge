@@ -1,6 +1,6 @@
 use crate::error::{GeminiError, Result};
 use crate::sse_stream::GeminiSseStream;
-use crate::types::{FunctionCall, FunctionDeclaration, Tool};
+use crate::types::{FunctionCall, FunctionDeclaration, ListModelsResponse, Tool};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -64,6 +64,10 @@ struct GenerationConfig {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "maxOutputTokens")]
     max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseMimeType")]
+    response_mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseSchema")]
+    response_schema: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,6 +171,31 @@ impl RestClient {
         prompt: impl Into<String>,
         tools: Option<Vec<FunctionDeclaration>>,
     ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_impl(prompt, tools, None).await
+    }
+
+    pub async fn stream_generate_content_json(
+        &self,
+        prompt: impl Into<String>,
+        schema: Value,
+    ) -> Result<GeminiSseStream> {
+        self.stream_generate_content_impl(prompt, None, Some(schema))
+            .await
+    }
+
+    async fn stream_generate_content_impl(
+        &self,
+        prompt: impl Into<String>,
+        tools: Option<Vec<FunctionDeclaration>>,
+        json_schema: Option<Value>,
+    ) -> Result<GeminiSseStream> {
+        let generation_config = json_schema.map(|schema| GenerationConfig {
+            temperature: None,
+            max_output_tokens: None,
+            response_mime_type: Some("application/json".to_string()),
+            response_schema: Some(schema),
+        });
+
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: "user".to_string(),
@@ -179,7 +208,7 @@ impl RestClient {
                     function_declarations: t,
                 }]
             }),
-            generation_config: None,
+            generation_config,
         };
 
         let model_name = self.model.strip_prefix("models/").unwrap_or(&self.model);
@@ -188,10 +217,51 @@ impl RestClient {
             GEMINI_REST_ENDPOINT, model_name, self.api_key
         );
 
-        let response = self
-            .client
+        // Create a new client with no timeout for streaming (SSE keeps connection open)
+        let streaming_client = Client::builder().build().unwrap_or_else(|_| Client::new());
+
+        let response = streaming_client
             .post(&url)
             .json(&request)
+            .send()
+            .await
+            .map_err(|e| GeminiError::ApiError(format!("HTTP request failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(GeminiError::ApiError(format!(
+                "HTTP {status}: {error_text}"
+            )));
+        }
+
+        // Check content-type to ensure we're getting SSE
+        if let Some(content_type) = response.headers().get("content-type") {
+            let ct_str = content_type.to_str().unwrap_or("");
+            if !ct_str.contains("text/event-stream") && !ct_str.contains("application/json") {
+                return Err(GeminiError::ApiError(format!(
+                    "Unexpected content-type: {ct_str} (expected text/event-stream)"
+                )));
+            }
+        }
+
+        let stream = GeminiSseStream::new(response.bytes_stream());
+        Ok(stream)
+    }
+
+    pub async fn list_models(&self, page_size: Option<u32>) -> Result<ListModelsResponse> {
+        let url = if let Some(size) = page_size {
+            format!(
+                "{}/models?key={}&pageSize={size}",
+                GEMINI_REST_ENDPOINT, self.api_key
+            )
+        } else {
+            format!("{}/models?key={}", GEMINI_REST_ENDPOINT, self.api_key)
+        };
+
+        let response = self
+            .client
+            .get(&url)
             .send()
             .await
             .map_err(|e| GeminiError::ApiError(format!("HTTP request failed: {e}")))?;
@@ -204,6 +274,11 @@ impl RestClient {
             )));
         }
 
-        Ok(GeminiSseStream::new(response.bytes_stream()))
+        let result: ListModelsResponse = response
+            .json()
+            .await
+            .map_err(|e| GeminiError::ApiError(format!("Failed to parse response: {e}")))?;
+
+        Ok(result)
     }
 }

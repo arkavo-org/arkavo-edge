@@ -359,8 +359,26 @@ impl LlamaCppProvider {
 
 #[async_trait]
 impl Provider for LlamaCppProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        let mut stream = self.generate_streaming(messages)?;
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        max_tokens: Option<usize>,
+    ) -> Result<String> {
+        let custom_provider;
+        let provider = if let Some(max) = max_tokens {
+            let mut config = self.config.clone();
+            config.max_tokens = max as u32;
+            custom_provider = Self {
+                model: self.model.clone(),
+                name: self.name.clone(),
+                config,
+            };
+            &custom_provider
+        } else {
+            self
+        };
+
+        let mut stream = provider.generate_streaming(messages)?;
         let mut full_response = String::new();
 
         while let Some(chunk) = tokio_stream::StreamExt::next(&mut stream).await {

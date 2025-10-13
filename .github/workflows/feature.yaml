@@ -351,9 +351,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # Install C++ build tools for future llama.cpp support
+      # Note: Currently building with windows-default (no C++ deps), but this
+      # ensures we're ready when llama.cpp is enabled on Windows
+      - name: Setup MSVC C++ Build Tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install CMake
+        run: |
+          choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System' -y
+          cmake --version
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
@@ -930,10 +945,10 @@ jobs:
       - name: Check for required environment variables
         run: |
           echo "Verifying no required environment variables..."
-          
+
           # Check for env::var calls that require configuration
           # Exclude build.rs files and test files, and allow standard env vars and optional API keys
-          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL"; then
+          if grep -r 'env::var("[A-Z_]*")\.\(expect\|unwrap\)' crates/ --include="*.rs" --exclude="build.rs" | grep -v test | grep -v "CARGO\|RUST\|PATH\|HOME\|TEMP\|TMP\|USER\|OUT_DIR\|OPENAI_API_KEY\|ANTHROPIC_API_KEY\|MOONSHOT_API_KEY\|DEEPSEEK_API_KEY\|DEEPSEEK_MODEL\|GEMINI_API_KEY\|GEMINI_MODEL"; then
             echo "::error::Found required environment variables"
             exit 1
           fi

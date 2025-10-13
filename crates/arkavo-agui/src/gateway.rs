@@ -16,6 +16,8 @@ struct ConnectionInfo {
     _ws_tx: mpsc::Sender<AgUiEvent>,
     _agent_id: Option<String>,
     subscriptions: Vec<SubscriptionHandle>,
+    current_plan: Option<Vec<arkavo_ui_generator::planner::ComponentPart>>,
+    current_prompt: Option<String>,
 }
 
 pub struct AgUiGateway {
@@ -28,6 +30,8 @@ pub struct AgUiGateway {
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
+    blank_mode: bool,
+    initial_prompt: Option<String>,
 }
 
 impl AgUiGateway {
@@ -43,7 +47,17 @@ impl AgUiGateway {
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
             debug_handler: None,
+            blank_mode: false,
+            initial_prompt: None,
         }
+    }
+
+    pub fn set_blank_mode(&mut self, blank: bool) {
+        self.blank_mode = blank;
+    }
+
+    pub fn set_initial_prompt(&mut self, prompt: String) {
+        self.initial_prompt = Some(prompt);
     }
 
     pub async fn with_debug_handler(
@@ -119,10 +133,166 @@ impl AgUiGateway {
             }
         });
 
+        // Register health reporters with global registry
+        {
+            use arkavo_observability::health_reporter::HealthRegistry;
+            use std::sync::Arc;
+
+            let registry = HealthRegistry::global();
+
+            // Register AG-UI health reporter
+            let agui_reporter = Arc::new(crate::health::AguiHealthReporter::new());
+            registry.register(agui_reporter).await;
+
+            // Register Router health reporter
+            use arkavo_router::health::RouterHealthReporter;
+            let connectivity_checker = Arc::new(arkavo_router::ConnectivityChecker::new());
+            let router_reporter = Arc::new(RouterHealthReporter::new(connectivity_checker));
+            registry.register(router_reporter).await;
+
+            // Register UI Generator health reporter (wrapper that delegates to global instance)
+            use arkavo_ui_generator::health::GlobalHealthReporterWrapper;
+            let ui_generator_reporter = Arc::new(GlobalHealthReporterWrapper);
+            registry.register(ui_generator_reporter).await;
+
+            println!("AG-UI: Health reporters registered");
+        }
+
+        // Create channel for broadcasting health alerts to all WebSocket connections
+        let (health_alert_tx, mut health_alert_rx) = mpsc::channel::<AgUiEvent>(100);
+
+        // Start intelligent health monitor with local LLM
+        {
+            use arkavo_mcp_tools::registry::ToolRegistry;
+
+            let tool_registry = Arc::new(ToolRegistry::new());
+
+            let health_monitor = crate::health_monitor::HealthMonitor::new(tool_registry)
+                .await?
+                .with_interval(30); // Check every 30 seconds
+
+            let _health_task = health_monitor.start(health_alert_tx.clone()).await?;
+            println!("AG-UI: Health monitor started (30s interval, model selection via router)");
+        }
+
+        // Broadcast health alerts to all connected WebSocket clients
+        let connections_for_health = self.connections.clone();
+        tokio::spawn(async move {
+            while let Some(alert_event) = health_alert_rx.recv().await {
+                let conns = connections_for_health.read().await;
+                for (_, conn_info) in conns.iter() {
+                    let _ = conn_info._ws_tx.send(alert_event.clone()).await;
+                }
+            }
+        });
+
+        // Push periodic status updates every 30 seconds
+        let connections_for_status = self.connections.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+
+                use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_observability::health_reporter::HealthRegistry;
+                use arkavo_router::Router;
+
+                let registry = ToolRegistry::new();
+                let tools = registry.list_tools();
+                let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+                // Get health data
+                let health_registry = HealthRegistry::global();
+                let health_reports = health_registry.check_all().await;
+                let overall_health = health_registry.get_overall_status().await;
+
+                let conns = connections_for_status.read().await;
+
+                let system_status = SystemStatus {
+                    uptime: format!(
+                        "{} seconds",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ),
+                    memory_usage: "N/A".to_string(),
+                    active_connections: conns.len() as u32,
+                };
+
+                let mcp_tools_status = McpToolsStatus {
+                    browser_available: browser_tool.is_some(),
+                    tools_count: tools.len(),
+                    last_used: None,
+                };
+
+                if let Ok(router) = Router::new().await {
+                    let llms = router
+                        .get_available_llms()
+                        .into_iter()
+                        .map(|info| LlmStatus {
+                            name: info.name,
+                            provider: info.provider,
+                            connected: info.available,
+                            model: info.model,
+                            requests_today: 0,
+                        })
+                        .collect();
+
+                    let health_data = HealthData {
+                        status: format!("{:?}", overall_health),
+                        components: health_reports
+                            .iter()
+                            .map(|r| ComponentHealth {
+                                component: r.component.clone(),
+                                status: format!("{:?}", r.status),
+                                message: r.message.clone(),
+                            })
+                            .collect(),
+                    };
+
+                    let status_event = AgUiEvent::StatusUpdate {
+                        system: system_status,
+                        mcp_tools: mcp_tools_status,
+                        llms,
+                        health: health_data,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                    };
+
+                    // Broadcast to all connections
+                    for (_, conn_info) in conns.iter() {
+                        let _ = conn_info._ws_tx.send(status_event.clone()).await;
+                    }
+
+                    println!(
+                        "AG-UI: Pushed status update - Health: {:?}, Components: {}",
+                        overall_health,
+                        health_reports.len()
+                    );
+                }
+            }
+        });
+
         // Serve static files
-        let index_file = warp::get()
-            .and(warp::path::end())
-            .map(|| warp::reply::html(include_str!("../static/dashboard.html")));
+        let blank_mode = self.blank_mode;
+        let index_file = warp::get().and(warp::path::end()).map(move || {
+            if blank_mode {
+                warp::reply::html(include_str!("../static/shell.html"))
+            } else {
+                warp::reply::html(include_str!("../static/dashboard.html"))
+            }
+        });
+
+        let static_js = warp::path("static")
+            .and(warp::path("toolbar.js"))
+            .and(warp::get())
+            .map(|| {
+                warp::reply::with_header(
+                    include_str!("../static/toolbar.js"),
+                    "Content-Type",
+                    "application/javascript",
+                )
+            });
 
         let chat_ui = warp::path("chat")
             .and(warp::get())
@@ -133,6 +303,7 @@ impl AgUiGateway {
         let agents_for_ws = discovered_agents.clone();
         let agent_connections_for_ws = self.agent_connections.clone();
         let budget_handler_for_ws = self.budget_handler.clone();
+        let initial_prompt_for_ws = Arc::new(RwLock::new(self.initial_prompt.clone()));
 
         let websocket = warp::path("ws")
             .and(warp::ws())
@@ -140,8 +311,14 @@ impl AgUiGateway {
             .and(warp::any().map(move || agents_for_ws.clone()))
             .and(warp::any().map(move || agent_connections_for_ws.clone()))
             .and(warp::any().map(move || budget_handler_for_ws.clone()))
+            .and(warp::any().map(move || initial_prompt_for_ws.clone()))
             .map(
-                |ws: warp::ws::Ws, connections, agents, agent_connections, budget_handler| {
+                |ws: warp::ws::Ws,
+                 connections,
+                 agents,
+                 agent_connections,
+                 budget_handler,
+                 initial_prompt| {
                     ws.on_upgrade(move |socket| {
                         handle_websocket(
                             socket,
@@ -149,6 +326,7 @@ impl AgUiGateway {
                             agents,
                             agent_connections,
                             budget_handler,
+                            initial_prompt,
                         )
                     })
                 },
@@ -235,6 +413,7 @@ impl AgUiGateway {
             );
 
         let routes = index_file
+            .or(static_js)
             .or(chat_ui)
             .or(websocket)
             .or(agent_events)
@@ -264,6 +443,7 @@ async fn handle_websocket(
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
+    initial_prompt: Arc<RwLock<Option<String>>>,
 ) {
     use futures::StreamExt;
 
@@ -288,6 +468,30 @@ async fn handle_websocket(
     });
 
     println!("AG-UI: New WebSocket connection: {session_id}");
+
+    // If there's an initial prompt, send it automatically
+    let prompt_guard = initial_prompt.read().await;
+    if let Some(prompt_text) = prompt_guard.as_ref() {
+        println!("AG-UI: Auto-submitting initial prompt: {prompt_text}");
+        let submit_event = AgUiEvent::SubmitPrompt {
+            text: prompt_text.clone(),
+        };
+        drop(prompt_guard);
+
+        if let Err(e) = handle_event(
+            submit_event,
+            &session_id,
+            &connections,
+            &agents,
+            &agent_connections,
+            &budget_handler,
+            &tx,
+        )
+        .await
+        {
+            eprintln!("AG-UI: Error auto-submitting initial prompt: {e}");
+        }
+    }
 
     // Handle incoming messages
     while let Some(result) = ws_stream.next().await {
@@ -372,12 +576,16 @@ async fn handle_event(
                     _ws_tx: tx.clone(),
                     _agent_id: Some(agent_id.clone()),
                     subscriptions: Vec::new(),
+                    current_plan: None,
+                    current_prompt: None,
                 };
 
                 connections
                     .write()
                     .await
                     .insert(session_id.to_string(), conn_info);
+
+                println!("AG-UI: Stored connection info for session {session_id}");
 
                 // Send initial snapshots
                 let state_snapshot = AgUiEvent::StateSnapshot {
@@ -656,6 +864,304 @@ async fn handle_event(
                 };
                 tx.send(error).await?;
             }
+        }
+
+        // UI Generation events
+        AgUiEvent::SubmitPrompt { text } => {
+            println!("AG-UI: Received SubmitPrompt: {text}");
+
+            // Extract and set any API keys from the prompt
+            let (cleaned_text, api_keys) = crate::api_keys::extract_api_keys(&text);
+            if !api_keys.is_empty() {
+                crate::api_keys::set_api_keys(&api_keys);
+
+                // Send updated status immediately to reflect new LLM availability
+                use arkavo_mcp_tools::registry::ToolRegistry;
+                use arkavo_router::Router;
+
+                let registry = ToolRegistry::new();
+                let tools = registry.list_tools();
+                let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+                let system_status = SystemStatus {
+                    uptime: format!(
+                        "{} seconds",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs()
+                    ),
+                    memory_usage: "N/A".to_string(),
+                    active_connections: connections.read().await.len() as u32,
+                };
+
+                let mcp_tools_status = McpToolsStatus {
+                    browser_available: browser_tool.is_some(),
+                    tools_count: tools.len(),
+                    last_used: None,
+                };
+
+                // Get health data
+                use arkavo_observability::health_reporter::HealthRegistry;
+                let health_registry = HealthRegistry::global();
+                let health_reports = health_registry.check_all().await;
+                let overall_health = health_registry.get_overall_status().await;
+
+                let router = Router::new().await?;
+                let llms = router
+                    .get_available_llms()
+                    .into_iter()
+                    .map(|info| LlmStatus {
+                        name: info.name,
+                        provider: info.provider,
+                        connected: info.available,
+                        model: info.model,
+                        requests_today: 0,
+                    })
+                    .collect();
+
+                let health_data = HealthData {
+                    status: format!("{:?}", overall_health),
+                    components: health_reports
+                        .iter()
+                        .map(|r| ComponentHealth {
+                            component: r.component.clone(),
+                            status: format!("{:?}", r.status),
+                            message: r.message.clone(),
+                        })
+                        .collect(),
+                };
+
+                let status_event = AgUiEvent::StatusUpdate {
+                    system: system_status,
+                    mcp_tools: mcp_tools_status,
+                    llms,
+                    health: health_data,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+
+                tx.send(status_event).await?;
+            }
+
+            use arkavo_router::Router;
+            use arkavo_ui_generator::planner::UiPlanner;
+
+            let router = Arc::new(Router::new().await?);
+            let planner = UiPlanner::new(router);
+            let plan = planner.plan(&cleaned_text).await?;
+
+            let mut conn_guard = connections.write().await;
+            if let Some(conn_info) = conn_guard.get_mut(session_id) {
+                conn_info.current_plan = Some(plan.parts.clone());
+                conn_info.current_prompt = Some(cleaned_text.clone());
+            }
+            drop(conn_guard);
+
+            let parts: Vec<crate::types::UiPlanPart> = plan
+                .parts
+                .iter()
+                .map(|p| crate::types::UiPlanPart {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    description: p.description.clone(),
+                })
+                .collect();
+
+            println!(
+                "AG-UI: Sending Plan event with {} parts to frontend",
+                parts.len()
+            );
+            let plan_event = AgUiEvent::Plan { parts };
+            tx.send(plan_event).await?;
+            println!("AG-UI: Plan event sent successfully");
+        }
+
+        AgUiEvent::RequestStatus => {
+            println!("AG-UI: Received RequestStatus");
+
+            use arkavo_mcp_tools::registry::ToolRegistry;
+            use arkavo_observability::health_reporter::HealthRegistry;
+            use arkavo_router::Router;
+
+            let registry = ToolRegistry::new();
+            let tools = registry.list_tools();
+            let browser_tool = tools.iter().find(|t| t.name.contains("browser"));
+
+            // Get health data from all registered components
+            let health_registry = HealthRegistry::global();
+            let health_reports = health_registry.check_all().await;
+            let overall_health = health_registry.get_overall_status().await;
+
+            let system_status = SystemStatus {
+                uptime: format!(
+                    "{} seconds",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                ),
+                memory_usage: "N/A".to_string(),
+                active_connections: connections.read().await.len() as u32,
+            };
+
+            let mcp_tools_status = McpToolsStatus {
+                browser_available: browser_tool.is_some(),
+                tools_count: tools.len(),
+                last_used: None,
+            };
+
+            // Get all available LLMs from Router (single source of truth)
+            let router = Router::new().await?;
+            let llms = router
+                .get_available_llms()
+                .into_iter()
+                .map(|info| LlmStatus {
+                    name: info.name,
+                    provider: info.provider,
+                    connected: info.available,
+                    model: info.model,
+                    requests_today: 0,
+                })
+                .collect();
+
+            let health_data = HealthData {
+                status: format!("{:?}", overall_health),
+                components: health_reports
+                    .iter()
+                    .map(|r| ComponentHealth {
+                        component: r.component.clone(),
+                        status: format!("{:?}", r.status),
+                        message: r.message.clone(),
+                    })
+                    .collect(),
+            };
+
+            let status_event = AgUiEvent::StatusUpdate {
+                system: system_status,
+                mcp_tools: mcp_tools_status,
+                llms,
+                health: health_data,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            tx.send(status_event).await?;
+
+            // Log health status for debugging
+            println!(
+                "AG-UI: Health Status - Overall: {:?}, Components: {}",
+                overall_health,
+                health_reports.len()
+            );
+            for report in &health_reports {
+                println!(
+                    "AG-UI:   - {} ({:?}): {}",
+                    report.component, report.status, report.message
+                );
+            }
+        }
+
+        AgUiEvent::ApplyPart { part_id } => {
+            println!("AG-UI: Received ApplyPart: {part_id}");
+
+            let conn_guard = connections.read().await;
+            let conn_info = conn_guard.get(session_id);
+
+            let (part_name, part_description, overall_prompt) = if let Some(info) = conn_info {
+                let plan = info.current_plan.as_ref();
+                let prompt = info.current_prompt.as_ref();
+
+                let part = plan.and_then(|p| p.iter().find(|part| part.id == part_id));
+
+                (
+                    part.map(|p| p.name.clone())
+                        .unwrap_or_else(|| "Component".to_string()),
+                    part.map(|p| p.description.clone())
+                        .unwrap_or_else(|| "UI Component".to_string()),
+                    prompt
+                        .cloned()
+                        .unwrap_or_else(|| "Build a modern web component".to_string()),
+                )
+            } else {
+                (
+                    "Component".to_string(),
+                    "UI Component".to_string(),
+                    "Build a modern web component".to_string(),
+                )
+            };
+            drop(conn_guard);
+
+            use arkavo_router::Router;
+            use arkavo_ui_generator::streaming::StreamingGenerator;
+
+            let router = Arc::new(Router::new().await?);
+            let generator = StreamingGenerator::new(router)?;
+
+            let mut stream_rx = generator
+                .generate_part(&part_name, &part_description, &overall_prompt)
+                .await?;
+
+            let tx_clone = tx.clone();
+            let part_id_clone = part_id.clone();
+            tokio::spawn(async move {
+                println!(
+                    "AG-UI: Starting stream receiver task for part: {}",
+                    part_id_clone
+                );
+                let mut chunk_count = 0;
+                while let Some(chunk) = stream_rx.recv().await {
+                    chunk_count += 1;
+                    println!(
+                        "AG-UI: Received chunk #{} for part {}, type={}, done={}, content_len={}",
+                        chunk_count,
+                        part_id_clone,
+                        match chunk.chunk_type {
+                            arkavo_ui_generator::streaming::ChunkType::Html => "html",
+                            arkavo_ui_generator::streaming::ChunkType::Css => "css",
+                            arkavo_ui_generator::streaming::ChunkType::JavaScript => "js",
+                        },
+                        chunk.done,
+                        chunk.content.len()
+                    );
+
+                    let stream_event = AgUiEvent::PartStream {
+                        part_id: part_id_clone.clone(),
+                        chunk_type: match chunk.chunk_type {
+                            arkavo_ui_generator::streaming::ChunkType::Html => "html".to_string(),
+                            arkavo_ui_generator::streaming::ChunkType::Css => "css".to_string(),
+                            arkavo_ui_generator::streaming::ChunkType::JavaScript => {
+                                "js".to_string()
+                            }
+                        },
+                        content: chunk.content,
+                        done: chunk.done,
+                    };
+
+                    if let Err(e) = tx_clone.send(stream_event).await {
+                        eprintln!("AG-UI: Failed to send stream event: {}", e);
+                        break;
+                    }
+
+                    if chunk.done {
+                        println!(
+                            "AG-UI: Stream complete for part {} after {} chunks",
+                            part_id_clone, chunk_count
+                        );
+                        let version_id = uuid::Uuid::new_v4().to_string();
+                        let applied_event = AgUiEvent::AppliedPart {
+                            part_id: part_id_clone.clone(),
+                            version_id,
+                        };
+                        if let Err(e) = tx_clone.send(applied_event).await {
+                            eprintln!("AG-UI: Failed to send applied event: {}", e);
+                        }
+                        break;
+                    }
+                }
+                println!(
+                    "AG-UI: Stream receiver task ended for part: {}",
+                    part_id_clone
+                );
+            });
         }
 
         _ => {

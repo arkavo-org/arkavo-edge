@@ -159,7 +159,11 @@ impl OllamaClient {
 
 #[async_trait]
 impl Provider for OllamaClient {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
         let model = self.select_model(&messages).await?;
         let request = ChatRequest {
             model,

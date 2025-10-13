@@ -324,6 +324,14 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      # Install C++ build tools for future llama.cpp support
+      # Note: Currently building with windows-default (no C++ deps), but this
+      # ensures we're ready when llama.cpp is enabled on Windows
+      - name: Setup MSVC C++ Build Tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install CMake
         shell: pwsh
         run: |

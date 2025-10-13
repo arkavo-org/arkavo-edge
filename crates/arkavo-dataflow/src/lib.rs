@@ -20,21 +20,21 @@
 //! ```rust,no_run
 //! use arkavo_dataflow::{DataflowEngine, DataflowConfig};
 //!
-//! #[tokio::main]
+//! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> anyhow::Result<()> {
 //!     // Create engine with default config
 //!     let engine = DataflowEngine::new(DataflowConfig::default());
-//!     
+//!
 //!     // Create pipeline from natural language (requires `nl` feature)
 //!     #[cfg(feature = "nl")]
 //!     {
 //!         let pipeline_id = engine
 //!             .create_pipeline_from_nl("Connect input to output when message contains 'error'")?;
-//!         
+//!
 //!         // Start the pipeline
 //!         engine.start_pipeline(pipeline_id).await?;
 //!     }
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
