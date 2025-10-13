@@ -220,333 +220,255 @@ jobs:
           fi
 
 # Detect if platform-specific builds are needed
-check-platform-changes:
-  name: Detect Platform-Specific Changes
-  runs-on: ubuntu-22.04
-  timeout-minutes: 5
-  outputs:
-    macos_needed: ${{ steps.check.outputs.macos_needed }}
-    windows_needed: ${{ steps.check.outputs.windows_needed }}
-    version_valid: ${{ steps.check.outputs.version_valid }}
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Full history for accurate diffs
-        
-    - name: Verify checkout
-      run: |
-        echo "Repository checked out successfully"
-        echo "Current directory: $(pwd)"
-        echo "Git status:"
-        git status --short
-        
-    - name: Detect platform-specific changes
-      id: check
-      run: |
-        set -e
-        set -o pipefail
-        
-        echo "::group::Environment Information"
-        echo "Event: ${{ github.event_name }}"
-        echo "Repository: ${{ github.repository }}"
-        echo "Branch: ${{ github.ref }}"
-        echo "SHA: ${{ github.sha }}"
-        echo "::endgroup::"
-        
-        # Determine base and head SHAs
-        echo "::group::Determining Commit Range"
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.sha }}"
-          echo "Pull Request Mode"
-          echo "Base SHA: $BASE_SHA"
-          echo "Head SHA: $HEAD_SHA"
-          
-          # Verify SHAs exist
-          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
-            echo "::error::Base SHA $BASE_SHA not found"
-            exit 1
-          fi
-          
-          if ! git cat-file -e "$HEAD_SHA" 2>/dev/null; then
-            echo "::error::Head SHA $HEAD_SHA not found"
-            exit 1
-          fi
-        else
-          # For push events
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            BASE_SHA="HEAD^"
-            HEAD_SHA="HEAD"
-            echo "Push Event Mode (comparing with parent)"
-          else
-            # First commit - compare against empty tree
-            BASE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-            HEAD_SHA="HEAD"
-            echo "First Commit Mode (comparing with empty tree)"
-          fi
-          echo "Base: $BASE_SHA"
-          echo "Head: $HEAD_SHA"
-        fi
-        echo "::endgroup::"
-        
-        # Get changed files
-        echo "::group::Getting Changed Files"
-        if ! CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>&1); then
-          echo "::error::Failed to get changed files: $CHANGED_FILES"
-          exit 1
-        fi
-        
-        if [ -z "$CHANGED_FILES" ]; then
-          echo "::warning::No changed files detected"
-          CHANGED_FILES=""
-        else
-          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l)
-          echo "Total files changed: $FILE_COUNT"
-          echo ""
-          echo "Changed files:"
-          echo "$CHANGED_FILES" | head -20 | while read -r file; do
-            echo "  - $file"
-          done
-          if [ "$FILE_COUNT" -gt 20 ]; then
-            echo "  ... and $((FILE_COUNT - 20)) more files"
-          fi
-        fi
-        echo "::endgroup::"
-        
-        # Version validation
-        echo "::group::Version Validation"
-        VERSION_VALID=true
-        
-        if [ -f "Cargo.toml" ]; then
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2 || echo "")
-          
-          if [ -n "$CURRENT_VERSION" ]; then
-            echo "Current version: $CURRENT_VERSION"
+  check-platform-changes:
+      name: Detect Platform-Specific Changes
+      runs-on: ubuntu-22.04
+      timeout-minutes: 5
+      outputs:
+        macos_needed: ${{ steps.check.outputs.macos_needed }}
+        windows_needed: ${{ steps.check.outputs.windows_needed }}
+        version_valid: ${{ steps.check.outputs.version_valid }}
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 0  # Full history for accurate diffs
             
-            # Validate version format
-            if echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "✓ Version format is valid (semantic versioning)"
+        - name: Verify checkout
+          run: |
+            echo "Repository checked out successfully"
+            echo "Current directory: $(pwd)"
+            echo "Git status:"
+            git status --short
+            
+        - name: Detect platform-specific changes
+          id: check
+          run: |
+            set -e
+            set -o pipefail
+            
+            echo "::group::Environment Information"
+            echo "Event: ${{ github.event_name }}"
+            echo "Repository: ${{ github.repository }}"
+            echo "Branch: ${{ github.ref }}"
+            echo "SHA: ${{ github.sha }}"
+            echo "::endgroup::"
+            
+            # Determine base and head SHAs
+            echo "::group::Determining Commit Range"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE_SHA="${{ github.event.pull_request.base.sha }}"
+              HEAD_SHA="${{ github.sha }}"
+              echo "Pull Request Mode"
+              echo "Base SHA: $BASE_SHA"
+              echo "Head SHA: $HEAD_SHA"
               
-              # For PRs, compare with base version
-              if [ "${{ github.event_name }}" = "pull_request" ]; then
-                BASE_VERSION=$(git show "$BASE_SHA:Cargo.toml" 2>/dev/null | grep '^version =' | head -n 1 | cut -d'"' -f2 || echo "0.0.0")
-                echo "Base version: $BASE_VERSION"
-                
-                if [ "$CURRENT_VERSION" = "$BASE_VERSION" ]; then
-                  echo "::warning::Version has not been incremented from $BASE_VERSION"
-                  VERSION_VALID=false
-                else
-                  echo "✓ Version incremented: $BASE_VERSION → $CURRENT_VERSION"
-                fi
+              # Verify SHAs exist
+              if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+                echo "::error::Base SHA $BASE_SHA not found"
+                exit 1
+              fi
+              
+              if ! git cat-file -e "$HEAD_SHA" 2>/dev/null; then
+                echo "::error::Head SHA $HEAD_SHA not found"
+                exit 1
               fi
             else
-              echo "::error::Invalid version format: $CURRENT_VERSION (expected X.Y.Z)"
+              # For push events
+              if git rev-parse HEAD^ >/dev/null 2>&1; then
+                BASE_SHA="HEAD^"
+                HEAD_SHA="HEAD"
+                echo "Push Event Mode (comparing with parent)"
+              else
+                # First commit - compare against empty tree
+                BASE_SHA="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+                HEAD_SHA="HEAD"
+                echo "First Commit Mode (comparing with empty tree)"
+              fi
+              echo "Base: $BASE_SHA"
+              echo "Head: $HEAD_SHA"
+            fi
+            echo "::endgroup::"
+            
+            # Get changed files
+            echo "::group::Getting Changed Files"
+            if ! CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>&1); then
+              echo "::error::Failed to get changed files: $CHANGED_FILES"
+              exit 1
+            fi
+            
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "::warning::No changed files detected"
+              CHANGED_FILES=""
+            else
+              FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l)
+              echo "Total files changed: $FILE_COUNT"
+              echo ""
+              echo "Changed files:"
+              echo "$CHANGED_FILES" | head -20 | while read -r file; do
+                echo "  - $file"
+              done
+              if [ "$FILE_COUNT" -gt 20 ]; then
+                echo "  ... and $((FILE_COUNT - 20)) more files"
+              fi
+            fi
+            echo "::endgroup::"
+            
+            # Version validation
+            echo "::group::Version Validation"
+            VERSION_VALID=true
+            
+            if [ -f "Cargo.toml" ]; then
+              CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2 || echo "")
+              
+              if [ -n "$CURRENT_VERSION" ]; then
+                echo "Current version: $CURRENT_VERSION"
+                
+                # Validate version format
+                if echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                  echo "✓ Version format is valid (semantic versioning)"
+                  
+                  # For PRs, compare with base version
+                  if [ "${{ github.event_name }}" = "pull_request" ]; then
+                    BASE_VERSION=$(git show "$BASE_SHA:Cargo.toml" 2>/dev/null | grep '^version =' | head -n 1 | cut -d'"' -f2 || echo "0.0.0")
+                    echo "Base version: $BASE_VERSION"
+                    
+                    if [ "$CURRENT_VERSION" = "$BASE_VERSION" ]; then
+                      echo "::warning::Version has not been incremented from $BASE_VERSION"
+                      VERSION_VALID=false
+                    else
+                      echo "✓ Version incremented: $BASE_VERSION → $CURRENT_VERSION"
+                    fi
+                  fi
+                else
+                  echo "::error::Invalid version format: $CURRENT_VERSION (expected X.Y.Z)"
+                  VERSION_VALID=false
+                fi
+              else
+                echo "::warning::Could not extract version from Cargo.toml"
+                VERSION_VALID=false
+              fi
+            else
+              echo "::warning::Cargo.toml not found"
               VERSION_VALID=false
             fi
-          else
-            echo "::warning::Could not extract version from Cargo.toml"
-            VERSION_VALID=false
-          fi
-        else
-          echo "::warning::Cargo.toml not found"
-          VERSION_VALID=false
-        fi
-        echo "::endgroup::"
-        
-        # Platform detection helper function
-        check_pattern() {
-          local pattern="$1"
-          local description="$2"
-          
-          if echo "$CHANGED_FILES" | grep -qE "$pattern"; then
-            echo "  ✓ Match: $description"
-            return 0
-          fi
-          return 1
-        }
-        
-        # macOS build detection
-        echo "::group::macOS Build Detection"
-        MACOS_NEEDED=false
-        
-        if check_pattern '^crates/arkavo-mcp-macos/' 'macOS-specific crate (arkavo-mcp-macos)'; then
-          MACOS_NEEDED=true
-        fi
-        
-        if check_pattern '^\.github/workflows/' 'Workflow configuration files'; then
-          MACOS_NEEDED=true
-        fi
-        
-        if check_pattern '^Cargo\.(toml|lock)$' 'Root dependency files'; then
-          MACOS_NEEDED=true
-        fi
-        
-        if check_pattern '^crates/(arkavo-cli|arkavo)/' 'Core crates (arkavo-cli, arkavo)'; then
-          MACOS_NEEDED=true
-        fi
-        
-        echo "Decision: macOS build needed = $MACOS_NEEDED"
-        echo "::endgroup::"
-        
-        # Windows build detection
-        echo "::group::Windows Build Detection"
-        WINDOWS_NEEDED=false
-        
-        if check_pattern '^\.github/workflows/' 'Workflow configuration files'; then
-          WINDOWS_NEEDED=true
-        fi
-        
-        if check_pattern '^Cargo\.(toml|lock)$' 'Root dependency files'; then
-          WINDOWS_NEEDED=true
-        fi
-        
-        if check_pattern '^crates/(arkavo-cli|arkavo)/' 'Core crates (arkavo-cli, arkavo)'; then
-          WINDOWS_NEEDED=true
-        fi
-        
-        echo "Decision: Windows build needed = $WINDOWS_NEEDED"
-        echo "::endgroup::"
-        
-        # Documentation-only check
-        echo "::group::Documentation-Only Check"
-        if echo "$CHANGED_FILES" | grep -qE '\.md$|^docs/|^README'; then
-          NON_DOC_CHANGES=$(echo "$CHANGED_FILES" | grep -vE '\.md$|^docs/|^README' || true)
-          
-          if [ -z "$NON_DOC_CHANGES" ]; then
-            echo "✓ All changes are documentation-only"
+            echo "::endgroup::"
+            
+            # Platform detection helper function
+            check_pattern() {
+              local pattern="$1"
+              local description="$2"
+              
+              if echo "$CHANGED_FILES" | grep -qE "$pattern"; then
+                echo "  ✓ Match: $description"
+                return 0
+              fi
+              return 1
+            }
+            
+            # macOS build detection
+            echo "::group::macOS Build Detection"
             MACOS_NEEDED=false
+            
+            if check_pattern '^crates/arkavo-mcp-macos/' 'macOS-specific crate (arkavo-mcp-macos)'; then
+              MACOS_NEEDED=true
+            fi
+            
+            if check_pattern '^\.github/workflows/' 'Workflow configuration files'; then
+              MACOS_NEEDED=true
+            fi
+            
+            if check_pattern '^Cargo\.(toml|lock)$' 'Root dependency files'; then
+              MACOS_NEEDED=true
+            fi
+            
+            if check_pattern '^crates/(arkavo-cli|arkavo)/' 'Core crates (arkavo-cli, arkavo)'; then
+              MACOS_NEEDED=true
+            fi
+            
+            echo "Decision: macOS build needed = $MACOS_NEEDED"
+            echo "::endgroup::"
+            
+            # Windows build detection
+            echo "::group::Windows Build Detection"
             WINDOWS_NEEDED=false
-            echo "Overriding: macOS build = false"
-            echo "Overriding: Windows build = false"
-          else
-            echo "Mixed changes detected (code + documentation)"
-          fi
-        else
-          echo "No documentation files changed"
-        fi
-        echo "::endgroup::"
-        
-        # Validate outputs
-        echo "::group::Validating Outputs"
-        validate_boolean() {
-          local value="$1"
-          local name="$2"
-          if [ "$value" != "true" ] && [ "$value" != "false" ]; then
-            echo "::error::Invalid boolean value for $name: $value"
-            return 1
-          fi
-          echo "✓ $name is valid: $value"
-          return 0
-        }
-        
-        if ! validate_boolean "$MACOS_NEEDED" "macos_needed"; then
-          exit 1
-        fi
-        
-        if ! validate_boolean "$WINDOWS_NEEDED" "windows_needed"; then
-          exit 1
-        fi
-        
-        if ! validate_boolean "$VERSION_VALID" "version_valid"; then
-          exit 1
-        fi
-        echo "::endgroup::"
-        
-        # Set outputs
-        echo "macos_needed=$MACOS_NEEDED" >> $GITHUB_OUTPUT
-        echo "windows_needed=$WINDOWS_NEEDED" >> $GITHUB_OUTPUT
-        echo "version_valid=$VERSION_VALID" >> $GITHUB_OUTPUT
-        
-        # Final summary
-        echo ""
-        echo "::notice::=== Build Decision Summary ==="
-        echo "::notice::macOS build needed: $MACOS_NEEDED"
-        echo "::notice::Windows build needed: $WINDOWS_NEEDED"
-        echo "::notice::Version validation: $VERSION_VALID"
-        echo ""
-        
-        if [ "$MACOS_NEEDED" = "false" ] && [ "$WINDOWS_NEEDED" = "false" ]; then
-          echo "::notice::💡 Tip: To force platform builds, add labels 'build:macos', 'build:windows', or 'build:all-platforms'"
-        fi
-
-  build-linux:
-    name: Build Linux (${{ matrix.target }})
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            features: default
-            artifact_name: arkavo-x86_64-linux
-          - target: x86_64-unknown-linux-musl
-            features: memory,mdns
-            artifact_name: arkavo-x86_64-linux-musl
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-${{ matrix.target }}"
-
-      - name: Install build tools
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
-            # Install musl tools for static build
-            sudo apt-get update
-            sudo apt-get install -y musl-tools musl-dev
-          fi
-
-      - name: Build
-        env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: musl-g++
-          AR_x86_64_unknown_linux_musl: ar
-          CXXFLAGS_x86_64_unknown_linux_musl: "-static"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-          # For glibc build, ensure static linking of OpenMP
-          RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support and static OpenMP
-            cargo build --release --target ${{ matrix.target }} -p arkavo
-          else
-            # Static build for containers with memory and mDNS
-            cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
-          fi
-
-      - name: Prepare release artifact
-        run: |
-          mkdir -p release-package
-          cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
-          chmod +x release-package/${{ matrix.artifact_name }}
-          
-          # Create feature manifest
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
-          else
-            echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
-          fi
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: release-package/
-          retention-days: 1
-
+            
+            if check_pattern '^\.github/workflows/' 'Workflow configuration files'; then
+              WINDOWS_NEEDED=true
+            fi
+            
+            if check_pattern '^Cargo\.(toml|lock)$' 'Root dependency files'; then
+              WINDOWS_NEEDED=true
+            fi
+            
+            if check_pattern '^crates/(arkavo-cli|arkavo)/' 'Core crates (arkavo-cli, arkavo)'; then
+              WINDOWS_NEEDED=true
+            fi
+            
+            echo "Decision: Windows build needed = $WINDOWS_NEEDED"
+            echo "::endgroup::"
+            
+            # Documentation-only check
+            echo "::group::Documentation-Only Check"
+            if echo "$CHANGED_FILES" | grep -qE '\.md$|^docs/|^README'; then
+              NON_DOC_CHANGES=$(echo "$CHANGED_FILES" | grep -vE '\.md$|^docs/|^README' || true)
+              
+              if [ -z "$NON_DOC_CHANGES" ]; then
+                echo "✓ All changes are documentation-only"
+                MACOS_NEEDED=false
+                WINDOWS_NEEDED=false
+                echo "Overriding: macOS build = false"
+                echo "Overriding: Windows build = false"
+              else
+                echo "Mixed changes detected (code + documentation)"
+              fi
+            else
+              echo "No documentation files changed"
+            fi
+            echo "::endgroup::"
+            
+            # Validate outputs
+            echo "::group::Validating Outputs"
+            validate_boolean() {
+              local value="$1"
+              local name="$2"
+              if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+                echo "::error::Invalid boolean value for $name: $value"
+                return 1
+              fi
+              echo "✓ $name is valid: $value"
+              return 0
+            }
+            
+            if ! validate_boolean "$MACOS_NEEDED" "macos_needed"; then
+              exit 1
+            fi
+            
+            if ! validate_boolean "$WINDOWS_NEEDED" "windows_needed"; then
+              exit 1
+            fi
+            
+            if ! validate_boolean "$VERSION_VALID" "version_valid"; then
+              exit 1
+            fi
+            echo "::endgroup::"
+            
+            # Set outputs
+            echo "macos_needed=$MACOS_NEEDED" >> $GITHUB_OUTPUT
+            echo "windows_needed=$WINDOWS_NEEDED" >> $GITHUB_OUTPUT
+            echo "version_valid=$VERSION_VALID" >> $GITHUB_OUTPUT
+            
+            # Final summary
+            echo ""
+            echo "::notice::=== Build Decision Summary ==="
+            echo "::notice::macOS build needed: $MACOS_NEEDED"
+            echo "::notice::Windows build needed: $WINDOWS_NEEDED"
+            echo "::notice::Version validation: $VERSION_VALID"
+            echo ""
+            
+            if [ "$MACOS_NEEDED" = "false" ] && [ "$WINDOWS_NEEDED" = "false" ]; then
+              echo "::notice::💡 Tip: To force platform builds, add labels 'build:macos', 'build:windows', or 'build:all-platforms'"
+            fi
   build-macos:
     name: Build macOS (ARM64)
     needs: [test, clippy, check-platform-changes]
