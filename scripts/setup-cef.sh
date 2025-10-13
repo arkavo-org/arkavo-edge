@@ -40,12 +40,15 @@ fi
 echo "==> Extracting CEF..."
 tar -xjf "$CEF_FILENAME"
 
-EXTRACTED_DIR="cef_binary_${CEF_VERSION}_${CEF_PLATFORM}"
-if [ -d "$EXTRACTED_DIR" ]; then
+# Find the extracted directory (might have slight variations in naming)
+EXTRACTED_DIR=$(find . -maxdepth 1 -type d -name "cef_binary_*_${CEF_PLATFORM}" | head -n 1)
+if [ -n "$EXTRACTED_DIR" ] && [ -d "$EXTRACTED_DIR" ]; then
     mv "$EXTRACTED_DIR" cef
     echo "==> CEF extracted to $CEF_DIR"
 else
-    echo "Error: Expected directory $EXTRACTED_DIR not found after extraction"
+    echo "Error: Could not find extracted CEF directory matching pattern: cef_binary_*_${CEF_PLATFORM}"
+    echo "Available directories:"
+    ls -la
     exit 1
 fi
 
