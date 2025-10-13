@@ -161,7 +161,9 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
+          # Test workspace WITHOUT llama-cpp to avoid 4+ minute C++ compilation
+          # We test llm-remote features separately below
+          cargo test --workspace --no-default-features --features memory,mdns,llm-remote --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
           cargo test -p arkavo-memory --lib
           cargo test -p arkavo-memory --test mcp_integration_test
           cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
