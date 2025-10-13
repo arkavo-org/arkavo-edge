@@ -20,9 +20,9 @@ reqwest = { workspace = true }
 hf-hub = { workspace = true }
 
 # Internal dependencies
-arkavo-llm = { path = "../arkavo-llm", features = ["llm-local", "llama-cpp", "gemini"] }
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-budget = { path = "../arkavo-budget" }
-arkavo-gemini = { path = "../arkavo-gemini" }
+arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-context = { path = "../arkavo-context" }
 arkavo-observability = { path = "../arkavo-observability" }
 
@@ -30,8 +30,12 @@ arkavo-observability = { path = "../arkavo-observability" }
 tokio-test = "0.4"
 
 [features]
-default = ["llama-cpp"]
-llama-cpp = []
+default = ["llama-cpp", "gemini"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-llm/llm-local"]
+gemini = ["arkavo-llm/gemini"]
+llm-remote = ["arkavo-llm/llm-remote"]
+# Windows compatible features (no C++ dependencies)
+windows = ["gemini", "llm-remote"]
 
 [lints]
 workspace = true

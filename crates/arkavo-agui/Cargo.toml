@@ -8,8 +8,11 @@ repository.workspace = true
 description = "AG-UI protocol implementation and web gateway for Arkavo Edge"
 
 [features]
-default = ["mdns"]
+default = ["mdns", "llama-cpp"]
 mdns = ["dep:mdns-sd"]
+llama-cpp = ["arkavo-router/llama-cpp"]
+# Windows compatible features (no C++ dependencies)
+windows = ["mdns", "arkavo-router/windows"]
 
 [dependencies]
 # Core dependencies
@@ -27,7 +30,7 @@ arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-dataflow = { path = "../arkavo-dataflow" }
 arkavo-budget = { path = "../arkavo-budget" }
-arkavo-router = { path = "../arkavo-router" }
+arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-debugger = { path = "../arkavo-debugger" }

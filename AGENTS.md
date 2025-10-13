@@ -45,11 +45,20 @@ cargo run
 # Run chat with prompt (default, no embeddings)
 cargo run -p arkavo -- chat --prompt Hi
 
-# Run tests
+# Run tests (standard)
 cargo test
+
+# Run tests with nextest (faster, recommended for development)
+# Install once: cargo install cargo-nextest --locked
+cargo nextest run
 
 # Run specific test
 cargo test test_name
+# or with nextest:
+cargo nextest run -E 'test(test_name)'
+
+# Rerun only failed tests
+cargo nextest run --failed
 
 # Code quality
 cargo clippy -- -D warnings
@@ -276,3 +285,4 @@ When `ARKAVO_DEBUG_CHAT=1`:
 
   ARKAVO_DEBUG_CHAT=1 arkavo chat --prompt "test"
 - don't build --release while we are in development mode, use debug
+- **Windows builds exclude C++ dependencies**: The `windows-default` feature explicitly excludes llama-cpp and other C++ dependencies (like candle) to avoid MSVC linker issues. Windows builds only include pure Rust features: memory, mdns, and llm-remote. If you add new dependencies, ensure they don't hardcode C++ features that would be pulled into Windows builds.
