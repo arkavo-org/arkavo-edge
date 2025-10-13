@@ -14,6 +14,9 @@ fn main() {
 
     let cef_root = PathBuf::from("../../vendor/cef");
 
+    // Convert to absolute path for CMake
+    let cef_root = cef_root.canonicalize().unwrap_or_else(|_| cef_root.clone());
+
     if !cef_root.exists() {
         eprintln!(
             "\n============================================================================="
