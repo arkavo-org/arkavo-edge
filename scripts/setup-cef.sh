@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# CEF version to download
-CEF_VERSION="131.2.7+g872dfbe+chromium-131.0.6778.86"
+# CEF version to download (latest stable as of 2025-10-13)
+CEF_VERSION="138.0.51+g41d93d2+chromium-138.0.7204.293"
 CEF_PLATFORM="macosx64"
 
 VENDOR_DIR="$(cd "$(dirname "$0")/.." && pwd)/vendor"
@@ -29,13 +29,32 @@ echo "==> Downloading CEF..."
 echo "    URL: $CEF_URL"
 
 if command -v curl &> /dev/null; then
-    curl -L --progress-bar -o "$CEF_FILENAME" "$CEF_URL"
+    curl -L --fail --progress-bar -o "$CEF_FILENAME" "$CEF_URL"
+    if [ $? -ne 0 ]; then
+        echo "Error: Download failed with curl"
+        rm -f "$CEF_FILENAME"
+        exit 1
+    fi
 elif command -v wget &> /dev/null; then
     wget --progress=bar:force -O "$CEF_FILENAME" "$CEF_URL"
+    if [ $? -ne 0 ]; then
+        echo "Error: Download failed with wget"
+        rm -f "$CEF_FILENAME"
+        exit 1
+    fi
 else
     echo "Error: Neither curl nor wget found. Please install one to continue."
     exit 1
 fi
+
+# Verify download succeeded
+if [ ! -s "$CEF_FILENAME" ]; then
+    echo "Error: Downloaded file is empty or missing"
+    ls -lh "$CEF_FILENAME" || true
+    exit 1
+fi
+
+echo "    Downloaded: $(du -h "$CEF_FILENAME" | cut -f1)"
 
 echo "==> Extracting CEF..."
 tar -xjf "$CEF_FILENAME"
