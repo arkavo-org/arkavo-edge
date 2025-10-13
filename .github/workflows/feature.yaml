@@ -402,6 +402,151 @@ jobs:
           path: release-package/
           retention-days: 1
 
+  # macOS .pkg build job
+  build-macos-pkg:
+    name: Build macOS .pkg
+    needs: [test, clippy]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-pkg"
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build ARM64 binary
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
+
+      - name: Create app bundle
+        run: |
+          mkdir -p Arkavo.app/Contents/MacOS
+          mkdir -p Arkavo.app/Contents/Resources
+
+          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo
+          cp packaging/macos/Info.plist Arkavo.app/Contents/Info.plist
+
+          # Update version in Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Arkavo.app/Contents/Info.plist
+
+          chmod +x Arkavo.app/Contents/MacOS/arkavo
+
+      - name: Codesign app
+        continue-on-error: true
+        env:
+          MACOS_DEV_ID_APP: ${{ secrets.MACOS_DEV_ID_APP }}
+        run: |
+          if [ -z "$MACOS_DEV_ID_APP" ]; then
+            echo "⚠️ MACOS_DEV_ID_APP not set - skipping codesign"
+            echo "To enable signing, add MACOS_DEV_ID_APP secret with your Developer ID Application certificate name"
+            exit 0
+          fi
+
+          echo "Signing app with hardened runtime..."
+          codesign --force --options runtime --timestamp \
+            --sign "$MACOS_DEV_ID_APP" \
+            Arkavo.app
+
+          codesign --verify --deep --strict --verbose Arkavo.app
+          echo "✅ App signed successfully"
+
+      - name: Build component pkg
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p pkgroot/Applications
+          cp -R Arkavo.app pkgroot/Applications/
+
+          pkgbuild \
+            --root pkgroot \
+            --identifier com.arkavo.edge \
+            --version "$VERSION" \
+            --install-location / \
+            arkavo-$VERSION.component.pkg
+
+      - name: Sign installer
+        continue-on-error: true
+        env:
+          MACOS_DEV_ID_INSTALLER: ${{ secrets.MACOS_DEV_ID_INSTALLER }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if [ -z "$MACOS_DEV_ID_INSTALLER" ]; then
+            echo "⚠️ MACOS_DEV_ID_INSTALLER not set - creating unsigned pkg"
+            echo "To enable signing, add MACOS_DEV_ID_INSTALLER secret with your Developer ID Installer certificate name"
+            mv arkavo-$VERSION.component.pkg arkavo-$VERSION-macos-arm64.pkg
+            exit 0
+          fi
+
+          echo "Signing installer..."
+          productsign \
+            --sign "$MACOS_DEV_ID_INSTALLER" \
+            arkavo-$VERSION.component.pkg \
+            arkavo-$VERSION-macos-arm64.pkg
+
+          rm arkavo-$VERSION.component.pkg
+          echo "✅ Installer signed successfully"
+
+      - name: Notarize pkg
+        continue-on-error: true
+        env:
+          MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          if [ -z "$MACOS_NOTARY_PROFILE" ]; then
+            echo "⚠️ MACOS_NOTARY_PROFILE not set - skipping notarization"
+            echo "To enable notarization, run: xcrun notarytool store-credentials <profile-name>"
+            echo "Then add MACOS_NOTARY_PROFILE secret with the profile name"
+            exit 0
+          fi
+
+          echo "Submitting for notarization..."
+          xcrun notarytool submit arkavo-$VERSION-macos-arm64.pkg \
+            --keychain-profile "$MACOS_NOTARY_PROFILE" \
+            --wait
+
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple arkavo-$VERSION-macos-arm64.pkg
+
+          echo "✅ Pkg notarized and stapled successfully"
+
+      - name: Generate checksum
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          shasum -a 256 arkavo-$VERSION-macos-arm64.pkg > arkavo-$VERSION-macos-arm64.pkg.sha256
+
+      - name: Upload pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arkavo-macos-pkg
+          path: |
+            arkavo-*.pkg
+            arkavo-*.pkg.sha256
+          retention-days: 1
+
   # Performance check can run independently
   performance-check:
     name: Performance Check
