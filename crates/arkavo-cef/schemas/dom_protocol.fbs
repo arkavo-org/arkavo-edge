@@ -1,0 +1,49 @@
+namespace arkavo.cef;
+
+enum DOMOp : byte {
+    ReplaceInnerHTML = 0,
+    SetAttribute = 1,
+    SetStyle = 2,
+    RemoveNode = 3,
+    AppendNode = 4,
+    QuerySelector = 5,
+    AddEventListener = 6,
+    SetTextContent = 7,
+}
+
+table DOMCommand {
+    id: uint32;
+    op: DOMOp;
+    selector: string;
+    payload: string;
+    property: string;
+}
+
+enum FeedbackStatus : byte {
+    Success = 0,
+    Error = 1,
+    InvalidSelector = 2,
+    DOMException = 3,
+}
+
+table Telemetry {
+    fps: float;
+    lcp_ms: float;
+    layout_cost_us: uint64;
+}
+
+table DOMFeedback {
+    id: uint32;
+    status: FeedbackStatus;
+    exec_time_ns: uint64;
+    message: string;
+    telemetry: Telemetry;
+}
+
+table DOMEvent {
+    event_type: string;
+    selector: string;
+    data: string;
+}
+
+root_type DOMCommand;

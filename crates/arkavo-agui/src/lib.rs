@@ -11,6 +11,7 @@ pub mod handler;
 pub mod health;
 pub mod health_monitor;
 pub mod mdns_impl;
+pub mod renderer;
 pub mod roi_metrics;
 pub mod streaming;
 pub mod types;
@@ -18,5 +19,6 @@ pub mod ui_handler;
 
 pub use coding_agent_bridge::CodingAgentBridge;
 pub use gateway::AgUiGateway;
+pub use renderer::{create_renderer, default_renderer_type, RendererType, UiRenderer};
 pub use types::*;
 pub use ui_handler::UiHandler;
