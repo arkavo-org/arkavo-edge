@@ -72,7 +72,11 @@ fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse 
 
 #[async_trait]
 impl Provider for KimiProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
         let kimi_messages = convert_messages_to_kimi(messages);
 
         // Use the arkavo-kimi Provider trait

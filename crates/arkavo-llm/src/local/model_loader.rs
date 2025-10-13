@@ -498,13 +498,10 @@ impl ModelLoader {
         &mut self,
         content: &candle_core::quantized::gguf_file::Content,
     ) -> bool {
-        // For now, we'll create a simple tokenizer that can at least encode/decode basic text
-        // This is a temporary solution until we can bundle the actual Gemma tokenizer
-
         // Check if we have the token list
         if let Some(gguf_file::Value::Array(tokens)) = content.metadata.get("tokenizer.ggml.tokens")
         {
-            tracing::info!(
+            tracing::debug!(
                 "Found {} tokens in GGUF metadata, attempting to use bundled tokenizer",
                 tokens.len()
             );
@@ -515,8 +512,8 @@ impl ModelLoader {
                 return true;
             }
 
-            tracing::warn!(
-                "No bundled tokenizer available for this model. Please download tokenizer.model separately."
+            tracing::debug!(
+                "No bundled tokenizer available for this model. Will try other methods."
             );
         }
 
@@ -526,40 +523,10 @@ impl ModelLoader {
     /// Load a bundled tokenizer based on model metadata
     fn load_bundled_tokenizer(
         &self,
-        metadata: &std::collections::HashMap<String, gguf_file::Value>,
+        _metadata: &std::collections::HashMap<String, gguf_file::Value>,
     ) -> Option<Arc<tokenizers::Tokenizer>> {
-        // Check model type from metadata
-        let model_name = metadata.get("general.name").and_then(|v| match v {
-            gguf_file::Value::String(s) => Some(s.as_str()),
-            _ => None,
-        });
-
-        match model_name {
-            Some(name) if name.contains("gemma") => {
-                // For Gemma models, use a simple tokenizer stub
-                // In production, this would load actual tokenizer data
-                tracing::info!("Loading tokenizer stub for Gemma model");
-                self.create_tokenizer_stub()
-            }
-            Some(name) if name.contains("llama") => {
-                tracing::info!("Loading tokenizer stub for Llama model");
-                self.create_tokenizer_stub()
-            }
-            _ => None,
-        }
-    }
-
-    /// Create a basic tokenizer stub for development
-    fn create_tokenizer_stub(&self) -> Option<Arc<tokenizers::Tokenizer>> {
-        use tokenizers::models::bpe::BPE;
-        use tokenizers::tokenizer::Tokenizer;
-
-        // Create a minimal BPE tokenizer
-        // In production, this would load actual vocabulary and merges
-        let bpe = BPE::default();
-        let tokenizer = Tokenizer::new(bpe);
-
-        Some(Arc::new(tokenizer))
+        // No bundled tokenizer available - must use other methods
+        None
     }
 
     fn try_embedded_tokenizer(&mut self, value: &candle_core::quantized::gguf_file::Value) -> bool {

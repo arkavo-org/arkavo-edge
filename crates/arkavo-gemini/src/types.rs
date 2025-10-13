@@ -274,6 +274,7 @@ pub enum ClientMessage {
 // Streaming API types
 #[derive(Debug, Clone, Deserialize)]
 pub struct StreamChunk {
+    #[serde(default)]
     pub candidates: Vec<StreamCandidate>,
 }
 
@@ -281,6 +282,7 @@ pub struct StreamChunk {
 #[serde(rename_all = "camelCase")]
 pub struct StreamCandidate {
     pub content: StreamContent,
+    #[serde(default)]
     pub finish_reason: Option<String>,
 }
 
@@ -288,6 +290,7 @@ pub struct StreamCandidate {
 pub struct StreamContent {
     #[serde(default)]
     pub parts: Vec<StreamPart>,
+    #[serde(default)]
     pub role: String,
 }
 
@@ -314,4 +317,33 @@ pub struct StreamResponse {
     pub text: Option<String>,
     pub function_calls: Vec<FunctionCall>,
     pub done: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub name: String,
+    #[serde(default)]
+    pub base_model_id: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub input_token_limit: Option<u32>,
+    #[serde(default)]
+    pub output_token_limit: Option<u32>,
+    #[serde(default)]
+    pub supported_generation_methods: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListModelsResponse {
+    #[serde(default)]
+    pub models: Vec<ModelInfo>,
+    #[serde(default)]
+    pub next_page_token: Option<String>,
 }

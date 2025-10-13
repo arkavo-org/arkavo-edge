@@ -1,15 +1,22 @@
 pub mod agent_connection;
+pub mod api_keys;
 pub mod budget_handler;
+pub mod coding_agent_bridge;
 pub mod cost_handler;
 pub mod dataflow_handler;
 pub mod debug_handler;
 pub mod gateway;
 pub mod gateway_mdns;
 pub mod handler;
+pub mod health;
+pub mod health_monitor;
 pub mod mdns_impl;
 pub mod roi_metrics;
 pub mod streaming;
 pub mod types;
+pub mod ui_handler;
 
+pub use coding_agent_bridge::CodingAgentBridge;
 pub use gateway::AgUiGateway;
 pub use types::*;
+pub use ui_handler::UiHandler;

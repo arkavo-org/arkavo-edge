@@ -7,16 +7,57 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Parse optional port argument
-    let port = if !args.is_empty() {
-        args[0].parse::<u16>().unwrap_or(7700)
-    } else {
-        7700
-    };
+    let mut port = 7700;
+    let mut initial_prompt: Option<String> = None;
+    let mut blank_mode = false;
 
-    // Check if we're already in a runtime context
-    let run_async = async {
-        let gateway = AgUiGateway::new(port);
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--blank" => {
+                blank_mode = true;
+                i += 1;
+            }
+            "--prompt" | "-p" => {
+                if i + 1 < args.len() {
+                    initial_prompt = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --prompt requires a value");
+                    return Err("Missing prompt value".into());
+                }
+            }
+            "--port" => {
+                if i + 1 < args.len() {
+                    port = args[i + 1].parse::<u16>().unwrap_or(7700);
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            arg => {
+                if let Ok(p) = arg.parse::<u16>() {
+                    port = p;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let run_async = async move {
+        let mut gateway = AgUiGateway::new(port);
+
+        if blank_mode {
+            gateway.set_blank_mode(true);
+            println!("Starting in blank canvas mode");
+        }
+
+        if let Some(prompt) = initial_prompt {
+            println!("Starting UI with initial prompt: {prompt}");
+            println!("UI will generate incrementally - you can interrupt and modify at any time");
+            gateway.set_initial_prompt(prompt);
+        }
+
         gateway.start().await
     };
 
@@ -33,12 +74,21 @@ fn print_usage() {
     println!("Arkavo UI - Web interface for agent orchestration");
     println!();
     println!("USAGE:");
-    println!("    arkavo ui [PORT]");
+    println!("    arkavo ui [OPTIONS]");
     println!();
     println!("OPTIONS:");
-    println!("    PORT    Port to run the UI server on (default: 7700)");
+    println!("    --blank                    Start with blank canvas (no dashboard)");
+    println!("    --port <PORT>              Port to run the UI server on (default: 7700)");
+    println!("    --prompt, -p <PROMPT>      Initial prompt for UI generation");
+    println!("    <PORT>                     Port number (shorthand)");
+    println!();
+    println!("ENVIRONMENT:");
+    println!("    GEMINI_API_KEY             Gemini API key for UI generation");
     println!();
     println!("EXAMPLES:");
-    println!("    arkavo ui          # Start UI on default port 7700");
-    println!("    arkavo ui 8080     # Start UI on port 8080");
+    println!("    arkavo ui");
+    println!("    arkavo ui 8080");
+    println!("    arkavo ui --blank --prompt \"Build a bank account page\"");
+    println!("    arkavo ui --prompt \"Create a dashboard with charts\"");
+    println!("    GEMINI_API_KEY=xxx arkavo ui --blank --prompt \"bank + portfolio\"");
 }

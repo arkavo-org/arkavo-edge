@@ -235,7 +235,11 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl Provider for OpenAIProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String, crate::Error> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String, crate::Error> {
         let api_messages = self.convert_messages(messages);
 
         // GPT-5 only supports default temperature (1.0)

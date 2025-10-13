@@ -45,11 +45,20 @@ cargo run
 # Run chat with prompt (default, no embeddings)
 cargo run -p arkavo -- chat --prompt Hi
 
-# Run tests
+# Run tests (standard)
 cargo test
+
+# Run tests with nextest (faster, recommended for development)
+# Install once: cargo install cargo-nextest --locked
+cargo nextest run
 
 # Run specific test
 cargo test test_name
+# or with nextest:
+cargo nextest run -E 'test(test_name)'
+
+# Rerun only failed tests
+cargo nextest run --failed
 
 # Code quality
 cargo clippy -- -D warnings
@@ -275,3 +284,6 @@ When `ARKAVO_DEBUG_CHAT=1`:
   verbose debug statements are suppressed. To enable them for debugging, users can run:
 
   ARKAVO_DEBUG_CHAT=1 arkavo chat --prompt "test"
+- don't build --release while we are in development mode, use debug
+- **Windows builds exclude C++ dependencies**: The `windows-default` feature explicitly excludes llama-cpp and other C++ dependencies (like candle) to avoid MSVC linker issues. Windows builds only include pure Rust features: memory, mdns, and llm-remote. If you add new dependencies, ensure they don't hardcode C++ features that would be pulled into Windows builds.
+- **Windows CI C++ Build Tools**: The Windows CI workflow includes MSVC C++ build tools and CMake setup for future llama.cpp support. Currently, builds use `--features windows-default` which excludes C++ dependencies, but the tools are pre-installed to enable quick iteration when C++ features are needed. To enable llama.cpp on Windows: (1) update `windows-default` feature to include `llama-cpp`, (2) ensure all transitive dependencies use `default-features=false` to prevent feature pollution, (3) verify the build in CI before merging.

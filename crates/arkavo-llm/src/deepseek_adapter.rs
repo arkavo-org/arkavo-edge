@@ -80,7 +80,11 @@ fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamRespo
 
 #[async_trait]
 impl Provider for DeepSeekProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
         let deepseek_messages = convert_messages_to_deepseek(messages);
 
         // Use the arkavo-deepseek Provider trait

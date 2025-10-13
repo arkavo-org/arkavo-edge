@@ -13,33 +13,33 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Default features - portable across all platforms with pure Rust mDNS
-default = ["memory", "mdns", "test-harness", "llm-remote"]
-# Default features for Windows
-windows-default = ["memory", "mdns", "llm-remote"]
+default = ["memory", "mdns", "test-harness", "llm-remote", "llama-cpp"]
+# Default features for Windows (no C++ dependencies)
+windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows"]
 test-harness = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
-local = ["arkavo-llm/local", "arkavo-dataflow/local", "arkavo-terminal/llm-local"]
+local = ["arkavo-llm/local", "arkavo-dataflow/llm-local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm/metal"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
 arkavo-git = { path = "../arkavo-git" }
-arkavo-llm = { path = "../arkavo-llm" }
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
 arkavo-memory = { path = "../arkavo-memory", default-features = false }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
-arkavo-dataflow = { path = "../arkavo-dataflow", features = ["nl", "sandbox", "llm-remote", "llm-local"] }
+arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
-arkavo-agui = { path = "../arkavo-agui", default-features = false }
+arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }

@@ -237,6 +237,70 @@ pub enum AgUiEvent {
         #[serde(rename = "eventId")]
         event_id: String,
     },
+
+    // UI Generation events
+    SubmitPrompt {
+        text: String,
+    },
+    Plan {
+        parts: Vec<UiPlanPart>,
+    },
+    RequestStatus,
+    StatusUpdate {
+        system: SystemStatus,
+        #[serde(rename = "mcpTools")]
+        mcp_tools: McpToolsStatus,
+        llms: Vec<LlmStatus>,
+        health: HealthData,
+        timestamp: String,
+    },
+    SystemNotification {
+        message: String,
+        severity: NotificationSeverity,
+    },
+    PartStream {
+        #[serde(rename = "partId")]
+        part_id: String,
+        #[serde(rename = "chunkType")]
+        chunk_type: String,
+        content: String,
+        done: bool,
+    },
+    ApplyPart {
+        #[serde(rename = "partId")]
+        part_id: String,
+    },
+    AppliedPart {
+        #[serde(rename = "partId")]
+        part_id: String,
+        #[serde(rename = "versionId")]
+        version_id: String,
+    },
+    CancelGeneration,
+    Undo,
+    Redo,
+    UndoAvailable {
+        #[serde(rename = "canUndo")]
+        can_undo: bool,
+        #[serde(rename = "canRedo")]
+        can_redo: bool,
+    },
+    UserEdit {
+        selector: String,
+        action: String,
+        before: String,
+        after: String,
+    },
+    SaveSession {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPlanPart {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,4 +431,49 @@ pub enum ConfigErrorInfo {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemStatus {
+    pub uptime: String,
+    pub memory_usage: String,
+    pub active_connections: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolsStatus {
+    pub browser_available: bool,
+    pub tools_count: usize,
+    pub last_used: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmStatus {
+    pub name: String,
+    pub provider: String,
+    pub connected: bool,
+    pub model: String,
+    #[serde(rename = "requestsToday")]
+    pub requests_today: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthData {
+    pub status: String,
+    pub components: Vec<ComponentHealth>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentHealth {
+    pub component: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotificationSeverity {
+    Info,
+    Warning,
+    Error,
 }

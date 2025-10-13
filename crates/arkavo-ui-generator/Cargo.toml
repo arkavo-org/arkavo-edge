@@ -1,0 +1,37 @@
+[package]
+name = "arkavo-ui-generator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AI-driven UI code generation for Arkavo Edge"
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Arkavo dependencies
+arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-gemini = { path = "../arkavo-gemini" }
+arkavo-observability = { path = "../arkavo-observability" }
+
+# Template rendering
+handlebars = { workspace = true }
+regex = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+arkavo-browser = { path = "../arkavo-browser" }
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures = { workspace = true }

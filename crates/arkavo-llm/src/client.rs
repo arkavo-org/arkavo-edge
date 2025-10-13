@@ -83,17 +83,17 @@ impl LlmClient {
 
     #[allow(clippy::unused_async)]
     pub async fn from_llamacpp_model(model_name: &str, model_path: String) -> Result<Self> {
-        #[cfg(feature = "llama-cpp")]
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
             use crate::LlamaCppProvider;
             let provider = LlamaCppProvider::new(model_name.to_string(), model_path)?;
             Ok(Self::new(Box::new(provider)))
         }
-        #[cfg(not(feature = "llama-cpp"))]
+        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {
             let _ = (model_name, model_path); // Suppress unused variable warnings
             Err(Error::Config(
-                "LLama.cpp models require the 'llama-cpp' feature to be enabled".to_string(),
+                "LLama.cpp models require the 'llama-cpp' feature and are not available on musl targets".to_string(),
             ))
         }
     }
@@ -108,7 +108,7 @@ impl LlmClient {
         max_tokens: u32,
         seed: u32,
     ) -> Result<Self> {
-        #[cfg(feature = "llama-cpp")]
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
             use crate::{LlamaCppProvider, llamacpp_provider::SamplingConfig};
             let config = SamplingConfig {
@@ -123,7 +123,7 @@ impl LlmClient {
                 LlamaCppProvider::new_with_config(model_name.to_string(), model_path, config)?;
             Ok(Self::new(Box::new(provider)))
         }
-        #[cfg(not(feature = "llama-cpp"))]
+        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {
             let _ = (
                 model_name,
@@ -135,7 +135,7 @@ impl LlmClient {
                 seed,
             ); // Suppress unused variable warnings
             Err(Error::Config(
-                "LLama.cpp models require the 'llama-cpp' feature to be enabled".to_string(),
+                "LLama.cpp models require the 'llama-cpp' feature and are not available on musl targets".to_string(),
             ))
         }
     }

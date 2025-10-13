@@ -59,7 +59,11 @@ fn convert_stream_response(resp: arkavo_qwen::StreamResponse) -> crate::StreamRe
 
 #[async_trait]
 impl Provider for QwenProvider {
-    async fn complete(&self, messages: Vec<Message>) -> Result<String> {
+    async fn complete_with_options(
+        &self,
+        messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
         let qwen_messages: Vec<arkavo_qwen::Message> =
             messages.into_iter().map(convert_message).collect();
 
