@@ -30,7 +30,6 @@ pub struct AgUiGateway {
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
-    blank_mode: bool,
     initial_prompt: Option<String>,
 }
 
@@ -47,13 +46,8 @@ impl AgUiGateway {
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
             debug_handler: None,
-            blank_mode: false,
             initial_prompt: None,
         }
-    }
-
-    pub fn set_blank_mode(&mut self, blank: bool) {
-        self.blank_mode = blank;
     }
 
     pub fn set_initial_prompt(&mut self, prompt: String) {
@@ -274,14 +268,9 @@ impl AgUiGateway {
         });
 
         // Serve static files
-        let blank_mode = self.blank_mode;
-        let index_file = warp::get().and(warp::path::end()).map(move || {
-            if blank_mode {
-                warp::reply::html(include_str!("../static/shell.html"))
-            } else {
-                warp::reply::html(include_str!("../static/dashboard.html"))
-            }
-        });
+        let index_file = warp::get()
+            .and(warp::path::end())
+            .map(|| warp::reply::html(include_str!("../static/shell.html")));
 
         let static_js = warp::path("static")
             .and(warp::path("toolbar.js"))

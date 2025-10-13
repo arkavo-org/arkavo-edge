@@ -9,15 +9,10 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut port = 7700;
     let mut initial_prompt: Option<String> = None;
-    let mut blank_mode = false;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--blank" => {
-                blank_mode = true;
-                i += 1;
-            }
             "--prompt" | "-p" => {
                 if i + 1 < args.len() {
                     initial_prompt = Some(args[i + 1].clone());
@@ -47,11 +42,6 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let run_async = async move {
         let mut gateway = AgUiGateway::new(port);
 
-        if blank_mode {
-            gateway.set_blank_mode(true);
-            println!("Starting in blank canvas mode");
-        }
-
         if let Some(prompt) = initial_prompt {
             println!("Starting UI with initial prompt: {prompt}");
             println!("UI will generate incrementally - you can interrupt and modify at any time");
@@ -71,13 +61,12 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_usage() {
-    println!("Arkavo UI - Web interface for agent orchestration");
+    println!("Arkavo UI - Web interface for AI-driven UI generation");
     println!();
     println!("USAGE:");
     println!("    arkavo ui [OPTIONS]");
     println!();
     println!("OPTIONS:");
-    println!("    --blank                    Start with blank canvas (no dashboard)");
     println!("    --port <PORT>              Port to run the UI server on (default: 7700)");
     println!("    --prompt, -p <PROMPT>      Initial prompt for UI generation");
     println!("    <PORT>                     Port number (shorthand)");
@@ -88,7 +77,7 @@ fn print_usage() {
     println!("EXAMPLES:");
     println!("    arkavo ui");
     println!("    arkavo ui 8080");
-    println!("    arkavo ui --blank --prompt \"Build a bank account page\"");
+    println!("    arkavo ui --prompt \"Build a bank account page\"");
     println!("    arkavo ui --prompt \"Create a dashboard with charts\"");
-    println!("    GEMINI_API_KEY=xxx arkavo ui --blank --prompt \"bank + portfolio\"");
+    println!("    GEMINI_API_KEY=xxx arkavo ui --prompt \"bank + portfolio\"");
 }

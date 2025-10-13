@@ -4,21 +4,21 @@ AG-UI (Agentic GUI) protocol implementation and web gateway for Arkavo Edge.
 
 ## Features
 
-- **Blank Canvas UI Generator**: Prompt-to-UI system that generates production-ready web components
-- **Real-time UI Generation**: Streams HTML, CSS, and JavaScript from Gemini LLM
+- **AI-Driven UI Generation**: Prompt-to-UI system that generates production-ready web components
+- **Real-time Streaming**: Streams HTML, CSS, and JavaScript from Gemini LLM
 - **Auto-start Mode**: Automatically begins UI generation when started with `--prompt` flag
 - **WebSocket Protocol**: Real-time bidirectional communication for live updates
-- **Status Dashboard**: System health, MCP tools, and remote LLM connection monitoring
+- **Status Monitoring**: System health, MCP tools, and remote LLM connection monitoring
 - **AG-UI Protocol**: Full implementation of the Agentic GUI event protocol
 
 ## Quick Start
 
 ### Basic Usage
 
-Start the UI generator in blank canvas mode:
+Start the UI generator:
 
 ```bash
-cargo run --bin arkavo -- ui --blank
+cargo run --bin arkavo -- ui
 ```
 
 Then open http://127.0.0.1:7700 and enter a prompt to generate UI components.
@@ -31,7 +31,7 @@ Start with automatic UI generation:
 export GEMINI_API_KEY=your_api_key
 export GEMINI_MODEL=gemini-2.5-pro  # optional, defaults to gemini-2.5-pro
 
-cargo run --bin arkavo -- ui --blank --prompt "Build a calculator"
+cargo run --bin arkavo -- ui --prompt "Build a calculator"
 ```
 
 The system will:
@@ -47,7 +47,7 @@ The system will:
 - **Gateway** (`gateway.rs`): WebSocket server and HTTP endpoints
 - **UI Planner** (`arkavo-ui-generator/planner.rs`): Breaks down prompts into component plans
 - **Streaming Generator** (`arkavo-ui-generator/streaming.rs`): Generates code using Gemini LLM
-- **Frontend** (`static/shell.html`, `static/toolbar.js`): Web interface for the blank canvas
+- **Frontend** (`static/shell.html`, `static/toolbar.js`): Web interface for AI-driven UI generation
 
 ### Event Flow
 
