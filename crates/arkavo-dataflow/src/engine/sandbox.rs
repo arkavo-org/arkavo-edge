@@ -131,7 +131,7 @@ impl Sandbox {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("Sandbox execution failed: {}", stderr));
+            return Err(anyhow::anyhow!("Sandbox execution failed: {stderr}"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
