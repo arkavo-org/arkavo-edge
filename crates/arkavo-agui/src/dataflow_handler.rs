@@ -1,8 +1,10 @@
-use anyhow::Result;
 use arkavo_dataflow::agent_interface::LlmDataflowAgent;
 use serde_json::json;
-use warp::http::StatusCode;
-use warp::reply::{json, with_status};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 
 pub struct DataflowHandler {
     agent: LlmDataflowAgent,
@@ -25,62 +27,61 @@ impl DataflowHandler {
         &self,
         path: Vec<String>,
         body: serde_json::Value,
-    ) -> Result<warp::reply::WithStatus<warp::reply::Json>, warp::Rejection> {
+    ) -> Response {
         match path.first().map(|s| s.as_str()) {
-            Some("discover") => Ok(self.discover_capabilities().await),
-            Some("configure") => Ok(self.configure_providers(body).await),
-            Some("suggest") => Ok(self.suggest_blueprint(body).await),
-            _ => Ok(with_status(
-                json(&json!({"error": "not_found"})),
+            Some("discover") => self.discover_capabilities().await,
+            Some("configure") => self.configure_providers(body).await,
+            Some("suggest") => self.suggest_blueprint(body).await,
+            _ => (
                 StatusCode::NOT_FOUND,
-            )),
+                Json(json!({"error": "not_found"})),
+            )
+                .into_response(),
         }
     }
 
-    async fn discover_capabilities(&self) -> warp::reply::WithStatus<warp::reply::Json> {
+    async fn discover_capabilities(&self) -> Response {
         match self.agent.discover_capabilities().await {
-            Ok(capabilities) => with_status(json(&capabilities), StatusCode::OK),
-            Err(e) => with_status(
-                json(&json!({"error": e.to_string()})),
+            Ok(capabilities) => (StatusCode::OK, Json(capabilities)).into_response(),
+            Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-            ),
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response(),
         }
     }
 
-    async fn configure_providers(
-        &self,
-        body: serde_json::Value,
-    ) -> warp::reply::WithStatus<warp::reply::Json> {
+    async fn configure_providers(&self, body: serde_json::Value) -> Response {
         let providers = match serde_json::from_value::<Vec<(String, String)>>(body) {
             Ok(p) => p,
             Err(e) => {
-                return with_status(
-                    json(&json!({"error": format!("Invalid request body: {}", e)})),
+                return (
                     StatusCode::BAD_REQUEST,
-                );
+                    Json(json!({"error": format!("Invalid request body: {}", e)})),
+                )
+                    .into_response();
             }
         };
 
         match self.agent.configure_providers(providers).await {
-            Ok(response) => with_status(json(&json!({"message": response})), StatusCode::OK),
-            Err(e) => with_status(
-                json(&json!({"error": e.to_string()})),
+            Ok(response) => (StatusCode::OK, Json(json!({"message": response}))).into_response(),
+            Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-            ),
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response(),
         }
     }
 
-    async fn suggest_blueprint(
-        &self,
-        body: serde_json::Value,
-    ) -> warp::reply::WithStatus<warp::reply::Json> {
+    async fn suggest_blueprint(&self, body: serde_json::Value) -> Response {
         let task_description = match body.get("task").and_then(|v| v.as_str()) {
             Some(t) => t,
             None => {
-                return with_status(
-                    json(&json!({"error": "Missing 'task' in request body"})),
+                return (
                     StatusCode::BAD_REQUEST,
-                );
+                    Json(json!({"error": "Missing 'task' in request body"})),
+                )
+                    .into_response();
             }
         };
 
@@ -89,11 +90,12 @@ impl DataflowHandler {
             .suggest_blueprint_for_task(task_description)
             .await
         {
-            Ok(blueprint) => with_status(json(&blueprint), StatusCode::OK),
-            Err(e) => with_status(
-                json(&json!({"error": e.to_string()})),
+            Ok(blueprint) => (StatusCode::OK, Json(blueprint)).into_response(),
+            Err(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-            ),
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response(),
         }
     }
 }
