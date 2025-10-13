@@ -212,9 +212,7 @@ impl TaskExecutor {
         // Validate state transitions
         if !Self::is_valid_transition(old_status, new_status) {
             return Err(anyhow::anyhow!(
-                "Invalid status transition from {:?} to {:?}",
-                old_status,
-                new_status
+                "Invalid status transition from {old_status:?} to {new_status:?}"
             ));
         }
 

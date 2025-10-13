@@ -227,7 +227,7 @@ impl OpenAIProvider {
                     message: "Invalid API key".to_string(),
                     provider: "openai".to_string(),
                 },
-                _ => ProviderError::Other(anyhow::anyhow!("OpenAI API error: {}", status)),
+                _ => ProviderError::Other(anyhow::anyhow!("OpenAI API error: {status}")),
             }
         }
     }
@@ -297,9 +297,7 @@ impl Provider for OpenAIProvider {
                             .await
                             .unwrap_or_else(|_| "Failed to read error response".to_string());
                         Err(anyhow::anyhow!(
-                            "OpenAI API error {}: {}",
-                            status,
-                            error_text
+                            "OpenAI API error {status}: {error_text}"
                         ))
                     }
                 })

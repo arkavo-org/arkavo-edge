@@ -226,7 +226,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize test harness
     let harness = TestHarness::new()
-        .map_err(|e| anyhow::anyhow!("Failed to initialize test harness: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to initialize test harness: {e}"))?;
 
     let mcp_server = harness.mcp_server();
 

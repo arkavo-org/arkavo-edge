@@ -299,7 +299,7 @@ impl AnthropicProvider {
                     message: "Invalid API key".to_string(),
                     provider: "anthropic".to_string(),
                 },
-                _ => ProviderError::Other(anyhow::anyhow!("Anthropic API error: {}", status)),
+                _ => ProviderError::Other(anyhow::anyhow!("Anthropic API error: {status}")),
             }
         }
     }
@@ -360,9 +360,7 @@ impl Provider for AnthropicProvider {
                             .await
                             .unwrap_or_else(|_| "Failed to read error response".to_string());
                         Err(anyhow::anyhow!(
-                            "Anthropic API error {}: {}",
-                            status,
-                            error_text
+                            "Anthropic API error {status}: {error_text}"
                         ))
                     }
                 })

@@ -126,7 +126,7 @@ impl ProviderFactory for OllamaProviderFactory {
 
         // Validate URL format
         let url = url::Url::parse(&config.base_url)
-            .map_err(|e| anyhow::anyhow!("Invalid base URL: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))?;
 
         // Ensure it's HTTP or HTTPS
         if !["http", "https"].contains(&url.scheme()) {
@@ -475,7 +475,7 @@ impl ProviderFactory for LocalProviderFactory {
         provider
             .initialize()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {e}"))?;
 
         Ok(Box::new(provider))
     }

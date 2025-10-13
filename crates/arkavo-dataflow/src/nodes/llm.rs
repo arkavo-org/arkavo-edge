@@ -161,7 +161,7 @@ impl LlmTransform {
                     .unwrap_or_else(|_| "http://10.0.0.101:11434".to_string());
                 Ok((remote_url, None))
             }
-            _ => Err(anyhow::anyhow!("Unknown provider: {}", provider_name)),
+            _ => Err(anyhow::anyhow!("Unknown provider: {provider_name}")),
         }
     }
 

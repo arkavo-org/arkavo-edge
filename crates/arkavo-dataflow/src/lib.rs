@@ -158,7 +158,7 @@ impl DataflowEngine {
     pub fn import_blueprint(&self, json: &str) -> Result<Uuid> {
         let blueprint: dsl::Blueprint = serde_json::from_str(json)?;
         dsl::BlueprintValidator::validate(&blueprint)
-            .map_err(|errors| anyhow::anyhow!("Blueprint validation failed: {:?}", errors))?;
+            .map_err(|errors| anyhow::anyhow!("Blueprint validation failed: {errors:?}"))?;
         self.create_pipeline_from_blueprint(blueprint)
     }
 

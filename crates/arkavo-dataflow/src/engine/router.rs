@@ -65,8 +65,7 @@ impl SplitRouter for BroadcastRouter {
 
         if failed_count > 0 {
             Err(anyhow::anyhow!(
-                "Failed to send to {} targets",
-                failed_count
+                "Failed to send to {failed_count} targets"
             ))
         } else {
             Ok(())

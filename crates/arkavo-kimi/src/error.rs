@@ -102,7 +102,7 @@ impl KimiError {
                 message,
                 error_code: None,
             },
-            _ => Self::Other(anyhow::anyhow!("HTTP error {}: {}", status, message)),
+            _ => Self::Other(anyhow::anyhow!("HTTP error {status}: {message}")),
         }
     }
 }

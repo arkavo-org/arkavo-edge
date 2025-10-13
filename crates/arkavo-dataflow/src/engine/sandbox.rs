@@ -182,7 +182,7 @@ impl Sandbox {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow::anyhow!("Sandbox execution failed: {}", stderr));
+            return Err(anyhow::anyhow!("Sandbox execution failed: {stderr}"));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -233,7 +233,7 @@ impl Sandbox {
 
         for pattern in &forbidden_patterns {
             if code.contains(pattern) {
-                return Err(anyhow::anyhow!("Forbidden pattern detected: {}", pattern));
+                return Err(anyhow::anyhow!("Forbidden pattern detected: {pattern}"));
             }
         }
 
