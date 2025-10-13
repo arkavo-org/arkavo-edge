@@ -427,6 +427,12 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
+      - name: Download and build CEF
+        run: |
+          echo "Downloading CEF (~100MB)..."
+          ./scripts/setup-cef.sh
+          echo "✅ CEF setup complete"
+
       - name: Build ARM64 binary
         run: cargo build --release --target aarch64-apple-darwin
 
@@ -444,9 +450,18 @@ jobs:
         run: |
           mkdir -p Arkavo.app/Contents/MacOS
           mkdir -p Arkavo.app/Contents/Resources
+          mkdir -p Arkavo.app/Contents/Frameworks
 
           cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo
           cp packaging/macos/Info.plist Arkavo.app/Contents/Info.plist
+
+          # Copy CEF framework (~100MB)
+          if [ -d "vendor/cef/Release/Chromium Embedded Framework.framework" ]; then
+            cp -R "vendor/cef/Release/Chromium Embedded Framework.framework" Arkavo.app/Contents/Frameworks/
+            echo "✅ CEF framework included in bundle"
+          else
+            echo "⚠️ CEF framework not found - .pkg will not include CEF support"
+          fi
 
           # Update version in Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Arkavo.app/Contents/Info.plist
