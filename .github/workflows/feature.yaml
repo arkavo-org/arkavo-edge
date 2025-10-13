@@ -405,7 +405,6 @@ jobs:
   # macOS .pkg build job
   build-macos-pkg:
     name: Build macOS .pkg
-    needs: [test, clippy]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
