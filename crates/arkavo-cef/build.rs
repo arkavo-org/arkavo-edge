@@ -15,13 +15,20 @@ fn main() {
     let cef_root = PathBuf::from("../../vendor/cef");
 
     if !cef_root.exists() {
-        eprintln!("\n=============================================================================");
-        eprintln!("CEF not found at {:?}", cef_root.canonicalize().unwrap_or(cef_root.clone()));
+        eprintln!(
+            "\n============================================================================="
+        );
+        eprintln!(
+            "CEF not found at {:?}",
+            cef_root.canonicalize().unwrap_or(cef_root.clone())
+        );
         eprintln!("\nTo download and setup CEF, run:");
         eprintln!("    ./scripts/setup-cef.sh");
         eprintln!("\nOr download manually from:");
         eprintln!("    https://cef-builds.spotifycdn.com/index.html");
-        eprintln!("=============================================================================\n");
+        eprintln!(
+            "=============================================================================\n"
+        );
 
         // Don't fail the build - allow compilation without CEF
         println!("cargo:warning=CEF not found - skipping CEF bridge build");
@@ -31,10 +38,14 @@ fn main() {
     // Check if CEF DLL wrapper is built
     let wrapper_lib = cef_root.join("build_wrapper/libcef_dll_wrapper/libcef_dll_wrapper.a");
     if !wrapper_lib.exists() {
-        eprintln!("\n=============================================================================");
+        eprintln!(
+            "\n============================================================================="
+        );
         eprintln!("CEF DLL wrapper not built");
         eprintln!("\nRunning setup script to build wrapper...");
-        eprintln!("=============================================================================\n");
+        eprintln!(
+            "=============================================================================\n"
+        );
 
         let status = Command::new("bash")
             .arg("../../scripts/setup-cef.sh")
@@ -74,7 +85,10 @@ fn main() {
 
     // Link CEF framework
     println!("cargo:rustc-link-lib=framework=CEF");
-    println!("cargo:rustc-link-search=framework={}/Release", cef_root.display());
+    println!(
+        "cargo:rustc-link-search=framework={}/Release",
+        cef_root.display()
+    );
 
     // Link system frameworks
     println!("cargo:rustc-link-lib=framework=AppKit");

@@ -40,9 +40,7 @@ impl DOMCommandBuilder {
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())
@@ -67,9 +65,7 @@ impl DOMCommandBuilder {
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())
@@ -78,20 +74,12 @@ impl DOMCommandBuilder {
     pub async fn set_style(&mut self, selector: &str, property: &str, value: &str) -> Result<()> {
         let id = self.next_id();
         self.transport
-            .send_command(
-                id,
-                DOMOp::SetStyle as u8,
-                selector,
-                value,
-                Some(property),
-            )
+            .send_command(id, DOMOp::SetStyle as u8, selector, value, Some(property))
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())
@@ -105,9 +93,7 @@ impl DOMCommandBuilder {
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())
@@ -121,9 +107,7 @@ impl DOMCommandBuilder {
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())
@@ -143,9 +127,7 @@ impl DOMCommandBuilder {
 
         let feedback = self.transport.recv_feedback().await?;
         if feedback.status != 0 {
-            return Err(crate::error::CefError::DomCommandFailed(
-                feedback.message,
-            ));
+            return Err(crate::error::CefError::DomCommandFailed(feedback.message));
         }
 
         Ok(())

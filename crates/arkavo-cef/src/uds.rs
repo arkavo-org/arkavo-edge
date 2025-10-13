@@ -46,9 +46,7 @@ impl UdsTransport {
                 .map_err(|e| CefError::UdsTransportError(e.to_string()))?;
 
             if n == 0 {
-                return Err(CefError::UdsTransportError(
-                    "Connection closed".to_string(),
-                ));
+                return Err(CefError::UdsTransportError("Connection closed".to_string()));
             }
         }
     }

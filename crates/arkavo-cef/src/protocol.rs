@@ -80,13 +80,7 @@ mod tests {
 
     #[test]
     fn test_serialize_command() {
-        let data = Protocol::serialize_command(
-            1,
-            0,
-            "#content",
-            "<div>Hello</div>",
-            None,
-        );
+        let data = Protocol::serialize_command(1, 0, "#content", "<div>Hello</div>", None);
         assert!(data.is_ok());
     }
 

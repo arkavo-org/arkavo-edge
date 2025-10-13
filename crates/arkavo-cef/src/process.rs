@@ -1,9 +1,9 @@
 use crate::error::{CefError, Result};
-use nix::sys::signal::{kill, Signal};
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
 pub struct CefProcess {
@@ -16,8 +16,9 @@ impl CefProcess {
         let socket_path = socket_path.as_ref().to_path_buf();
 
         if socket_path.exists() {
-            std::fs::remove_file(&socket_path)
-                .map_err(|e| CefError::ProcessStartFailed(format!("Failed to remove old socket: {}", e)))?;
+            std::fs::remove_file(&socket_path).map_err(|e| {
+                CefError::ProcessStartFailed(format!("Failed to remove old socket: {}", e))
+            })?;
         }
 
         let child = Command::new(renderer_path.as_ref())

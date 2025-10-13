@@ -1094,8 +1094,8 @@ jobs:
           )
           
           for pattern in "${PATTERNS[@]}"; do
-            # Exclude arkavo-mcp-macos since it's macOS-specific and needs platform paths
-            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target --exclude-dir=arkavo-mcp-macos | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
+            # Exclude arkavo-mcp-macos (macOS-specific paths) and arkavo-agui (CEF renderer search paths with fallback)
+            if grep -r "$pattern" crates/ --include="*.rs" --exclude-dir=target --exclude-dir=arkavo-mcp-macos --exclude-dir=arkavo-agui | grep -v test | grep -v comment | grep -v "require_xcode_message"; then
               echo "::error::Found hardcoded path: $pattern"
               exit 1
             fi
