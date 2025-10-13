@@ -883,25 +883,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arkavo-ui-live-reload"
-version = "0.36.0"
-dependencies = [
- "anyhow",
- "arkavo-events",
- "chrono",
- "futures",
- "serde",
- "serde_json",
- "similar",
- "thiserror 2.0.17",
- "tokio",
- "tokio-stream",
- "tracing",
- "uuid",
- "warp",
-]
-
-[[package]]
 name = "arkavo-workspace"
 version = "0.32.0"
 dependencies = [
