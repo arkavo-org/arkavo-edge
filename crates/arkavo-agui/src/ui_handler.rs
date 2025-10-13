@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use axum::{Json, response::IntoResponse};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiGenerateRequest {
@@ -34,9 +34,7 @@ impl UiHandler {
         }
     }
 
-    pub async fn handle_generate(
-        Json(request): Json<UiGenerateRequest>,
-    ) -> impl IntoResponse {
+    pub async fn handle_generate(Json(request): Json<UiGenerateRequest>) -> impl IntoResponse {
         let response = UiGenerateResponse {
             html: format!("<div class=\"generated-ui\"><h2>{}</h2><p>UI generated based on your request.</p></div>", request.prompt),
             css: ".generated-ui { padding: 20px; background: var(--bg-secondary); border-radius: 8px; }".to_string(),

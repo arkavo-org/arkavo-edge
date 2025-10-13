@@ -64,9 +64,7 @@ impl SplitRouter for BroadcastRouter {
         let failed_count = results.iter().filter(|r| r.is_err()).count();
 
         if failed_count > 0 {
-            Err(anyhow::anyhow!(
-                "Failed to send to {failed_count} targets"
-            ))
+            Err(anyhow::anyhow!("Failed to send to {failed_count} targets"))
         } else {
             Ok(())
         }

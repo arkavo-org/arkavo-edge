@@ -1,10 +1,10 @@
 use arkavo_dataflow::agent_interface::LlmDataflowAgent;
-use serde_json::json;
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
+use serde_json::json;
 
 pub struct DataflowHandler {
     agent: LlmDataflowAgent,
@@ -23,20 +23,12 @@ impl DataflowHandler {
         }
     }
 
-    pub async fn handle_request(
-        &self,
-        path: Vec<String>,
-        body: serde_json::Value,
-    ) -> Response {
+    pub async fn handle_request(&self, path: Vec<String>, body: serde_json::Value) -> Response {
         match path.first().map(|s| s.as_str()) {
             Some("discover") => self.discover_capabilities().await,
             Some("configure") => self.configure_providers(body).await,
             Some("suggest") => self.suggest_blueprint(body).await,
-            _ => (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "not_found"})),
-            )
-                .into_response(),
+            _ => (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"}))).into_response(),
         }
     }
 
