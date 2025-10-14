@@ -358,7 +358,7 @@ async fn test_reasoner_tools_fallback() {
     // Server should receive deepseek-chat as the model when tools are present
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&json!({
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "msg_123",
             "object": "chat.completion",
             "created": 1_234_567_890,
@@ -501,7 +501,7 @@ async fn test_stateless_api() {
     let mock_server = MockServer::start().await;
 
     // Set up mocks with random responses (since they should be independent)
-    let responses = vec![
+    let responses = [
         json!({
             "id": "msg_123",
             "object": "chat.completion",
@@ -545,6 +545,7 @@ async fn test_stateless_api() {
             let mut count = counter_clone.lock().unwrap();
             let response = &responses[*count];
             *count += 1;
+            drop(count);
             ResponseTemplate::new(200).set_body_json(response.clone())
         })
         .expect(2)
@@ -597,8 +598,7 @@ async fn test_stateless_api() {
     let response_text = response2.choices[0].message.content.as_ref().unwrap();
     assert!(
         response_text.contains("don't") || response_text.contains("information"),
-        "Expected response to indicate lack of context, got: {}",
-        response_text
+        "Expected response to indicate lack of context, got: {response_text}"
     );
 }
 
@@ -622,7 +622,7 @@ async fn test_live_api_basic() {
     ];
 
     let response = provider.complete(messages).await.unwrap();
-    assert!(response.contains("4"));
+    assert!(response.contains('4'));
 }
 
 /// Live API streaming test
