@@ -107,46 +107,102 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  test:
-    name: Test
+  # Parallel test jobs split by speed category
+  test-fast:
+    name: Test Fast (${{ matrix.group }})
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        group:
+          - core  # Small, focused crates
+          - protocol  # Protocol and observability
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install CMake and build dependencies
+      - name: Install CMake, mold linker, and build dependencies
         run: |
           sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
       - uses: dtolnay/rust-toolchain@stable
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "workspace"
-      # No system dependencies needed for pure Rust build
-      - name: Run tests
+          prefix-key: "test-${{ matrix.group }}"
+      - name: Run tests with mold linker
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          # Test workspace with default features (includes llama-cpp)
-          # sccache will cache the C++ compilation after first run
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
-          cargo test -p arkavo-memory --lib
-          cargo test -p arkavo-memory --test mcp_integration_test
-          cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
-          cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-          cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-          cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
+            cargo test --locked -p arkavo-memory --lib
+            cargo test --locked -p arkavo-memory --test mcp_integration_test
+            cargo test --locked -p arkavo-budget
+            cargo test --locked -p arkavo-context
+            cargo test --locked -p arkavo-encryption
+            cargo test --locked -p arkavo-mcp-core
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo test --locked -p arkavo-protocol
+            cargo test --locked -p arkavo-observability
+            cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-workspace
+          fi
 
-  clippy:
-    name: Clippy
-    needs: [test]
+  test-slow:
+    name: Test Slow (${{ matrix.group }})
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        group:
+          - llm-heavy  # Router, dataflow (pull in LLM deps)
+          - ui-heavy   # UI generator, AGUI, CLI (pull in everything)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake, mold linker, and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "test-${{ matrix.group }}"
+      - name: Run tests with mold linker
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          if [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo test --locked -p arkavo-router
+            cargo test --locked -p arkavo-dataflow
+            cargo test --locked -p arkavo-terminal
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo test --locked -p arkavo-ui-generator
+            cargo test --locked -p arkavo-agui
+            cargo test --locked -p arkavo-cli
+            cargo test --locked -p arkavo
+          fi
+
+  # Parallel clippy jobs by crate category
+  clippy:
+    name: Clippy (${{ matrix.group }})
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        group:
+          - core
+          - protocol
+          - llm
+          - ui
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,8 +210,6 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -165,12 +219,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "workspace"
-      - name: Run clippy on lib and bins only
+          prefix-key: "clippy-${{ matrix.group }}"
+      - name: Run clippy on lib and bins only (no test deps)
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
-        run: cargo clippy --workspace --lib --bins -- -D warnings
+        run: |
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo clippy --locked -p arkavo-llm --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-memory --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-budget --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-context --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-encryption --lib --bins --no-deps -- -D warnings
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo clippy --locked -p arkavo-protocol --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-observability --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-tools --lib --bins --no-deps -- -D warnings
+          elif [ "${{ matrix.group }}" = "llm" ]; then
+            cargo clippy --locked -p arkavo-router --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-dataflow --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-terminal --lib --bins --no-deps -- -D warnings
+          elif [ "${{ matrix.group }}" = "ui" ]; then
+            cargo clippy --locked -p arkavo-ui-generator --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-agui --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-cli --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo --lib --bins --no-deps -- -D warnings
+          fi
 
   test-kimi-feature:
     name: Test Kimi Feature
