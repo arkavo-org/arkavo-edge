@@ -10,7 +10,7 @@ use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
-async fn setup_test_repo() -> (TempDir, Repository) {
+fn setup_test_repo() -> (TempDir, Repository) {
     let temp_dir = TempDir::new().unwrap();
     let manager = GitManager::new();
 
@@ -42,7 +42,7 @@ async fn setup_test_repo() -> (TempDir, Repository) {
 
 #[tokio::test]
 async fn test_git_status_tool() {
-    let (temp_dir, _repo) = setup_test_repo().await;
+    let (temp_dir, _repo) = setup_test_repo();
 
     // Create a new file
     fs::write(temp_dir.path().join("new_file.txt"), "test content").unwrap();
@@ -69,7 +69,7 @@ async fn test_git_status_tool() {
 
 #[tokio::test]
 async fn test_git_diff_tool() {
-    let (temp_dir, _repo) = setup_test_repo().await;
+    let (temp_dir, _repo) = setup_test_repo();
 
     // Modify the README
     fs::write(
@@ -92,7 +92,7 @@ async fn test_git_diff_tool() {
 
 #[tokio::test]
 async fn test_git_commit_tool() {
-    let (temp_dir, repo) = setup_test_repo().await;
+    let (temp_dir, repo) = setup_test_repo();
     let _manager = GitManager::new();
 
     // Create a new file
@@ -117,7 +117,7 @@ async fn test_git_commit_tool() {
 
 #[tokio::test]
 async fn test_git_branch_tool() {
-    let (temp_dir, _repo) = setup_test_repo().await;
+    let (temp_dir, _repo) = setup_test_repo();
 
     let tool = GitBranchKit::new();
 
@@ -158,7 +158,7 @@ async fn test_git_branch_tool() {
 
 #[tokio::test]
 async fn test_git_log_tool() {
-    let (temp_dir, repo) = setup_test_repo().await;
+    let (temp_dir, repo) = setup_test_repo();
     let manager = GitManager::new();
 
     // Create additional commits
@@ -205,7 +205,7 @@ async fn test_path_sanitization() {
 
 #[tokio::test]
 async fn test_git_commit_missing_message() {
-    let (temp_dir, _repo) = setup_test_repo().await;
+    let (temp_dir, _repo) = setup_test_repo();
 
     let tool = GitCommitKit::new();
     let params = json!({
@@ -220,7 +220,7 @@ async fn test_git_commit_missing_message() {
 
 #[tokio::test]
 async fn test_git_branch_invalid_action() {
-    let (temp_dir, _repo) = setup_test_repo().await;
+    let (temp_dir, _repo) = setup_test_repo();
 
     let tool = GitBranchKit::new();
     let params = json!({

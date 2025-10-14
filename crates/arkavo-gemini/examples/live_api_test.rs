@@ -1,3 +1,8 @@
+//! Live API test example
+//!
+//! This example uses #[tokio::main] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
 use serde_json::json;
 use std::env;

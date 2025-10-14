@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
 use base64::Engine;

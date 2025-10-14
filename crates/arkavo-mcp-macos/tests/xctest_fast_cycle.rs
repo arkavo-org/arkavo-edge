@@ -113,7 +113,7 @@ async fn test_fast_xctest_verification_cycle() {
 
 #[cfg(target_os = "macos")]
 #[tokio::test]
-#[ignore] // Run with: cargo test test_xctest_setup_and_verify -- --ignored
+#[ignore = "Run with: cargo test test_xctest_setup_and_verify -- --ignored"]
 async fn test_xctest_setup_and_verify() {
     use arkavo_mcp_macos::mcp::server::Tool;
     use arkavo_mcp_macos::mcp::xctest_setup_tool::XCTestSetupKit;
@@ -198,7 +198,7 @@ async fn test_xctest_setup_and_verify() {
 /// Benchmark test to measure XCTest verification performance
 #[cfg(target_os = "macos")]
 #[tokio::test]
-#[ignore] // Run with: cargo test test_xctest_verification_performance -- --ignored
+#[ignore = "Run with: cargo test test_xctest_verification_performance -- --ignored"]
 async fn test_xctest_verification_performance() {
     use std::time::Instant;
 

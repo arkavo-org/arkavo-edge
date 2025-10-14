@@ -1,4 +1,5 @@
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::float_cmp)]
 #![cfg(target_os = "macos")]
 
 use arkavo_mcp_macos::mcp::device_manager::DeviceManager;

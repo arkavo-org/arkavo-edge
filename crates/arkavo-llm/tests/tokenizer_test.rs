@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(feature = "llm-local")]
 mod tokenizer_tests {
     use arkavo_llm::local::{ModelDownloader, ModelManifest};
