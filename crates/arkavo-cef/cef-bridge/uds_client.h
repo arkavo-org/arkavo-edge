@@ -8,8 +8,32 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-struct DOMCommand;
-struct DOMFeedback;
+// Inline type definitions (normally in dom_executor.h, temporarily here for compilation)
+enum class DOMOp : uint8_t {
+    ReplaceInnerHTML = 0,
+    SetAttribute = 1,
+    SetStyle = 2,
+    RemoveNode = 3,
+    AppendNode = 4,
+    QuerySelector = 5,
+    AddEventListener = 6,
+    SetTextContent = 7,
+};
+
+struct DOMCommand {
+    uint32_t id;
+    DOMOp op;
+    std::string selector;
+    std::string payload;
+    std::string property;
+};
+
+struct DOMFeedback {
+    uint32_t id;
+    uint8_t status;
+    uint64_t exec_time_ns;
+    std::string message;
+};
 
 class UdsClient {
 public:

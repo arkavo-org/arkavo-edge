@@ -33,11 +33,22 @@ add_executable(arkavo-cef-renderer
 
 SET_EXECUTABLE_TARGET_PROPERTIES(arkavo-cef-renderer)
 
-target_link_libraries(arkavo-cef-renderer
-    libcef_lib
-    libcef_dll_wrapper
-    ${CEF_STANDARD_LIBS}
-)
+# Set full path to libcef_dll_wrapper
+set(CEF_DLL_WRAPPER "${CEF_ROOT}/build_wrapper/libcef_dll_wrapper/libcef_dll_wrapper.a")
+
+if(APPLE)
+    # On macOS, don't link libcef_lib - CEF framework is embedded in bundle
+    target_link_libraries(arkavo-cef-renderer
+        "${CEF_DLL_WRAPPER}"
+        ${CEF_STANDARD_LIBS}
+    )
+else()
+    target_link_libraries(arkavo-cef-renderer
+        libcef_lib
+        "${CEF_DLL_WRAPPER}"
+        ${CEF_STANDARD_LIBS}
+    )
+endif()
 
 COPY_FILES("arkavo-cef-renderer" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 COPY_FILES("arkavo-cef-renderer" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
