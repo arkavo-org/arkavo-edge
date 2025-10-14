@@ -38,13 +38,12 @@ async fn test_gpt4o_vision_basic() {
         .await
         .expect("Failed to get response from GPT-5 with image");
 
-    println!("GPT-5 vision response: {}", response);
+    println!("GPT-5 vision response: {response}");
 
     // The test image is a red pixel
     assert!(
         response.to_lowercase().contains("red") || response.to_lowercase().contains("pink"),
-        "Response should identify the red color: {}",
-        response
+        "Response should identify the red color: {response}"
     );
 }
 
@@ -86,7 +85,7 @@ async fn test_gpt4o_vision_with_text() {
         .await
         .expect("Failed to analyze image with text");
 
-    println!("Image analysis response: {}", response);
+    println!("Image analysis response: {response}");
     assert!(!response.is_empty());
 }
 
@@ -123,11 +122,10 @@ async fn test_gpt4o_multiple_images() {
         .await
         .expect("Failed to compare multiple images");
 
-    println!("Multiple image comparison: {}", response);
+    println!("Multiple image comparison: {response}");
     assert!(
         response.to_lowercase().contains("no") || response.to_lowercase().contains("different"),
-        "Should identify that colors are different: {}",
-        response
+        "Should identify that colors are different: {response}"
     );
 }
 
@@ -177,14 +175,13 @@ async fn test_gpt4o_vision_streaming() {
                 }
             }
             Err(e) => {
-                panic!("Stream error: {}", e);
+                panic!("Stream error: {e}");
             }
         }
     }
 
     println!(
-        "Vision streaming response ({} chunks): {}",
-        chunk_count, full_response
+        "Vision streaming response ({chunk_count} chunks): {full_response}"
     );
     assert!(chunk_count > 1, "Should receive multiple chunks");
     assert!(!full_response.is_empty());
@@ -219,7 +216,7 @@ async fn test_non_vision_model_with_image_fails() {
     // GPT-5 doesn't support images, so this should either fail or ignore the image
     match result {
         Ok(response) => {
-            println!("Non-vision model response: {}", response);
+            println!("Non-vision model response: {response}");
             // Model might acknowledge it can't see images
             assert!(
                 response.to_lowercase().contains("can't")
@@ -230,7 +227,7 @@ async fn test_non_vision_model_with_image_fails() {
             );
         }
         Err(e) => {
-            println!("Expected error with non-vision model: {}", e);
+            println!("Expected error with non-vision model: {e}");
             assert!(e.to_string().contains("400") || e.to_string().contains("invalid"));
         }
     }
@@ -244,7 +241,7 @@ async fn test_gpt4o_with_local_image_file() {
     // Skip if test image doesn't exist
     let test_image_path = Path::new("tests/openai_integration/test_assets/test_image.png");
     if !test_image_path.exists() {
-        println!("Skipping test - no test image at {:?}", test_image_path);
+        println!("Skipping test - no test image at {test_image_path:?}");
         return;
     }
 
@@ -276,7 +273,7 @@ async fn test_gpt4o_with_local_image_file() {
         .await
         .expect("Failed to analyze local image");
 
-    println!("Local image analysis: {}", response);
+    println!("Local image analysis: {response}");
     assert!(!response.is_empty());
 }
 

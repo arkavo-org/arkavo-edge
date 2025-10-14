@@ -134,7 +134,7 @@ mod tests {
     fn test_list_tools() {
         let registry = ToolRegistry::new();
         let tools = registry.list_tools();
-        assert!(tools.len() > 0);
+        assert!(!tools.is_empty());
     }
 
     #[test]

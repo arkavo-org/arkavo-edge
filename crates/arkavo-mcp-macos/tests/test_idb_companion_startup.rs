@@ -32,15 +32,14 @@ async fn test_idb_companion_can_start() -> Result<()> {
     if let Some(raw_output) = targets.get("raw_output").and_then(|v| v.as_str()) {
         println!("\nSample devices:");
         for (i, line) in raw_output.lines().take(3).enumerate() {
-            if let Ok(device) = serde_json::from_str::<serde_json::Value>(line) {
-                if let (Some(name), Some(model), Some(state)) = (
+            if let Ok(device) = serde_json::from_str::<serde_json::Value>(line)
+                && let (Some(name), Some(model), Some(state)) = (
                     device.get("name").and_then(|v| v.as_str()),
                     device.get("model").and_then(|v| v.as_str()),
                     device.get("state").and_then(|v| v.as_str()),
                 ) {
                     println!("  {}. {} - {} ({})", i + 1, name, model, state);
                 }
-            }
         }
     }
 

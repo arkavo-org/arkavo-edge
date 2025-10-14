@@ -38,8 +38,7 @@ mod auth_manager_regression_tests {
                 // Environment variable was required and validation worked
                 assert!(
                     err.to_string().contains("at least 32 characters"),
-                    "Error message should mention 32 character requirement, got: {}",
-                    err
+                    "Error message should mention 32 character requirement, got: {err}"
                 );
             }
         }
@@ -74,8 +73,7 @@ mod auth_manager_regression_tests {
                 assert!(
                     error_msg.contains("Master key required")
                         && error_msg.contains("at least 32 characters"),
-                    "Unexpected error: {}",
-                    error_msg
+                    "Unexpected error: {error_msg}"
                 );
             }
         }

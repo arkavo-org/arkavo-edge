@@ -34,7 +34,7 @@ async fn test_split_json_across_chunks() {
                     break;
                 }
             }
-            Err(e) => panic!("Stream error: {}", e),
+            Err(e) => panic!("Stream error: {e}"),
         }
     }
 
@@ -61,7 +61,7 @@ async fn test_multiline_data_field() {
                     break;
                 }
             }
-            Err(e) => panic!("Stream error: {}", e),
+            Err(e) => panic!("Stream error: {e}"),
         }
     }
 
@@ -72,8 +72,7 @@ async fn test_multiline_data_field() {
 async fn test_large_response() {
     let large_text = "x".repeat(50000);
     let json = format!(
-        "data: {{\"candidates\":[{{\"content\":{{\"parts\":[{{\"text\":\"{}\"}}],\"role\":\"model\"}},\"finishReason\":\"STOP\"}}]}}\n\n",
-        large_text
+        "data: {{\"candidates\":[{{\"content\":{{\"parts\":[{{\"text\":\"{large_text}\"}}],\"role\":\"model\"}},\"finishReason\":\"STOP\"}}]}}\n\n"
     );
 
     let test_stream = create_test_stream(vec![&json]);
@@ -90,7 +89,7 @@ async fn test_large_response() {
                     break;
                 }
             }
-            Err(e) => panic!("Stream error: {}", e),
+            Err(e) => panic!("Stream error: {e}"),
         }
     }
 
@@ -145,7 +144,7 @@ async fn test_empty_candidates() {
                     break;
                 }
             }
-            Err(e) => panic!("Should not error on empty candidates: {}", e),
+            Err(e) => panic!("Should not error on empty candidates: {e}"),
         }
     }
 
@@ -166,7 +165,7 @@ async fn test_missing_optional_fields() {
                 got_response = true;
                 break;
             }
-            Err(e) => panic!("Should not error on missing optional fields: {}", e),
+            Err(e) => panic!("Should not error on missing optional fields: {e}"),
         }
     }
 

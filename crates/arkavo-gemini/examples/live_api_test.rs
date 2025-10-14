@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         |args| {
             let name = args["name"].as_str().unwrap_or("unknown");
             let openness = args["openness"].as_str().unwrap_or("unknown");
-            println!("✓ Tool executed: create_stream(name={}, openness={})", name, openness);
+            println!("✓ Tool executed: create_stream(name={name}, openness={openness})");
             Ok(json!({
                 "id": format!("stream-{}", uuid::Uuid::new_v4()),
                 "name": name,
@@ -85,11 +85,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for (id, result) in results {
                         match result {
                             Ok(value) => {
-                                println!("✓ Tool {} succeeded", id);
+                                println!("✓ Tool {id} succeeded");
                                 client.send_tool_response(&id, value).await?;
                             }
                             Err(e) => {
-                                println!("✗ Tool {} failed: {}", id, e);
+                                println!("✗ Tool {id} failed: {e}");
                                 client.send_tool_response(&id, json!({"error": e.to_string()})).await?;
                             }
                         }
@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("\n✓ All tool responses sent!");
                 }
                 Err(e) => {
-                    println!("✗ Error receiving tool calls: {}", e);
+                    println!("✗ Error receiving tool calls: {e}");
                 }
             }
         }

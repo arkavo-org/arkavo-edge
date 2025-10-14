@@ -48,21 +48,20 @@ async fn test_openai_streaming_basic() {
                 }
             }
             Err(e) => {
-                panic!("Stream error: {}", e);
+                panic!("Stream error: {e}");
             }
         }
     }
 
     let full_response = chunks.join("");
-    println!("Received {} chunks", chunk_count);
-    println!("Full response: {}", full_response);
+    println!("Received {chunk_count} chunks");
+    println!("Full response: {full_response}");
 
     assert!(chunk_count > 1, "Should receive multiple chunks");
     assert!(!full_response.is_empty(), "Should receive a response");
     assert!(
         full_response.chars().any(|c| c.is_numeric()),
-        "Response should contain numbers: '{}'",
-        full_response
+        "Response should contain numbers: '{full_response}'"
     );
 }
 
@@ -113,7 +112,7 @@ async fn test_openai_streaming_performance() {
                 }
             }
             Err(e) => {
-                panic!("Stream error: {}", e);
+                panic!("Stream error: {e}");
             }
         }
     }
@@ -121,8 +120,8 @@ async fn test_openai_streaming_performance() {
     let total_time = start.elapsed();
 
     println!("First chunk received in: {:?}", first_chunk_time.unwrap());
-    println!("Total streaming time: {:?}", total_time);
-    println!("Total chunks: {}", total_chunks);
+    println!("Total streaming time: {total_time:?}");
+    println!("Total chunks: {total_chunks}");
     println!("Content length: {} chars", content.len());
 
     assert!(
@@ -169,12 +168,12 @@ async fn test_openai_streaming_interruption() {
                 chunks_received += 1;
 
                 if chunks_received >= MAX_CHUNKS {
-                    println!("Interrupting stream after {} chunks", chunks_received);
+                    println!("Interrupting stream after {chunks_received} chunks");
                     break; // Simulate interruption
                 }
             }
             Err(e) => {
-                panic!("Stream error: {}", e);
+                panic!("Stream error: {e}");
             }
         }
     }
@@ -228,12 +227,12 @@ async fn test_openai_streaming_with_system_message() {
                 }
             }
             Err(e) => {
-                panic!("Stream error: {}", e);
+                panic!("Stream error: {e}");
             }
         }
     }
 
-    println!("Haiku response:\n{}", full_response);
+    println!("Haiku response:\n{full_response}");
 
     let lines: Vec<&str> = full_response.trim().lines().collect();
     assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
@@ -292,7 +291,7 @@ async fn test_openai_streaming_concurrent() {
                         }
                     }
                     Err(e) => {
-                        return Err(format!("Stream error: {}", e));
+                        return Err(format!("Stream error: {e}"));
                     }
                 }
             }
@@ -314,8 +313,7 @@ async fn test_openai_streaming_concurrent() {
                     content.contains("Stream")
                         || content.contains("OK")
                         || content.contains(&(i + 1).to_string()),
-                    "Response should reference stream number or OK, got: '{}'",
-                    content
+                    "Response should reference stream number or OK, got: '{content}'"
                 );
             }
             _ => panic!("Stream {} failed", i + 1),

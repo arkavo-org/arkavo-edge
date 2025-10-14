@@ -34,7 +34,7 @@ fn test_certs_dir() -> PathBuf {
             output.status.success(),
             "Failed to generate test certificates: {}",
             String::from_utf8_lossy(&output.stderr)
-        )
+        );
     }
 
     dir

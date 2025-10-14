@@ -22,9 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for model in &response.models {
         let base_model = model
-            .base_model_id
-            .as_ref()
-            .map(|s| s.as_str())
+            .base_model_id.as_deref()
             .unwrap_or("N/A");
         let input_limit = model
             .input_token_limit
@@ -69,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(next_token) = response.next_page_token {
-        println!("\nMore models available (next page token: {})", next_token);
+        println!("\nMore models available (next page token: {next_token})");
     }
 
     Ok(())

@@ -40,16 +40,16 @@ fn test_mcp_server_starts_without_panic() {
 
                 // Check for the specific panic we're looking for
                 if stderr.contains("Cannot start a runtime from within a runtime") {
-                    panic!("MCP server panicked with tokio runtime error:\n{}", stderr);
+                    panic!("MCP server panicked with tokio runtime error:\n{stderr}");
                 } else if stderr.contains("panicked") {
-                    panic!("MCP server panicked:\n{}", stderr);
+                    panic!("MCP server panicked:\n{stderr}");
                 } else {
-                    panic!("MCP server exited with error:\n{}", stderr);
+                    panic!("MCP server exited with error:\n{stderr}");
                 }
             }
         }
         Err(e) => {
-            panic!("Failed to check MCP server status: {}", e);
+            panic!("Failed to check MCP server status: {e}");
         }
     }
 }

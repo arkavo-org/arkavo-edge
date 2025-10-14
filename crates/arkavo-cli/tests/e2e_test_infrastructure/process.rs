@@ -103,20 +103,16 @@ pub async fn spawn_component(
     let log_prefix_clone = log_prefix.clone();
     let stdout_thread = thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                println!("{log_prefix_clone} {line}");
-            }
+        for line in reader.lines().flatten() {
+            println!("{log_prefix_clone} {line}");
         }
     });
 
     let log_prefix_clone = log_prefix.clone();
     let stderr_thread = thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                eprintln!("{log_prefix_clone} {line}");
-            }
+        for line in reader.lines().flatten() {
+            eprintln!("{log_prefix_clone} {line}");
         }
     });
 

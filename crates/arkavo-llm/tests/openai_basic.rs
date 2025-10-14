@@ -245,11 +245,11 @@ mod test_helpers {
     use super::*;
     use std::env;
 
-    pub(crate) fn get_test_api_key() -> Option<String> {
+    pub fn get_test_api_key() -> Option<String> {
         env::var("OPENAI_API_KEY").ok()
     }
 
-    pub(crate) fn create_test_config(model: &str) -> OpenAIConfig {
+    pub fn create_test_config(model: &str) -> OpenAIConfig {
         OpenAIConfig {
             api_key: get_test_api_key().unwrap_or_else(|| "test-key".to_string()),
             base_url: "https://api.openai.com/v1".to_string(),
