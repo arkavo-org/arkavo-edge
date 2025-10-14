@@ -48,3 +48,9 @@ if(APPLE)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
     )
 endif()
+
+# Install target for cmake crate
+install(TARGETS arkavo-cef-renderer
+    BUNDLE DESTINATION bin
+    RUNTIME DESTINATION bin
+)
