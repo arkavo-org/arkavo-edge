@@ -112,10 +112,11 @@ mod tests {
         let mut found_warning = false;
         while let Ok(event) = event_rx.try_recv() {
             if let crate::tracker::BudgetEvent::ThresholdExceeded(alert) = event
-                && alert.alert_type == crate::config::AlertType::Warning {
-                    found_warning = true;
-                    break;
-                }
+                && alert.alert_type == crate::config::AlertType::Warning
+            {
+                found_warning = true;
+                break;
+            }
         }
         assert!(
             found_warning,
@@ -253,10 +254,11 @@ mod tests {
         let mut found_exhausted = false;
         while let Ok(event) = event_rx.try_recv() {
             if let crate::tracker::BudgetEvent::BudgetExhausted(alert) = event
-                && alert.alert_type == crate::config::AlertType::Exhausted {
-                    found_exhausted = true;
-                    break;
-                }
+                && alert.alert_type == crate::config::AlertType::Exhausted
+            {
+                found_exhausted = true;
+                break;
+            }
         }
         assert!(found_exhausted, "Should have received exhausted alert");
     }

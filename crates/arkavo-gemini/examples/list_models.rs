@@ -21,9 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "=".repeat(80));
 
     for model in &response.models {
-        let base_model = model
-            .base_model_id.as_deref()
-            .unwrap_or("N/A");
+        let base_model = model.base_model_id.as_deref().unwrap_or("N/A");
         let input_limit = model
             .input_token_limit
             .map(|n| n.to_string())

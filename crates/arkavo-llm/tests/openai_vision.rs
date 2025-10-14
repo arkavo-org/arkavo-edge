@@ -180,9 +180,7 @@ async fn test_gpt4o_vision_streaming() {
         }
     }
 
-    println!(
-        "Vision streaming response ({chunk_count} chunks): {full_response}"
-    );
+    println!("Vision streaming response ({chunk_count} chunks): {full_response}");
     assert!(chunk_count > 1, "Should receive multiple chunks");
     assert!(!full_response.is_empty());
 }

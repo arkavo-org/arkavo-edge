@@ -576,7 +576,6 @@ Generate the complete, production-ready component now:"#
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn test_parse_json_component() {

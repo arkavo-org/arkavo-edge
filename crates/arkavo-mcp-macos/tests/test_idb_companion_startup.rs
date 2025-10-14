@@ -37,9 +37,10 @@ async fn test_idb_companion_can_start() -> Result<()> {
                     device.get("name").and_then(|v| v.as_str()),
                     device.get("model").and_then(|v| v.as_str()),
                     device.get("state").and_then(|v| v.as_str()),
-                ) {
-                    println!("  {}. {} - {} ({})", i + 1, name, model, state);
-                }
+                )
+            {
+                println!("  {}. {} - {} ({})", i + 1, name, model, state);
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 #![allow(clippy::disallowed_methods)]
+#![cfg(target_os = "macos")]
 
 use arkavo_git::{GitManager, Repository};
 use arkavo_mcp_macos::mcp::git_tools::{

@@ -106,11 +106,12 @@ fn parse_test_agents_config(
             });
         } else if let Some(agent) = current_agent.as_mut()
             && (trimmed.contains("_API_KEY:") || trimmed.contains("_api_key:"))
-                && let Some(colon_pos) = trimmed.find(':') {
-                    let key_name = trimmed[..colon_pos].trim().to_string();
-                    let key_value = trimmed[colon_pos + 1..].trim().to_string();
-                    agent.api_keys.insert(key_name, key_value);
-                }
+            && let Some(colon_pos) = trimmed.find(':')
+        {
+            let key_name = trimmed[..colon_pos].trim().to_string();
+            let key_value = trimmed[colon_pos + 1..].trim().to_string();
+            agent.api_keys.insert(key_name, key_value);
+        }
     }
 
     if let Some(agent) = current_agent {

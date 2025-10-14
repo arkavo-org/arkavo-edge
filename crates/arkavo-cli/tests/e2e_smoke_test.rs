@@ -68,10 +68,11 @@ async fn test_agent_ui_echo() -> Result<(), Box<dyn std::error::Error>> {
     let mut connected = false;
     for _ in 0..5 {
         if let Ok(response) = client.get(ui_url).send().await
-            && response.status().is_success() {
-                connected = true;
-                break;
-            }
+            && response.status().is_success()
+        {
+            connected = true;
+            break;
+        }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 

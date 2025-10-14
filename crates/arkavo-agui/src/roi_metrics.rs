@@ -294,7 +294,6 @@ impl ROICalculator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_roi_dashboard_calculation() {
