@@ -1,4 +1,8 @@
+//! IDB framework conflict tests
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
 #![cfg(target_os = "macos")]
+#![allow(clippy::disallowed_methods)]
 
 use arkavo_mcp_macos::mcp::idb_wrapper::IdbWrapper;
 
