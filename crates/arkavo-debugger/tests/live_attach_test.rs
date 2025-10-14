@@ -1,3 +1,8 @@
+//! Live attach tests for debugger session management
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_debugger::SessionManager;
 use arkavo_events::{Event, EventPayload, EventWriterConfig};
 use std::sync::Arc;

@@ -244,6 +244,7 @@ impl Tool for CodeGrepTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -277,7 +278,7 @@ mod tests {
         });
 
         let result = tool.execute(params).await;
-        assert!(result.is_ok(), "Expected Ok but got: {:?}", result);
+        assert!(result.is_ok(), "Expected Ok but got: {result:?}");
         if let Ok(value) = result {
             assert!(value.get("files").is_some());
         }
@@ -306,7 +307,7 @@ mod tests {
         });
 
         let result = tool.execute(params).await;
-        assert!(result.is_ok(), "Expected Ok but got: {:?}", result);
+        assert!(result.is_ok(), "Expected Ok but got: {result:?}");
         if let Ok(value) = result {
             assert!(value.get("lines").is_some());
         }
