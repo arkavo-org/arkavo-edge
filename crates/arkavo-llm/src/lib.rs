@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod client;
+#[cfg(feature = "llm-remote")]
 pub mod common;
 pub mod error;
 pub mod image;
