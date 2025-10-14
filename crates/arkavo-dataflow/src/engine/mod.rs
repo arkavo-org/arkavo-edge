@@ -238,6 +238,8 @@ impl Message {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
     use crate::dsl::{Blueprint, Link, Node};

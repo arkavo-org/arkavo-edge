@@ -589,6 +589,9 @@ pub async fn create_auth_headers(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod tests {
     use super::*;
 

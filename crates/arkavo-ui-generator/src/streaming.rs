@@ -575,6 +575,7 @@ Generate the complete, production-ready component now:"#
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
 
     #[test]

@@ -400,6 +400,8 @@ pub fn openrpc_to_json() -> Result<String, serde_json::Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

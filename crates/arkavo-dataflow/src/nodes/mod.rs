@@ -1,5 +1,8 @@
 pub mod auth_manager;
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod auth_manager_test;
 #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
 pub mod llm;
@@ -83,6 +86,9 @@ impl Default for NodeRegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod tests {
     use super::*;
 

@@ -3,6 +3,8 @@
 //! These tests use #[tokio::test] which internally uses Runtime::block_on.
 #![cfg(target_os = "macos")]
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::ignore_without_reason)]
+#![allow(clippy::default_trait_access)]
 
 use arkavo_mcp_macos::mcp::idb_wrapper::IdbWrapper;
 

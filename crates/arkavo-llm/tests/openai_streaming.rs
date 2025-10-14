@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
 use futures::StreamExt;
@@ -234,8 +236,10 @@ async fn test_openai_streaming_with_system_message() {
 
     println!("Haiku response:\n{full_response}");
 
-    let lines: Vec<&str> = full_response.trim().lines().collect();
-    assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
+    assert!(
+        full_response.trim().lines().count() >= 3,
+        "Haiku should have at least 3 lines"
+    );
 }
 
 #[tokio::test]

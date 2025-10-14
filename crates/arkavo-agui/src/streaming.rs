@@ -212,6 +212,7 @@ pub fn from_ordered_delta(ordered: OrderedMessageDelta) -> MessageDelta {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use arkavo_protocol::types::MessageDeltaContent;

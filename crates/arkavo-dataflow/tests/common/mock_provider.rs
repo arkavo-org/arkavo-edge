@@ -1,3 +1,11 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
+#![allow(clippy::float_cmp)]
+#![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::needless_collect)]
+
 use arkavo_llm::{Message, Provider, StreamResponse};
 use async_trait::async_trait;
 use std::sync::Arc;

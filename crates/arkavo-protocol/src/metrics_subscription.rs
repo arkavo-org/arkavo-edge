@@ -256,6 +256,8 @@ impl Drop for MetricsSubscriptionService {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use std::time::Duration;

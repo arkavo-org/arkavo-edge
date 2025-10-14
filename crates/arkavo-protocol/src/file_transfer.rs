@@ -365,6 +365,8 @@ pub fn calculate_chunks(file_size: u64, chunk_size: usize) -> usize {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

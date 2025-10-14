@@ -167,6 +167,8 @@ impl Default for MessageRouter {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 

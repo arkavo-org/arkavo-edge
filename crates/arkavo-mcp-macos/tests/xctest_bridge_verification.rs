@@ -1,4 +1,6 @@
 #![allow(clippy::disallowed_methods)]
+#![allow(clippy::ignore_without_reason)]
+#![allow(clippy::default_trait_access)]
 
 use arkavo_mcp_macos::mcp::xctest_verifier::{XCTestStatus, XCTestVerifier};
 use std::time::Duration;

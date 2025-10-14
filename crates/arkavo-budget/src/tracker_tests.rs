@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::config::{BudgetConfig, BudgetLimits, BudgetThresholds};
     use crate::cost::TokenCost;

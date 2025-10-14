@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::providers::{ProviderConfig, ProviderFactoryRegistry, ProviderType};
 use arkavo_llm::{Message, Provider, Role};
@@ -238,25 +240,4 @@ async fn test_openai_multi_turn_conversation() {
         response.to_lowercase().contains("blue"),
         "Response should mention 'blue': {response}"
     );
-}
-
-#[cfg(test)]
-mod test_helpers {
-    use super::*;
-    use std::env;
-
-    pub fn get_test_api_key() -> Option<String> {
-        env::var("OPENAI_API_KEY").ok()
-    }
-
-    pub fn create_test_config(model: &str) -> OpenAIConfig {
-        OpenAIConfig {
-            api_key: get_test_api_key().unwrap_or_else(|| "test-key".to_string()),
-            base_url: "https://api.openai.com/v1".to_string(),
-            model: "gpt-5".to_string(),
-            organization_id: None,
-            api_version: None,
-            is_azure: false,
-        }
-    }
 }

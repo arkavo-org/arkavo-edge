@@ -1,3 +1,6 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::zombie_processes)]
+
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;

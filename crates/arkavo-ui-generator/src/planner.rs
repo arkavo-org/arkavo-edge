@@ -139,6 +139,7 @@ Return ONLY the JSON array, nothing else."#
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

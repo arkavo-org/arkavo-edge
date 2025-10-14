@@ -77,8 +77,10 @@ async fn test_gpt_4_turbo_model() {
     println!("GPT-5 haiku:\n{response}");
 
     assert!(!response.is_empty());
-    let lines: Vec<&str> = response.trim().lines().collect();
-    assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
+    assert!(
+        response.trim().lines().count() >= 3,
+        "Haiku should have at least 3 lines"
+    );
 }
 
 #[tokio::test]

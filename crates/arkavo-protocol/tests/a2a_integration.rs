@@ -1,3 +1,6 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::float_cmp)]
+
 use arkavo_protocol::{
     file_transfer::{
         FileChunk, FileDownloadRequest, FileMetadata, FileTransferManager, FileUploadRequest,

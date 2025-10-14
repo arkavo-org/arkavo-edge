@@ -292,6 +292,7 @@ impl ROICalculator {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

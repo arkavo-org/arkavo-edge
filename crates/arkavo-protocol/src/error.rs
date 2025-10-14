@@ -124,6 +124,8 @@ impl A2aError {
 pub type Result<T> = std::result::Result<T, A2aError>;
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
