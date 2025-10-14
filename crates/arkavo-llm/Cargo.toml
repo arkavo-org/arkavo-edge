@@ -40,7 +40,7 @@ chrono = { workspace = true }
 reqwest = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
-url = { version = "2.5.4", optional = true }
+url = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 
 # Local inference dependencies (optional)
@@ -78,6 +78,5 @@ intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], option
 [dev-dependencies]
 tempfile = { workspace = true }
 serial_test = "3"
-anyhow = { workspace = true }
 [lints]
 workspace = true
