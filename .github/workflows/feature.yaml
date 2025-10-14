@@ -163,7 +163,7 @@ jobs:
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-workspace
           elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
-            cargo test --locked -p arkavo-router
+            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
             cargo test --locked -p arkavo-dataflow
             cargo test --locked -p arkavo-terminal
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
@@ -192,7 +192,7 @@ jobs:
             cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
-            cargo clippy --locked -p arkavo-router --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
             cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then

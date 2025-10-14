@@ -659,6 +659,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any(
+        all(feature = "llama-cpp", not(target_env = "musl")),
+        feature = "llm-local"
+    ))]
     async fn test_rule_based_classification() {
         let classifier = TaskClassifier::new().await;
         if classifier.is_err() {
