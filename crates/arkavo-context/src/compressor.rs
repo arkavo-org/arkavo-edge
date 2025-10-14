@@ -1,8 +1,11 @@
 use crate::{Error, Result};
 #[cfg(feature = "llm-local")]
 use arkavo_llm::local::LocalProvider;
+#[cfg(feature = "llm-local")]
 use arkavo_llm::{Message, Provider, Role};
+#[cfg(feature = "llm-local")]
 use std::sync::Arc;
+#[cfg(feature = "llm-local")]
 use tokio::sync::Mutex;
 
 #[cfg(feature = "llm-local")]
@@ -143,6 +146,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "llm-local")]
     fn test_compression_prompt_format() {
         let compressor_result = tokio::runtime::Runtime::new().unwrap().block_on(async {
             ContextCompressor::new(
