@@ -1,5 +1,4 @@
 #![allow(clippy::disallowed_methods)]
-
 #![cfg(target_os = "macos")]
 
 use arkavo_mcp_macos::mcp::calibration::server::{

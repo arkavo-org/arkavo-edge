@@ -1,3 +1,8 @@
+//! Integration tests for arkavo-gemini
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
 use serde_json::json;
 

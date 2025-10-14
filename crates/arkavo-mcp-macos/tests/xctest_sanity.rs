@@ -1,5 +1,4 @@
 #![allow(clippy::disallowed_methods)]
-
 #![cfg(target_os = "macos")]
 
 //! Quick sanity check for XCUITest integration
