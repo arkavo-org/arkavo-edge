@@ -383,7 +383,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    needs: [test, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-fast, test-slow, clippy]  # Run after tests and clippy pass to save costs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -442,7 +442,7 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    needs: [test, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-fast, test-slow, clippy]  # Run after tests and clippy pass to save costs
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -957,7 +957,7 @@ jobs:
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:
     name: Regression Tests
-    needs: [test, clippy]  # Run after tests pass to save macOS runner costs
+    needs: [test-fast, test-slow, clippy]  # Run after tests pass to save macOS runner costs
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -1121,7 +1121,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, clippy, test-fast, test-slow, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1130,7 +1130,8 @@ jobs:
           if [[ "${{ needs.version-check.result }}" != "success" || \
                 "${{ needs.format.result }}" != "success" || \
                 "${{ needs.clippy.result }}" != "success" || \
-                "${{ needs.test.result }}" != "success" || \
+                "${{ needs.test-fast.result }}" != "success" || \
+                "${{ needs.test-slow.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.binary-smoke-test.result }}" != "success" || \
