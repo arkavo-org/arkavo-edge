@@ -118,8 +118,8 @@ jobs:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context, arkavo-encryption, arkavo-mcp-core
           - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-tools, arkavo-workspace
-          - llm-heavy   # arkavo-router, arkavo-dataflow, arkavo-terminal
-          - ui-heavy    # arkavo-ui-generator, arkavo-agui, arkavo-cli, arkavo
+          - llm-heavy   # arkavo-router (no llama-cpp), arkavo-dataflow, arkavo-terminal
+          - ui-heavy    # arkavo-ui-generator, arkavo-agui (no llama-cpp)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -177,7 +177,7 @@ jobs:
             cargo test --locked -p arkavo-terminal
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo test --locked -p arkavo-ui-generator
-            cargo test --locked -p arkavo-agui
+            cargo test --locked -p arkavo-agui --no-default-features --features mdns
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -204,7 +204,7 @@ jobs:
             cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-agui --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
           fi
 
   test-kimi-feature:
