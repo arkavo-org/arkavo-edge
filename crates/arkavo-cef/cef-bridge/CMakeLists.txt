@@ -20,8 +20,8 @@ add_definitions(-DUSE_SANDBOX=0)
 set(ARKAVO_CEF_SOURCES
     cef_app.cc
     cef_app.h
-    dom_executor.cc
-    dom_executor.h
+    # dom_executor.cc - Temporarily disabled due to CEF API compatibility (GetDOM removed in CEF 102+)
+    # dom_executor.h
     uds_client.cc
     uds_client.h
 )

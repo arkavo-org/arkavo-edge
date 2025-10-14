@@ -1,5 +1,5 @@
 #include "uds_client.h"
-#include "dom_executor.h"
+// #include "dom_executor.h" - Temporarily disabled due to CEF API compatibility
 #include <unistd.h>
 #include <iostream>
 #include <cstring>

@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     CefSettings settings;
     settings.no_sandbox = true;
     settings.windowless_rendering_enabled = true;
-    settings.javascript_flags = CefString("--disable-javascript");
+    CefString(&settings.javascript_flags).FromASCII("--disable-javascript");
     CefString(&settings.log_file).FromASCII("/tmp/arkavo_cef.log");
     settings.log_severity = LOGSEVERITY_WARNING;
 

@@ -1,5 +1,5 @@
 #include "cef_app.h"
-#include "dom_executor.h"
+// #include "dom_executor.h" - Temporarily disabled due to CEF API compatibility
 #include <iostream>
 
 ArkavoRenderProcessHandler::ArkavoRenderProcessHandler(const std::string& socket_path)
@@ -13,7 +13,8 @@ void ArkavoRenderProcessHandler::OnContextCreated(
 
     std::cout << "Arkavo CEF context created (V8 disabled)" << std::endl;
 
-    DOMExecutor::GetInstance()->Initialize(frame, socket_path_);
+    // DOMExecutor::GetInstance()->Initialize(frame, socket_path_); - Temporarily disabled
+    std::cout << "Note: DOM manipulation temporarily disabled pending CEF API update" << std::endl;
 }
 
 void ArkavoRenderProcessHandler::OnContextReleased(
