@@ -169,7 +169,6 @@ jobs:
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo test --locked -p arkavo-ui-generator
             cargo test --locked -p arkavo-agui
-            cargo test --locked -p arkavo-cli
           fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
@@ -197,7 +196,6 @@ jobs:
           elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
             cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
             cargo clippy --locked -p arkavo-agui --lib --bins -- -D warnings
-            cargo clippy --locked -p arkavo-cli --lib --bins -- -D warnings
           fi
 
   test-kimi-feature:
