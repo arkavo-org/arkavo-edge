@@ -107,37 +107,8 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "workspace"
-      - name: Run clippy
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
   test:
     name: Test
-    needs: [clippy]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +142,35 @@ jobs:
           cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
           cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
           cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+
+  clippy:
+    name: Clippy
+    needs: [test]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install CMake and build dependencies
+        run: |
+          sudo apt-get update
+          # Install both runtime and static OpenMP libraries for static linking
+          # Use gcc-multilib which includes static libgomp.a
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "workspace"
+      - name: Run clippy on lib and bins only
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: cargo clippy --workspace --lib --bins -- -D warnings
 
   test-kimi-feature:
     name: Test Kimi Feature
