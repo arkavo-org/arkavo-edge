@@ -17,14 +17,12 @@ fn main() {
     let cef_root = PathBuf::from(&manifest_dir).join("../../vendor/cef");
 
     // Normalize the path
-    let cef_root = cef_root
-        .canonicalize()
-        .unwrap_or_else(|_| {
-            // If canonicalize fails, try to construct absolute path manually
-            std::fs::canonicalize(&manifest_dir)
-                .unwrap_or_else(|_| PathBuf::from(&manifest_dir))
-                .join("../../vendor/cef")
-        });
+    let cef_root = cef_root.canonicalize().unwrap_or_else(|_| {
+        // If canonicalize fails, try to construct absolute path manually
+        std::fs::canonicalize(&manifest_dir)
+            .unwrap_or_else(|_| PathBuf::from(&manifest_dir))
+            .join("../../vendor/cef")
+    });
 
     if !cef_root.exists() {
         eprintln!(
@@ -76,17 +74,12 @@ fn main() {
 
     // Build our CEF bridge
     let bridge_dir = PathBuf::from("cef-bridge");
-    let build_dir = bridge_dir.join("build");
 
-    // Create build directory
-    std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
-
-    // Configure with CMake
+    // Configure with CMake - let cmake crate handle build directory
     let mut config = cmake::Config::new(&bridge_dir);
     config
         .define("CEF_ROOT", cef_root.to_str().unwrap())
-        .define("CMAKE_BUILD_TYPE", "Release")
-        .out_dir(&build_dir);
+        .define("CMAKE_BUILD_TYPE", "Release");
 
     println!("cargo:warning=Building CEF bridge...");
     let dst = config.build();
