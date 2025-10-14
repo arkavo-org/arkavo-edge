@@ -1,3 +1,9 @@
+//! SSE stress tests for arkavo-gemini
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::never_loop)] // Some loops break immediately for testing
+
 use arkavo_gemini::types::StreamChunk;
 use bytes::Bytes;
 use futures::stream;
