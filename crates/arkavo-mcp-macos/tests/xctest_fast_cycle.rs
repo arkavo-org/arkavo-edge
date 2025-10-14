@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Fast test cycle for XCTest bridge functionality
 //!
 //! This test demonstrates how to quickly verify XCTest functionality

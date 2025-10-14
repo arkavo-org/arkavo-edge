@@ -136,6 +136,7 @@ impl RetryClient {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
     use crate::error::KimiError;
@@ -152,17 +153,17 @@ mod tests {
         assert_eq!(config.max_retries, 5);
         assert_eq!(config.initial_delay, Duration::from_millis(500));
         assert_eq!(config.max_delay, Duration::from_secs(60));
-        assert_eq!(config.backoff_factor, 3.0);
-        assert_eq!(config.jitter_factor, 0.2);
+        assert!((config.backoff_factor - 3.0).abs() < f32::EPSILON);
+        assert!((config.jitter_factor - 0.2).abs() < f32::EPSILON);
     }
 
     #[test]
     fn test_jitter_factor_clamping() {
         let config1 = RetryConfig::default().with_jitter_factor(1.5);
-        assert_eq!(config1.jitter_factor, 1.0);
+        assert!((config1.jitter_factor - 1.0).abs() < f32::EPSILON);
 
         let config2 = RetryConfig::default().with_jitter_factor(-0.5);
-        assert_eq!(config2.jitter_factor, 0.0);
+        assert!(config2.jitter_factor.abs() < f32::EPSILON);
     }
 
     #[tokio::test]

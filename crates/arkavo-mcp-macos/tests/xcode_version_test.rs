@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(test)]
 mod tests {
     use arkavo_mcp_macos::mcp::xcode_version::XcodeVersion;

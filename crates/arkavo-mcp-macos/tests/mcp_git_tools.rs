@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_git::{GitManager, Repository};
 use arkavo_mcp_macos::mcp::git_tools::{
     GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitStatusKit,

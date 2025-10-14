@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Minimal test for XCTest socket communication
 
 use std::env;

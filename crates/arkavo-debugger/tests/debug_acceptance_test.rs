@@ -287,5 +287,5 @@ async fn test_debug_agent_analysis() {
     // 4. Compare multiple sessions
 
     // For now, this is a placeholder showing the intended test structure
-    assert!(true, "Debug agent analysis test placeholder");
+    // Placeholder test
 }

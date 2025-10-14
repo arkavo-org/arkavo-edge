@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_mcp_macos::mcp::device_manager::DeviceManager;
 use arkavo_mcp_macos::mcp::enrollment_flow_handler::EnrollmentFlowHandler;
 use arkavo_mcp_macos::mcp::server::Tool;

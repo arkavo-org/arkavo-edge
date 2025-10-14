@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_mcp_macos::mcp::filesystem_tools::FileSystemKit;
 use arkavo_mcp_macos::mcp::server::Tool;
 use serde_json::json;

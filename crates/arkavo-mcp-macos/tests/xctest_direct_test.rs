@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Direct test of XCTest compiler and socket communication
 
 use arkavo_mcp_macos::mcp::{

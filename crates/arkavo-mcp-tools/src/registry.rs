@@ -113,13 +113,14 @@ impl Default for ToolRegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 
     #[test]
     fn test_registry_creation() {
         let registry = ToolRegistry::new();
-        assert!(registry.tools.len() > 0);
+        assert!(!registry.tools.is_empty());
     }
 
     #[test]
