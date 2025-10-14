@@ -107,30 +107,41 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  # Parallel test jobs split by speed category
-  test-fast:
-    name: Test Fast (${{ matrix.group }})
+  # Combined test + lint jobs for maximum cache reuse
+  # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
+  test-and-lint:
+    name: Test & Lint (${{ matrix.group }})
     runs-on: ubuntu-22.04
     strategy:
       matrix:
         group:
-          - core  # Small, focused crates
-          - protocol  # Protocol and observability
+          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context, arkavo-encryption, arkavo-mcp-core
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-tools, arkavo-workspace
+          - llm-heavy   # arkavo-router, arkavo-dataflow, arkavo-terminal
+          - ui-heavy    # arkavo-ui-generator, arkavo-agui, arkavo-cli, arkavo
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
       - name: Install CMake, mold linker, and build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-${{ matrix.group }}"
+          prefix-key: "test-lint-${{ matrix.group }}"
+
+      # Step 1: Run tests first (produces full codegen artifacts)
       - name: Run tests with mold linker
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -150,38 +161,7 @@ jobs:
             cargo test --locked -p arkavo-observability
             cargo test --locked -p arkavo-mcp-tools
             cargo test --locked -p arkavo-workspace
-          fi
-
-  test-slow:
-    name: Test Slow (${{ matrix.group }})
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        group:
-          - llm-heavy  # Router, dataflow (pull in LLM deps)
-          - ui-heavy   # UI generator, AGUI, CLI (pull in everything)
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake, mold linker, and build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test-${{ matrix.group }}"
-      - name: Run tests with mold linker
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: sccache
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: |
-          if [ "${{ matrix.group }}" = "llm-heavy" ]; then
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
             cargo test --locked -p arkavo-router
             cargo test --locked -p arkavo-dataflow
             cargo test --locked -p arkavo-terminal
@@ -192,59 +172,33 @@ jobs:
             cargo test --locked -p arkavo
           fi
 
-  # Parallel clippy jobs by crate category
-  clippy:
-    name: Clippy (${{ matrix.group }})
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        group:
-          - core
-          - protocol
-          - llm
-          - ui
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Setup sccache for C++ caching
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "clippy-${{ matrix.group }}"
-      - name: Run clippy on lib and bins only (no test deps)
+      # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
+      - name: Run clippy on lib and bins
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
           if [ "${{ matrix.group }}" = "core" ]; then
-            cargo clippy --locked -p arkavo-llm --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-memory --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-budget --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-context --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-encryption --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-llm --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-memory --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-budget --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-context --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-encryption --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
           elif [ "${{ matrix.group }}" = "protocol" ]; then
-            cargo clippy --locked -p arkavo-protocol --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-observability --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-mcp-core --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-mcp-tools --lib --bins --no-deps -- -D warnings
-          elif [ "${{ matrix.group }}" = "llm" ]; then
-            cargo clippy --locked -p arkavo-router --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-dataflow --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-terminal --lib --bins --no-deps -- -D warnings
-          elif [ "${{ matrix.group }}" = "ui" ]; then
-            cargo clippy --locked -p arkavo-ui-generator --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-agui --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo-cli --lib --bins --no-deps -- -D warnings
-            cargo clippy --locked -p arkavo --lib --bins --no-deps -- -D warnings
+            cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo clippy --locked -p arkavo-router --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-agui --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-cli --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo --lib --bins -- -D warnings
           fi
 
   test-kimi-feature:
@@ -383,7 +337,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    needs: [test-fast, test-slow, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint]  # Run after tests and clippy pass to save costs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -442,7 +396,7 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    needs: [test-fast, test-slow, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint]  # Run after tests and clippy pass to save costs
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -957,7 +911,7 @@ jobs:
   # Regression tests - ensuring fixed bugs stay fixed
   regression-tests:
     name: Regression Tests
-    needs: [test-fast, test-slow, clippy]  # Run after tests pass to save macOS runner costs
+    needs: [test-and-lint]  # Run after tests pass to save macOS runner costs
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -1121,7 +1075,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test-fast, test-slow, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, test-and-lint, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1129,9 +1083,7 @@ jobs:
         run: |
           if [[ "${{ needs.version-check.result }}" != "success" || \
                 "${{ needs.format.result }}" != "success" || \
-                "${{ needs.clippy.result }}" != "success" || \
-                "${{ needs.test-fast.result }}" != "success" || \
-                "${{ needs.test-slow.result }}" != "success" || \
+                "${{ needs.test-and-lint.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.binary-smoke-test.result }}" != "success" || \
