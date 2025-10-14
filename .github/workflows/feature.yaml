@@ -113,6 +113,7 @@ jobs:
     name: Test & Lint (${{ matrix.group }})
     runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false  # Run all groups even if one fails
       matrix:
         group:
           - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context, arkavo-encryption, arkavo-mcp-core
