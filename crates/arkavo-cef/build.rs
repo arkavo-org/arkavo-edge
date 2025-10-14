@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
@@ -12,10 +12,19 @@ fn main() {
     println!("cargo:rerun-if-changed=cef-bridge/");
     println!("cargo:rerun-if-changed=../../vendor/cef");
 
-    let cef_root = PathBuf::from("../../vendor/cef");
+    // Get the workspace root (where Cargo.toml is)
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let cef_root = PathBuf::from(&manifest_dir).join("../../vendor/cef");
 
-    // Convert to absolute path for CMake
-    let cef_root = cef_root.canonicalize().unwrap_or_else(|_| cef_root.clone());
+    // Normalize the path
+    let cef_root = cef_root
+        .canonicalize()
+        .unwrap_or_else(|_| {
+            // If canonicalize fails, try to construct absolute path manually
+            std::fs::canonicalize(&manifest_dir)
+                .unwrap_or_else(|_| PathBuf::from(&manifest_dir))
+                .join("../../vendor/cef")
+        });
 
     if !cef_root.exists() {
         eprintln!(
