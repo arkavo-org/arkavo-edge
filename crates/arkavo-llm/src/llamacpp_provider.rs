@@ -1,9 +1,6 @@
-use crate::{Error, Message, Provider, Result, Role, StreamResponse, decode_image};
+use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llama_cpp::multimodal::{
-    MtmdBitmap, MtmdContext, encode_chunk, get_output_embeddings, preprocess_image_for_clip,
-    tokenize_with_images,
-};
+use arkavo_llama_cpp::multimodal::MtmdContext;
 use arkavo_llama_cpp::{
     LlamaModel, apply_chat_template, ffi, init_llama_logging, test_minimal_init,
 };
@@ -12,8 +9,7 @@ use std::ffi::CString;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
-mod llamacpp_streaming;
-use llamacpp_streaming::{StreamingConfig, generate_tokens};
+use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
@@ -74,7 +70,7 @@ impl LlamaCppProvider {
 
         if config.debug {
             arkavo_llama_cpp::set_debug_logging(true);
-            llamacpp_streaming::set_debug(true);
+            crate::llamacpp_streaming::set_debug(true);
         }
 
         test_minimal_init()
@@ -125,7 +121,7 @@ impl LlamaCppProvider {
         let prompt_bytes = apply_chat_template(&llama_messages, true)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
 
-        if llamacpp_streaming::is_debug() {
+        if crate::llamacpp_streaming::is_debug() {
             if let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes) {
                 eprintln!("Chat template output:\n{prompt_str}");
                 if prompt_str.contains("<|im_start|>") {
@@ -158,7 +154,7 @@ impl LlamaCppProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
-        use llamacpp_streaming::generate_tokens_with_vision;
+        use crate::llamacpp_streaming::generate_tokens_with_vision;
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();

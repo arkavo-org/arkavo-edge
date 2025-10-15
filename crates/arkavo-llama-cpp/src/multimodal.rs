@@ -1,6 +1,5 @@
 use crate::{ffi, LlamaModel};
 use std::ffi::CString;
-use std::ptr;
 
 #[cfg(not(target_env = "musl"))]
 pub struct MtmdContext {
@@ -9,6 +8,9 @@ pub struct MtmdContext {
 
 #[cfg(not(target_env = "musl"))]
 unsafe impl Send for MtmdContext {}
+
+#[cfg(not(target_env = "musl"))]
+unsafe impl Sync for MtmdContext {}
 
 #[cfg(not(target_env = "musl"))]
 impl MtmdContext {
@@ -22,7 +24,7 @@ impl MtmdContext {
             .map(|n| n.get() as i32)
             .unwrap_or(8);
         params.verbosity = ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
-        params.media_marker = ffi::mtmd_default_marker();
+        params.media_marker = unsafe { ffi::mtmd_default_marker() };
 
         let ctx = unsafe { ffi::mtmd_init_from_file(c_path.as_ptr(), text_model.ptr, params) };
 
@@ -183,7 +185,7 @@ pub fn tokenize_with_images(
         parse_special: true,
     };
 
-    let bitmap_ptrs: Vec<*const ffi::mtmd_bitmap> = bitmaps
+    let mut bitmap_ptrs: Vec<*const ffi::mtmd_bitmap> = bitmaps
         .iter()
         .map(|b| b.ptr as *const ffi::mtmd_bitmap)
         .collect();
@@ -195,7 +197,7 @@ pub fn tokenize_with_images(
             ctx.ptr,
             chunks.ptr,
             &text_input,
-            bitmap_ptrs.as_ptr(),
+            bitmap_ptrs.as_mut_ptr() as *mut *const ffi::mtmd_bitmap,
             bitmaps.len(),
         )
     };
@@ -242,7 +244,7 @@ pub fn preprocess_image_for_clip(
         return Err("Image data too small".to_string());
     }
 
-    let format = if image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+    let _format = if image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
         "PNG"
     } else if image_data.starts_with(&[0xFF, 0xD8, 0xFF]) {
         "JPEG"
