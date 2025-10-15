@@ -82,26 +82,12 @@ fn main() {
         .define("CMAKE_BUILD_TYPE", "Release");
 
     println!("cargo:warning=Building CEF bridge...");
-    let dst = config.build();
+    let _dst = config.build();
 
-    // Link the CEF libraries
-    let lib_dir = dst.join("lib");
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
-
-    // Link CEF framework
-    println!("cargo:rustc-link-lib=framework=CEF");
-    println!(
-        "cargo:rustc-link-search=framework={}/Release",
-        cef_root.display()
-    );
-
-    // Link system frameworks
-    println!("cargo:rustc-link-lib=framework=AppKit");
-    println!("cargo:rustc-link-lib=framework=Foundation");
-    println!("cargo:rustc-link-lib=framework=CoreFoundation");
-
-    // Link C++ standard library
-    println!("cargo:rustc-link-lib=c++");
+    // NOTE: We do NOT link CEF into the Rust binary!
+    // The Rust code only spawns the arkavo-cef-renderer subprocess,
+    // which is a separate C++ binary that has CEF linked.
+    // This avoids loading CEF framework into the main process.
 
     println!("cargo:warning=CEF bridge built successfully");
 }

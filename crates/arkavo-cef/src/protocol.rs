@@ -1,4 +1,4 @@
-use crate::error::{CefError, Result};
+use crate::error::Result;
 use bytes::{Buf, BufMut, BytesMut};
 
 pub struct Protocol;

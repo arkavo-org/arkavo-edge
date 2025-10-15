@@ -3,7 +3,12 @@ set -euo pipefail
 
 # CEF version to download (latest stable as of 2025-10-13)
 CEF_VERSION="138.0.51+g41d93d2+chromium-138.0.7204.293"
-CEF_PLATFORM="macosx64"
+# Detect platform architecture
+if [ "$(uname -m)" = "arm64" ]; then
+    CEF_PLATFORM="macosarm64"
+else
+    CEF_PLATFORM="macosx64"
+fi
 
 VENDOR_DIR="$(cd "$(dirname "$0")/.." && pwd)/vendor"
 CEF_DIR="$VENDOR_DIR/cef"

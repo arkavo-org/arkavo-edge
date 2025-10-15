@@ -40,15 +40,24 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let run_async = async move {
-        let mut gateway = AgUiGateway::new(port);
-
-        if let Some(prompt) = initial_prompt {
-            println!("Starting UI with initial prompt: {prompt}");
-            println!("UI will generate incrementally - you can interrupt and modify at any time");
-            gateway.set_initial_prompt(prompt);
+        // Determine which renderer to use
+        #[cfg(feature = "cef-ui")]
+        {
+            println!("Starting Arkavo UI with native CEF renderer...");
+            use_cef_renderer(port, initial_prompt).await
         }
 
-        gateway.start().await
+        #[cfg(all(not(feature = "cef-ui"), feature = "web-ui"))]
+        {
+            println!("Starting Arkavo UI with web renderer...");
+            println!("Open http://127.0.0.1:{} in your browser", port);
+            use_web_renderer(port, initial_prompt).await
+        }
+
+        #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
+        {
+            Err("No UI renderer available. Build with --features cef-ui or web-ui".into())
+        }
     };
 
     match tokio::runtime::Handle::try_current() {
@@ -58,6 +67,94 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             runtime.block_on(run_async)
         }
     }
+}
+
+#[cfg(feature = "cef-ui")]
+async fn use_cef_renderer(
+    _port: u16,
+    initial_prompt: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use arkavo_agui::{create_renderer, default_renderer_type};
+
+    let renderer_type = default_renderer_type()
+        .ok_or("CEF renderer not available")?;
+
+    println!("Creating CEF renderer...");
+    let mut renderer = create_renderer(renderer_type).await?;
+
+    println!("CEF window opened successfully!");
+
+    let html = r#"
+        <div id="app">
+            <h1>Arkavo UI Generator</h1>
+            <p>Native CEF rendering with Rust-driven DOM</p>
+            <p style="color: #888;">Waiting for UI generation...</p>
+        </div>
+    "#;
+
+    let css = r#"
+        body {
+            margin: 0;
+            padding: 40px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        #app {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+        }
+    "#;
+
+    renderer.render(html, css, "").await?;
+
+    if let Some(prompt) = initial_prompt {
+        println!("Processing initial prompt: {}", prompt);
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        let generated_html = format!(
+            r#"<div id="app">
+                <h1>Generated from prompt</h1>
+                <p>"{}"</p>
+                <button>Action Button</button>
+            </div>"#,
+            prompt
+        );
+        renderer.render(&generated_html, css, "").await?;
+    }
+
+    println!("CEF renderer is running. Press Ctrl+C to exit.");
+
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        if !renderer.is_running() {
+            break;
+        }
+    }
+
+    Box::new(renderer).shutdown().await?;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "cef-ui"), feature = "web-ui"))]
+async fn use_web_renderer(
+    port: u16,
+    initial_prompt: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut gateway = AgUiGateway::new(port);
+
+    if let Some(prompt) = initial_prompt {
+        println!("Starting UI with initial prompt: {prompt}");
+        println!("UI will generate incrementally - you can interrupt and modify at any time");
+        gateway.set_initial_prompt(prompt);
+    }
+
+    gateway.start().await
 }
 
 fn print_usage() {

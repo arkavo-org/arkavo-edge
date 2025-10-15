@@ -44,10 +44,13 @@ pub async fn create_renderer(renderer_type: RendererType) -> Result<Box<dyn UiRe
     }
 }
 
-pub fn default_renderer_type() -> RendererType {
+pub fn default_renderer_type() -> Option<RendererType> {
     #[cfg(feature = "cef-ui")]
-    return RendererType::Cef;
+    return Some(RendererType::Cef);
 
     #[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
-    return RendererType::Web;
+    return Some(RendererType::Web);
+
+    #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
+    None
 }

@@ -28,13 +28,37 @@ impl CefRendererImpl {
             "/usr/local/bin/arkavo-cef-renderer",
             "./target/debug/arkavo-cef-renderer",
             "./target/release/arkavo-cef-renderer",
-            "../arkavo-cef/cef-bridge/build/arkavo-cef-renderer",
         ];
 
-        for candidate in candidates {
+        for candidate in &candidates {
             let path = PathBuf::from(candidate);
             if path.exists() {
                 return Ok(path);
+            }
+        }
+
+        // Search in cargo build output directories
+        let build_dirs = [
+            "./target/debug/build",
+            "./target/release/build",
+        ];
+
+        for build_dir in &build_dirs {
+            if let Ok(entries) = std::fs::read_dir(build_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("arkavo-cef-"))
+                        .unwrap_or(false)
+                    {
+                        let renderer_path = path
+                            .join("out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer");
+                        if renderer_path.exists() {
+                            return Ok(renderer_path);
+                        }
+                    }
+                }
             }
         }
 
