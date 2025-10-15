@@ -113,13 +113,15 @@ pub fn get_service_ip() -> Ipv4Addr {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_fallback_ip() {
         let ip = get_fallback_ip();
-        assert_eq!(ip, Ipv4Addr::new(127, 0, 0, 1));
+        assert_eq!(ip, Ipv4Addr::LOCALHOST);
     }
 
     #[test]

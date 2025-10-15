@@ -1,3 +1,8 @@
+//! REST API tool test example
+//!
+//! This example uses #[tokio::main] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::{FunctionDeclaration, RestClient, ToolDispatcher, ToolRegistry};
 use serde_json::json;
 use std::env;
@@ -34,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         |args| {
             let name = args["name"].as_str().unwrap_or("unknown");
             let openness = args["openness"].as_str().unwrap_or("unknown");
-            println!("✓ Tool executed: create_stream(name={}, openness={})", name, openness);
+            println!("✓ Tool executed: create_stream(name={name}, openness={openness})");
             Ok(json!({
                 "id": format!("stream-{}", uuid::Uuid::new_v4()),
                 "name": name,
@@ -70,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     if let Some(response_text) = text {
-        println!("\n📝 Model response: {}", response_text);
+        println!("\n📝 Model response: {response_text}");
     }
 
     if !calls.is_empty() {
@@ -88,11 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for (id, result) in results {
             match result {
                 Ok(value) => {
-                    println!("✓ Tool {} succeeded", id);
+                    println!("✓ Tool {id} succeeded");
                     println!("  Result: {}", serde_json::to_string_pretty(&value)?);
                 }
                 Err(e) => {
-                    println!("✗ Tool {} failed: {}", id, e);
+                    println!("✗ Tool {id} failed: {e}");
                 }
             }
         }

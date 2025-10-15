@@ -644,13 +644,11 @@ async fn prompt_for_ollama_config(
                     Ok(client)
                 }
                 Err(e) => Err(anyhow::anyhow!(
-                    "Failed to connect to Ollama at {}: {}",
-                    base_url,
-                    e
+                    "Failed to connect to Ollama at {base_url}: {e}"
                 )),
             }
         }
-        Err(e) => Err(anyhow::anyhow!("Failed to create client: {}", e)),
+        Err(e) => Err(anyhow::anyhow!("Failed to create client: {e}")),
     }
 }
 

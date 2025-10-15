@@ -1,8 +1,22 @@
 use crate::decision::TokenEstimate;
 use crate::{Error, Result};
-use arkavo_llm::{Message, Provider, Role};
+use arkavo_llm::Message;
 use serde::{Deserialize, Serialize};
+
+#[cfg(any(
+    all(feature = "llama-cpp", not(target_env = "musl")),
+    feature = "llm-local"
+))]
+use arkavo_llm::{Provider, Role};
+#[cfg(any(
+    all(feature = "llama-cpp", not(target_env = "musl")),
+    feature = "llm-local"
+))]
 use std::sync::Arc;
+#[cfg(any(
+    all(feature = "llama-cpp", not(target_env = "musl")),
+    feature = "llm-local"
+))]
 use tokio::sync::Mutex;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -635,6 +649,7 @@ impl TaskClassifier {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -658,6 +673,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(any(
+        all(feature = "llama-cpp", not(target_env = "musl")),
+        feature = "llm-local"
+    ))]
     async fn test_rule_based_classification() {
         let classifier = TaskClassifier::new().await;
         if classifier.is_err() {

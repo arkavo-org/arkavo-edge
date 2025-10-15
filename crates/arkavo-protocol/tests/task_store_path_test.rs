@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_protocol::task_store::SqliteTaskStore;
 
 #[tokio::test]

@@ -169,7 +169,7 @@ impl AuthManager {
         // Check if credential exists
         let creds = self.credentials.read().await;
         if !creds.contains_key(credential_id) {
-            return Err(anyhow::anyhow!("Credential not found: {}", credential_id));
+            return Err(anyhow::anyhow!("Credential not found: {credential_id}"));
         }
         let metadata = creds.get(credential_id).cloned();
         drop(creds);
@@ -502,7 +502,7 @@ impl AuthManager {
 
         // Try OS keychain
         let entry = keyring::Entry::new("arkavo", "master_key")
-            .map_err(|e| anyhow::anyhow!("Failed to access keychain: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to access keychain: {e}"))?;
 
         // Try to get existing key from keychain
         match entry.get_password() {
@@ -520,7 +520,7 @@ impl AuthManager {
                 // Store in keychain
                 entry
                     .set_password(&new_key)
-                    .map_err(|e| anyhow::anyhow!("Failed to store key in keychain: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to store key in keychain: {e}"))?;
 
                 return Ok(new_key);
             }
@@ -589,6 +589,9 @@ pub async fn create_auth_headers(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod tests {
     use super::*;
 

@@ -25,7 +25,7 @@ impl McpServer {
     pub async fn register_tool(&self, name: String, tool: Arc<dyn Tool>) -> Result<()> {
         let mut tools = self.tools.write().await;
         if tools.contains_key(&name) {
-            return Err(anyhow::anyhow!("Tool '{}' is already registered", name));
+            return Err(anyhow::anyhow!("Tool '{name}' is already registered"));
         }
         info!("Registered tool: {}", name);
         tools.insert(name, tool);

@@ -1,3 +1,10 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
+#![allow(clippy::float_cmp)]
+#![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::needless_collect)]
+
 use arkavo_dataflow::nodes::model_registry::{ModelCapabilities, ModelInfo, get_default_models};
 use chrono::Utc;
 

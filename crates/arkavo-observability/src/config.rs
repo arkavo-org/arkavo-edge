@@ -381,6 +381,7 @@ impl Default for SecureConfigBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use std::io::Write;

@@ -575,8 +575,8 @@ Generate the complete, production-ready component now:"#
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_parse_json_component() {

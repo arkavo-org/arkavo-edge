@@ -1,3 +1,19 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::future_not_send)]
+#![allow(dead_code)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::unnecessary_debug_formatting)]
+#![allow(clippy::lines_filter_map_ok)]
+#![allow(clippy::manual_strip)]
+#![allow(clippy::needless_continue)]
+#![allow(unused_imports)]
+#![allow(clippy::zombie_processes)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::ignore_without_reason)]
+#![allow(clippy::unnecessary_unwrap)]
+#![allow(unreachable_pub)]
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -103,20 +119,16 @@ pub async fn spawn_component(
     let log_prefix_clone = log_prefix.clone();
     let stdout_thread = thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                println!("{log_prefix_clone} {line}");
-            }
+        for line in reader.lines().flatten() {
+            println!("{log_prefix_clone} {line}");
         }
     });
 
     let log_prefix_clone = log_prefix.clone();
     let stderr_thread = thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                eprintln!("{log_prefix_clone} {line}");
-            }
+        for line in reader.lines().flatten() {
+            eprintln!("{log_prefix_clone} {line}");
         }
     });
 

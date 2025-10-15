@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 /// Comprehensive TUI regression tests for key bindings, model connections, and window management
 /// Run with: cargo test -p arkavo-terminal tui_comprehensive_regression -- --ignored --nocapture
 use arkavo_mcp_tools::mcp_connection::McpConnection;

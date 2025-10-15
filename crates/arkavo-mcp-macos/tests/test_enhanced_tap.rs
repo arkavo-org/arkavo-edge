@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(target_os = "macos")]
 mod tests {
     use arkavo_mcp_macos::mcp::idb_companion_health::IdbCompanionHealth;

@@ -84,6 +84,7 @@ async fn get_registered_components(registry: &HealthRegistry) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 

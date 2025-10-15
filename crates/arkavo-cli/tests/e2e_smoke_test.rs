@@ -1,3 +1,19 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::future_not_send)]
+#![allow(dead_code)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::unnecessary_debug_formatting)]
+#![allow(clippy::lines_filter_map_ok)]
+#![allow(clippy::manual_strip)]
+#![allow(clippy::needless_continue)]
+#![allow(unused_imports)]
+#![allow(clippy::zombie_processes)]
+#![allow(clippy::unreadable_literal)]
+#![allow(clippy::ignore_without_reason)]
+#![allow(clippy::unnecessary_unwrap)]
+#![allow(unreachable_pub)]
+
 mod e2e_test_infrastructure;
 
 use e2e_test_infrastructure::*;
@@ -67,11 +83,11 @@ async fn test_agent_ui_echo() -> Result<(), Box<dyn std::error::Error>> {
     // Try to connect with retries
     let mut connected = false;
     for _ in 0..5 {
-        if let Ok(response) = client.get(ui_url).send().await {
-            if response.status().is_success() {
-                connected = true;
-                break;
-            }
+        if let Ok(response) = client.get(ui_url).send().await
+            && response.status().is_success()
+        {
+            connected = true;
+            break;
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }

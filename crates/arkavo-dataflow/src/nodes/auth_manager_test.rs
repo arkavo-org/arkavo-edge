@@ -1,5 +1,8 @@
 /// Regression tests for auth_manager bug fixes
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod auth_manager_regression_tests {
     use super::super::auth_manager::*;
 
@@ -14,7 +17,7 @@ mod auth_manager_regression_tests {
 
         // Verify that NonZeroU32 is created with expect() instead of unwrap()
         // This is checked at compile time - if it compiles, the test passes
-        assert!(true, "Constants are properly defined - no magic numbers");
+        // Constants are properly defined - no magic numbers
     }
 
     #[tokio::test]
@@ -38,8 +41,7 @@ mod auth_manager_regression_tests {
                 // Environment variable was required and validation worked
                 assert!(
                     err.to_string().contains("at least 32 characters"),
-                    "Error message should mention 32 character requirement, got: {}",
-                    err
+                    "Error message should mention 32 character requirement, got: {err}"
                 );
             }
         }
@@ -74,8 +76,7 @@ mod auth_manager_regression_tests {
                 assert!(
                     error_msg.contains("Master key required")
                         && error_msg.contains("at least 32 characters"),
-                    "Unexpected error: {}",
-                    error_msg
+                    "Unexpected error: {error_msg}"
                 );
             }
         }

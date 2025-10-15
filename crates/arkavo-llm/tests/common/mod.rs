@@ -1,3 +1,6 @@
+#![allow(clippy::pub_underscore_fields)]
+#![allow(clippy::redundant_pub_crate)]
+
 use std::env;
 use std::fs;
 use std::path::Path;

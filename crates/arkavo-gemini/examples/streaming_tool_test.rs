@@ -1,3 +1,8 @@
+//! Streaming tool test example
+//!
+//! This example uses #[tokio::main] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::{
     FunctionDeclaration, GeminiSseStream, RestClient, ToolDispatcher, ToolRegistry,
 };
@@ -37,8 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let name = args["name"].as_str().unwrap_or("unknown");
             let openness = args["openness"].as_str().unwrap_or("unknown");
             println!(
-                "✓ Tool executed: create_stream(name={}, openness={})",
-                name, openness
+                "✓ Tool executed: create_stream(name={name}, openness={openness})"
             );
             Ok(json!({
                 "id": format!("stream-{}", uuid::Uuid::new_v4()),
@@ -93,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some(text) = &response.text {
-                    print!("{}", text);
+                    print!("{text}");
                 }
 
                 if !response.function_calls.is_empty() {
@@ -112,16 +116,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let results = dispatcher.dispatch(response.function_calls.clone()).await;
                     let tool_duration = tool_start.elapsed();
 
-                    println!("✓ Tool execution completed in {:?}\n", tool_duration);
+                    println!("✓ Tool execution completed in {tool_duration:?}\n");
 
                     for (id, result) in results {
                         match result {
                             Ok(value) => {
-                                println!("✓ Tool {} succeeded", id);
+                                println!("✓ Tool {id} succeeded");
                                 println!("  Result: {}\n", serde_json::to_string_pretty(&value)?);
                             }
                             Err(e) => {
-                                println!("✗ Tool {} failed: {}\n", id, e);
+                                println!("✗ Tool {id} failed: {e}\n");
                             }
                         }
                     }
@@ -133,7 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                println!("\n✗ Stream error: {}", e);
+                println!("\n✗ Stream error: {e}");
                 break;
             }
         }
@@ -144,11 +148,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n─────────────────────────────────────");
     println!("Performance Metrics:");
     println!("─────────────────────────────────────");
-    println!("Total responses: {}", response_count);
+    println!("Total responses: {response_count}");
     if let Some(ttft) = first_token_time {
-        println!("Time to first token (TTFT): {:?}", ttft);
+        println!("Time to first token (TTFT): {ttft:?}");
     }
-    println!("Total duration: {:?}", total_time);
+    println!("Total duration: {total_time:?}");
     println!("─────────────────────────────────────");
 
     Ok(())

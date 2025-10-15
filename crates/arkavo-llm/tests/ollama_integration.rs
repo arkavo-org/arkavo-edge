@@ -1,4 +1,5 @@
 #![cfg(feature = "llm-remote")]
+#![allow(clippy::disallowed_methods)]
 
 use arkavo_llm::{LlmClient, Message};
 use serial_test::serial;

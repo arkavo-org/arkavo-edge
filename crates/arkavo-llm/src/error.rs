@@ -2,6 +2,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[cfg(feature = "llm-remote")]
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
 
@@ -59,6 +60,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "llm-remote")]
     fn test_error_from_reqwest() {
         // Test that we can convert reqwest errors
         // Note: Creating actual reqwest errors is complex, so we test the type system

@@ -1,3 +1,9 @@
+//! Integration tests for DeepSeek provider
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+//! This is the correct pattern for async tests, so we allow the clippy lint.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_deepseek::{
     ChatMessage, DeepSeekClient, DeepSeekConfig, DeepSeekProvider, Message, MessageContent,
     MessageRole, Provider, ResponseFormat, Role, Tool, ToolChoice, ToolFunction,
@@ -14,7 +20,7 @@ async fn test_anthropic_basic() {
     let response_body = json!({
         "id": "msg_123",
         "object": "chat.completion",
-        "created": 1234567890,
+        "created": 1_234_567_890,
         "model": "deepseek-chat",
         "choices": [{
             "index": 0,
@@ -83,7 +89,7 @@ async fn test_anthropic_tools() {
     let response_body = json!({
         "id": "msg_123",
         "object": "chat.completion",
-        "created": 1234567890,
+        "created": 1_234_567_890,
         "model": "deepseek-chat",
         "choices": [{
             "index": 0,
@@ -186,7 +192,7 @@ async fn test_function_calling_standard() {
     let response_body = json!({
         "id": "msg_123",
         "object": "chat.completion",
-        "created": 1234567890,
+        "created": 1_234_567_890,
         "model": "deepseek-chat",
         "choices": [{
             "index": 0,
@@ -250,7 +256,7 @@ async fn test_strict_mode_valid() {
     let response_body = json!({
         "id": "msg_123",
         "object": "chat.completion",
-        "created": 1234567890,
+        "created": 1_234_567_890,
         "model": "deepseek-chat",
         "choices": [{
             "index": 0,
@@ -352,10 +358,10 @@ async fn test_reasoner_tools_fallback() {
     // Server should receive deepseek-chat as the model when tools are present
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&json!({
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "msg_123",
             "object": "chat.completion",
-            "created": 1234567890,
+            "created": 1_234_567_890,
             "model": "deepseek-chat",
             "choices": [{
                 "index": 0,
@@ -412,9 +418,9 @@ async fn test_reasoner_tools_fallback() {
 async fn test_streaming() {
     let mock_server = MockServer::start().await;
 
-    let stream_data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+    let stream_data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1_234_567_890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
-data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}
+data: {"id":"1","object":"chat.completion.chunk","created":1_234_567_890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}
 
 data: [DONE]
 "#;
@@ -495,11 +501,11 @@ async fn test_stateless_api() {
     let mock_server = MockServer::start().await;
 
     // Set up mocks with random responses (since they should be independent)
-    let responses = vec![
+    let responses = [
         json!({
             "id": "msg_123",
             "object": "chat.completion",
-            "created": 1234567890,
+            "created": 1_234_567_890,
             "model": "deepseek-chat",
             "choices": [{
                 "index": 0,
@@ -515,7 +521,7 @@ async fn test_stateless_api() {
         json!({
             "id": "msg_124",
             "object": "chat.completion",
-            "created": 1234567891,
+            "created": 1_234_567_891,
             "model": "deepseek-chat",
             "choices": [{
                 "index": 0,
@@ -539,6 +545,7 @@ async fn test_stateless_api() {
             let mut count = counter_clone.lock().unwrap();
             let response = &responses[*count];
             *count += 1;
+            drop(count);
             ResponseTemplate::new(200).set_body_json(response.clone())
         })
         .expect(2)
@@ -591,14 +598,13 @@ async fn test_stateless_api() {
     let response_text = response2.choices[0].message.content.as_ref().unwrap();
     assert!(
         response_text.contains("don't") || response_text.contains("information"),
-        "Expected response to indicate lack of context, got: {}",
-        response_text
+        "Expected response to indicate lack of context, got: {response_text}"
     );
 }
 
 /// Integration test with actual API (requires DEEPSEEK_API_KEY)
 #[tokio::test]
-#[ignore]
+#[ignore = "requires DEEPSEEK_API_KEY environment variable"]
 async fn test_live_api_basic() {
     let provider = DeepSeekProvider::from_env().expect("DEEPSEEK_API_KEY must be set");
 
@@ -616,12 +622,12 @@ async fn test_live_api_basic() {
     ];
 
     let response = provider.complete(messages).await.unwrap();
-    assert!(response.contains("4"));
+    assert!(response.contains('4'));
 }
 
 /// Live API streaming test
 #[tokio::test]
-#[ignore]
+#[ignore = "requires DEEPSEEK_API_KEY environment variable"]
 async fn test_live_api_streaming() {
     let provider = DeepSeekProvider::from_env().expect("DEEPSEEK_API_KEY must be set");
 

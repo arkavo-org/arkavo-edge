@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 //! Regression test for issue #114: Remove xcodebuild runtime dependency
 //!
 //! This test ensures that the xcodebuild wrapper properly prevents system prompts
