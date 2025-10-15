@@ -19,10 +19,11 @@ tracing = { workspace = true }
 
 # Arkavo dependencies
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
-arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llama-cpp"] }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
+base64 = { workspace = true }
 
 # Template rendering
 handlebars = { workspace = true }
@@ -36,4 +37,3 @@ tempfile = { workspace = true }
 arkavo-browser = { path = "../arkavo-browser" }
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = { workspace = true }
-base64 = { workspace = true }

@@ -119,8 +119,12 @@ impl LlmClient {
                 seed,
                 debug: false,
             };
-            let provider =
-                LlamaCppProvider::new_with_config(model_name.to_string(), model_path, None, config)?;
+            let provider = LlamaCppProvider::new_with_config(
+                model_name.to_string(),
+                model_path,
+                None,
+                config,
+            )?;
             Ok(Self::new(Box::new(provider)))
         }
         #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
