@@ -100,6 +100,14 @@ impl LlamaCppProvider {
         &self,
         messages: Vec<Message>,
     ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        let has_images = messages.iter().any(|m| m.images.is_some() && !m.images.as_ref().unwrap().is_empty());
+
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        if has_images && self.mtmd_ctx.is_some() {
+            return self.generate_streaming_with_vision(messages);
+        }
+
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
 
         let prompt_bytes = apply_chat_template(&llama_messages, true)
@@ -128,6 +136,33 @@ impl LlamaCppProvider {
 
         tokio::spawn(async move {
             generate_tokens(model, prompt_bytes, streaming_config, tx).await;
+        });
+
+        Ok(UnboundedReceiverStream::new(rx))
+    }
+
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    fn generate_streaming_with_vision(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
+        use llamacpp_streaming::generate_tokens_with_vision;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let model = self.model.clone();
+        let mtmd_ctx = self.mtmd_ctx.clone().ok_or_else(|| {
+            Error::Config("Vision context not initialized".to_string())
+        })?;
+        let streaming_config = StreamingConfig {
+            temperature: self.config.temperature,
+            top_p: self.config.top_p,
+            top_k: self.config.top_k,
+            max_tokens: self.config.max_tokens,
+            seed: self.config.seed,
+        };
+
+        tokio::spawn(async move {
+            generate_tokens_with_vision(model, mtmd_ctx, messages, streaming_config, tx).await;
         });
 
         Ok(UnboundedReceiverStream::new(rx))

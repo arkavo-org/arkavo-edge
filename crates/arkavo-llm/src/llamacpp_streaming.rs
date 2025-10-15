@@ -1,8 +1,13 @@
-use crate::{Error, Result, StreamResponse};
+use crate::{Error, Message, Result, StreamResponse, decode_image};
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, LlamaSampler, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain, decode_batch,
     token_to_piece, tokenize_with_model,
+};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llama_cpp::multimodal::{
+    MtmdContext, MtmdBitmap, tokenize_with_images, encode_chunk,
+    get_output_embeddings, preprocess_image_for_clip, default_media_marker,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -235,4 +240,71 @@ fn send_metrics(
 
     tracing::info!("{}", metrics_msg);
     eprintln!("{metrics_msg}");
+}
+
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+pub async fn generate_tokens_with_vision(
+    model: Arc<LlamaModel>,
+    mtmd_ctx: Arc<MtmdContext>,
+    messages: Vec<Message>,
+    config: StreamingConfig,
+    tx: UnboundedSender<Result<StreamResponse>>,
+) {
+    let result: Result<()> = async {
+        let first_msg_with_image = messages.iter().find(|m| {
+            m.images.is_some() && !m.images.as_ref().unwrap().is_empty()
+        }).ok_or_else(|| Error::Config("No images found in messages".to_string()))?;
+
+        let image_b64 = &first_msg_with_image.images.as_ref().unwrap()[0];
+        let image_bytes = decode_image(image_b64)?;
+
+        if is_debug() {
+            eprintln!("🖼️ Processing image: {} bytes", image_bytes.len());
+        }
+
+        let rgb_data = preprocess_image_for_clip(&image_bytes, 448, 448)
+            .map_err(|e| Error::Config(format!("Image preprocessing failed: {e}")))?;
+
+        let bitmap = MtmdBitmap::from_rgb(448, 448, &rgb_data)
+            .map_err(|e| Error::Config(format!("Bitmap creation failed: {e}")))?;
+
+        let marker = default_media_marker();
+        let prompt_with_marker = format!("{} {}", marker, first_msg_with_image.content);
+
+        if is_debug() {
+            eprintln!("📝 Prompt with marker: {}", prompt_with_marker);
+        }
+
+        let chunks = tokenize_with_images(&mtmd_ctx, &prompt_with_marker, &[&bitmap])
+            .map_err(|e| Error::Config(format!("Tokenization failed: {e}")))?;
+
+        if is_debug() {
+            eprintln!("✅ Tokenized into {} chunks", chunks.size());
+        }
+
+        for i in 0..chunks.size() {
+            if let Some(chunk) = chunks.get(i) {
+                encode_chunk(&mtmd_ctx, chunk)
+                    .map_err(|e| Error::Config(format!("Chunk encoding failed: {e}")))?;
+
+                let embeddings_ptr = get_output_embeddings(&mtmd_ctx);
+                if is_debug() {
+                    eprintln!("🎯 Got embeddings for chunk {}", i);
+                }
+            }
+        }
+
+        if is_debug() {
+            eprintln!("🚀 Starting text generation after vision processing");
+        }
+
+        let dummy_prompt = format!("{}\n", first_msg_with_image.content);
+        generate_tokens(model, dummy_prompt.into_bytes(), config, tx.clone()).await;
+
+        Ok(())
+    }.await;
+
+    if let Err(e) = result {
+        let _ = tx.send(Err(e));
+    }
 }
