@@ -1,9 +1,12 @@
 use crate::{Error, Message, Provider, Result, Role, StreamResponse, decode_image};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llama_cpp::multimodal::{
+    MtmdBitmap, MtmdContext, encode_chunk, get_output_embeddings, preprocess_image_for_clip,
+    tokenize_with_images,
+};
 use arkavo_llama_cpp::{
     LlamaModel, apply_chat_template, ffi, init_llama_logging, test_minimal_init,
 };
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llama_cpp::multimodal::{MtmdContext, MtmdBitmap, tokenize_with_images, encode_chunk, get_output_embeddings, preprocess_image_for_clip};
 use async_trait::async_trait;
 use std::ffi::CString;
 use std::sync::Arc;
@@ -53,7 +56,12 @@ impl LlamaCppProvider {
         model_path: String,
         mmproj_path: String,
     ) -> Result<Self> {
-        Self::new_with_config(model_name, model_path, Some(mmproj_path), SamplingConfig::default())
+        Self::new_with_config(
+            model_name,
+            model_path,
+            Some(mmproj_path),
+            SamplingConfig::default(),
+        )
     }
 
     pub fn new_with_config(
@@ -80,7 +88,9 @@ impl LlamaCppProvider {
             let ctx = MtmdContext::from_file(&mmproj, &model)
                 .map_err(|e| Error::Config(format!("Failed to load mmproj: {e}")))?;
             if !ctx.supports_vision() {
-                return Err(Error::Config("mmproj model does not support vision".to_string()));
+                return Err(Error::Config(
+                    "mmproj model does not support vision".to_string(),
+                ));
             }
             Some(Arc::new(ctx))
         } else {
@@ -101,7 +111,9 @@ impl LlamaCppProvider {
         messages: Vec<Message>,
     ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-        let has_images = messages.iter().any(|m| m.images.is_some() && !m.images.as_ref().unwrap().is_empty());
+        let has_images = messages
+            .iter()
+            .any(|m| m.images.is_some() && !m.images.as_ref().unwrap().is_empty());
 
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         if has_images && self.mtmd_ctx.is_some() {
@@ -150,9 +162,10 @@ impl LlamaCppProvider {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let model = self.model.clone();
-        let mtmd_ctx = self.mtmd_ctx.clone().ok_or_else(|| {
-            Error::Config("Vision context not initialized".to_string())
-        })?;
+        let mtmd_ctx = self
+            .mtmd_ctx
+            .clone()
+            .ok_or_else(|| Error::Config("Vision context not initialized".to_string()))?;
         let streaming_config = StreamingConfig {
             temperature: self.config.temperature,
             top_p: self.config.top_p,

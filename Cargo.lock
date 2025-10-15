@@ -870,6 +870,7 @@ dependencies = [
  "arkavo-observability",
  "arkavo-router",
  "async-trait",
+ "base64 0.22.1",
  "chromiumoxide",
  "chrono",
  "futures",

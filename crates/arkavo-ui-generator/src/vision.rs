@@ -23,8 +23,7 @@ impl ScreenshotCapture {
         use std::fs;
         use tempfile::NamedTempFile;
 
-        let temp_file = NamedTempFile::new()
-            .context("Failed to create temporary file")?;
+        let temp_file = NamedTempFile::new().context("Failed to create temporary file")?;
         let temp_path = temp_file.path();
 
         let output = Command::new("screencapture")
@@ -39,8 +38,7 @@ impl ScreenshotCapture {
             anyhow::bail!("screencapture failed: {:?}", output.stderr);
         }
 
-        let image_data = fs::read(temp_path)
-            .context("Failed to read screenshot file")?;
+        let image_data = fs::read(temp_path).context("Failed to read screenshot file")?;
 
         let (width, height) = Self::get_png_dimensions(&image_data)?;
 
@@ -57,8 +55,7 @@ impl ScreenshotCapture {
         use std::fs;
         use tempfile::NamedTempFile;
 
-        let temp_file = NamedTempFile::new()
-            .context("Failed to create temporary file")?;
+        let temp_file = NamedTempFile::new().context("Failed to create temporary file")?;
         let temp_path = temp_file.path();
 
         let output = Command::new("import")
@@ -70,8 +67,7 @@ impl ScreenshotCapture {
             anyhow::bail!("import command failed: {:?}", output.stderr);
         }
 
-        let image_data = fs::read(temp_path)
-            .context("Failed to read screenshot file")?;
+        let image_data = fs::read(temp_path).context("Failed to read screenshot file")?;
 
         let (width, height) = Self::get_png_dimensions(&image_data)?;
 
@@ -115,13 +111,15 @@ impl ScreenshotCapture {
     }
 
     pub fn to_base64(&self) -> Result<String> {
-        encode_image_bytes(&self.image_data)
-            .context("Failed to encode image to base64")
+        encode_image_bytes(&self.image_data).context("Failed to encode image to base64")
     }
 
     pub fn create_vision_message(&self, prompt: &str) -> Result<Message> {
         let base64_image = self.to_base64()?;
-        Ok(Message::user_with_images(prompt.to_string(), vec![base64_image]))
+        Ok(Message::user_with_images(
+            prompt.to_string(),
+            vec![base64_image],
+        ))
     }
 
     fn get_png_dimensions(data: &[u8]) -> Result<(u32, u32)> {
@@ -179,7 +177,9 @@ impl UiVerifier {
         screenshot: &ScreenshotCapture,
         requirements: &str,
     ) -> Result<VerificationResult> {
-        let llm = self.llm_client.as_ref()
+        let llm = self
+            .llm_client
+            .as_ref()
             .context("LLM client not configured for vision verification")?;
 
         let prompt = format!(
@@ -194,11 +194,13 @@ impl UiVerifier {
 
         let message = screenshot.create_vision_message(&prompt)?;
 
-        let response = llm.complete_with_options(vec![message], Some(500)).await
+        let response = llm
+            .complete_with_options(vec![message], Some(500))
+            .await
             .context("Failed to get LLM response")?;
 
-        let passed = response.to_uppercase().contains("PASS")
-            && !response.to_uppercase().contains("FAIL");
+        let passed =
+            response.to_uppercase().contains("PASS") && !response.to_uppercase().contains("FAIL");
 
         Ok(VerificationResult {
             passed,
@@ -219,7 +221,11 @@ pub struct VerificationResult {
 
 impl VerificationResult {
     pub fn display_summary(&self) -> String {
-        let status = if self.passed { "✅ PASSED" } else { "❌ FAILED" };
+        let status = if self.passed {
+            "✅ PASSED"
+        } else {
+            "❌ FAILED"
+        };
         format!(
             "{} ({}x{})\n\nFeedback:\n{}",
             status, self.screenshot_width, self.screenshot_height, self.feedback
@@ -234,10 +240,8 @@ mod tests {
     #[test]
     fn test_png_dimensions() {
         let png_header = vec![
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-            0x00, 0x00, 0x04, 0x00,
-            0x00, 0x00, 0x03, 0x00,
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x03, 0x00,
         ];
 
         let result = ScreenshotCapture::get_png_dimensions(&png_header);

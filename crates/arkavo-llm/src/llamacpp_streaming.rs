@@ -1,13 +1,13 @@
 use crate::{Error, Message, Result, StreamResponse, decode_image};
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llama_cpp::multimodal::{
+    MtmdBitmap, MtmdContext, default_media_marker, encode_chunk, get_output_embeddings,
+    preprocess_image_for_clip, tokenize_with_images,
+};
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, LlamaSampler, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain, decode_batch,
     token_to_piece, tokenize_with_model,
-};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llama_cpp::multimodal::{
-    MtmdContext, MtmdBitmap, tokenize_with_images, encode_chunk,
-    get_output_embeddings, preprocess_image_for_clip, default_media_marker,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,13 +59,9 @@ pub async fn generate_tokens(
             );
         }
 
-        let sampler = create_sampler_chain(
-            config.temperature,
-            config.top_p,
-            config.top_k,
-            config.seed,
-        )
-        .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?;
+        let sampler =
+            create_sampler_chain(config.temperature, config.top_p, config.top_k, config.seed)
+                .map_err(|e| Error::Config(format!("Failed to create sampler: {e}")))?;
 
         let eos_token = model.get_eos_token();
         if is_debug() {
@@ -118,9 +114,8 @@ pub async fn generate_tokens(
             sampler.accept(token);
 
             let mut batch = batch_init_with_tokens(&[token], pos, true);
-            decode_batch(&ctx, batch).map_err(|e| {
-                Error::Config(format!("Failed to decode token at pos {pos}: {e}"))
-            })?;
+            decode_batch(&ctx, batch)
+                .map_err(|e| Error::Config(format!("Failed to decode token at pos {pos}: {e}")))?;
             batch_free(&mut batch);
 
             pos += 1;
@@ -179,9 +174,8 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
             }
             let is_last_chunk = (i + 1) * chunk_size >= input_tokens.len();
             let batch = batch_get_one_with_offset(chunk, pos_offset, is_last_chunk);
-            decode_batch(ctx, batch).map_err(|e| {
-                Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e))
-            })?;
+            decode_batch(ctx, batch)
+                .map_err(|e| Error::Config(format!("Failed to decode chunk {}: {}", i + 1, e)))?;
             pos_offset += i32::try_from(chunk.len()).unwrap_or(i32::MAX);
         }
     } else {
@@ -251,9 +245,10 @@ pub async fn generate_tokens_with_vision(
     tx: UnboundedSender<Result<StreamResponse>>,
 ) {
     let result: Result<()> = async {
-        let first_msg_with_image = messages.iter().find(|m| {
-            m.images.is_some() && !m.images.as_ref().unwrap().is_empty()
-        }).ok_or_else(|| Error::Config("No images found in messages".to_string()))?;
+        let first_msg_with_image = messages
+            .iter()
+            .find(|m| m.images.is_some() && !m.images.as_ref().unwrap().is_empty())
+            .ok_or_else(|| Error::Config("No images found in messages".to_string()))?;
 
         let image_b64 = &first_msg_with_image.images.as_ref().unwrap()[0];
         let image_bytes = decode_image(image_b64)?;
@@ -302,7 +297,8 @@ pub async fn generate_tokens_with_vision(
         generate_tokens(model, dummy_prompt.into_bytes(), config, tx.clone()).await;
 
         Ok(())
-    }.await;
+    }
+    .await;
 
     if let Err(e) = result {
         let _ = tx.send(Err(e));

@@ -1,4 +1,4 @@
-use crate::{LlamaModel, ffi};
+use crate::{ffi, LlamaModel};
 use std::ffi::CString;
 use std::ptr;
 
@@ -13,8 +13,8 @@ unsafe impl Send for MtmdContext {}
 #[cfg(not(target_env = "musl"))]
 impl MtmdContext {
     pub fn from_file(mmproj_path: &str, text_model: &LlamaModel) -> Result<Self, String> {
-        let c_path = CString::new(mmproj_path)
-            .map_err(|e| format!("Invalid mmproj path: {}", e))?;
+        let c_path =
+            CString::new(mmproj_path).map_err(|e| format!("Invalid mmproj path: {}", e))?;
 
         let mut params = unsafe { ffi::mtmd_context_params_default() };
         params.use_gpu = true;
@@ -24,13 +24,7 @@ impl MtmdContext {
         params.verbosity = ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
         params.media_marker = ffi::mtmd_default_marker();
 
-        let ctx = unsafe {
-            ffi::mtmd_init_from_file(
-                c_path.as_ptr(),
-                text_model.ptr,
-                params
-            )
-        };
+        let ctx = unsafe { ffi::mtmd_init_from_file(c_path.as_ptr(), text_model.ptr, params) };
 
         if ctx.is_null() {
             Err("Failed to load mmproj model".to_string())
@@ -84,9 +78,7 @@ impl MtmdBitmap {
             ));
         }
 
-        let bitmap = unsafe {
-            ffi::mtmd_bitmap_init(width, height, rgb_data.as_ptr())
-        };
+        let bitmap = unsafe { ffi::mtmd_bitmap_init(width, height, rgb_data.as_ptr()) };
 
         if bitmap.is_null() {
             Err("Failed to create bitmap".to_string())
@@ -96,9 +88,7 @@ impl MtmdBitmap {
     }
 
     pub fn from_audio(samples: &[f32]) -> Result<Self, String> {
-        let bitmap = unsafe {
-            ffi::mtmd_bitmap_init_from_audio(samples.len(), samples.as_ptr())
-        };
+        let bitmap = unsafe { ffi::mtmd_bitmap_init_from_audio(samples.len(), samples.as_ptr()) };
 
         if bitmap.is_null() {
             Err("Failed to create audio bitmap".to_string())
@@ -185,8 +175,7 @@ pub fn tokenize_with_images(
     text: &str,
     bitmaps: &[&MtmdBitmap],
 ) -> Result<MtmdInputChunks, String> {
-    let text_cstring = CString::new(text)
-        .map_err(|e| format!("Invalid text: {}", e))?;
+    let text_cstring = CString::new(text).map_err(|e| format!("Invalid text: {}", e))?;
 
     let text_input = ffi::mtmd_input_text {
         text: text_cstring.as_ptr(),
@@ -244,7 +233,11 @@ pub fn default_media_marker() -> &'static str {
     }
 }
 
-pub fn preprocess_image_for_clip(image_data: &[u8], target_width: u32, target_height: u32) -> Result<Vec<u8>, String> {
+pub fn preprocess_image_for_clip(
+    image_data: &[u8],
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<u8>, String> {
     if image_data.len() < 8 {
         return Err("Image data too small".to_string());
     }
@@ -257,8 +250,18 @@ pub fn preprocess_image_for_clip(image_data: &[u8], target_width: u32, target_he
         return Err("Unsupported image format".to_string());
     };
 
-    let _source_width = u32::from_be_bytes([image_data[16], image_data[17], image_data[18], image_data[19]]);
-    let _source_height = u32::from_be_bytes([image_data[20], image_data[21], image_data[22], image_data[23]]);
+    let _source_width = u32::from_be_bytes([
+        image_data[16],
+        image_data[17],
+        image_data[18],
+        image_data[19],
+    ]);
+    let _source_height = u32::from_be_bytes([
+        image_data[20],
+        image_data[21],
+        image_data[22],
+        image_data[23],
+    ]);
 
     let rgb_size = (target_width * target_height * 3) as usize;
     let mut rgb_data = vec![0u8; rgb_size];
@@ -287,11 +290,8 @@ mod tests {
     #[test]
     fn test_preprocess_image_size() {
         let fake_png = vec![
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-            0, 0, 0, 13,
-            0, 0, 0, 1,
-            0, 0, 0, 2,
-            0, 0, 1, 0,
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 2, 0,
+            0, 1, 0,
         ];
         let result = preprocess_image_for_clip(&fake_png, 224, 224);
         assert!(result.is_ok());
