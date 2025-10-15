@@ -334,7 +334,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    needs: [test-and-lint]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -434,7 +434,7 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    needs: [test-and-lint]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
