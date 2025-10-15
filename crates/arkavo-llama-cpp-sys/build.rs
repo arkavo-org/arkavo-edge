@@ -11,12 +11,15 @@ fn main() {
         std::fs::write(out_path.join("bindings.rs"), "// Dummy bindings for musl\n").unwrap();
         return;
     }
-    // Track the actual header file location (relative to crate root)
+    // Track the actual header file locations (relative to crate root)
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/mtmd.h");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/clip.h");
 
     // Track key source directories
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/src");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/ggml");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/CMakeLists.txt");
 
     // Track this build script itself
@@ -58,7 +61,8 @@ fn main() {
     config
         .define("GGML_OPENCL", "OFF")
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
-        .define("LLAMA_CURL", "OFF"); // Disable CURL requirement (not needed for local inference)
+        .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
+        .define("LLAMA_BUILD_MTMD", "ON"); // Enable multimodal support
 
     let dst = config.build();
 
@@ -66,6 +70,11 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
+
+    // Link multimodal library if it exists
+    if lib_dir.join("libmtmd.a").exists() || lib_dir.join("mtmd.lib").exists() {
+        println!("cargo:rustc-link-lib=static=mtmd");
+    }
 
     // Only link libraries that actually exist
     if lib_dir.join("libggml-base.a").exists() {
@@ -112,8 +121,9 @@ fn main() {
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let header = out_path.join("include").join("llama.h");
+    let mtmd_header = out_path.join("include").join("mtmd.h");
 
-    // Check if header exists
+    // Check if main header exists
     if !header.exists() {
         panic!(
             "llama.h not found at {:?}. CMake build may have failed.",
@@ -121,10 +131,29 @@ fn main() {
         );
     }
 
+    // Create a wrapper header that includes both llama.h and mtmd.h
+    let wrapper_header = out_path.join("wrapper.h");
+    let mut wrapper_content = format!("#include \"{}\"\n", header.display());
+    if mtmd_header.exists() {
+        wrapper_content.push_str(&format!("#include \"{}\"\n", mtmd_header.display()));
+    }
+    std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");
+
     let bindings = bindgen::Builder::default()
-        .header(header.to_str().unwrap())
+        .header(wrapper_header.to_str().unwrap())
         .clang_arg(format!("-I{}", out_path.join("include").display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .allowlist_function("llama_.*")
+        .allowlist_function("ggml_.*")
+        .allowlist_function("mtmd_.*")
+        .allowlist_function("clip_.*")
+        .allowlist_type("llama_.*")
+        .allowlist_type("ggml_.*")
+        .allowlist_type("mtmd_.*")
+        .allowlist_type("clip_.*")
+        .allowlist_var("LLAMA_.*")
+        .allowlist_var("GGML_.*")
+        .allowlist_var("MTMD_.*")
         .generate()
         .expect("Unable to generate bindings");
 

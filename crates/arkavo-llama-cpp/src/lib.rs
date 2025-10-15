@@ -11,6 +11,10 @@ mod stubs {
 #[cfg(target_env = "musl")]
 pub use stubs::*;
 
+// Multimodal support module
+#[cfg(not(target_env = "musl"))]
+pub mod multimodal;
+
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
