@@ -30,6 +30,7 @@ regex = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 arkavo-browser = { path = "../arkavo-browser" }
