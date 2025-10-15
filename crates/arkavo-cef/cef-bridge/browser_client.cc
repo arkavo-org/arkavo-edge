@@ -29,3 +29,20 @@ void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
         std::cout << "Page loaded successfully" << std::endl;
     }
 }
+
+void ArkavoBrowserClient::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
+    rect.x = 0;
+    rect.y = 0;
+    rect.width = 1024;
+    rect.height = 768;
+}
+
+void ArkavoBrowserClient::OnPaint(CefRefPtr<CefBrowser> browser,
+                                   PaintElementType type,
+                                   const RectList& dirtyRects,
+                                   const void* buffer,
+                                   int width,
+                                   int height) {
+    std::cout << "OnPaint called: " << width << "x" << height
+              << " (" << dirtyRects.size() << " dirty rects)" << std::endl;
+}

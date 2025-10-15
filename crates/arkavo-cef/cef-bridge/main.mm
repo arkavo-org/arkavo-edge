@@ -1,6 +1,7 @@
 #include "cef_app.h"
 #include "browser_client.h"
 #include "include/cef_app.h"
+#include "include/cef_command_line.h"
 #include "include/wrapper/cef_helpers.h"
 #include <iostream>
 #include <string>
@@ -78,7 +79,7 @@ int main(int argc, char* argv[]) {
 #endif
 
     // Enable verbose logging for debugging
-    settings.log_severity = LOGSEVERITY_VERBOSE;
+    settings.log_severity = LOGSEVERITY_INFO;
     CefString(&settings.log_file).FromASCII("/tmp/arkavo_cef.log");
 
 #ifdef __APPLE__

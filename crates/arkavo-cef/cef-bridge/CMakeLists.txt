@@ -28,10 +28,17 @@ set(ARKAVO_CEF_SOURCES
     uds_client.h
 )
 
-add_executable(arkavo-cef-renderer
-    main.cc
-    ${ARKAVO_CEF_SOURCES}
-)
+if(APPLE)
+    add_executable(arkavo-cef-renderer
+        main.mm
+        ${ARKAVO_CEF_SOURCES}
+    )
+else()
+    add_executable(arkavo-cef-renderer
+        main.cc
+        ${ARKAVO_CEF_SOURCES}
+    )
+endif()
 
 SET_EXECUTABLE_TARGET_PROPERTIES(arkavo-cef-renderer)
 

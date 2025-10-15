@@ -28,3 +28,23 @@ void ArkavoRenderProcessHandler::OnContextReleased(
 ArkavoApp::ArkavoApp(const std::string& socket_path) {
     render_process_handler_ = new ArkavoRenderProcessHandler(socket_path);
 }
+
+void ArkavoApp::OnBeforeCommandLineProcessing(
+    const CefString& process_type,
+    CefRefPtr<CefCommandLine> command_line) {
+
+    // Completely disable GPU process
+    command_line->AppendSwitch("disable-gpu");
+    command_line->AppendSwitch("disable-gpu-compositing");
+    command_line->AppendSwitch("disable-gpu-process-crash-limit");
+
+    // Disable keychain/password manager to prevent login keychain prompts
+    command_line->AppendSwitch("use-mock-keychain");
+    command_line->AppendSwitch("password-store=basic");
+
+    // Disable various features we don't need
+    command_line->AppendSwitch("disable-features=RendererCodeIntegrity");
+    command_line->AppendSwitch("disable-sync");
+
+    std::cout << "Command line switches applied" << std::endl;
+}

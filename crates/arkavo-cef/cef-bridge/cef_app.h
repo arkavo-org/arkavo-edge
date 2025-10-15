@@ -2,7 +2,9 @@
 #define CEF_APP_H
 
 #include "include/cef_app.h"
+#include "include/cef_browser_process_handler.h"
 #include "include/cef_client.h"
+#include "include/cef_command_line.h"
 
 class ArkavoRenderProcessHandler : public CefRenderProcessHandler {
 public:
@@ -22,13 +24,21 @@ private:
     IMPLEMENT_REFCOUNTING(ArkavoRenderProcessHandler);
 };
 
-class ArkavoApp : public CefApp {
+class ArkavoApp : public CefApp, public CefBrowserProcessHandler {
 public:
     ArkavoApp(const std::string& socket_path);
 
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
         return render_process_handler_;
     }
+
+    CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+        return this;
+    }
+
+    void OnBeforeCommandLineProcessing(
+        const CefString& process_type,
+        CefRefPtr<CefCommandLine> command_line) override;
 
 private:
     CefRefPtr<ArkavoRenderProcessHandler> render_process_handler_;
