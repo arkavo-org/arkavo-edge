@@ -33,18 +33,64 @@ void ArkavoApp::OnBeforeCommandLineProcessing(
     const CefString& process_type,
     CefRefPtr<CefCommandLine> command_line) {
 
-    // Completely disable GPU process
-    command_line->AppendSwitch("disable-gpu");
+    // Log GPU process command line for diagnostics
+    if (process_type == "gpu-process") {
+        std::cout << "GPU process CMD: "
+                  << command_line->GetCommandLineString().ToString()
+                  << std::endl;
+    }
+
+    // Use software GPU (SwiftShader) instead of disabling GPU entirely
+    command_line->AppendSwitchWithValue("use-angle", "swiftshader");
+    command_line->AppendSwitchWithValue("use-gl", "swiftshader");
+
+    // Disable GPU-accelerated features, prefer software paths
     command_line->AppendSwitch("disable-gpu-compositing");
-    command_line->AppendSwitch("disable-gpu-process-crash-limit");
+
+    // Reduce compositor/gpu paths that can trigger device init
+    command_line->AppendSwitchWithValue("disable-features",
+        "VizDisplayCompositor,UseSkiaRenderer,CanvasOopRasterization,"
+        "Accelerated2dCanvas,ThreadedDisplayCompositor");
+
+    // Stop GPU restart loop during bring-up
+    command_line->AppendSwitchWithValue("gpu-process-crash-limit", "0");
+
+    // OSR-specific: enable frame scheduling for windowless rendering
+    command_line->AppendSwitch("enable-begin-frame-scheduling");
+
+    // Disable GPU watchdog to see actual errors during bring-up
+    command_line->AppendSwitch("disable-gpu-watchdog");
 
     // Disable keychain/password manager to prevent login keychain prompts
     command_line->AppendSwitch("use-mock-keychain");
     command_line->AppendSwitch("password-store=basic");
 
     // Disable various features we don't need
-    command_line->AppendSwitch("disable-features=RendererCodeIntegrity");
     command_line->AppendSwitch("disable-sync");
 
-    std::cout << "Command line switches applied" << std::endl;
+    std::cout << "Command line switches applied for process: "
+              << (process_type.empty() ? "browser" : process_type.ToString())
+              << std::endl;
+}
+
+void ArkavoApp::OnBeforeChildProcessLaunch(
+    CefRefPtr<CefCommandLine> command_line) {
+
+    // Propagate flags to child processes (GPU, renderer, etc.)
+    command_line->AppendSwitch("disable-gpu");
+    command_line->AppendSwitch("disable-gpu-compositing");
+
+    // Force software pipeline in child process
+    command_line->AppendSwitchWithValue("use-angle", "swiftshader");
+    command_line->AppendSwitchWithValue("use-gl", "swiftshader");
+
+    // Reduce compositor/gpu paths
+    command_line->AppendSwitchWithValue("disable-features",
+        "VizDisplayCompositor,UseSkiaRenderer,CanvasOopRasterization,"
+        "Accelerated2dCanvas,ThreadedDisplayCompositor");
+
+    // Stop restart spam
+    command_line->AppendSwitchWithValue("gpu-process-crash-limit", "0");
+
+    std::cout << "Child process launch flags applied" << std::endl;
 }
