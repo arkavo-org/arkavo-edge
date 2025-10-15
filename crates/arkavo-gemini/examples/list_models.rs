@@ -1,3 +1,8 @@
+//! List models example
+//!
+//! This example uses #[tokio::main] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_gemini::RestClient;
 use std::env;
 
@@ -21,11 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", "=".repeat(80));
 
     for model in &response.models {
-        let base_model = model
-            .base_model_id
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("N/A");
+        let base_model = model.base_model_id.as_deref().unwrap_or("N/A");
         let input_limit = model
             .input_token_limit
             .map(|n| n.to_string())
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(next_token) = response.next_page_token {
-        println!("\nMore models available (next page token: {})", next_token);
+        println!("\nMore models available (next page token: {next_token})");
     }
 
     Ok(())

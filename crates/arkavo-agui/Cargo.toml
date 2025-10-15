@@ -16,13 +16,15 @@ windows = ["mdns", "arkavo-router/windows"]
 
 [dependencies]
 # Core dependencies
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }
 
 # Web server and WebSocket
-warp = { workspace = true, features = ["websocket"] }
+axum = { workspace = true, features = ["ws"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["fs", "cors"] }
 reqwest = { workspace = true }
 
 # Protocol dependencies

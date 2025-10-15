@@ -107,57 +107,96 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  clippy:
-    name: Clippy
+  # Combined test + lint jobs for maximum cache reuse
+  # Tests run first (full codegen), then clippy reuses artifacts (check-mode is nearly free)
+  test-and-lint:
+    name: Test & Lint (${{ matrix.group }})
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false  # Run all groups even if one fails
+      matrix:
+        group:
+          - core        # arkavo-llm, arkavo-memory, arkavo-budget, arkavo-context, arkavo-encryption, arkavo-mcp-core
+          - protocol    # arkavo-protocol, arkavo-observability, arkavo-mcp-tools, arkavo-workspace
+          - llm-heavy   # arkavo-router (no llama-cpp), arkavo-dataflow, arkavo-terminal
+          - ui-heavy    # arkavo-ui-generator, arkavo-agui (no llama-cpp)
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install CMake and build dependencies
+
+      - name: Install CMake, mold linker, and build dependencies
         run: |
           sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "clippy"
-      - name: Run clippy
-        run: cargo clippy --workspace -- -D warnings
 
-  test:
-    name: Test
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Install CMake and build dependencies
-        run: |
-          sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "test"
-      # No system dependencies needed for pure Rust build
-      - name: Run tests
+          prefix-key: "test-lint-${{ matrix.group }}"
+
+      # Step 1: Run tests first (produces full codegen artifacts)
+      - name: Run tests with mold linker
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo test --workspace --exclude arkavo-memory --exclude arkavo-mcp-macos --exclude arkavo-llm
-          cargo test -p arkavo-memory --lib
-          cargo test -p arkavo-memory --test mcp_integration_test
-          cargo test -p arkavo-llm --lib --no-default-features --features llm-remote
-          cargo test -p arkavo-dataflow test_auth_manager_constants -- --nocapture
-          cargo test -p arkavo-dataflow test_auth_manager_handles_invalid_master_key -- --nocapture
-          cargo test -p arkavo-dataflow test_auth_manager_keychain_fallback -- --nocapture
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
+            cargo test --locked -p arkavo-memory --lib
+            cargo test --locked -p arkavo-memory --test mcp_integration_test
+            cargo test --locked -p arkavo-budget
+            cargo test --locked -p arkavo-context
+            cargo test --locked -p arkavo-encryption
+            cargo test --locked -p arkavo-mcp-core
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo test --locked -p arkavo-protocol
+            cargo test --locked -p arkavo-observability
+            cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-workspace
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
+            cargo test --locked -p arkavo-dataflow
+            cargo test --locked -p arkavo-terminal
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo test --locked -p arkavo-ui-generator
+            cargo test --locked -p arkavo-agui --no-default-features --features mdns
+          fi
+
+      # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
+      - name: Run clippy on lib and bins
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: |
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo clippy --locked -p arkavo-llm --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-memory --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-budget --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-context --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-encryption --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
+            cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
+          fi
 
   test-kimi-feature:
     name: Test Kimi Feature
@@ -238,6 +277,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
@@ -260,6 +301,8 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
         run: |
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support and static OpenMP
@@ -291,7 +334,7 @@ jobs:
 
   build-macos:
     name: Build macOS (ARM64)
-    needs: [test, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -300,10 +343,53 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "build-aarch64"
+
+      # Regression test for Issue #114 - Run before full build to catch issues early
+      - name: Test Issue #114 - No Xcode Prompts
+        run: |
+          echo "Testing regression for issue #114..."
+
+          # Build without default features to avoid embeddings
+          echo "Building arkavo-mcp-macos..."
+          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
+
+          # Run the regression test
+          echo "Running regression test..."
+          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
+            echo "::error::Regression test failed"
+            exit 1
+          }
+
+          # Test that discovery tools don't prompt
+          echo "Testing Swift discovery tool..."
+          cd crates/arkavo-mcp-macos
+
+          # Create a minimal PATH that excludes Xcode but includes Rust
+          CARGO_BIN="${HOME}/.cargo/bin"
+          if [ ! -d "$CARGO_BIN" ]; then
+            # GitHub Actions might have cargo in a different location
+            CARGO_BIN=$(dirname $(which cargo))
+          fi
+
+          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
+          echo "Using PATH: $MINIMAL_PATH"
+
+          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
+
+          # Ensure no prompt-related output
+          if grep -i "command line tools\|xcode-select" output.log; then
+            echo "::error::Regression failure: Found Xcode installation prompt"
+            exit 1
+          fi
+
+          echo "✅ Issue #114 regression test passed"
+          cd ../..
 
       - name: Install idb-companion
         run: |
@@ -311,6 +397,9 @@ jobs:
           brew install idb-companion
 
       - name: Build
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
         run: cargo build --release --target aarch64-apple-darwin
 
       - name: Check binary size
@@ -345,7 +434,7 @@ jobs:
   # Windows build job
   build-windows:
     name: Build Windows
-    needs: [test, clippy]  # Run after tests and clippy pass to save costs
+    needs: [test-and-lint, build-linux]  # Run after tests pass and Linux builds complete to save costs
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -369,12 +458,18 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Setup sccache for C++ caching
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "build-windows"
 
       - name: Build Windows binary
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
         run: |
           cargo build --release --target x86_64-pc-windows-msvc --no-default-features --features windows-default -p arkavo
 
@@ -851,68 +946,6 @@ jobs:
       - name: Run schema validation
         run: cargo run -p xtask -- schema-gen --check
 
-  # Regression tests - ensuring fixed bugs stay fixed
-  regression-tests:
-    name: Regression Tests
-    needs: [test, clippy]  # Run after tests pass to save macOS runner costs
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Issue #114: Test on macOS without Xcode
-          - os: macos-latest
-            test_name: "Issue #114 - No Xcode Prompts"
-            issue: 114
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "regression-${{ matrix.issue }}"
-
-      # Issue #114: xcodebuild runtime dependency
-      - name: Test Issue #114 - xcodebuild should not trigger prompts
-        if: matrix.issue == 114
-        run: |
-          echo "Testing regression for issue #114..."
-          
-          # Build without default features to avoid embeddings
-          echo "Building arkavo-mcp-macos..."
-          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
-          
-          # Run the regression test
-          echo "Running regression test..."
-          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
-            echo "::error::Regression test failed"
-            exit 1
-          }
-          
-          # Test that discovery tools don't prompt
-          echo "Testing Swift discovery tool..."
-          cd crates/arkavo-mcp-macos
-          
-          # Create a minimal PATH that excludes Xcode but includes Rust
-          CARGO_BIN="${HOME}/.cargo/bin"
-          if [ ! -d "$CARGO_BIN" ]; then
-            # GitHub Actions might have cargo in a different location
-            CARGO_BIN=$(dirname $(which cargo))
-          fi
-          
-          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
-          echo "Using PATH: $MINIMAL_PATH"
-          
-          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
-          
-          # Ensure no prompt-related output
-          if grep -i "command line tools\|xcode-select" output.log; then
-            echo "::error::Regression failure: Found Xcode installation prompt"
-            exit 1
-          fi
-          
-          echo "✅ Issue #114 regression test passed"
-
   # Zero-config and portability verification
   zero-config-check:
     name: Zero Configuration Check
@@ -1018,7 +1051,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, clippy, test, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, test-and-lint, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1026,15 +1059,13 @@ jobs:
         run: |
           if [[ "${{ needs.version-check.result }}" != "success" || \
                 "${{ needs.format.result }}" != "success" || \
-                "${{ needs.clippy.result }}" != "success" || \
-                "${{ needs.test.result }}" != "success" || \
+                "${{ needs.test-and-lint.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.binary-smoke-test.result }}" != "success" || \
                 "${{ needs.performance-check.result }}" != "success" || \
                 "${{ needs.validate-openrpc.result }}" != "success" || \
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \
-                "${{ needs.regression-tests.result }}" != "success" || \
                 "${{ needs.zero-config-check.result }}" != "success" || \
                 "${{ needs.validate-xtask-schema.result }}" != "success" || \
                 "${{ needs.no-openssl-check.result }}" != "success" ]]; then

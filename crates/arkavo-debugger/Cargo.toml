@@ -22,4 +22,4 @@ bincode = "1.3"
 url = "2.5"
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }

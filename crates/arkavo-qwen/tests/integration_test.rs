@@ -1,3 +1,9 @@
+//! Integration tests for Qwen provider
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+//! This is the correct pattern for async tests, so we allow the clippy lint.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_qwen::{
     Message as QwenMessage, MessageRole, Provider, QwenClient, QwenConfig, QwenProvider, QwenRegion,
 };
@@ -11,7 +17,7 @@ async fn test_complete_basic() {
     let response_body = serde_json::json!({
         "id": "chatcmpl-123",
         "object": "chat.completion",
-        "created": 1234567890_u64,
+        "created": 1_234_567_890_u64,
         "model": "qwen3-32b",
         "choices": [{
             "index": 0,
@@ -277,7 +283,7 @@ async fn test_retry_on_server_error_then_success() {
     let success_response = serde_json::json!({
         "id": "chatcmpl-123",
         "object": "chat.completion",
-        "created": 1234567890_u64,
+        "created": 1_234_567_890_u64,
         "model": "qwen3-32b",
         "choices": [{
             "index": 0,

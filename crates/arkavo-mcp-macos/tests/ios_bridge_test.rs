@@ -1,3 +1,8 @@
+//! iOS bridge integration tests
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod ios_bridge_tests {

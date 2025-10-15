@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_mcp_tools::mcp_connection::McpConnection;
 use serde_json::json;
 use std::time::Duration;

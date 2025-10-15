@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_router::Router;
 use arkavo_ui_generator::streaming::StreamingGenerator;
 use std::sync::Arc;

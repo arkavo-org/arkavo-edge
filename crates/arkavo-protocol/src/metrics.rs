@@ -239,6 +239,8 @@ impl RpcTimer {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

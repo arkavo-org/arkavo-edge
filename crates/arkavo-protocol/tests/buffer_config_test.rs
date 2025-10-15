@@ -1,3 +1,6 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::field_reassign_with_default)]
+
 #[cfg(test)]
 mod tests {
     use arkavo_protocol::config::BufferConfig;

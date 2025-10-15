@@ -255,6 +255,8 @@ impl Default for WorkflowCostPredictor {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

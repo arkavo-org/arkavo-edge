@@ -222,6 +222,7 @@ impl Tool for CombyTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 

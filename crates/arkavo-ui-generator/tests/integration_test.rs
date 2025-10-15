@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use anyhow::Result;
 use arkavo_browser::LiveInjector;
 use arkavo_router::Router;

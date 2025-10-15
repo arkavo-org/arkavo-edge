@@ -366,6 +366,7 @@ impl Tool for TestRunnerTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

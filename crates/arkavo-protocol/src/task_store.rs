@@ -349,6 +349,8 @@ impl TaskStore for SqliteTaskStore {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use crate::types::{AgentIdentity, AuthenticationRequirements, InteractionMode, MessagePart};

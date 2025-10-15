@@ -269,6 +269,8 @@ impl CostOrchestrator {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use arkavo_budget::{BudgetConfig, BudgetManager};

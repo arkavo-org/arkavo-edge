@@ -17,7 +17,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
 chrono = { workspace = true }
 regex = { workspace = true }
 glob = { workspace = true }

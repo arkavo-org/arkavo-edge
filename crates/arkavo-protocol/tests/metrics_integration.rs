@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(feature = "metrics")]
 use arkavo_protocol::{MetricsCollector, RpcTimer};
 

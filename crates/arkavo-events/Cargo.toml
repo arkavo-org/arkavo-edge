@@ -18,4 +18,4 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }

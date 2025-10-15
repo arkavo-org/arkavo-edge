@@ -151,6 +151,8 @@ impl AuthBackend for MultiAuthBackend {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
     use jsonwebtoken::{EncodingKey, Header, encode};

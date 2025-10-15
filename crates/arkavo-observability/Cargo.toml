@@ -16,7 +16,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 # Async runtime
-tokio = { workspace = true, features = ["rt", "time", "macros", "net"] }
+tokio = { workspace = true, features = ["rt", "time", "macros", "net", "sync"] }
 
 # Serialization
 serde.workspace = true
