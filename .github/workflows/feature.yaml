@@ -350,6 +350,47 @@ jobs:
           shared-key: "v1-${{ runner.os }}"
           prefix-key: "build-aarch64"
 
+      # Regression test for Issue #114 - Run before full build to catch issues early
+      - name: Test Issue #114 - No Xcode Prompts
+        run: |
+          echo "Testing regression for issue #114..."
+
+          # Build without default features to avoid embeddings
+          echo "Building arkavo-mcp-macos..."
+          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
+
+          # Run the regression test
+          echo "Running regression test..."
+          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
+            echo "::error::Regression test failed"
+            exit 1
+          }
+
+          # Test that discovery tools don't prompt
+          echo "Testing Swift discovery tool..."
+          cd crates/arkavo-mcp-macos
+
+          # Create a minimal PATH that excludes Xcode but includes Rust
+          CARGO_BIN="${HOME}/.cargo/bin"
+          if [ ! -d "$CARGO_BIN" ]; then
+            # GitHub Actions might have cargo in a different location
+            CARGO_BIN=$(dirname $(which cargo))
+          fi
+
+          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
+          echo "Using PATH: $MINIMAL_PATH"
+
+          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
+
+          # Ensure no prompt-related output
+          if grep -i "command line tools\|xcode-select" output.log; then
+            echo "::error::Regression failure: Found Xcode installation prompt"
+            exit 1
+          fi
+
+          echo "✅ Issue #114 regression test passed"
+          cd ../..
+
       - name: Install idb-companion
         run: |
           brew tap facebook/fb
@@ -905,68 +946,6 @@ jobs:
       - name: Run schema validation
         run: cargo run -p xtask -- schema-gen --check
 
-  # Regression tests - ensuring fixed bugs stay fixed
-  regression-tests:
-    name: Regression Tests
-    needs: [test-and-lint]  # Run after tests pass to save macOS runner costs
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Issue #114: Test on macOS without Xcode
-          - os: macos-latest
-            test_name: "Issue #114 - No Xcode Prompts"
-            issue: 114
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "v1-${{ runner.os }}"
-          prefix-key: "regression-${{ matrix.issue }}"
-
-      # Issue #114: xcodebuild runtime dependency
-      - name: Test Issue #114 - xcodebuild should not trigger prompts
-        if: matrix.issue == 114
-        run: |
-          echo "Testing regression for issue #114..."
-          
-          # Build without default features to avoid embeddings
-          echo "Building arkavo-mcp-macos..."
-          cargo build -p arkavo-mcp-macos --no-default-features || exit 1
-          
-          # Run the regression test
-          echo "Running regression test..."
-          cargo test -p arkavo-mcp-macos --no-default-features --test regression_issue_114 -- --nocapture || {
-            echo "::error::Regression test failed"
-            exit 1
-          }
-          
-          # Test that discovery tools don't prompt
-          echo "Testing Swift discovery tool..."
-          cd crates/arkavo-mcp-macos
-          
-          # Create a minimal PATH that excludes Xcode but includes Rust
-          CARGO_BIN="${HOME}/.cargo/bin"
-          if [ ! -d "$CARGO_BIN" ]; then
-            # GitHub Actions might have cargo in a different location
-            CARGO_BIN=$(dirname $(which cargo))
-          fi
-          
-          MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin:${CARGO_BIN}"
-          echo "Using PATH: $MINIMAL_PATH"
-          
-          PATH="$MINIMAL_PATH" cargo run --bin test_swift_discovery 2>&1 | tee output.log || true
-          
-          # Ensure no prompt-related output
-          if grep -i "command line tools\|xcode-select" output.log; then
-            echo "::error::Regression failure: Found Xcode installation prompt"
-            exit 1
-          fi
-          
-          echo "✅ Issue #114 regression test passed"
-
   # Zero-config and portability verification
   zero-config-check:
     name: Zero Configuration Check
@@ -1072,7 +1051,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, test-and-lint, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, regression-tests, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, test-and-lint, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1087,7 +1066,6 @@ jobs:
                 "${{ needs.performance-check.result }}" != "success" || \
                 "${{ needs.validate-openrpc.result }}" != "success" || \
                 "${{ needs.validate-doc-snippets.result }}" != "success" || \
-                "${{ needs.regression-tests.result }}" != "success" || \
                 "${{ needs.zero-config-check.result }}" != "success" || \
                 "${{ needs.validate-xtask-schema.result }}" != "success" || \
                 "${{ needs.no-openssl-check.result }}" != "success" ]]; then
