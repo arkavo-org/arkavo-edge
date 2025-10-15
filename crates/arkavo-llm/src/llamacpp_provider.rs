@@ -1,9 +1,11 @@
-use crate::{Error, Message, Provider, Result, Role, StreamResponse};
+use crate::{Error, Message, Provider, Result, Role, StreamResponse, decode_image};
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, apply_chat_template, batch_free, batch_get_one_with_logits,
     batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain, decode_batch, ffi,
     init_llama_logging, test_minimal_init, token_to_piece, tokenize_with_model,
 };
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llama_cpp::multimodal::{MtmdContext, MtmdBitmap, tokenize_with_images, encode_chunk, get_output_embeddings, preprocess_image_for_clip};
 use async_trait::async_trait;
 use std::ffi::CString;
 use std::sync::Arc;
@@ -40,38 +42,60 @@ pub struct LlamaCppProvider {
     model: Arc<LlamaModel>,
     name: String,
     config: SamplingConfig,
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+    mtmd_ctx: Option<Arc<MtmdContext>>,
 }
 
 impl LlamaCppProvider {
     pub fn new(model_name: String, model_path: String) -> Result<Self> {
-        Self::new_with_config(model_name, model_path, SamplingConfig::default())
+        Self::new_with_config(model_name, model_path, None, SamplingConfig::default())
+    }
+
+    pub fn new_with_mmproj(
+        model_name: String,
+        model_path: String,
+        mmproj_path: String,
+    ) -> Result<Self> {
+        Self::new_with_config(model_name, model_path, Some(mmproj_path), SamplingConfig::default())
     }
 
     pub fn new_with_config(
         model_name: String,
         model_path: String,
+        mmproj_path: Option<String>,
         config: SamplingConfig,
     ) -> Result<Self> {
-        // Initialize llama.cpp logging
         init_llama_logging();
 
-        // Enable debug if requested
         if config.debug {
             arkavo_llama_cpp::set_debug_logging(true);
             DEBUG_LLAMACPP.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        // Run minimal FFI test first to catch early crashes
         test_minimal_init()
             .map_err(|e| Error::Config(format!("FFI initialization test failed: {e}")))?;
 
         let model = LlamaModel::from_file(&model_path)
             .map_err(|e| Error::Config(format!("Failed to load model: {e}")))?;
 
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+        let mtmd_ctx = if let Some(mmproj) = mmproj_path {
+            let ctx = MtmdContext::from_file(&mmproj, &model)
+                .map_err(|e| Error::Config(format!("Failed to load mmproj: {e}")))?;
+            if !ctx.supports_vision() {
+                return Err(Error::Config("mmproj model does not support vision".to_string()));
+            }
+            Some(Arc::new(ctx))
+        } else {
+            None
+        };
+
         Ok(Self {
             model: Arc::new(model),
             name: model_name,
             config,
+            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+            mtmd_ctx,
         })
     }
 
@@ -372,6 +396,8 @@ impl Provider for LlamaCppProvider {
                 model: self.model.clone(),
                 name: self.name.clone(),
                 config,
+                #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+                mtmd_ctx: self.mtmd_ctx.clone(),
             };
             &custom_provider
         } else {
