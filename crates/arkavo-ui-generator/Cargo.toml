@@ -36,3 +36,4 @@ tempfile = { workspace = true }
 arkavo-browser = { path = "../arkavo-browser" }
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = { workspace = true }
+base64 = { workspace = true }
