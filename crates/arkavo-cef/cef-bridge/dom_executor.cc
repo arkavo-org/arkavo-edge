@@ -10,6 +10,11 @@ DOMExecutor* DOMExecutor::GetInstance() {
 }
 
 void DOMExecutor::Initialize(CefRefPtr<CefFrame> frame, const std::string& socket_path) {
+    if (initialized_) {
+        std::cout << "DOMExecutor already initialized, skipping duplicate initialization" << std::endl;
+        return;
+    }
+
     frame_ = frame;
     uds_client_ = std::make_unique<UdsClient>(socket_path);
 
@@ -23,6 +28,8 @@ void DOMExecutor::Initialize(CefRefPtr<CefFrame> frame, const std::string& socke
     uds_client_->StartListening([this](const DOMCommand& cmd) {
         ProcessCommand(cmd);
     });
+
+    initialized_ = true;
 }
 
 void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {

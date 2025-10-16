@@ -11,11 +11,7 @@ void ArkavoRenderProcessHandler::OnContextCreated(
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefV8Context> context) {
 
-    std::cout << "Arkavo CEF context created - initializing DOMExecutor" << std::endl;
-
-    DOMExecutor::GetInstance()->Initialize(frame, socket_path_);
-
-    std::cout << "DOMExecutor ready for Rust-driven DOM commands" << std::endl;
+    std::cout << "Arkavo CEF context created (single-process: DOMExecutor already initialized in OnAfterCreated)" << std::endl;
 }
 
 void ArkavoRenderProcessHandler::OnContextReleased(

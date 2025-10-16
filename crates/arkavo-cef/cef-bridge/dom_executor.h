@@ -30,6 +30,7 @@ private:
 
     CefRefPtr<CefFrame> frame_;
     std::unique_ptr<UdsClient> uds_client_;
+    bool initialized_ = false;
 };
 
 #endif
