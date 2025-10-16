@@ -166,3 +166,44 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 
     return true;
 }
+
+bool UdsClient::SendEvent(const DOMEvent& event) {
+    if (sock_fd_ < 0) {
+        return false;
+    }
+
+    uint8_t buffer[2048];
+    uint32_t offset = 0;
+
+    uint8_t msg_type = 0x02;
+    buffer[offset++] = msg_type;
+
+    auto write_string = [&](const std::string& str) {
+        uint32_t len = str.size();
+        memcpy(buffer + offset, &len, sizeof(len));
+        offset += sizeof(len);
+        memcpy(buffer + offset, str.c_str(), len);
+        offset += len;
+    };
+
+    write_string(event.event_type);
+    write_string(event.selector);
+    write_string(event.target_id);
+    write_string(event.value);
+    write_string(event.data);
+
+    uint32_t frame_len = offset;
+    ssize_t n = send(sock_fd_, &frame_len, sizeof(frame_len), 0);
+    if (n < 0) {
+        std::cerr << "Failed to send event frame length: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    n = send(sock_fd_, buffer, offset, 0);
+    if (n < 0) {
+        std::cerr << "Failed to send event: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    return true;
+}

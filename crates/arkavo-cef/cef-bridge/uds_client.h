@@ -35,6 +35,14 @@ struct DOMFeedback {
     std::string message;
 };
 
+struct DOMEvent {
+    std::string event_type;
+    std::string selector;
+    std::string target_id;
+    std::string value;
+    std::string data;
+};
+
 class UdsClient {
 public:
     explicit UdsClient(const std::string& socket_path);
@@ -47,6 +55,7 @@ public:
     void StopListening();
 
     bool SendFeedback(const DOMFeedback& feedback);
+    bool SendEvent(const DOMEvent& event);
 
 private:
     void ListenLoop();

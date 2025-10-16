@@ -51,6 +51,9 @@ void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {
         case DOMOp::RemoveNode:
             ExecuteRemoveNode(cmd.id, cmd.selector);
             break;
+        case DOMOp::AddEventListener:
+            ExecuteAddEventListener(cmd.id, cmd.selector, cmd.payload);
+            break;
         default:
             DOMFeedback feedback = {cmd.id, 1, 0, "Unknown operation"};
             SendFeedback(feedback);
@@ -219,6 +222,48 @@ void DOMExecutor::ExecuteRemoveNode(uint32_t id, const std::string& selector) {
 
     DOMFeedback feedback = {id, 0, 0, "OK"};
     SendFeedback(feedback);
+}
+
+void DOMExecutor::ExecuteAddEventListener(uint32_t id, const std::string& selector, const std::string& event_type) {
+    if (!frame_) {
+        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
+        SendFeedback(feedback);
+        return;
+    }
+
+    std::string escaped_selector = EscapeJavaScript(selector);
+    std::string escaped_event_type = EscapeJavaScript(event_type);
+
+    std::ostringstream js;
+    js << "(function() { "
+       << "  try { "
+       << "    var el = document.querySelector(\"" << escaped_selector << "\"); "
+       << "    if (!el) throw new Error('Element not found: " << escaped_selector << "'); "
+       << "    el.addEventListener(\"" << escaped_event_type << "\", function(e) { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: \"" << escaped_event_type << "\", "
+       << "        selector: \"" << escaped_selector << "\", "
+       << "        target_id: e.target.id || '', "
+       << "        value: e.target.value || '', "
+       << "        data: JSON.stringify({clientX: e.clientX, clientY: e.clientY, key: e.key})"
+       << "      });"
+       << "    }); "
+       << "    return 'OK'; "
+       << "  } catch(e) { "
+       << "    throw e; "
+       << "  } "
+       << "})();";
+
+    frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);
+
+    DOMFeedback feedback = {id, 0, 0, "OK"};
+    SendFeedback(feedback);
+}
+
+void DOMExecutor::SendEvent(const DOMEvent& event) {
+    if (uds_client_) {
+        uds_client_->SendEvent(event);
+    }
 }
 
 void DOMExecutor::SendFeedback(const DOMFeedback& feedback) {

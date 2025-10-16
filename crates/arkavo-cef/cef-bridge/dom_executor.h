@@ -25,7 +25,9 @@ private:
     void ExecuteSetStyle(uint32_t id, const std::string& selector, const std::string& property, const std::string& value);
     void ExecuteSetTextContent(uint32_t id, const std::string& selector, const std::string& text);
     void ExecuteRemoveNode(uint32_t id, const std::string& selector);
+    void ExecuteAddEventListener(uint32_t id, const std::string& selector, const std::string& event_type);
 
+    void SendEvent(const DOMEvent& event);
     void SendFeedback(const DOMFeedback& feedback);
 
     CefRefPtr<CefFrame> frame_;
