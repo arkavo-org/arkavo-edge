@@ -44,6 +44,7 @@ public:
 private:
     std::string socket_path_;
     CefRefPtr<CefBrowser> browser_;
+    bool dom_executor_initialized_;
 
     IMPLEMENT_REFCOUNTING(ArkavoBrowserClient);
 };

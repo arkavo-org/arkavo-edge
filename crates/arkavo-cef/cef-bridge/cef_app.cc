@@ -1,5 +1,5 @@
 #include "cef_app.h"
-// #include "dom_executor.h" - Temporarily disabled due to CEF API compatibility
+#include "dom_executor.h"
 #include <iostream>
 
 ArkavoRenderProcessHandler::ArkavoRenderProcessHandler(const std::string& socket_path)
@@ -11,10 +11,11 @@ void ArkavoRenderProcessHandler::OnContextCreated(
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefV8Context> context) {
 
-    std::cout << "Arkavo CEF context created (V8 disabled)" << std::endl;
+    std::cout << "Arkavo CEF context created - initializing DOMExecutor" << std::endl;
 
-    // DOMExecutor::GetInstance()->Initialize(frame, socket_path_); - Temporarily disabled
-    std::cout << "Note: DOM manipulation temporarily disabled pending CEF API update" << std::endl;
+    DOMExecutor::GetInstance()->Initialize(frame, socket_path_);
+
+    std::cout << "DOMExecutor ready for Rust-driven DOM commands" << std::endl;
 }
 
 void ArkavoRenderProcessHandler::OnContextReleased(
@@ -33,64 +34,32 @@ void ArkavoApp::OnBeforeCommandLineProcessing(
     const CefString& process_type,
     CefRefPtr<CefCommandLine> command_line) {
 
-    // Log GPU process command line for diagnostics
-    if (process_type == "gpu-process") {
-        std::cout << "GPU process CMD: "
-                  << command_line->GetCommandLineString().ToString()
-                  << std::endl;
-    }
+    // Enable single-process mode (avoids multi-process IPC issues)
+    command_line->AppendSwitch("single-process");
 
-    // Use software GPU (SwiftShader) instead of disabling GPU entirely
+    // Single-process mode: software rendering via SwiftShader
     command_line->AppendSwitchWithValue("use-angle", "swiftshader");
     command_line->AppendSwitchWithValue("use-gl", "swiftshader");
 
-    // Disable GPU-accelerated features, prefer software paths
+    // Disable GPU-accelerated features (software rendering only)
     command_line->AppendSwitch("disable-gpu-compositing");
 
-    // Reduce compositor/gpu paths that can trigger device init
+    // Reduce compositor/gpu paths for software rendering
     command_line->AppendSwitchWithValue("disable-features",
         "VizDisplayCompositor,UseSkiaRenderer,CanvasOopRasterization,"
         "Accelerated2dCanvas,ThreadedDisplayCompositor");
 
-    // Stop GPU restart loop during bring-up
-    command_line->AppendSwitchWithValue("gpu-process-crash-limit", "0");
-
     // OSR-specific: enable frame scheduling for windowless rendering
     command_line->AppendSwitch("enable-begin-frame-scheduling");
-
-    // Disable GPU watchdog to see actual errors during bring-up
-    command_line->AppendSwitch("disable-gpu-watchdog");
 
     // Disable keychain/password manager to prevent login keychain prompts
     command_line->AppendSwitch("use-mock-keychain");
     command_line->AppendSwitch("password-store=basic");
 
-    // Disable various features we don't need
+    // Disable features not needed for UI generation
     command_line->AppendSwitch("disable-sync");
 
-    std::cout << "Command line switches applied for process: "
-              << (process_type.empty() ? "browser" : process_type.ToString())
+    std::cout << "Single-process mode: software rendering configured"
               << std::endl;
 }
 
-void ArkavoApp::OnBeforeChildProcessLaunch(
-    CefRefPtr<CefCommandLine> command_line) {
-
-    // Propagate flags to child processes (GPU, renderer, etc.)
-    command_line->AppendSwitch("disable-gpu");
-    command_line->AppendSwitch("disable-gpu-compositing");
-
-    // Force software pipeline in child process
-    command_line->AppendSwitchWithValue("use-angle", "swiftshader");
-    command_line->AppendSwitchWithValue("use-gl", "swiftshader");
-
-    // Reduce compositor/gpu paths
-    command_line->AppendSwitchWithValue("disable-features",
-        "VizDisplayCompositor,UseSkiaRenderer,CanvasOopRasterization,"
-        "Accelerated2dCanvas,ThreadedDisplayCompositor");
-
-    // Stop restart spam
-    command_line->AppendSwitchWithValue("gpu-process-crash-limit", "0");
-
-    std::cout << "Child process launch flags applied" << std::endl;
-}

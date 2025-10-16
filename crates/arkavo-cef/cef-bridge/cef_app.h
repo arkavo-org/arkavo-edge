@@ -40,9 +40,6 @@ public:
         const CefString& process_type,
         CefRefPtr<CefCommandLine> command_line) override;
 
-    void OnBeforeChildProcessLaunch(
-        CefRefPtr<CefCommandLine> command_line) override;
-
 private:
     CefRefPtr<ArkavoRenderProcessHandler> render_process_handler_;
 

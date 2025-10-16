@@ -12,7 +12,7 @@ UdsClient::~UdsClient() {
     Disconnect();
 }
 
-bool UdsClient::Connect() {
+bool UdsClient::Bind() {
     sock_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock_fd_ < 0) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
@@ -24,14 +24,35 @@ bool UdsClient::Connect() {
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (connect(sock_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::cerr << "Failed to connect to socket: " << strerror(errno) << std::endl;
+    unlink(socket_path_.c_str());
+
+    if (bind(sock_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        std::cerr << "Failed to bind socket: " << strerror(errno) << std::endl;
         close(sock_fd_);
         sock_fd_ = -1;
         return false;
     }
 
-    std::cout << "Connected to UDS at " << socket_path_ << std::endl;
+    if (listen(sock_fd_, 1) < 0) {
+        std::cerr << "Failed to listen on socket: " << strerror(errno) << std::endl;
+        close(sock_fd_);
+        sock_fd_ = -1;
+        return false;
+    }
+
+    std::cout << "UDS server listening at " << socket_path_ << std::endl;
+
+    int client_fd = accept(sock_fd_, NULL, NULL);
+    if (client_fd < 0) {
+        std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;
+        close(sock_fd_);
+        sock_fd_ = -1;
+        return false;
+    }
+
+    close(sock_fd_);
+    sock_fd_ = client_fd;
+    std::cout << "UDS client connected" << std::endl;
     return true;
 }
 

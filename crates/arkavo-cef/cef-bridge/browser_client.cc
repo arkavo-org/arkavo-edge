@@ -1,15 +1,25 @@
 #include "browser_client.h"
+#include "dom_executor.h"
 #include "include/cef_app.h"
 #include "include/wrapper/cef_helpers.h"
 #include <iostream>
 
 ArkavoBrowserClient::ArkavoBrowserClient(const std::string& socket_path)
-    : socket_path_(socket_path) {
+    : socket_path_(socket_path), dom_executor_initialized_(false) {
 }
 
 void ArkavoBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     browser_ = browser;
     std::cout << "Browser window created" << std::endl;
+
+    if (!dom_executor_initialized_) {
+        auto frame = browser->GetMainFrame();
+        if (frame) {
+            DOMExecutor::GetInstance()->Initialize(frame, socket_path_);
+            dom_executor_initialized_ = true;
+            std::cout << "DOMExecutor initialized in browser process" << std::endl;
+        }
+    }
 }
 
 bool ArkavoBrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {

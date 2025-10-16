@@ -40,7 +40,7 @@ public:
     explicit UdsClient(const std::string& socket_path);
     ~UdsClient();
 
-    bool Connect();
+    bool Bind();
     void Disconnect();
 
     void StartListening(std::function<void(const DOMCommand&)> callback);

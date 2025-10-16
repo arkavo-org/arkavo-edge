@@ -2,36 +2,9 @@
 #define DOM_EXECUTOR_H
 
 #include "include/cef_frame.h"
-#include "include/cef_dom.h"
 #include "uds_client.h"
 #include <memory>
 #include <string>
-
-enum class DOMOp : uint8_t {
-    ReplaceInnerHTML = 0,
-    SetAttribute = 1,
-    SetStyle = 2,
-    RemoveNode = 3,
-    AppendNode = 4,
-    QuerySelector = 5,
-    AddEventListener = 6,
-    SetTextContent = 7,
-};
-
-struct DOMCommand {
-    uint32_t id;
-    DOMOp op;
-    std::string selector;
-    std::string payload;
-    std::string property;
-};
-
-struct DOMFeedback {
-    uint32_t id;
-    uint8_t status;
-    uint64_t exec_time_ns;
-    std::string message;
-};
 
 class DOMExecutor {
 public:
@@ -45,7 +18,7 @@ private:
     DOMExecutor() = default;
     ~DOMExecutor() = default;
 
-    CefRefPtr<CefDOMNode> FindNode(const std::string& selector);
+    std::string EscapeJavaScript(const std::string& str);
 
     void ExecuteReplaceInnerHTML(uint32_t id, const std::string& selector, const std::string& html);
     void ExecuteSetAttribute(uint32_t id, const std::string& selector, const std::string& attr, const std::string& value);
