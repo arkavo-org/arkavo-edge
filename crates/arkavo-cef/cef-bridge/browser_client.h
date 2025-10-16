@@ -41,10 +41,13 @@ public:
                    CefRefPtr<CefFrame> frame,
                    int httpStatusCode) override;
 
+    void SaveScreenshot(const void* buffer, int width, int height);
+
 private:
     std::string socket_path_;
     CefRefPtr<CefBrowser> browser_;
     bool dom_executor_initialized_;
+    bool screenshot_saved_;
 
     IMPLEMENT_REFCOUNTING(ArkavoBrowserClient);
 };
