@@ -29,8 +29,11 @@ fn main() {
             "\n============================================================================="
         );
         eprintln!(
-            "CEF not found at {:?}",
-            cef_root.canonicalize().unwrap_or(cef_root.clone())
+            "CEF not found at {}",
+            cef_root
+                .canonicalize()
+                .unwrap_or_else(|_| cef_root.clone())
+                .display()
         );
         eprintln!("\nTo download and setup CEF, run:");
         eprintln!("    ./scripts/setup-cef.sh");

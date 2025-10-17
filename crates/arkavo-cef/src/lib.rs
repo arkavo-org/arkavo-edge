@@ -7,7 +7,8 @@ pub mod uds;
 pub use dom_commands::{DOMCommandBuilder, DOMOp};
 pub use error::{CefError, Result};
 pub use process::CefProcess;
-pub use uds::UdsTransport;
+pub use protocol::DOMEvent;
+pub use uds::{ReceivedMessage, UdsTransport};
 
 use std::path::Path;
 use tokio::time::Duration;
@@ -40,6 +41,11 @@ impl CefRenderer {
         })
     }
 
+    /// Returns a mutable reference to the DOM command builder.
+    ///
+    /// # Panics
+    ///
+    /// Panics if commands have not been initialized.
     pub fn commands(&mut self) -> &mut DOMCommandBuilder {
         self.commands.as_mut().expect("Commands not initialized")
     }

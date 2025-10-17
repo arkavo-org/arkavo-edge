@@ -26,6 +26,9 @@ pub enum CefError {
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
+    #[error("Protocol error: {0}")]
+    ProtocolError(String),
+
     #[error("Timeout waiting for response")]
     Timeout,
 

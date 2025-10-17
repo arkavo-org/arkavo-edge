@@ -17,7 +17,7 @@ impl CefProcess {
 
         if socket_path.exists() {
             std::fs::remove_file(&socket_path).map_err(|e| {
-                CefError::ProcessStartFailed(format!("Failed to remove old socket: {}", e))
+                CefError::ProcessStartFailed(format!("Failed to remove old socket: {e}"))
             })?;
         }
 
@@ -51,15 +51,13 @@ impl CefProcess {
                 match child.try_wait() {
                     Ok(Some(status)) => {
                         return Err(CefError::ProcessCrashed(format!(
-                            "Process exited with status: {}",
-                            status
+                            "Process exited with status: {status}"
                         )));
                     }
                     Ok(None) => {}
                     Err(e) => {
                         return Err(CefError::ProcessStartFailed(format!(
-                            "Failed to check process status: {}",
-                            e
+                            "Failed to check process status: {e}"
                         )));
                     }
                 }
@@ -75,12 +73,12 @@ impl CefProcess {
     pub fn is_running(&mut self) -> bool {
         self.child
             .as_mut()
-            .and_then(|c| c.try_wait().ok())
-            .map_or(false, |status| status.is_none())
+            .is_some_and(|c| c.try_wait().ok().is_some_and(|status| status.is_none()))
     }
 
     pub fn kill(&mut self) -> Result<()> {
         if let Some(ref mut child) = self.child {
+            #[allow(clippy::cast_possible_wrap)]
             let pid = Pid::from_raw(child.id() as i32);
 
             if let Err(e) = kill(pid, Signal::SIGTERM) {
@@ -89,8 +87,7 @@ impl CefProcess {
                 if let Err(e) = kill(pid, Signal::SIGKILL) {
                     error!("Failed to send SIGKILL to CEF process: {}", e);
                     return Err(CefError::ProcessCrashed(format!(
-                        "Failed to kill process: {}",
-                        e
+                        "Failed to kill process: {e}"
                     )));
                 }
             }
@@ -102,10 +99,10 @@ impl CefProcess {
             info!("CEF process terminated");
         }
 
-        if self.socket_path.exists() {
-            if let Err(e) = std::fs::remove_file(&self.socket_path) {
-                warn!("Failed to remove socket file: {}", e);
-            }
+        if self.socket_path.exists()
+            && let Err(e) = std::fs::remove_file(&self.socket_path)
+        {
+            warn!("Failed to remove socket file: {}", e);
         }
 
         Ok(())

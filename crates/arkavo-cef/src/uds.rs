@@ -8,7 +8,6 @@ use tokio::net::UnixStream;
 pub struct UdsTransport {
     stream: UnixStream,
     read_buf: BytesMut,
-    write_buf: BytesMut,
 }
 
 impl UdsTransport {
@@ -20,7 +19,6 @@ impl UdsTransport {
         Ok(Self {
             stream,
             read_buf: BytesMut::with_capacity(8192),
-            write_buf: BytesMut::with_capacity(8192),
         })
     }
 
@@ -67,6 +65,40 @@ impl UdsTransport {
         let data = self.recv_raw().await?;
         Protocol::deserialize_feedback(&data)
     }
+
+    pub async fn recv_event(&mut self) -> Result<crate::protocol::DOMEvent> {
+        let data = self.recv_raw().await?;
+        Protocol::deserialize_event(&data)
+    }
+
+    pub async fn try_recv_message(&mut self) -> Result<Option<ReceivedMessage>> {
+        let data = self.recv_raw().await?;
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+
+        match data[0] {
+            0x01 => {
+                let feedback = Protocol::deserialize_feedback(&data)?;
+                Ok(Some(ReceivedMessage::Feedback(feedback)))
+            }
+            0x02 => {
+                let event = Protocol::deserialize_event(&data)?;
+                Ok(Some(ReceivedMessage::Event(event)))
+            }
+            _ => Err(CefError::ProtocolError(format!(
+                "Unknown message type: {}",
+                data[0]
+            ))),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReceivedMessage {
+    Feedback(crate::protocol::DOMFeedbackSimple),
+    Event(crate::protocol::DOMEvent),
 }
 
 #[cfg(test)]

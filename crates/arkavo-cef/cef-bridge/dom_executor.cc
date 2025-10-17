@@ -29,7 +29,47 @@ void DOMExecutor::Initialize(CefRefPtr<CefFrame> frame, const std::string& socke
         ProcessCommand(cmd);
     });
 
+    RegisterEventBridge();
+
     initialized_ = true;
+}
+
+void DOMExecutor::RegisterEventBridge() {
+    if (!frame_) {
+        std::cerr << "Cannot register event bridge: frame not available" << std::endl;
+        return;
+    }
+
+    std::ostringstream js;
+    js << "(function() {"
+       << "  window.ArkavoEventBridge = function(event) {"
+       << "    if (!event || typeof event !== 'object') {"
+       << "      console.error('ArkavoEventBridge: Invalid event object');"
+       << "      return;"
+       << "    }"
+       << "    window.__arkavoEventQueue = window.__arkavoEventQueue || [];"
+       << "    window.__arkavoEventQueue.push(event);"
+       << "  };"
+       << "  window.__arkavoEventQueue = [];"
+       << "  console.log('ArkavoEventBridge registered');"
+       << "})();";
+
+    frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);
+    std::cout << "ArkavoEventBridge function registered in window context" << std::endl;
+}
+
+void DOMExecutor::HandleDOMEvent(const std::string& event_type, const std::string& selector,
+                                  const std::string& target_id, const std::string& value,
+                                  const std::string& data) {
+    DOMEvent event;
+    event.event_type = event_type;
+    event.selector = selector;
+    event.target_id = target_id;
+    event.value = value;
+    event.data = data;
+
+    SendEvent(event);
+    std::cout << "DOM event sent: " << event_type << " on " << selector << std::endl;
 }
 
 void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {

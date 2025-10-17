@@ -11,8 +11,11 @@ public:
     static DOMExecutor* GetInstance();
 
     void Initialize(CefRefPtr<CefFrame> frame, const std::string& socket_path);
+    void RegisterEventBridge();
 
     void ProcessCommand(const DOMCommand& cmd);
+    void HandleDOMEvent(const std::string& event_type, const std::string& selector,
+                        const std::string& target_id, const std::string& value, const std::string& data);
 
 private:
     DOMExecutor() = default;

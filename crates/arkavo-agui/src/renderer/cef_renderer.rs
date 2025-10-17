@@ -1,11 +1,15 @@
 use super::UiRenderer;
 use anyhow::Result;
-use arkavo_cef::{CefRenderer, DOMCommandBuilder};
+use arkavo_cef::{CefRenderer, DOMCommandBuilder, DOMEvent};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{error, info};
+
+pub type EventCallback = Arc<dyn Fn(DOMEvent) + Send + Sync>;
 
 pub struct CefRendererImpl {
     renderer: CefRenderer,
+    event_callback: Option<EventCallback>,
 }
 
 impl CefRendererImpl {
@@ -15,7 +19,10 @@ impl CefRendererImpl {
 
         let renderer = CefRenderer::new(renderer_path).await?;
 
-        Ok(Self { renderer })
+        Ok(Self {
+            renderer,
+            event_callback: None,
+        })
     }
 
     fn find_renderer_binary() -> Result<PathBuf> {
@@ -38,22 +45,21 @@ impl CefRendererImpl {
         }
 
         // Search in cargo build output directories
-        let build_dirs = [
-            "./target/debug/build",
-            "./target/release/build",
-        ];
+        let build_dirs = ["./target/debug/build", "./target/release/build"];
 
         for build_dir in &build_dirs {
             if let Ok(entries) = std::fs::read_dir(build_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.file_name()
+                    if path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .map(|n| n.starts_with("arkavo-cef-"))
                         .unwrap_or(false)
                     {
-                        let renderer_path = path
-                            .join("out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer");
+                        let renderer_path = path.join(
+                            "out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer",
+                        );
                         if renderer_path.exists() {
                             return Ok(renderer_path);
                         }
@@ -69,6 +75,17 @@ impl CefRendererImpl {
 
     fn commands(&mut self) -> &mut DOMCommandBuilder {
         self.renderer.commands()
+    }
+
+    pub fn set_event_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(DOMEvent) + Send + Sync + 'static,
+    {
+        self.event_callback = Some(Arc::new(callback));
+    }
+
+    pub async fn poll_events(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 

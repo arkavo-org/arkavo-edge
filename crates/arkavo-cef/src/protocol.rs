@@ -74,6 +74,65 @@ pub struct DOMFeedbackSimple {
     pub message: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct DOMEvent {
+    pub event_type: String,
+    pub selector: String,
+    pub target_id: String,
+    pub value: String,
+    pub data: String,
+}
+
+impl Protocol {
+    pub fn deserialize_event(data: &[u8]) -> Result<DOMEvent> {
+        if data.is_empty() || data[0] != 0x02 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Invalid event message type".to_string(),
+            ));
+        }
+
+        let mut cursor = 1;
+
+        let read_string = |cursor: &mut usize| -> Result<String> {
+            if data.len() < *cursor + 4 {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string length".to_string(),
+                ));
+            }
+            let len = u32::from_le_bytes([
+                data[*cursor],
+                data[*cursor + 1],
+                data[*cursor + 2],
+                data[*cursor + 3],
+            ]) as usize;
+            *cursor += 4;
+
+            if data.len() < *cursor + len {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string data".to_string(),
+                ));
+            }
+            let s = String::from_utf8_lossy(&data[*cursor..*cursor + len]).to_string();
+            *cursor += len;
+            Ok(s)
+        };
+
+        let event_type = read_string(&mut cursor)?;
+        let selector = read_string(&mut cursor)?;
+        let target_id = read_string(&mut cursor)?;
+        let value = read_string(&mut cursor)?;
+        let data_field = read_string(&mut cursor)?;
+
+        Ok(DOMEvent {
+            event_type,
+            selector,
+            target_id,
+            value,
+            data: data_field,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
