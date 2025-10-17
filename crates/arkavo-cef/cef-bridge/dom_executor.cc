@@ -58,6 +58,22 @@ void DOMExecutor::RegisterEventBridge() {
     std::cout << "ArkavoEventBridge function registered in window context" << std::endl;
 }
 
+void DOMExecutor::PollEventQueue() {
+    if (!frame_ || !initialized_) {
+        return;
+    }
+
+    std::ostringstream js;
+    js << "(function() {"
+       << "  var events = window.__arkavoGetEvents ? window.__arkavoGetEvents() : null;"
+       << "  if (events && events.length > 0) {"
+       << "    console.log('Polled ' + events.length + ' events');"
+       << "  }"
+       << "})();";
+
+    frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);
+}
+
 void DOMExecutor::HandleDOMEvent(const std::string& event_type, const std::string& selector,
                                   const std::string& target_id, const std::string& value,
                                   const std::string& data) {

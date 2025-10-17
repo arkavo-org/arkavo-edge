@@ -76,8 +76,7 @@ async fn use_cef_renderer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_agui::{create_renderer, default_renderer_type};
 
-    let renderer_type = default_renderer_type()
-        .ok_or("CEF renderer not available")?;
+    let renderer_type = default_renderer_type().ok_or("CEF renderer not available")?;
 
     println!("Creating CEF renderer...");
     let mut renderer = create_renderer(renderer_type).await?;

@@ -1,6 +1,6 @@
 #![cfg(feature = "cef-ui")]
 
-use arkavo_agui::renderer::{create_renderer, RendererType};
+use arkavo_agui::renderer::{RendererType, create_renderer};
 use std::time::Instant;
 use tokio::time::Duration;
 
@@ -57,7 +57,11 @@ async fn bench_dom_operations() {
     for i in 0..iterations {
         let start = Instant::now();
         renderer
-            .set_style("#styled-box", "background-color", if i % 2 == 0 { "red" } else { "blue" })
+            .set_style(
+                "#styled-box",
+                "background-color",
+                if i % 2 == 0 { "red" } else { "blue" },
+            )
             .await
             .ok();
         let elapsed = start.elapsed();

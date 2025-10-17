@@ -12,6 +12,7 @@ public:
 
     void Initialize(CefRefPtr<CefFrame> frame, const std::string& socket_path);
     void RegisterEventBridge();
+    void PollEventQueue();
 
     void ProcessCommand(const DOMCommand& cmd);
     void HandleDOMEvent(const std::string& event_type, const std::string& selector,
