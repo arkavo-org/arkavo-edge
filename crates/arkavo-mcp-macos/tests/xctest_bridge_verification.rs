@@ -1,3 +1,7 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::ignore_without_reason)]
+#![allow(clippy::default_trait_access)]
+
 use arkavo_mcp_macos::mcp::xctest_verifier::{XCTestStatus, XCTestVerifier};
 use std::time::Duration;
 
@@ -40,14 +44,14 @@ async fn test_xctest_device_verification() {
         for (_runtime, device_list) in devices_map {
             if let Some(devices_array) = device_list.as_array() {
                 for device in devices_array {
-                    if let Some(state) = device.get("state").and_then(|s| s.as_str()) {
-                        if state == "Booted" {
-                            device_id = device
-                                .get("udid")
-                                .and_then(|u| u.as_str())
-                                .map(std::string::ToString::to_string);
-                            break;
-                        }
+                    if let Some(state) = device.get("state").and_then(|s| s.as_str())
+                        && state == "Booted"
+                    {
+                        device_id = device
+                            .get("udid")
+                            .and_then(|u| u.as_str())
+                            .map(std::string::ToString::to_string);
+                        break;
                     }
                 }
             }

@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use crate::config::{BudgetConfig, BudgetLimits, BudgetThresholds};
     use crate::cost::TokenCost;
@@ -111,11 +112,11 @@ mod tests {
         // Check for warning alert
         let mut found_warning = false;
         while let Ok(event) = event_rx.try_recv() {
-            if let crate::tracker::BudgetEvent::ThresholdExceeded(alert) = event {
-                if alert.alert_type == crate::config::AlertType::Warning {
-                    found_warning = true;
-                    break;
-                }
+            if let crate::tracker::BudgetEvent::ThresholdExceeded(alert) = event
+                && alert.alert_type == crate::config::AlertType::Warning
+            {
+                found_warning = true;
+                break;
             }
         }
         assert!(
@@ -253,11 +254,11 @@ mod tests {
         // Check for exhausted alert
         let mut found_exhausted = false;
         while let Ok(event) = event_rx.try_recv() {
-            if let crate::tracker::BudgetEvent::BudgetExhausted(alert) = event {
-                if alert.alert_type == crate::config::AlertType::Exhausted {
-                    found_exhausted = true;
-                    break;
-                }
+            if let crate::tracker::BudgetEvent::BudgetExhausted(alert) = event
+                && alert.alert_type == crate::config::AlertType::Exhausted
+            {
+                found_exhausted = true;
+                break;
             }
         }
         assert!(found_exhausted, "Should have received exhausted alert");

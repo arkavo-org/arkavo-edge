@@ -2269,6 +2269,7 @@ impl A2aServer {
                             let llm_adapter_clone = llm_adapter.clone();
                             let mcp_registry_clone = mcp_registry.clone();
                             #[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
                             rt.block_on(async move {
                                 match tokio::fs::read_to_string("AGENTS.md").await {
                                     Ok(content) => {
@@ -2402,6 +2403,8 @@ impl A2aServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

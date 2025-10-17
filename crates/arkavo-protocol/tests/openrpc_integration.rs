@@ -1,3 +1,6 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::field_reassign_with_default)]
+
 use arkavo_protocol::config::ServerConfig;
 use arkavo_protocol::{A2aServer, generate_openrpc_schema, openrpc_to_json};
 

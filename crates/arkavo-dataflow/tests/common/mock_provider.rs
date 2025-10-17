@@ -1,3 +1,11 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(unexpected_cfgs)]
+#![allow(unused_variables)]
+#![allow(clippy::float_cmp)]
+#![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::needless_collect)]
+
 use arkavo_llm::{Message, Provider, StreamResponse};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -5,7 +13,7 @@ use tokio::sync::RwLock;
 use tokio_stream::Stream;
 
 /// Simple mock provider for testing
-pub struct MockProvider {
+pub(crate) struct MockProvider {
     responses: Arc<RwLock<Vec<String>>>,
     current_index: Arc<RwLock<usize>>,
     pub request_count: Arc<RwLock<usize>>,

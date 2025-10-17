@@ -328,7 +328,7 @@ impl DeepSeekClient {
                 StatusCode::UNAUTHORIZED => DeepSeekError::AuthenticationFailed {
                     message: "Invalid API key".to_string(),
                 },
-                _ => DeepSeekError::Other(anyhow::anyhow!("DeepSeek API error: {}", status)),
+                _ => DeepSeekError::Other(anyhow::anyhow!("DeepSeek API error: {status}")),
             })
         }
     }

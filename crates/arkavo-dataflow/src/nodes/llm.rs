@@ -161,7 +161,7 @@ impl LlmTransform {
                     .unwrap_or_else(|_| "http://10.0.0.101:11434".to_string());
                 Ok((remote_url, None))
             }
-            _ => Err(anyhow::anyhow!("Unknown provider: {}", provider_name)),
+            _ => Err(anyhow::anyhow!("Unknown provider: {provider_name}")),
         }
     }
 
@@ -413,6 +413,9 @@ impl Default for LlmTransform {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::collection_is_never_read)]
+#[allow(clippy::needless_collect)]
 mod tests {
     use super::*;
 

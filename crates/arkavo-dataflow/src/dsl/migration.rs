@@ -50,9 +50,7 @@ impl MigrationRegistry {
         }
 
         Err(anyhow::anyhow!(
-            "No migration path found from version {} to {}",
-            from,
-            target
+            "No migration path found from version {from} to {target}"
         ))
     }
 

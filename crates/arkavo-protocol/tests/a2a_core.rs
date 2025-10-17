@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 // Core A2A protocol integration tests
 use arkavo_protocol::{
     file_transfer::{

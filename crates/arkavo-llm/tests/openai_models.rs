@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_llm::providers::openai::{OpenAIConfig, OpenAIProvider};
 use arkavo_llm::{Message, Provider, Role};
 use std::time::Instant;
@@ -35,8 +37,8 @@ async fn test_gpt_4o_model() {
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
-    println!("GPT-5 response time: {:?}", duration);
-    println!("GPT-5 response: {}", response);
+    println!("GPT-5 response time: {duration:?}");
+    println!("GPT-5 response: {response}");
 
     assert!(!response.is_empty());
     assert!(response.to_lowercase().contains("gpt") || response.contains("4o"));
@@ -71,12 +73,14 @@ async fn test_gpt_4_turbo_model() {
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
-    println!("GPT-5 response time: {:?}", duration);
-    println!("GPT-5 haiku:\n{}", response);
+    println!("GPT-5 response time: {duration:?}");
+    println!("GPT-5 haiku:\n{response}");
 
     assert!(!response.is_empty());
-    let lines: Vec<&str> = response.trim().lines().collect();
-    assert!(lines.len() >= 3, "Haiku should have at least 3 lines");
+    assert!(
+        response.trim().lines().count() >= 3,
+        "Haiku should have at least 3 lines"
+    );
 }
 
 #[tokio::test]
@@ -108,10 +112,10 @@ async fn test_gpt_35_turbo_model() {
         .expect("Failed to get response from GPT-5");
     let duration = start.elapsed();
 
-    println!("GPT-5 response time: {:?}", duration);
-    println!("GPT-5 response: {}", response);
+    println!("GPT-5 response time: {duration:?}");
+    println!("GPT-5 response: {response}");
 
-    assert!(response.contains("4"));
+    assert!(response.contains('4'));
 }
 
 #[tokio::test]
@@ -151,19 +155,19 @@ async fn test_model_performance_comparison() {
                 match provider.complete(messages).await {
                     Ok(response) => {
                         let duration = start.elapsed();
-                        println!("Model: {}", model_name);
-                        println!("Response time: {:?}", duration);
+                        println!("Model: {model_name}");
+                        println!("Response time: {duration:?}");
                         println!("Response: {}", response.trim());
                         println!("---");
                     }
                     Err(e) => {
-                        println!("Model: {} - Error: {}", model_name, e);
+                        println!("Model: {model_name} - Error: {e}");
                         println!("---");
                     }
                 }
             }
             Err(e) => {
-                println!("Failed to create provider for {}: {}", model_name, e);
+                println!("Failed to create provider for {model_name}: {e}");
             }
         }
     }
@@ -191,7 +195,7 @@ async fn test_context_window_handling() {
     let messages = vec![
         Message {
             role: Role::System,
-            content: format!("Remember this text: {}", long_text),
+            content: format!("Remember this text: {long_text}"),
             images: None,
         },
         Message {
@@ -249,8 +253,7 @@ async fn test_json_mode_response() {
     let json_result: Result<serde_json::Value, _> = serde_json::from_str(&response);
     assert!(
         json_result.is_ok(),
-        "Response should be valid JSON: {}",
-        response
+        "Response should be valid JSON: {response}"
     );
 
     let json = json_result.unwrap();

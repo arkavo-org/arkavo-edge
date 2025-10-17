@@ -1,3 +1,8 @@
+//! Debug acceptance tests
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_debugger::{Diagnostics, SessionReplay};
 use arkavo_events::{Event, EventPayload};
 use arkavo_memory::storage::MemoryStorage;
@@ -282,5 +287,5 @@ async fn test_debug_agent_analysis() {
     // 4. Compare multiple sessions
 
     // For now, this is a placeholder showing the intended test structure
-    assert!(true, "Debug agent analysis test placeholder");
+    // Placeholder test
 }

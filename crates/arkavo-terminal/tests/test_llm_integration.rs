@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(test)]
 mod llm_integration_tests {
     use arkavo_terminal::{LlmRequest, LlmResponse};

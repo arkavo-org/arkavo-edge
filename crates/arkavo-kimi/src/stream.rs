@@ -154,6 +154,7 @@ impl Stream for SseParser {
 
 /// Parse a single SSE line for testing
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 pub fn parse_sse_line(line: &str) -> Option<Result<StreamChunk>> {
     if let Some(data) = line.strip_prefix("data: ") {
         let trimmed = data.trim();
@@ -173,6 +174,7 @@ pub fn parse_sse_line(line: &str) -> Option<Result<StreamChunk>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 

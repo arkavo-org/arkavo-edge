@@ -292,9 +292,9 @@ impl ROICalculator {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[test]
     fn test_roi_dashboard_calculation() {

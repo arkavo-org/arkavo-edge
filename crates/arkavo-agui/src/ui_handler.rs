@@ -1,6 +1,5 @@
+use axum::{Json, response::IntoResponse};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use warp::{Filter, Reply};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiGenerateRequest {
@@ -35,9 +34,7 @@ impl UiHandler {
         }
     }
 
-    pub async fn handle_generate(
-        request: UiGenerateRequest,
-    ) -> Result<impl Reply, warp::Rejection> {
+    pub async fn handle_generate(Json(request): Json<UiGenerateRequest>) -> impl IntoResponse {
         let response = UiGenerateResponse {
             html: format!("<div class=\"generated-ui\"><h2>{}</h2><p>UI generated based on your request.</p></div>", request.prompt),
             css: ".generated-ui { padding: 20px; background: var(--bg-secondary); border-radius: 8px; }".to_string(),
@@ -47,7 +44,7 @@ impl UiHandler {
             generation_time_ms: 150,
         };
 
-        Ok(warp::reply::json(&response))
+        Json(response)
     }
 }
 
@@ -57,16 +54,8 @@ impl Default for UiHandler {
     }
 }
 
-pub fn create_ui_routes(
-    _handler: Arc<UiHandler>,
-) -> impl warp::Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-    warp::path!("api" / "ui" / "generate")
-        .and(warp::post())
-        .and(warp::body::json())
-        .and_then(UiHandler::handle_generate)
-}
-
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -77,7 +66,6 @@ mod tests {
             context: None,
         };
 
-        let result = UiHandler::handle_generate(request).await;
-        assert!(result.is_ok());
+        let _result = UiHandler::handle_generate(Json(request)).await;
     }
 }

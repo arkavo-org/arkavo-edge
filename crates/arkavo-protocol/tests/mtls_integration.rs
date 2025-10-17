@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_protocol::error::A2aError;
 use arkavo_protocol::http::HttpTransport;
 use arkavo_protocol::transport::{
@@ -34,7 +36,7 @@ fn test_certs_dir() -> PathBuf {
             output.status.success(),
             "Failed to generate test certificates: {}",
             String::from_utf8_lossy(&output.stderr)
-        )
+        );
     }
 
     dir

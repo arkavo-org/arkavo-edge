@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
+use log::{debug, warn};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio_stream::Stream;
-use tracing::{debug, warn};
 
 use super::types::{ChatRequest, ChatResponse};
 use crate::{Error, Message, Provider, Result, StreamResponse};
@@ -80,7 +80,7 @@ impl OllamaClient {
 
         for model in &vision_models {
             if available_models.iter().any(|m| m.contains(model)) {
-                debug!("Selected vision model: {}", model);
+                debug!("Selected vision model: {model}");
                 return Ok((*model).to_string());
             }
         }
@@ -107,7 +107,7 @@ impl OllamaClient {
             let coding_models = ["devstral:latest", "devstral"];
             for model in &coding_models {
                 if available_models.iter().any(|m| m.contains(model)) {
-                    debug!("Selected coding model: {}", model);
+                    debug!("Selected coding model: {model}");
                     return Ok((*model).to_string());
                 }
             }
@@ -133,13 +133,13 @@ impl OllamaClient {
             // For specific version tags like "qwen3:0.6b", do exact matching
             if model.contains(':') {
                 if available_models.iter().any(|m| m == model) {
-                    debug!("Selected general model: {}", model);
+                    debug!("Selected general model: {model}");
                     return Ok((*model).to_string());
                 }
             } else {
                 // For general model names, use contains matching
                 if available_models.iter().any(|m| m.contains(model)) {
-                    debug!("Selected general model: {}", model);
+                    debug!("Selected general model: {model}");
                     return Ok((*model).to_string());
                 }
             }
@@ -147,7 +147,7 @@ impl OllamaClient {
 
         // If no preferred model found, use the first available model
         if let Some(first_model) = available_models.first() {
-            debug!("Using first available model: {}", first_model);
+            debug!("Using first available model: {first_model}");
             Ok(first_model.clone())
         } else {
             Err(crate::Error::Provider(
@@ -255,7 +255,7 @@ impl Provider for OllamaClient {
                                             done: stream_resp.done,
                                         }));
                                     } else {
-                                        warn!("Failed to parse response: {}", line);
+                                        warn!("Failed to parse response: {line}");
                                         responses.push(Err(Error::Json(e)));
                                     }
                                 }

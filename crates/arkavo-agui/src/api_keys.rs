@@ -39,6 +39,7 @@ pub fn set_api_keys(keys: &HashMap<String, String>) {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

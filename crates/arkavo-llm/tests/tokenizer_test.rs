@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(feature = "llm-local")]
 mod tokenizer_tests {
     use arkavo_llm::local::{ModelDownloader, ModelManifest};
@@ -22,7 +24,7 @@ mod tokenizer_tests {
     }
 
     #[tokio::test]
-    #[ignore] // Ignore by default to avoid downloads in CI
+    #[ignore = "Ignore by default to avoid downloads in CI"]
     async fn test_phi2_tokenizer_download() {
         // Load manifest
         let manifest = ModelManifest::load().expect("Failed to load manifest");

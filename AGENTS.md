@@ -247,6 +247,7 @@ When `ARKAVO_DEBUG_CHAT=1`:
   - `xcrun simctl io <device> sendkey` - DOES NOT EXIST
   - Valid simctl io commands are ONLY: enumerate, poll, recordVideo, screenshot
   - For UI automation use: IDB, XCTest, or AppleScript - NOT simctl
+- **Do not use XPC in the Apple ecosystem - it is locked down**. Apple's XPC services and protocols (including webinspectord) use private, undocumented APIs that are not accessible to third-party applications. Safari Web Inspector and other Apple tools have privileged access that cannot be replicated. For WebKit/WKWebView automation, use public APIs like Safari's Develop menu or iOS Simulator with ios-webkit-debug-proxy for iOS targets only.
 - run clippy and cargo fmt before each git push
 - ProTip! Add .patch or .diff to the end of URLs for Git's plaintext views.
 - keep PR titles short and not "feat:". the reason is this is shown prominently in Github next to files and folders

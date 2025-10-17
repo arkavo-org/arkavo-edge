@@ -35,15 +35,13 @@ members = [
     "crates/arkavo-workspace",
     "crates/arkavo-bench",
     "crates/arkavo-ui-generator",
-    "crates/arkavo-ui-live-reload",
-    "crates/arkavo-cef",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.37.0"
+version = "0.36.1"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -98,7 +96,7 @@ similar = "2.6"
 # Terminal and UI
 ratatui = "0.29.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-syntect = { version = "5.2", default-features = false }
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 indicatif = "0.17"
 
 # Git and filesystem
@@ -135,9 +133,9 @@ mdns-sd = "0.14"
 # LLM and ML
 tokenizers = { version = "0.21.2", default-features = false, features = ["fancy-regex"] }
 hf-hub = { version = "0.4.3", default-features = false, features = ["tokio", "rustls-tls"] }
-candle-core = "0.9.1"
-candle-nn = "0.9.1"
-candle-transformers = "0.9.1"
+candle-core = { version = "0.9.1", default-features = false }
+candle-nn = { version = "0.9.1", default-features = false }
+candle-transformers = { version = "0.9.1", default-features = false }
 fastembed = "4"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.6"
@@ -164,6 +162,8 @@ split-debuginfo = "unpacked"
 incremental = true
 debug-assertions = true
 overflow-checks = true
+lto = "thin"
+codegen-units = 16
 
 # Speed up compiling build scripts and proc-macro deps in dev
 [profile.dev.build-override]

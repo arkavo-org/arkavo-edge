@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods)]
 #![cfg(target_os = "macos")]
 
 use arkavo_mcp_macos::mcp::calibration::server::{
@@ -143,14 +144,14 @@ async fn test_calibration_with_real_simulator() {
     let mut device_id = None;
     if let Some(devices) = json["devices"].as_object() {
         for (_runtime, device_list) in devices {
-            if let Some(array) = device_list.as_array() {
-                if let Some(first_device) = array.first() {
-                    device_id = first_device["udid"]
-                        .as_str()
-                        .map(std::string::ToString::to_string);
-                    if device_id.is_some() {
-                        break;
-                    }
+            if let Some(array) = device_list.as_array()
+                && let Some(first_device) = array.first()
+            {
+                device_id = first_device["udid"]
+                    .as_str()
+                    .map(std::string::ToString::to_string);
+                if device_id.is_some() {
+                    break;
                 }
             }
         }

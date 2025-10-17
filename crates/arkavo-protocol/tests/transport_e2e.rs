@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use arkavo_protocol::{
     A2aEndpoint, A2aRequest, A2aTransport, HttpTransport, TransportConfig, WebSocketTransport,
 };

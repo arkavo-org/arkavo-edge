@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 // Hot-reload configuration parser tests
 // The async file watcher tests are excluded as they would run indefinitely
 // Use the manual test scripts for integration testing of the hot-reload functionality

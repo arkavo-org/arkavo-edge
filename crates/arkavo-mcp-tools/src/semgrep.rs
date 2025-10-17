@@ -190,6 +190,7 @@ impl Tool for SemgrepTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // tokio::test uses block_on internally
 mod tests {
     use super::*;
 

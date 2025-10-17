@@ -137,10 +137,10 @@ impl Pipeline {
             sender
                 .send(message)
                 .await
-                .map_err(|_| anyhow::anyhow!("Failed to send message to node {}", node_id))?;
+                .map_err(|_| anyhow::anyhow!("Failed to send message to node {node_id}"))?;
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Node {} not found", node_id))
+            Err(anyhow::anyhow!("Node {node_id} not found"))
         }
     }
 
@@ -238,6 +238,8 @@ impl Message {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::assertions_on_constants)]
 mod tests {
     use super::*;
     use crate::dsl::{Blueprint, Link, Node};

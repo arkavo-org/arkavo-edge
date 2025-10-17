@@ -1,3 +1,8 @@
+//! IDB recovery tests
+//!
+//! These tests use #[tokio::test] which internally uses Runtime::block_on.
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(target_os = "macos")]
 use arkavo_mcp_macos::mcp::idb_recovery::IdbRecovery;
 

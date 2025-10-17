@@ -5,11 +5,23 @@ use crate::debug_handler::DebugHandler;
 use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::types::ConfigError;
+use axum::{
+    Json, Router,
+    extract::{
+        Path as AxumPath, State,
+        ws::{Message, WebSocket},
+    },
+    response::{
+        Html, IntoResponse, Response,
+        sse::{Event, Sse},
+    },
+    routing::{get, post},
+};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use warp::Filter;
 
 /// Connection information for active WebSocket clients
 struct ConnectionInfo {
@@ -18,6 +30,19 @@ struct ConnectionInfo {
     subscriptions: Vec<SubscriptionHandle>,
     current_plan: Option<Vec<arkavo_ui_generator::planner::ComponentPart>>,
     current_prompt: Option<String>,
+}
+
+#[derive(Clone)]
+struct AppState {
+    connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
+    agents: Arc<RwLock<Vec<serde_json::Value>>>,
+    agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
+    budget_handler: Arc<RwLock<BudgetHandler>>,
+    initial_prompt: Arc<RwLock<Option<String>>>,
+    dataflow_handler: Arc<DataflowHandler>,
+    telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
+    debug_handler: Option<Arc<DebugHandler>>,
+    blank_mode: bool,
 }
 
 pub struct AgUiGateway {
@@ -267,149 +292,36 @@ impl AgUiGateway {
             }
         });
 
-        // Serve static files
-        let index_file = warp::get()
-            .and(warp::path::end())
-            .map(|| warp::reply::html(include_str!("../static/shell.html")));
-
-        let static_js = warp::path("static")
-            .and(warp::path("toolbar.js"))
-            .and(warp::get())
-            .map(|| {
-                warp::reply::with_header(
-                    include_str!("../static/toolbar.js"),
-                    "Content-Type",
-                    "application/javascript",
-                )
-            });
-
-        let chat_ui = warp::path("chat")
-            .and(warp::get())
-            .map(|| warp::reply::html(include_str!("../static/index-agui.html")));
-
-        // WebSocket endpoint for AG-UI protocol
-        let connections = self.connections.clone();
-        let agents_for_ws = discovered_agents.clone();
-        let agent_connections_for_ws = self.agent_connections.clone();
-        let budget_handler_for_ws = self.budget_handler.clone();
-        let initial_prompt_for_ws = Arc::new(RwLock::new(self.initial_prompt.clone()));
-
-        let websocket = warp::path("ws")
-            .and(warp::ws())
-            .and(warp::any().map(move || connections.clone()))
-            .and(warp::any().map(move || agents_for_ws.clone()))
-            .and(warp::any().map(move || agent_connections_for_ws.clone()))
-            .and(warp::any().map(move || budget_handler_for_ws.clone()))
-            .and(warp::any().map(move || initial_prompt_for_ws.clone()))
-            .map(
-                |ws: warp::ws::Ws,
-                 connections,
-                 agents,
-                 agent_connections,
-                 budget_handler,
-                 initial_prompt| {
-                    ws.on_upgrade(move |socket| {
-                        handle_websocket(
-                            socket,
-                            connections,
-                            agents,
-                            agent_connections,
-                            budget_handler,
-                            initial_prompt,
-                        )
-                    })
-                },
-            );
-
-        // SSE endpoint for legacy agent discovery (to be deprecated)
-        let agents_for_sse = discovered_agents.clone();
-        let agent_events = warp::path("events")
-            .and(warp::get())
-            .and(warp::any().map(move || agents_for_sse.clone()))
-            .map(|agents: Arc<RwLock<Vec<serde_json::Value>>>| {
-                use futures::stream;
-                use warp::sse::Event;
-
-                let event_stream = stream::unfold(agents, |agents| async move {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                    let agents_list = agents.read().await.clone();
-                    let response = serde_json::json!({ "agents": agents_list });
-
-                    let event = Event::default()
-                        .event("discovery")
-                        .data(response.to_string());
-
-                    Some((Ok::<_, warp::Error>(event), agents))
-                });
-
-                warp::sse::reply(event_stream)
-            });
-
-        // Agent proxy endpoint for JSON-RPC calls
-        let agents_for_proxy = discovered_agents.clone();
-        let agent_proxy = warp::path!("agent" / String)
-            .and(warp::post())
-            .and(warp::body::json())
-            .and(warp::any().map(move || agents_for_proxy.clone()))
-            .and_then(handle_agent_proxy);
-
-        // Dataflow API endpoint
-        let dataflow_handler = self.dataflow_handler.clone();
-        let dataflow_api =
-            warp::path("api")
-                .and(warp::path("dataflow"))
-                .and(warp::path::tail())
-                .and(warp::body::json())
-                .and(warp::any().map(move || dataflow_handler.clone()))
-                .and_then(
-                    |path: warp::path::Tail,
-                     body: serde_json::Value,
-                     handler: Arc<DataflowHandler>| async move {
-                        let path_vec = path
-                            .as_str()
-                            .split('/')
-                            .map(|s| s.to_string())
-                            .collect::<Vec<String>>();
-                        handler.handle_request(path_vec, body).await
-                    },
-                );
-
-        // Telemetry WebSocket endpoint
+        // Create shared state for handlers
         let telemetry_rx = self
             .telemetry_rx
             .take()
             .expect("telemetry_rx already taken");
-        let telemetry_broadcast = Arc::new(RwLock::new(telemetry_rx));
-        let telemetry_for_ws = telemetry_broadcast.clone();
 
-        let telemetry_ws = warp::path("telemetry")
-            .and(warp::ws())
-            .and(warp::any().map(move || telemetry_for_ws.clone()))
-            .map(|ws: warp::ws::Ws, telemetry| {
-                ws.on_upgrade(move |socket| handle_telemetry_websocket(socket, telemetry))
-            });
+        let state = AppState {
+            connections: self.connections.clone(),
+            agents: discovered_agents.clone(),
+            agent_connections: self.agent_connections.clone(),
+            budget_handler: self.budget_handler.clone(),
+            initial_prompt: Arc::new(RwLock::new(self.initial_prompt.clone())),
+            dataflow_handler: self.dataflow_handler.clone(),
+            telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
+            debug_handler: self.debug_handler.clone(),
+            blank_mode: self.blank_mode,
+        };
 
-        // Debug WebSocket endpoint
-        let debug_handler_for_ws = self.debug_handler.clone();
-        let debug_ws = warp::path("debug")
-            .and(warp::ws())
-            .and(warp::any().map(move || debug_handler_for_ws.clone()))
-            .map(
-                |ws: warp::ws::Ws, debug_handler: Option<Arc<DebugHandler>>| {
-                    ws.on_upgrade(move |socket| handle_debug_websocket(socket, debug_handler))
-                },
-            );
-
-        let routes = index_file
-            .or(static_js)
-            .or(chat_ui)
-            .or(websocket)
-            .or(agent_events)
-            .or(agent_proxy)
-            .or(dataflow_api)
-            .or(telemetry_ws)
-            .or(debug_ws);
+        // Build axum router
+        let app = Router::new()
+            .route("/", get(index_handler))
+            .route("/static/toolbar.js", get(static_js_handler))
+            .route("/chat", get(chat_ui_handler))
+            .route("/ws", get(websocket_handler))
+            .route("/events", get(sse_handler))
+            .route("/agent/:id", post(agent_proxy_handler))
+            .route("/api/dataflow/*path", post(dataflow_handler))
+            .route("/telemetry", get(telemetry_websocket_handler))
+            .route("/debug", get(debug_websocket_handler))
+            .with_state(state);
 
         let addr: SocketAddr = ([0, 0, 0, 0], self.port).into();
         println!("Starting AG-UI Gateway on http://127.0.0.1:{}", self.port);
@@ -420,38 +332,131 @@ impl AgUiGateway {
         );
         println!("Open http://127.0.0.1:{} in your web browser", self.port);
 
-        warp::serve(routes).run(addr).await;
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
 
         Ok(())
     }
 }
 
+async fn index_handler(State(state): State<AppState>) -> Html<&'static str> {
+    if state.blank_mode {
+        Html(include_str!("../static/shell.html"))
+    } else {
+        Html(include_str!("../static/dashboard.html"))
+    }
+}
+
+async fn static_js_handler() -> Response {
+    use axum::{body::Body, http::header};
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/javascript")
+        .body(Body::from(include_str!("../static/toolbar.js")))
+        .unwrap()
+        .into_response()
+}
+
+async fn chat_ui_handler() -> Html<&'static str> {
+    Html(include_str!("../static/index-agui.html"))
+}
+
+async fn websocket_handler(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(|socket| {
+        handle_websocket(
+            socket,
+            state.connections,
+            state.agents,
+            state.agent_connections,
+            state.budget_handler,
+            state.initial_prompt,
+        )
+    })
+}
+
+async fn sse_handler(
+    State(state): State<AppState>,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    use futures::stream;
+
+    let agents = state.agents;
+    let event_stream = stream::unfold(agents, |agents| async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        let agents_list = agents.read().await.clone();
+        let response = serde_json::json!({ "agents": agents_list });
+
+        let event = Event::default()
+            .event("discovery")
+            .data(response.to_string());
+
+        Some((Ok::<_, Infallible>(event), agents))
+    });
+
+    Sse::new(event_stream)
+}
+
+async fn agent_proxy_handler(
+    AxumPath(agent_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    handle_agent_proxy(agent_id, body, state.agents).await
+}
+
+async fn dataflow_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(path): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let path_vec = path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+
+    state.dataflow_handler.handle_request(path_vec, body).await
+}
+
+async fn telemetry_websocket_handler(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(|socket| handle_telemetry_websocket(socket, state.telemetry_rx))
+}
+
+async fn debug_websocket_handler(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
+    ws.on_upgrade(|socket| handle_debug_websocket(socket, state.debug_handler))
+}
+
 async fn handle_websocket(
-    ws: warp::ws::WebSocket,
+    ws: WebSocket,
     connections: Arc<RwLock<HashMap<String, ConnectionInfo>>>,
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
     agent_connections: Arc<RwLock<HashMap<String, Arc<AgentConnection>>>>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
     initial_prompt: Arc<RwLock<Option<String>>>,
 ) {
-    use futures::StreamExt;
-
-    let (ws_sink, mut ws_stream) = ws.split();
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // Create bounded channel for back-pressure handling
     let (tx, mut rx) = mpsc::channel::<AgUiEvent>(32);
 
     // Spawn task to forward messages from channel to WebSocket
+    let ws_clone = Arc::new(tokio::sync::Mutex::new(ws));
+    let ws_for_forward = ws_clone.clone();
     let forward_task = tokio::spawn(async move {
-        use futures::SinkExt;
-        let mut ws_tx = ws_sink;
-
         while let Some(event) = rx.recv().await {
-            if let Ok(json) = serde_json::to_string(&event)
-                && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
-            {
-                break; // WebSocket closed
+            if let Ok(json) = serde_json::to_string(&event) {
+                let mut ws_guard = ws_for_forward.lock().await;
+                if ws_guard.send(Message::Text(json)).await.is_err() {
+                    break; // WebSocket closed
+                }
             }
         }
     });
@@ -483,41 +488,47 @@ async fn handle_websocket(
     }
 
     // Handle incoming messages
-    while let Some(result) = ws_stream.next().await {
-        match result {
-            Ok(msg) => {
-                if let Ok(text) = msg.to_str() {
-                    match serde_json::from_str::<AgUiEvent>(text) {
-                        Ok(event) => {
-                            if let Err(e) = handle_event(
-                                event,
-                                &session_id,
-                                &connections,
-                                &agents,
-                                &agent_connections,
-                                &budget_handler,
-                                &tx,
-                            )
-                            .await
-                            {
-                                eprintln!("AG-UI: Error handling event: {e}");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("AG-UI: Failed to parse event: {e}");
-                            let error = AgUiEvent::Error {
-                                code: "INVALID_EVENT".to_string(),
-                                message: format!("Failed to parse event: {e}"),
-                            };
-                            let _ = tx.send(error).await;
-                        }
+    let ws_for_recv = ws_clone.clone();
+    loop {
+        let msg = {
+            let mut ws_guard = ws_for_recv.lock().await;
+            ws_guard.recv().await
+        };
+
+        match msg {
+            Some(Ok(Message::Text(text))) => match serde_json::from_str::<AgUiEvent>(&text) {
+                Ok(event) => {
+                    if let Err(e) = handle_event(
+                        event,
+                        &session_id,
+                        &connections,
+                        &agents,
+                        &agent_connections,
+                        &budget_handler,
+                        &tx,
+                    )
+                    .await
+                    {
+                        eprintln!("AG-UI: Error handling event: {e}");
                     }
                 }
+                Err(e) => {
+                    eprintln!("AG-UI: Failed to parse event: {e}");
+                    let error = AgUiEvent::Error {
+                        code: "INVALID_EVENT".to_string(),
+                        message: format!("Failed to parse event: {e}"),
+                    };
+                    let _ = tx.send(error).await;
+                }
+            },
+            Some(Ok(Message::Close(_))) | None => {
+                break;
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 eprintln!("AG-UI: WebSocket error: {e}");
                 break;
             }
+            _ => {}
         }
     }
 
@@ -1165,7 +1176,7 @@ async fn handle_agent_proxy(
     agent_id: String,
     body: serde_json::Value,
     agents: Arc<RwLock<Vec<serde_json::Value>>>,
-) -> Result<impl warp::Reply, warp::Rejection> {
+) -> Json<serde_json::Value> {
     // Find the agent
     let agents_list = agents.read().await;
     let agent = agents_list
@@ -1177,7 +1188,7 @@ async fn handle_agent_proxy(
             // Forward the request to the agent
             let request_id = body.get("id").cloned();
             match forward_to_agent(endpoint, body).await {
-                Ok(response) => Ok(warp::reply::json(&response)),
+                Ok(response) => Json(response),
                 Err(e) => {
                     let error_response = serde_json::json!({
                         "jsonrpc": "2.0",
@@ -1187,7 +1198,7 @@ async fn handle_agent_proxy(
                         },
                         "id": request_id
                     });
-                    Ok(warp::reply::json(&error_response))
+                    Json(error_response)
                 }
             }
         } else {
@@ -1199,7 +1210,7 @@ async fn handle_agent_proxy(
                 },
                 "id": body.get("id").cloned()
             });
-            Ok(warp::reply::json(&error_response))
+            Json(error_response)
         }
     } else {
         let error_response = serde_json::json!({
@@ -1210,7 +1221,7 @@ async fn handle_agent_proxy(
             },
             "id": body.get("id").cloned()
         });
-        Ok(warp::reply::json(&error_response))
+        Json(error_response)
     }
 }
 
@@ -1233,13 +1244,9 @@ async fn forward_to_agent(
 }
 
 async fn handle_telemetry_websocket(
-    ws: warp::ws::WebSocket,
+    mut ws: WebSocket,
     telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
 ) {
-    use futures::{SinkExt, StreamExt};
-
-    let (mut ws_tx, _ws_rx) = ws.split();
-
     println!("New telemetry WebSocket connection");
 
     // Take ownership of the receiver
@@ -1248,7 +1255,7 @@ async fn handle_telemetry_websocket(
     // Forward telemetry events to WebSocket
     while let Some(event) = rx.recv().await {
         if let Ok(json) = serde_json::to_string(&event)
-            && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
+            && ws.send(Message::Text(json)).await.is_err()
         {
             break;
         }
@@ -1257,11 +1264,7 @@ async fn handle_telemetry_websocket(
     println!("Telemetry WebSocket connection closed");
 }
 
-async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<Arc<DebugHandler>>) {
-    use futures::{SinkExt, StreamExt};
-
-    let (ws_sink, mut ws_stream) = ws.split();
-
+async fn handle_debug_websocket(mut ws: WebSocket, debug_handler: Option<Arc<DebugHandler>>) {
     if let Some(handler) = debug_handler {
         println!("New debug WebSocket connection");
 
@@ -1269,24 +1272,30 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         let (tx, mut rx) = mpsc::channel::<AgUiEvent>(100);
 
         // Spawn task to forward events
+        let ws_clone = Arc::new(tokio::sync::Mutex::new(ws));
+        let ws_for_forward = ws_clone.clone();
         let forward_task = tokio::spawn(async move {
-            let mut ws_tx = ws_sink;
             while let Some(event) = rx.recv().await {
-                if let Ok(json) = serde_json::to_string(&event)
-                    && ws_tx.send(warp::ws::Message::text(json)).await.is_err()
-                {
-                    break;
+                if let Ok(json) = serde_json::to_string(&event) {
+                    let mut ws_guard = ws_for_forward.lock().await;
+                    if ws_guard.send(Message::Text(json)).await.is_err() {
+                        break;
+                    }
                 }
             }
         });
 
         // Handle incoming debug commands
-        while let Some(result) = ws_stream.next().await {
-            match result {
-                Ok(msg) => {
-                    if let Ok(text) = msg.to_str()
-                        && let Ok(cmd) = serde_json::from_str::<DebugCommand>(text)
-                    {
+        let ws_for_recv = ws_clone.clone();
+        loop {
+            let msg = {
+                let mut ws_guard = ws_for_recv.lock().await;
+                ws_guard.recv().await
+            };
+
+            match msg {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(cmd) = serde_json::from_str::<DebugCommand>(&text) {
                         match cmd {
                             DebugCommand::SubscribeSession { session_id } => {
                                 let _ = handler.subscribe_to_session(session_id, tx.clone()).await;
@@ -1399,7 +1408,9 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
                         }
                     }
                 }
-                Err(_) => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(_)) => break,
+                _ => {}
             }
         }
 
@@ -1407,14 +1418,12 @@ async fn handle_debug_websocket(ws: warp::ws::WebSocket, debug_handler: Option<A
         println!("Debug WebSocket connection closed");
     } else {
         // Debug handler not available
-        use futures::SinkExt;
-        let mut ws_tx = ws_sink;
         let error = AgUiEvent::Error {
             code: "DEBUG_DISABLED".to_string(),
             message: "Debug handler not configured".to_string(),
         };
         if let Ok(json) = serde_json::to_string(&error) {
-            let _ = ws_tx.send(warp::ws::Message::text(json)).await;
+            let _ = ws.send(Message::Text(json)).await;
         }
     }
 }

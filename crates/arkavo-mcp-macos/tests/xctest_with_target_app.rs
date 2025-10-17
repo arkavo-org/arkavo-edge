@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod tests {

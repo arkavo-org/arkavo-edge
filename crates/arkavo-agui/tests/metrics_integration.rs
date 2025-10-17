@@ -1,3 +1,7 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::needless_collect)]
+#![allow(clippy::float_cmp)]
+
 use arkavo_observability::metrics_snapshot::{
     MetricsSampler, MetricsSamplerConfig, MetricsSnapshot,
 };
