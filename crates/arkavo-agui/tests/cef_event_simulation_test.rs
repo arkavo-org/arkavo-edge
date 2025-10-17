@@ -1,7 +1,7 @@
 #![cfg(feature = "cef-ui")]
 
-use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 use arkavo_agui::renderer::UiRenderer;
+use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
@@ -29,7 +29,10 @@ async fn test_event_simulation() {
     let events_clone = events_received.clone();
 
     renderer.set_event_callback(move |event| {
-        println!("✓ Event received: {} on {}", event.event_type, event.selector);
+        println!(
+            "✓ Event received: {} on {}",
+            event.event_type, event.selector
+        );
         println!("  Target ID: {}", event.target_id);
         println!("  Value: {}", event.value);
         println!("  Data: {}", event.data);
