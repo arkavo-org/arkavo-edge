@@ -26,6 +26,8 @@ set(ARKAVO_CEF_SOURCES
     dom_executor.h
     uds_client.cc
     uds_client.h
+    event_handler.cc
+    event_handler.h
 )
 
 if(APPLE)

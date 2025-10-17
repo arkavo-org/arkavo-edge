@@ -47,11 +47,16 @@ void DOMExecutor::RegisterEventBridge() {
        << "      console.error('ArkavoEventBridge: Invalid event object');"
        << "      return;"
        << "    }"
-       << "    window.__arkavoEventQueue = window.__arkavoEventQueue || [];"
-       << "    window.__arkavoEventQueue.push(event);"
+       << "    if (typeof window.arkavoPushEvent === 'function') {"
+       << "      window.arkavoPushEvent(event);"
+       << "    } else {"
+       << "      console.warn('arkavoPushEvent not available, queueing event');"
+       << "      window.__arkavoEventQueue = window.__arkavoEventQueue || [];"
+       << "      window.__arkavoEventQueue.push(event);"
+       << "    }"
        << "  };"
        << "  window.__arkavoEventQueue = [];"
-       << "  console.log('ArkavoEventBridge registered');"
+       << "  console.log('ArkavoEventBridge registered (push mode)');"
        << "})();";
 
     frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);

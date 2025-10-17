@@ -1,5 +1,6 @@
 #include "cef_app.h"
 #include "dom_executor.h"
+#include "event_handler.h"
 #include <iostream>
 
 ArkavoRenderProcessHandler::ArkavoRenderProcessHandler(const std::string& socket_path)
@@ -11,7 +12,16 @@ void ArkavoRenderProcessHandler::OnContextCreated(
     CefRefPtr<CefFrame> frame,
     CefRefPtr<CefV8Context> context) {
 
-    std::cout << "Arkavo CEF context created (single-process: DOMExecutor already initialized in OnAfterCreated)" << std::endl;
+    std::cout << "Arkavo CEF context created - registering V8 event handler" << std::endl;
+
+    CefRefPtr<CefV8Value> global = context->GetGlobal();
+
+    CefRefPtr<ArkavoEventHandler> handler = new ArkavoEventHandler();
+    CefRefPtr<CefV8Value> func = CefV8Value::CreateFunction("arkavoPushEvent", handler);
+
+    global->SetValue("arkavoPushEvent", func, V8_PROPERTY_ATTRIBUTE_NONE);
+
+    std::cout << "V8 function 'arkavoPushEvent' registered for direct event pushing" << std::endl;
 }
 
 void ArkavoRenderProcessHandler::OnContextReleased(
