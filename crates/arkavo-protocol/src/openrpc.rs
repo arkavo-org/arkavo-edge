@@ -1,7 +1,9 @@
 use crate::types::{
-    AgentDiscoverFilter, DiscoveredAgent, Message, MessagePart, MessageSendRequest,
-    MessageSendResponse, TaskCancelRequest, TaskCancelResponse, TaskCapability,
+    AgentDiscoverFilter, Attachment, ChatCapabilities, ChatOpenRequest, ChatSession,
+    DiscoveredAgent, Message, MessageDelta, MessageDeltaContent, MessagePart, MessageSendRequest,
+    MessageSendResponse, StreamEndReason, TaskCancelRequest, TaskCancelResponse, TaskCapability,
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskRequest, TaskResponse, TaskStatus,
+    UserMessage,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -124,6 +126,22 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
             }),
         },
         methods: vec![
+            // Introspection
+            OpenRpcMethod {
+                name: "rpc.discover".to_string(),
+                description: Some("Returns OpenRPC schema document".to_string()),
+                summary: Some("OpenRPC discovery".to_string()),
+                params: vec![],
+                result: OpenRpcResult {
+                    name: "schema".to_string(),
+                    description: Some("OpenRPC schema document".to_string()),
+                    schema: json!({
+                        "type": "object"
+                    }),
+                },
+                errors: None,
+                examples: None,
+            },
             OpenRpcMethod {
                 name: "task_request".to_string(),
                 description: Some("Request a task from another agent".to_string()),
@@ -292,6 +310,130 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                 errors: None,
                 examples: None,
             },
+            // Chat Protocol Methods
+            OpenRpcMethod {
+                name: "chat_open".to_string(),
+                description: Some("Open a new chat session with the agent".to_string()),
+                summary: Some("Open chat session".to_string()),
+                params: vec![OpenRpcParam {
+                    name: "request".to_string(),
+                    description: Some(
+                        "Chat open request with optional context and metadata".to_string(),
+                    ),
+                    required: Some(true),
+                    schema: serde_json::to_value(schema_for!(ChatOpenRequest)).unwrap(),
+                }],
+                result: OpenRpcResult {
+                    name: "session".to_string(),
+                    description: Some("Chat session with session ID and capabilities".to_string()),
+                    schema: serde_json::to_value(schema_for!(ChatSession)).unwrap(),
+                },
+                errors: Some(vec![
+                    OpenRpcError {
+                        code: -32004,
+                        message: "Authentication failed".to_string(),
+                        data: None,
+                    },
+                    OpenRpcError {
+                        code: -32003,
+                        message: "Rate limit exceeded".to_string(),
+                        data: None,
+                    },
+                ]),
+                examples: Some(vec![OpenRpcExample {
+                    name: Some("Open new chat session".to_string()),
+                    description: None,
+                    params: vec![OpenRpcExampleParam {
+                        name: "request".to_string(),
+                        value: json!({
+                            "context": {"user_id": "user123"},
+                            "metadata": {"source": "mobile_app"}
+                        }),
+                    }],
+                    result: Some(json!({
+                        "session_id": "sess_abc123",
+                        "created_at": "2025-01-16T10:00:00Z",
+                        "capabilities": {
+                            "supports_attachments": false,
+                            "supports_tools": true
+                        }
+                    })),
+                }]),
+            },
+            OpenRpcMethod {
+                name: "chat_send".to_string(),
+                description: Some("Send a message within an existing chat session".to_string()),
+                summary: Some("Send chat message".to_string()),
+                params: vec![
+                    OpenRpcParam {
+                        name: "session_id".to_string(),
+                        description: Some("The session ID from chat_open".to_string()),
+                        required: Some(true),
+                        schema: json!({
+                            "type": "string"
+                        }),
+                    },
+                    OpenRpcParam {
+                        name: "message".to_string(),
+                        description: Some(
+                            "User message with content and optional attachments".to_string(),
+                        ),
+                        required: Some(true),
+                        schema: serde_json::to_value(schema_for!(UserMessage)).unwrap(),
+                    },
+                ],
+                result: OpenRpcResult {
+                    name: "result".to_string(),
+                    description: Some("Empty result on success".to_string()),
+                    schema: json!({
+                        "type": "null"
+                    }),
+                },
+                errors: Some(vec![
+                    OpenRpcError {
+                        code: -32001,
+                        message: "Session not found".to_string(),
+                        data: None,
+                    },
+                    OpenRpcError {
+                        code: -32002,
+                        message: "Buffer full".to_string(),
+                        data: None,
+                    },
+                    OpenRpcError {
+                        code: -32003,
+                        message: "Rate limit exceeded".to_string(),
+                        data: None,
+                    },
+                ]),
+                examples: None,
+            },
+            OpenRpcMethod {
+                name: "chat_close".to_string(),
+                description: Some("Close an existing chat session".to_string()),
+                summary: Some("Close chat session".to_string()),
+                params: vec![OpenRpcParam {
+                    name: "session_id".to_string(),
+                    description: Some("The session ID to close".to_string()),
+                    required: Some(true),
+                    schema: json!({
+                        "type": "string"
+                    }),
+                }],
+                result: OpenRpcResult {
+                    name: "result".to_string(),
+                    description: Some("Empty result on success".to_string()),
+                    schema: json!({
+                        "type": "null"
+                    }),
+                },
+                errors: Some(vec![OpenRpcError {
+                    code: -32001,
+                    message: "Session not found".to_string(),
+                    data: None,
+                }]),
+                examples: None,
+            },
         ],
         components: Some(OpenRpcComponents {
             schemas: Some({
@@ -373,6 +515,47 @@ pub fn generate_openrpc_schema() -> OpenRpcDocument {
                     serde_json::to_value(schema_for!(TaskCancelResponse)).unwrap(),
                 );
 
+                // Chat Protocol Schemas
+                schemas.insert(
+                    "ChatOpenRequest".to_string(),
+                    serde_json::to_value(schema_for!(ChatOpenRequest)).unwrap(),
+                );
+
+                schemas.insert(
+                    "ChatSession".to_string(),
+                    serde_json::to_value(schema_for!(ChatSession)).unwrap(),
+                );
+
+                schemas.insert(
+                    "ChatCapabilities".to_string(),
+                    serde_json::to_value(schema_for!(ChatCapabilities)).unwrap(),
+                );
+
+                schemas.insert(
+                    "UserMessage".to_string(),
+                    serde_json::to_value(schema_for!(UserMessage)).unwrap(),
+                );
+
+                schemas.insert(
+                    "Attachment".to_string(),
+                    serde_json::to_value(schema_for!(Attachment)).unwrap(),
+                );
+
+                schemas.insert(
+                    "MessageDelta".to_string(),
+                    serde_json::to_value(schema_for!(MessageDelta)).unwrap(),
+                );
+
+                schemas.insert(
+                    "MessageDeltaContent".to_string(),
+                    serde_json::to_value(schema_for!(MessageDeltaContent)).unwrap(),
+                );
+
+                schemas.insert(
+                    "StreamEndReason".to_string(),
+                    serde_json::to_value(schema_for!(StreamEndReason)).unwrap(),
+                );
+
                 schemas
             }),
         }),
@@ -420,6 +603,9 @@ mod tests {
         assert!(json.contains("task_request"));
         assert!(json.contains("task_declare"));
         assert!(json.contains("agent_discover"));
+        assert!(json.contains("chat_open"));
+        assert!(json.contains("chat_send"));
+        assert!(json.contains("chat_close"));
     }
 
     #[test]
@@ -432,5 +618,9 @@ mod tests {
         assert!(schemas.contains_key("TaskStatus"));
         assert!(schemas.contains_key("TaskRequest"));
         assert!(schemas.contains_key("TaskResponse"));
+        assert!(schemas.contains_key("ChatOpenRequest"));
+        assert!(schemas.contains_key("ChatSession"));
+        assert!(schemas.contains_key("UserMessage"));
+        assert!(schemas.contains_key("MessageDelta"));
     }
 }
