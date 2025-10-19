@@ -5,7 +5,7 @@
 #include <cstring>
 
 UdsClient::UdsClient(const std::string& socket_path)
-    : socket_path_(socket_path), sock_fd_(-1), running_(false) {
+    : socket_path_(socket_path), sock_fd_(-1), server_fd_(-1), running_(false), connected_(false) {
 }
 
 UdsClient::~UdsClient() {
@@ -13,8 +13,8 @@ UdsClient::~UdsClient() {
 }
 
 bool UdsClient::Bind() {
-    sock_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock_fd_ < 0) {
+    server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd_ < 0) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
         return false;
     }
@@ -26,42 +26,66 @@ bool UdsClient::Bind() {
 
     unlink(socket_path_.c_str());
 
-    if (bind(sock_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    if (bind(server_fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         std::cerr << "Failed to bind socket: " << strerror(errno) << std::endl;
-        close(sock_fd_);
-        sock_fd_ = -1;
+        close(server_fd_);
+        server_fd_ = -1;
         return false;
     }
 
-    if (listen(sock_fd_, 1) < 0) {
+    if (listen(server_fd_, 1) < 0) {
         std::cerr << "Failed to listen on socket: " << strerror(errno) << std::endl;
-        close(sock_fd_);
-        sock_fd_ = -1;
+        close(server_fd_);
+        server_fd_ = -1;
         return false;
     }
 
     std::cout << "UDS server listening at " << socket_path_ << std::endl;
 
-    int client_fd = accept(sock_fd_, NULL, NULL);
+    accept_thread_ = std::thread([this]() {
+        AcceptLoop();
+    });
+
+    return true;
+}
+
+void UdsClient::AcceptLoop() {
+    int client_fd = accept(server_fd_, NULL, NULL);
     if (client_fd < 0) {
         std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;
-        close(sock_fd_);
-        sock_fd_ = -1;
-        return false;
+        return;
     }
 
-    close(sock_fd_);
-    sock_fd_ = client_fd;
+    {
+        std::lock_guard<std::mutex> lock(fd_mutex_);
+        sock_fd_ = client_fd;
+        connected_ = true;
+    }
+
+    close(server_fd_);
+    server_fd_ = -1;
+
     std::cout << "UDS client connected" << std::endl;
-    return true;
 }
 
 void UdsClient::Disconnect() {
     StopListening();
 
-    if (sock_fd_ >= 0) {
-        close(sock_fd_);
-        sock_fd_ = -1;
+    if (server_fd_ >= 0) {
+        close(server_fd_);
+        server_fd_ = -1;
+    }
+
+    if (accept_thread_.joinable()) {
+        accept_thread_.join();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(fd_mutex_);
+        if (sock_fd_ >= 0) {
+            close(sock_fd_);
+            sock_fd_ = -1;
+        }
     }
 }
 
@@ -124,7 +148,9 @@ void UdsClient::ListenLoop() {
 }
 
 bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
-    if (sock_fd_ < 0) {
+    std::lock_guard<std::mutex> lock(fd_mutex_);
+
+    if (sock_fd_ < 0 || !connected_) {
         return false;
     }
 
@@ -168,7 +194,9 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 }
 
 bool UdsClient::SendEvent(const DOMEvent& event) {
-    if (sock_fd_ < 0) {
+    std::lock_guard<std::mutex> lock(fd_mutex_);
+
+    if (sock_fd_ < 0 || !connected_) {
         return false;
     }
 

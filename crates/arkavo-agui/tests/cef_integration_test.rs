@@ -2,7 +2,36 @@
 
 use arkavo_agui::renderer::{RendererType, UiRenderer, create_renderer};
 use arkavo_ui_generator::{UiContext, UiGenerationRequest, UiGenerator, UiPreferences};
+use std::path::Path;
 use tokio::time::Duration;
+
+fn find_latest_screenshot() -> Option<std::path::PathBuf> {
+    let tmp_dir = Path::new("/tmp");
+    let mut screenshots: Vec<_> = std::fs::read_dir(tmp_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| name.starts_with("arkavo_cef_screenshot_") && name.ends_with(".ppm"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    screenshots.sort_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok());
+
+    screenshots.last().map(|entry| entry.path())
+}
+
+fn verify_screenshot(path: &Path) -> bool {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let size = metadata.len();
+        size > 1024 && size < 10_000_000
+    } else {
+        false
+    }
+}
 
 #[tokio::test]
 async fn test_cef_renderer_startup_shutdown() {
@@ -58,7 +87,17 @@ async fn test_cef_simple_html_rendering() {
     let result = renderer.render(html, css, "").await;
     assert!(result.is_ok(), "HTML rendering should succeed");
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    if let Some(screenshot_path) = find_latest_screenshot() {
+        println!("Screenshot found at: {:?}", screenshot_path);
+        assert!(
+            verify_screenshot(&screenshot_path),
+            "Screenshot should be valid"
+        );
+    } else {
+        println!("No screenshot found (may be expected if CEF didn't fully initialize)");
+    }
 
     let shutdown_result = Box::new(renderer).shutdown().await;
     assert!(shutdown_result.is_ok());

@@ -3,6 +3,7 @@
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/wrapper/cef_helpers.h"
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <climits>
@@ -78,9 +79,17 @@ int main(int argc, char* argv[]) {
     settings.windowless_rendering_enabled = false;
 #endif
 
+    // Set unique cache path per instance to avoid singleton lock conflicts
+    std::string cache_id = socket_path;
+    std::replace(cache_id.begin(), cache_id.end(), '/', '_');
+    std::replace(cache_id.begin(), cache_id.end(), '.', '_');
+    std::string cache_path = "/tmp/arkavo_cef_cache_" + cache_id;
+    CefString(&settings.cache_path).FromASCII(cache_path.c_str());
+
     // Enable verbose logging for debugging
     settings.log_severity = LOGSEVERITY_INFO;
-    CefString(&settings.log_file).FromASCII("/tmp/arkavo_cef.log");
+    std::string log_file = "/tmp/arkavo_cef_" + cache_id + ".log";
+    CefString(&settings.log_file).FromASCII(log_file.c_str());
 
 #ifdef __APPLE__
     if (!exe_dir.empty()) {

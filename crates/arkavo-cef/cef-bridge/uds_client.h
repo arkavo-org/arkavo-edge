@@ -5,6 +5,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -59,11 +60,16 @@ public:
 
 private:
     void ListenLoop();
+    void AcceptLoop();
 
     std::string socket_path_;
     int sock_fd_;
+    int server_fd_;
     std::atomic<bool> running_;
+    std::atomic<bool> connected_;
     std::thread listen_thread_;
+    std::thread accept_thread_;
+    std::mutex fd_mutex_;
     std::function<void(const DOMCommand&)> command_callback_;
 };
 
