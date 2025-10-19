@@ -49,8 +49,7 @@ set(CEF_DLL_WRAPPER "${CEF_ROOT}/build_wrapper/libcef_dll_wrapper/libcef_dll_wra
 
 if(APPLE)
     # On macOS, link CEF framework binary directly (CEF uses flat framework structure)
-    # Use symlink to avoid issues with spaces in path
-    set(CEF_FRAMEWORK_BINARY "${CEF_ROOT}/Release/CEF.framework/libcef")
+    set(CEF_FRAMEWORK_BINARY "${CEF_ROOT}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework")
 
     if(EXISTS "${CEF_FRAMEWORK_BINARY}")
         message(STATUS "Found CEF framework binary: ${CEF_FRAMEWORK_BINARY}")
