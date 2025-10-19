@@ -14,7 +14,7 @@ fn find_latest_screenshot() -> Option<std::path::PathBuf> {
             entry
                 .file_name()
                 .to_str()
-                .map(|name| name.starts_with("arkavo_cef_screenshot_") && name.ends_with(".ppm"))
+                .map(|name| name.starts_with("arkavo_cef_screenshot_") && name.ends_with(".png"))
                 .unwrap_or(false)
         })
         .collect();

@@ -3,6 +3,8 @@
 #include <unistd.h>
 #include <iostream>
 #include <cstring>
+#include <sys/select.h>
+#include <cerrno>
 
 UdsClient::UdsClient(const std::string& socket_path)
     : socket_path_(socket_path), sock_fd_(-1), server_fd_(-1), running_(false), connected_(false) {
@@ -50,6 +52,28 @@ bool UdsClient::Bind() {
 }
 
 void UdsClient::AcceptLoop() {
+    // Set timeout for accept (30 seconds)
+    fd_set readfds;
+    struct timeval timeout;
+
+    FD_ZERO(&readfds);
+    FD_SET(server_fd_, &readfds);
+
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    int result = select(server_fd_ + 1, &readfds, NULL, NULL, &timeout);
+
+    if (result < 0) {
+        std::cerr << "Select failed: " << strerror(errno) << std::endl;
+        return;
+    }
+
+    if (result == 0) {
+        std::cerr << "Accept timeout after 30 seconds - no client connected" << std::endl;
+        return;
+    }
+
     int client_fd = accept(server_fd_, NULL, NULL);
     if (client_fd < 0) {
         std::cerr << "Failed to accept connection: " << strerror(errno) << std::endl;

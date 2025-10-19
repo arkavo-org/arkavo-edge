@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <ctime>
+#include <cstdlib>
 
 ArkavoBrowserClient::ArkavoBrowserClient(const std::string& socket_path)
     : socket_path_(socket_path), dom_executor_initialized_(false), screenshot_saved_(false) {
@@ -66,11 +67,13 @@ void ArkavoBrowserClient::OnPaint(CefRefPtr<CefBrowser> browser,
 
 void ArkavoBrowserClient::SaveScreenshot(const void* buffer, int width, int height) {
     std::time_t now = std::time(nullptr);
-    std::string filename = "/tmp/arkavo_cef_screenshot_" + std::to_string(now) + ".ppm";
+    std::string ppm_filename = "/tmp/arkavo_cef_screenshot_" + std::to_string(now) + ".ppm";
+    std::string png_filename = "/tmp/arkavo_cef_screenshot_" + std::to_string(now) + ".png";
 
-    std::ofstream file(filename, std::ios::binary);
+    // Save as PPM first
+    std::ofstream file(ppm_filename, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Failed to open screenshot file: " << filename << std::endl;
+        std::cerr << "Failed to open screenshot file: " << ppm_filename << std::endl;
         return;
     }
 
@@ -92,5 +95,25 @@ void ArkavoBrowserClient::SaveScreenshot(const void* buffer, int width, int heig
     }
 
     file.close();
-    std::cout << "Screenshot saved to: " << filename << std::endl;
+    std::cout << "Screenshot saved to: " << ppm_filename << std::endl;
+
+#ifdef __APPLE__
+    // Convert PPM to PNG using macOS sips command
+    std::string convert_cmd = "sips -s format png " + ppm_filename + " --out " + png_filename + " 2>/dev/null";
+    int result = std::system(convert_cmd.c_str());
+
+    if (result == 0) {
+        std::cout << "PNG screenshot saved to: " << png_filename << std::endl;
+
+        // Open the PNG file automatically
+        std::string open_cmd = "open " + png_filename + " &";
+        std::system(open_cmd.c_str());
+        std::cout << "Opening screenshot in default viewer" << std::endl;
+
+        // Remove the PPM file since we have PNG now
+        std::remove(ppm_filename.c_str());
+    } else {
+        std::cerr << "Failed to convert to PNG, PPM file retained" << std::endl;
+    }
+#endif
 }
