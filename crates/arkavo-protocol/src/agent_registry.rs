@@ -206,9 +206,7 @@ impl AgentRegistry {
         }
 
         // Get agent IDs for first capability
-        let mut result = self
-            .find_agents_with_capability(&capabilities[0])
-            .await;
+        let mut result = self.find_agents_with_capability(&capabilities[0]).await;
 
         // Intersect with agents for each remaining capability
         for capability in &capabilities[1..] {

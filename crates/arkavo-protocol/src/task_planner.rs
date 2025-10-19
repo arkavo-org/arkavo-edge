@@ -260,9 +260,7 @@ impl TaskPlanner {
         }
 
         // Always add summarization as final step
-        if intent_analysis.keywords.contains(&"summarize".to_string())
-            || !subtasks.is_empty()
-        {
+        if intent_analysis.keywords.contains(&"summarize".to_string()) || !subtasks.is_empty() {
             subtasks.push(SubTask {
                 id: Uuid::new_v4(),
                 task_type: "summarize".to_string(),
@@ -316,9 +314,8 @@ impl TaskPlanner {
             // Look for references like "$location", "$search_results", etc.
             if input_str.contains("$location") {
                 // Find the location subtask
-                if let Some(location_task) = subtasks
-                    .iter()
-                    .find(|t| t.task_type == "sensor_request")
+                if let Some(location_task) =
+                    subtasks.iter().find(|t| t.task_type == "sensor_request")
                 {
                     deps.push(location_task.id);
                 }
