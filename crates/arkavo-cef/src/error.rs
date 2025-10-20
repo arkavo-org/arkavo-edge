@@ -14,6 +14,12 @@ pub enum CefError {
     #[error("UDS transport error: {0}")]
     UdsTransportError(String),
 
+    #[error("Connection timeout")]
+    ConnectionTimeout,
+
+    #[error("Invalid socket path: {0}")]
+    InvalidSocketPath(String),
+
     #[error("DOM command failed: {0}")]
     DomCommandFailed(String),
 

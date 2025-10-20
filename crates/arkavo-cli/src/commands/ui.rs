@@ -1,4 +1,3 @@
-use arkavo_agui::AgUiGateway;
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -47,16 +46,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             use_cef_renderer(port, initial_prompt).await
         }
 
-        #[cfg(all(not(feature = "cef-ui"), feature = "web-ui"))]
+        #[cfg(not(feature = "cef-ui"))]
         {
-            println!("Starting Arkavo UI with web renderer...");
-            println!("Open http://127.0.0.1:{} in your browser", port);
-            use_web_renderer(port, initial_prompt).await
-        }
-
-        #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
-        {
-            Err("No UI renderer available. Build with --features cef-ui or web-ui".into())
+            Err("No UI renderer available. Build with --features cef-ui".into())
         }
     };
 
@@ -127,7 +119,7 @@ async fn use_cef_renderer(
         renderer.render(&generated_html, css, "").await?;
     }
 
-    println!("CEF renderer is running. Press Ctrl+C to exit.");
+    println!("CEF renderer is running. Close the window or press Ctrl+C to exit.");
 
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -136,24 +128,22 @@ async fn use_cef_renderer(
         }
     }
 
-    Box::new(renderer).shutdown().await?;
-    Ok(())
-}
-
-#[cfg(all(not(feature = "cef-ui"), feature = "web-ui"))]
-async fn use_web_renderer(
-    port: u16,
-    initial_prompt: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut gateway = AgUiGateway::new(port);
-
-    if let Some(prompt) = initial_prompt {
-        println!("Starting UI with initial prompt: {prompt}");
-        println!("UI will generate incrementally - you can interrupt and modify at any time");
-        gateway.set_initial_prompt(prompt);
+    // Renderer stopped - clean shutdown
+    match Box::new(renderer).shutdown().await {
+        Ok(_) => {
+            println!("Application closed gracefully");
+            Ok(())
+        }
+        Err(e) => {
+            // Ignore connection errors during shutdown - they're expected
+            if e.to_string().contains("Connection closed") {
+                println!("Application closed");
+                Ok(())
+            } else {
+                Err(e.into())
+            }
+        }
     }
-
-    gateway.start().await
 }
 
 fn print_usage() {

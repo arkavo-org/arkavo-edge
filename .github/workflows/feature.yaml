@@ -522,11 +522,27 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
+      - name: Cache CEF framework
+        id: cache-cef
+        uses: actions/cache@v4
+        with:
+          path: vendor/cef
+          key: cef-${{ runner.os }}-${{ hashFiles('scripts/setup-cef.sh') }}
+          restore-keys: |
+            cef-${{ runner.os }}-
+
       - name: Download and build CEF
+        if: steps.cache-cef.outputs.cache-hit != 'true'
         run: |
           echo "Downloading CEF (~100MB)..."
           ./scripts/setup-cef.sh
           echo "✅ CEF setup complete"
+
+      - name: Verify CEF cache
+        if: steps.cache-cef.outputs.cache-hit == 'true'
+        run: |
+          echo "✅ CEF loaded from cache"
+          ls -lh vendor/cef/ || echo "CEF cache verification failed"
 
       - name: Build ARM64 binary
         run: cargo build --release --target aarch64-apple-darwin

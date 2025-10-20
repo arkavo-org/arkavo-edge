@@ -5,7 +5,11 @@
 #include <iostream>
 #include <fstream>
 #include <ctime>
-#include <cstdlib>
+
+#ifdef __APPLE__
+// Forward declare the function to set browser in window delegate
+extern "C" void SetBrowserInWindowDelegate(CefRefPtr<CefBrowser> browser);
+#endif
 
 ArkavoBrowserClient::ArkavoBrowserClient(const std::string& socket_path)
     : socket_path_(socket_path), dom_executor_initialized_(false), screenshot_saved_(false) {
@@ -14,6 +18,11 @@ ArkavoBrowserClient::ArkavoBrowserClient(const std::string& socket_path)
 void ArkavoBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     browser_ = browser;
     std::cout << "Browser window created" << std::endl;
+
+#ifdef __APPLE__
+    // Set browser reference in window delegate so close button works
+    SetBrowserInWindowDelegate(browser);
+#endif
 
     if (!dom_executor_initialized_) {
         auto frame = browser->GetMainFrame();
@@ -26,13 +35,15 @@ void ArkavoBrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 }
 
 bool ArkavoBrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {
+    std::cout << "DoClose called - allowing browser to close" << std::endl;
     return false;
 }
 
 void ArkavoBrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     browser_ = nullptr;
-    std::cout << "Browser window closing..." << std::endl;
+    std::cout << "OnBeforeClose called - quitting message loop..." << std::endl;
     CefQuitMessageLoop();
+    std::cout << "Message loop quit requested" << std::endl;
 }
 
 void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
@@ -104,11 +115,6 @@ void ArkavoBrowserClient::SaveScreenshot(const void* buffer, int width, int heig
 
     if (result == 0) {
         std::cout << "PNG screenshot saved to: " << png_filename << std::endl;
-
-        // Open the PNG file automatically
-        std::string open_cmd = "open " + png_filename + " &";
-        std::system(open_cmd.c_str());
-        std::cout << "Opening screenshot in default viewer" << std::endl;
 
         // Remove the PPM file since we have PNG now
         std::remove(ppm_filename.c_str());

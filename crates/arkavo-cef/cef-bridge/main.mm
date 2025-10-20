@@ -12,6 +12,73 @@
 #include <mach-o/dyld.h>
 #include "include/wrapper/cef_library_loader.h"
 #include <Cocoa/Cocoa.h>
+
+// Window delegate to handle close button
+@interface WindowDelegate : NSObject <NSWindowDelegate> {
+    CefRefPtr<CefBrowser> _browser;
+    NSWindow* _window;
+    BOOL _isClosing;
+}
+- (void)setBrowser:(CefRefPtr<CefBrowser>)browser;
+- (void)setWindow:(NSWindow*)window;
+@end
+
+@implementation WindowDelegate
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _isClosing = NO;
+    }
+    return self;
+}
+
+- (void)setBrowser:(CefRefPtr<CefBrowser>)browser {
+    _browser = browser;
+}
+
+- (void)setWindow:(NSWindow*)window {
+    _window = window;
+}
+
+- (BOOL)windowShouldClose:(NSWindow*)window {
+    if (_isClosing) {
+        return NO;
+    }
+
+    _isClosing = YES;
+    std::cout << "Window close button clicked - initiating shutdown..." << std::endl;
+
+    // Hide window immediately for better UX
+    [window orderOut:nil];
+
+    if (_browser) {
+        _browser->GetHost()->CloseBrowser(true);
+
+        // Give CEF 1 second to clean up, then force exit
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            std::cout << "Shutdown complete" << std::endl;
+            CefQuitMessageLoop();
+            exit(0);
+        });
+    } else {
+        std::cout << "Shutdown complete" << std::endl;
+        CefQuitMessageLoop();
+        exit(0);
+    }
+    return NO;
+}
+@end
+
+// Global delegate reference
+static WindowDelegate* g_windowDelegate = nil;
+
+// C function to set browser in window delegate (callable from C++)
+extern "C" void SetBrowserInWindowDelegate(CefRefPtr<CefBrowser> browser) {
+    if (g_windowDelegate) {
+        [g_windowDelegate setBrowser:browser];
+    }
+}
 #endif
 
 int main(int argc, char* argv[]) {
@@ -74,7 +141,7 @@ int main(int argc, char* argv[]) {
     CefSettings settings;
     settings.no_sandbox = true;
 #ifdef __APPLE__
-    settings.windowless_rendering_enabled = true;
+    settings.windowless_rendering_enabled = false;
 #else
     settings.windowless_rendering_enabled = false;
 #endif
@@ -127,15 +194,37 @@ int main(int argc, char* argv[]) {
     browser_settings.javascript = STATE_DISABLED;
 
 #ifdef __APPLE__
-    // On macOS, use windowless rendering for now (no visible window yet)
-    window_info.SetAsWindowless(0);
+    // Create a visible window on macOS
+    NSRect frame = NSMakeRect(100, 100, 1024, 768);
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:frame
+                                         styleMask:(NSWindowStyleMaskTitled |
+                                                   NSWindowStyleMaskClosable |
+                                                   NSWindowStyleMaskMiniaturizable |
+                                                   NSWindowStyleMaskResizable)
+                                         backing:NSBackingStoreBuffered
+                                         defer:NO];
+    [window setTitle:@"Arkavo UI Generator"];
+
+    // Enable the close button to quit the app
+    [window setReleasedWhenClosed:NO];
+
+    // Create and set window delegate to handle close button
+    g_windowDelegate = [[WindowDelegate alloc] init];
+    [g_windowDelegate setWindow:window];
+    [window setDelegate:g_windowDelegate];
+
+    [window makeKeyAndOrderFront:nil];
+
+    NSView* contentView = [window contentView];
+    CefRect rect(0, 0, 1024, 768);
+    window_info.SetAsChild(contentView, rect);
 #else
     window_info.SetAsPopup(nullptr, "Arkavo UI Generator");
 #endif
 
     std::string url = "data:text/html,<html><body style='margin:0;padding:20px;font-family:system-ui;background:linear-gradient(135deg,%20%23667eea%200%25,%20%23764ba2%20100%25);color:%23fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></body></html>";
 
-    std::cout << "Creating browser (windowless mode)..." << std::endl;
+    std::cout << "Creating browser (windowed mode)..." << std::endl;
     CefBrowserHost::CreateBrowser(window_info, client, url, browser_settings, nullptr, nullptr);
 
     CefRunMessageLoop();

@@ -2,6 +2,7 @@ use crate::error::{CefError, Result};
 use crate::protocol::Protocol;
 use bytes::BytesMut;
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
@@ -12,8 +13,29 @@ pub struct UdsTransport {
 
 impl UdsTransport {
     pub async fn connect(path: impl AsRef<Path>) -> Result<Self> {
-        let stream = UnixStream::connect(path)
+        let path_str = path.as_ref().to_string_lossy();
+
+        let valid_prefixes = ["/tmp/arkavo_", "/private/tmp/arkavo_", "/var/folders/"];
+        if !valid_prefixes
+            .iter()
+            .any(|prefix| path_str.starts_with(prefix))
+        {
+            return Err(CefError::InvalidSocketPath(
+                "Socket path must start with /tmp/arkavo_, /private/tmp/arkavo_, or /var/folders/".to_string(),
+            ));
+        }
+
+        if path_str.len() > 100 {
+            return Err(CefError::InvalidSocketPath(
+                "Socket path too long".to_string(),
+            ));
+        }
+
+        let timeout_duration = Duration::from_secs(10);
+
+        let stream = tokio::time::timeout(timeout_duration, UnixStream::connect(path))
             .await
+            .map_err(|_| CefError::ConnectionTimeout)?
             .map_err(|e| CefError::UdsConnectionFailed(e.to_string()))?;
 
         Ok(Self {
@@ -109,8 +131,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_uds_transport() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let socket_path = temp_dir.path().join("test.sock");
+        let socket_path = format!("/tmp/arkavo_test_{}.sock", std::process::id());
+
+        let _ = std::fs::remove_file(&socket_path);
 
         let listener = UnixListener::bind(&socket_path).unwrap();
 

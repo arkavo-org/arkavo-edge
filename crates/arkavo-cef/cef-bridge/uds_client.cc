@@ -4,10 +4,11 @@
 #include <iostream>
 #include <cstring>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <cerrno>
 
 UdsClient::UdsClient(const std::string& socket_path)
-    : socket_path_(socket_path), sock_fd_(-1), server_fd_(-1), running_(false), connected_(false) {
+    : socket_path_(socket_path), conn_state_(), server_fd_(-1), running_(false) {
 }
 
 UdsClient::~UdsClient() {
@@ -15,6 +16,18 @@ UdsClient::~UdsClient() {
 }
 
 bool UdsClient::Bind() {
+    if (socket_path_.find("/tmp/arkavo_") != 0 &&
+        socket_path_.find("/private/tmp/arkavo_") != 0 &&
+        socket_path_.find("/var/folders/") != 0) {
+        std::cerr << "Invalid socket path: must start with /tmp/arkavo_, /private/tmp/arkavo_, or /var/folders/" << std::endl;
+        return false;
+    }
+
+    if (socket_path_.length() > 100) {
+        std::cerr << "Socket path too long (max 100 characters)" << std::endl;
+        return false;
+    }
+
     server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
     if (server_fd_ < 0) {
         std::cerr << "Failed to create socket: " << strerror(errno) << std::endl;
@@ -42,7 +55,14 @@ bool UdsClient::Bind() {
         return false;
     }
 
-    std::cout << "UDS server listening at " << socket_path_ << std::endl;
+    if (chmod(socket_path_.c_str(), 0600) < 0) {
+        std::cerr << "Failed to set socket permissions: " << strerror(errno) << std::endl;
+        close(server_fd_);
+        server_fd_ = -1;
+        return false;
+    }
+
+    std::cout << "UDS server listening at " << socket_path_ << " (permissions: 0600)" << std::endl;
 
     accept_thread_ = std::thread([this]() {
         AcceptLoop();
@@ -81,9 +101,9 @@ void UdsClient::AcceptLoop() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(fd_mutex_);
-        sock_fd_ = client_fd;
-        connected_ = true;
+        std::lock_guard<std::mutex> lock(conn_mutex_);
+        conn_state_.sock_fd = client_fd;
+        conn_state_.connected = true;
     }
 
     close(server_fd_);
@@ -105,10 +125,11 @@ void UdsClient::Disconnect() {
     }
 
     {
-        std::lock_guard<std::mutex> lock(fd_mutex_);
-        if (sock_fd_ >= 0) {
-            close(sock_fd_);
-            sock_fd_ = -1;
+        std::lock_guard<std::mutex> lock(conn_mutex_);
+        if (conn_state_.sock_fd >= 0) {
+            close(conn_state_.sock_fd);
+            conn_state_.sock_fd = -1;
+            conn_state_.connected = false;
         }
     }
 }
@@ -134,8 +155,17 @@ void UdsClient::ListenLoop() {
     uint8_t buffer[4096];
 
     while (running_) {
+        int socket_fd;
+        {
+            std::lock_guard<std::mutex> lock(conn_mutex_);
+            if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+                break;
+            }
+            socket_fd = conn_state_.sock_fd;
+        }
+
         uint32_t msg_len;
-        ssize_t n = recv(sock_fd_, &msg_len, sizeof(msg_len), 0);
+        ssize_t n = recv(socket_fd, &msg_len, sizeof(msg_len), 0);
 
         if (n <= 0) {
             if (n < 0) {
@@ -149,7 +179,7 @@ void UdsClient::ListenLoop() {
             continue;
         }
 
-        n = recv(sock_fd_, buffer, msg_len, 0);
+        n = recv(socket_fd, buffer, msg_len, 0);
 
         if (n < 0) {
             std::cerr << "Socket read error: " << strerror(errno) << std::endl;
@@ -172,9 +202,10 @@ void UdsClient::ListenLoop() {
 }
 
 bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
-    std::lock_guard<std::mutex> lock(fd_mutex_);
+    std::lock_guard<std::mutex> lock(conn_mutex_);
 
-    if (sock_fd_ < 0 || !connected_) {
+    if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+        std::cerr << "Cannot send feedback: not connected" << std::endl;
         return false;
     }
 
@@ -202,13 +233,13 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
     memcpy(buffer + msg_len_offset, &msg_len, sizeof(msg_len));
 
     uint32_t frame_len = offset;
-    ssize_t n = send(sock_fd_, &frame_len, sizeof(frame_len), 0);
+    ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
     if (n < 0) {
         std::cerr << "Failed to send frame length: " << strerror(errno) << std::endl;
         return false;
     }
 
-    n = send(sock_fd_, buffer, offset, 0);
+    n = send(conn_state_.sock_fd, buffer, offset, 0);
     if (n < 0) {
         std::cerr << "Failed to send feedback: " << strerror(errno) << std::endl;
         return false;
@@ -218,9 +249,10 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 }
 
 bool UdsClient::SendEvent(const DOMEvent& event) {
-    std::lock_guard<std::mutex> lock(fd_mutex_);
+    std::lock_guard<std::mutex> lock(conn_mutex_);
 
-    if (sock_fd_ < 0 || !connected_) {
+    if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+        std::cerr << "Cannot send event: not connected" << std::endl;
         return false;
     }
 
@@ -245,13 +277,13 @@ bool UdsClient::SendEvent(const DOMEvent& event) {
     write_string(event.data);
 
     uint32_t frame_len = offset;
-    ssize_t n = send(sock_fd_, &frame_len, sizeof(frame_len), 0);
+    ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
     if (n < 0) {
         std::cerr << "Failed to send event frame length: " << strerror(errno) << std::endl;
         return false;
     }
 
-    n = send(sock_fd_, buffer, offset, 0);
+    n = send(conn_state_.sock_fd, buffer, offset, 0);
     if (n < 0) {
         std::cerr << "Failed to send event: " << strerror(errno) << std::endl;
         return false;

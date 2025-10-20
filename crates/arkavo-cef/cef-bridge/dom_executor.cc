@@ -3,6 +3,8 @@
 #include <chrono>
 #include <iostream>
 #include <sstream>
+#include <regex>
+#include <algorithm>
 
 DOMExecutor* DOMExecutor::GetInstance() {
     static DOMExecutor instance;
@@ -142,14 +144,74 @@ std::string DOMExecutor::EscapeJavaScript(const std::string& str) {
     return escaped.str();
 }
 
+bool DOMExecutor::ValidateSelector(const std::string& selector) {
+    if (selector.empty() || selector.length() > MAX_SELECTOR_LENGTH) {
+        return false;
+    }
+
+    static const std::regex valid_selector_regex(
+        R"(^[#.]?[a-zA-Z0-9_-]+(\s*[>+~]\s*[#.]?[a-zA-Z0-9_-]+)*$)"
+    );
+
+    return std::regex_match(selector, valid_selector_regex);
+}
+
+bool DOMExecutor::ValidatePayloadSize(const std::string& payload, size_t max_size) {
+    return payload.size() <= max_size;
+}
+
+std::string DOMExecutor::SanitizeHtml(const std::string& html) {
+    std::string sanitized = html;
+
+    static const std::vector<std::string> dangerous_patterns = {
+        "<script", "</script>",
+        "javascript:", "onerror=", "onload=",
+        "onclick=", "onmouseover=", "onfocus="
+    };
+
+    for (const auto& pattern : dangerous_patterns) {
+        size_t pos = 0;
+        std::string pattern_lower = pattern;
+        std::transform(pattern_lower.begin(), pattern_lower.end(), pattern_lower.begin(), ::tolower);
+
+        while ((pos = sanitized.find(pattern, pos)) != std::string::npos) {
+            std::string check = sanitized.substr(pos, pattern.length());
+            std::transform(check.begin(), check.end(), check.begin(), ::tolower);
+
+            if (check == pattern_lower) {
+                sanitized.replace(pos, pattern.length(), "");
+            } else {
+                pos++;
+            }
+        }
+    }
+
+    return sanitized;
+}
+
+void DOMExecutor::SendErrorFeedback(uint32_t id, const std::string& message) {
+    DOMFeedback feedback = {id, 1, 0, message};
+    SendFeedback(feedback);
+}
+
 void DOMExecutor::ExecuteReplaceInnerHTML(uint32_t id, const std::string& selector, const std::string& html) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
         return;
     }
 
-    std::string escaped_html = EscapeJavaScript(html);
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
+        return;
+    }
+
+    if (!ValidatePayloadSize(html, MAX_HTML_PAYLOAD_SIZE)) {
+        SendErrorFeedback(id, "HTML payload too large");
+        return;
+    }
+
+    std::string sanitized_html = SanitizeHtml(html);
+    std::string escaped_html = EscapeJavaScript(sanitized_html);
     std::string escaped_selector = EscapeJavaScript(selector);
 
     std::ostringstream js;
@@ -173,8 +235,17 @@ void DOMExecutor::ExecuteReplaceInnerHTML(uint32_t id, const std::string& select
 void DOMExecutor::ExecuteSetAttribute(uint32_t id, const std::string& selector,
                                        const std::string& attr, const std::string& value) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
+        return;
+    }
+
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
+        return;
+    }
+
+    if (!ValidatePayloadSize(value, MAX_HTML_PAYLOAD_SIZE)) {
+        SendErrorFeedback(id, "Attribute value too large");
         return;
     }
 
@@ -203,8 +274,17 @@ void DOMExecutor::ExecuteSetAttribute(uint32_t id, const std::string& selector,
 void DOMExecutor::ExecuteSetStyle(uint32_t id, const std::string& selector,
                                    const std::string& property, const std::string& value) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
+        return;
+    }
+
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
+        return;
+    }
+
+    if (!ValidatePayloadSize(value, MAX_CSS_PAYLOAD_SIZE)) {
+        SendErrorFeedback(id, "CSS value too large");
         return;
     }
 
@@ -232,8 +312,17 @@ void DOMExecutor::ExecuteSetStyle(uint32_t id, const std::string& selector,
 
 void DOMExecutor::ExecuteSetTextContent(uint32_t id, const std::string& selector, const std::string& text) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
+        return;
+    }
+
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
+        return;
+    }
+
+    if (!ValidatePayloadSize(text, MAX_HTML_PAYLOAD_SIZE)) {
+        SendErrorFeedback(id, "Text payload too large");
         return;
     }
 
@@ -260,8 +349,12 @@ void DOMExecutor::ExecuteSetTextContent(uint32_t id, const std::string& selector
 
 void DOMExecutor::ExecuteRemoveNode(uint32_t id, const std::string& selector) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
+        return;
+    }
+
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
         return;
     }
 
@@ -287,8 +380,12 @@ void DOMExecutor::ExecuteRemoveNode(uint32_t id, const std::string& selector) {
 
 void DOMExecutor::ExecuteAddEventListener(uint32_t id, const std::string& selector, const std::string& event_type) {
     if (!frame_) {
-        DOMFeedback feedback = {id, 2, 0, "Frame not available"};
-        SendFeedback(feedback);
+        SendErrorFeedback(id, "Frame not available");
+        return;
+    }
+
+    if (!ValidateSelector(selector)) {
+        SendErrorFeedback(id, "Invalid selector");
         return;
     }
 

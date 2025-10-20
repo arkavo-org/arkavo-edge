@@ -6,6 +6,10 @@
 #include <memory>
 #include <string>
 
+constexpr size_t MAX_HTML_PAYLOAD_SIZE = 1048576;
+constexpr size_t MAX_CSS_PAYLOAD_SIZE = 102400;
+constexpr size_t MAX_SELECTOR_LENGTH = 512;
+
 class DOMExecutor {
 public:
     static DOMExecutor* GetInstance();
@@ -23,6 +27,10 @@ private:
     ~DOMExecutor() = default;
 
     std::string EscapeJavaScript(const std::string& str);
+    bool ValidateSelector(const std::string& selector);
+    bool ValidatePayloadSize(const std::string& payload, size_t max_size);
+    std::string SanitizeHtml(const std::string& html);
+    void SendErrorFeedback(uint32_t id, const std::string& message);
 
     void ExecuteReplaceInnerHTML(uint32_t id, const std::string& selector, const std::string& html);
     void ExecuteSetAttribute(uint32_t id, const std::string& selector, const std::string& attr, const std::string& value);

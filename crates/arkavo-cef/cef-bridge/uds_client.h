@@ -9,6 +9,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+struct ConnectionState {
+    int sock_fd;
+    bool connected;
+
+    ConnectionState() : sock_fd(-1), connected(false) {}
+};
+
 // Inline type definitions (normally in dom_executor.h, temporarily here for compilation)
 enum class DOMOp : uint8_t {
     ReplaceInnerHTML = 0,
@@ -63,13 +70,12 @@ private:
     void AcceptLoop();
 
     std::string socket_path_;
-    int sock_fd_;
+    ConnectionState conn_state_;
     int server_fd_;
     std::atomic<bool> running_;
-    std::atomic<bool> connected_;
     std::thread listen_thread_;
     std::thread accept_thread_;
-    std::mutex fd_mutex_;
+    std::mutex conn_mutex_;
     std::function<void(const DOMCommand&)> command_callback_;
 };
 
