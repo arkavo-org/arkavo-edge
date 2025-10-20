@@ -21,7 +21,8 @@ impl UdsTransport {
             .any(|prefix| path_str.starts_with(prefix))
         {
             return Err(CefError::InvalidSocketPath(
-                "Socket path must start with /tmp/arkavo_, /private/tmp/arkavo_, or /var/folders/".to_string(),
+                "Socket path must start with /tmp/arkavo_, /private/tmp/arkavo_, or /var/folders/"
+                    .to_string(),
             ));
         }
 

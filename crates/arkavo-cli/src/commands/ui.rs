@@ -1,4 +1,3 @@
-
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     if !args.is_empty() && matches!(args[0].as_str(), "help" | "-h" | "--help") {
