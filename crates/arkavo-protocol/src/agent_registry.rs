@@ -55,6 +55,7 @@ impl AgentRegistry {
     }
 
     /// Register or update an agent with its capabilities
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_agent(
         &self,
         agent_id: String,
@@ -122,7 +123,7 @@ impl AgentRegistry {
             agents
                 .get(agent_id)
                 .map(|info| info.capabilities.clone())
-                .ok_or_else(|| format!("Agent {} not found", agent_id))?
+                .ok_or_else(|| format!("Agent {agent_id} not found"))?
         };
 
         // Remove from agent list
@@ -164,6 +165,9 @@ impl AgentRegistry {
     }
 
     /// Find the best agent for a specific capability (considering load)
+    ///
+    /// # Panics
+    /// Panics if load values cannot be compared (e.g., NaN values).
     pub async fn find_best_agent(&self, capability: &str) -> Option<String> {
         let candidate_ids = self.find_agents_with_capability(capability).await;
 
@@ -225,7 +229,7 @@ impl AgentRegistry {
             agent.last_seen = Utc::now();
             Ok(())
         } else {
-            Err(format!("Agent {} not found", agent_id))
+            Err(format!("Agent {agent_id} not found"))
         }
     }
 
@@ -246,7 +250,7 @@ impl AgentRegistry {
             );
             Ok(())
         } else {
-            Err(format!("Agent {} not found", agent_id))
+            Err(format!("Agent {agent_id} not found"))
         }
     }
 
@@ -301,7 +305,7 @@ impl AgentRegistry {
             debug!(agent.id = %agent_id, "Agent heartbeat received");
             Ok(())
         } else {
-            Err(format!("Agent {} not found", agent_id))
+            Err(format!("Agent {agent_id} not found"))
         }
     }
 }

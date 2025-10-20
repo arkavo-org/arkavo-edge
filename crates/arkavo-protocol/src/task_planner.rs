@@ -114,7 +114,7 @@ impl TaskPlanner {
         );
 
         // Create subtasks based on intent
-        let mut subtasks = self.create_subtasks(&task_offer, &intent_analysis).await?;
+        let mut subtasks = self.create_subtasks(&task_offer, &intent_analysis)?;
 
         // Analyze dependencies between subtasks
         let dependencies = self.analyze_dependencies(&subtasks);
@@ -200,7 +200,7 @@ impl TaskPlanner {
     }
 
     /// Create subtasks based on intent analysis
-    async fn create_subtasks(
+    fn create_subtasks(
         &self,
         _task_offer: &TaskOffer,
         intent_analysis: &IntentAnalysis,
@@ -330,9 +330,9 @@ impl TaskPlanner {
 
             if input_str.contains("$filtered_results") {
                 // Depends on all filter tasks before this one
-                for j in 0..i {
-                    if subtasks[j].task_type == "filter" {
-                        deps.push(subtasks[j].id);
+                for subtask in subtasks.iter().take(i) {
+                    if subtask.task_type == "filter" {
+                        deps.push(subtask.id);
                     }
                 }
             }
@@ -453,6 +453,7 @@ struct Entity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::DevicePlatform;
 
     #[tokio::test]
     async fn test_intent_analysis() {
@@ -472,7 +473,13 @@ mod tests {
             intent_id: Uuid::new_v4().to_string(),
             intent: "Find nearby coffee shops".to_string(),
             capabilities_hint: Some(vec!["location".to_string(), "search".to_string()]),
-            device_caps: None,
+            device_caps: DeviceCapabilities {
+                ai_capabilities: vec![],
+                sensors: vec![],
+                platform: DevicePlatform::Ios,
+                os_version: "test".to_string(),
+            },
+            context: None,
         };
 
         let plan = planner.plan_task(task_offer).await.unwrap();
