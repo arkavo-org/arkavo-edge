@@ -631,7 +631,18 @@ jobs:
           fi
 
           echo "Signing app with hardened runtime using: $CERT_APP"
-          codesign --force --options runtime --timestamp \
+
+          # Sign the CEF framework first (it's already signed by Chromium, need to re-sign)
+          if [ -d "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
+            echo "Re-signing CEF framework..."
+            codesign --force --options runtime --timestamp \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          fi
+
+          # Sign the main app bundle with deep flag to cover all components
+          codesign --force --deep --options runtime --timestamp \
             --keychain build.keychain \
             --sign "$CERT_APP" \
             Arkavo.app
