@@ -1,0 +1,41 @@
+[package]
+name = "arkavo-cef"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Chromium Embedded Framework integration with native Blink DOM APIs for Arkavo Edge"
+
+[features]
+default = []
+
+[dependencies]
+# Core dependencies
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Binary serialization
+flatbuffers = "24.3"
+
+# Unix domain sockets
+tokio-util = { workspace = true, features = ["codec"] }
+bytes = { workspace = true }
+
+# Process management
+nix = { version = "0.29", features = ["process", "signal"] }
+
+[build-dependencies]
+flatbuffers = "24.3"
+cc = "1.0"
+cmake = "0.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

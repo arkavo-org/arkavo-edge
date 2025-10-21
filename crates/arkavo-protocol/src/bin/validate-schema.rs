@@ -33,14 +33,14 @@ fn main() {
             errors.push("Method has empty name".to_string());
         }
 
-        // Check naming convention
+        // Check naming convention (allow lowercase, underscores, dots, and slashes)
         if !method
             .name
             .chars()
-            .all(|c| c.is_lowercase() || c == '_' || c == '.')
+            .all(|c| c.is_lowercase() || c == '_' || c == '.' || c == '/')
         {
             errors.push(format!(
-                "Method '{}' doesn't follow naming convention (lowercase with underscores)",
+                "Method '{}' doesn't follow naming convention (lowercase with underscores, dots, or slashes)",
                 method.name
             ));
         }

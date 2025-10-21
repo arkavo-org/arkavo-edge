@@ -3,6 +3,7 @@
 
 pub mod a2a;
 pub mod agent_config;
+pub mod agent_registry;
 pub mod auth;
 pub mod chat_session;
 pub mod config;
@@ -25,6 +26,7 @@ pub mod security;
 pub mod server;
 pub mod session_persistence;
 pub mod task_executor;
+pub mod task_planner;
 pub mod task_store;
 pub mod transport;
 pub mod types;

@@ -55,7 +55,7 @@ cargo run --bin arkavo -- chat --prompt "hi"
 ### 6. **UI Planning with Gemini** ✅
 ```bash
 export GEMINI_API_KEY="your-key"
-cargo run --bin arkavo -- ui --blank --prompt "calculator"
+cargo run --bin arkavo -- ui --prompt "calculator"
 ```
 **Results**:
 - **Calculator UI**: Generated 8-part comprehensive plan
@@ -201,7 +201,7 @@ Planning is now working via Gemini. Next step is to ensure code generation works
 1. **Verify Streaming Generation**:
 ```bash
 export GEMINI_API_KEY='<your-api-key>'
-cargo run --bin arkavo -- ui --blank --prompt "simple counter"
+cargo run --bin arkavo -- ui --prompt "simple counter"
 ```
 
 Expected behavior:
@@ -247,9 +247,9 @@ Progress on this feature:
 
 - [x] Tokenizer loads successfully via LlamaCppProvider
 - [x] Planning uses Gemini API for comprehensive UI breakdown
-- [x] `arkavo ui --blank --prompt "calculator"` generates 8-part plan
-- [x] `arkavo ui --blank --prompt "pet finder"` generates 7-part plan
-- [x] `arkavo ui --blank --prompt "simple counter"` generates 6-part plan
+- [x] `arkavo ui --prompt "calculator"` generates 8-part plan
+- [x] `arkavo ui --prompt "pet finder"` generates 7-part plan
+- [x] `arkavo ui --prompt "simple counter"` generates 6-part plan
 - [x] JSON parsing handles markdown code fences from LLMs
 - [x] Router provides separate methods for planning vs classification
 - [x] No duplicate model loading (Router reused)

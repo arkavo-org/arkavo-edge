@@ -1,5 +1,5 @@
 use crate::auth::SessionAuth;
-use crate::config::BufferConfig;
+use crate::config::{BufferConfig, ChatStreamingMode};
 use crate::error::{A2aError, Result};
 use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
@@ -157,6 +157,7 @@ impl ChatSessionManager {
             let sessions = self.sessions.clone();
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
+            let buffer_config = self.buffer_config.clone();
 
             self.task_tracker
                 .spawn_named("session-handler", async move {
@@ -170,6 +171,7 @@ impl ChatSessionManager {
                         metrics_collector,
                         inflight_deltas,
                         backpressure_notify,
+                        buffer_config,
                     )
                     .await;
                 });
@@ -368,7 +370,7 @@ impl ChatSessionManager {
     }
 
     /// Handle a chat session with back-pressure management
-    #[instrument(skip(message_rx, delta_tx, llm_adapter, sessions, session_metrics, metrics_collector, inflight_deltas, backpressure_notify), fields(session.id = %session_id))]
+    #[instrument(skip(message_rx, delta_tx, llm_adapter, sessions, session_metrics, metrics_collector, inflight_deltas, backpressure_notify, buffer_config), fields(session.id = %session_id))]
     #[allow(clippy::too_many_arguments)]
     async fn handle_session(
         session_id: String,
@@ -380,10 +382,12 @@ impl ChatSessionManager {
         metrics_collector: MetricsCollector,
         inflight_deltas: Arc<AtomicU64>,
         backpressure_notify: Arc<Notify>,
+        buffer_config: BufferConfig,
     ) {
         const MAX_INFLIGHT_WINDOW: u64 = 100; // Maximum deltas before applying back-pressure
         let mut conversation_context = Vec::new();
-        info!("Session handler started");
+        let streaming_mode = buffer_config.chat_streaming_mode;
+        info!(streaming_mode = ?streaming_mode, "Session handler started");
 
         loop {
             tokio::select! {
@@ -415,11 +419,81 @@ impl ChatSessionManager {
                             let mut sequence = 0u64;
                             let mut assistant_response = String::new();
 
-                            while let Some(delta_result) = delta_stream.next().await {
-                                match delta_result {
-                                    Ok(stream_delta) => {
-                                        // Convert StreamDelta to MessageDelta
-                                        let message_delta = match stream_delta.delta {
+                            // In aggregated mode, accumulate the entire response
+                            if streaming_mode == ChatStreamingMode::Aggregated {
+                                // Collect all deltas into complete response
+                                while let Some(delta_result) = delta_stream.next().await {
+                                    match delta_result {
+                                        Ok(stream_delta) => {
+                                            match stream_delta.delta {
+                                                DeltaType::Text { content } => {
+                                                    assistant_response.push_str(&content);
+                                                },
+                                                DeltaType::StreamEnd { reason } => {
+                                                    // Add complete response to context
+                                                    if !assistant_response.is_empty() {
+                                                        conversation_context.push(format!("Assistant: {assistant_response}"));
+                                                    }
+
+                                                    // Send single aggregated message
+                                                    let aggregated_delta = MessageDelta {
+                                                        session_id: session_id.clone(),
+                                                        message_id: message_id.clone(),
+                                                        sequence: 0,
+                                                        delta: MessageDeltaContent::Text {
+                                                            text: assistant_response.clone()
+                                                        },
+                                                        timestamp: chrono::Utc::now(),
+                                                    };
+                                                    let _ = delta_tx.send(aggregated_delta);
+
+                                                    // Send end marker
+                                                    let end_reason = match reason {
+                                                        arkavo_llm::EndReason::Complete => StreamEndReason::Complete,
+                                                        arkavo_llm::EndReason::MaxTokens => StreamEndReason::MaxTokens,
+                                                        arkavo_llm::EndReason::Aborted => StreamEndReason::UserAbort,
+                                                        arkavo_llm::EndReason::Error(_) => StreamEndReason::Error,
+                                                        arkavo_llm::EndReason::Timeout => StreamEndReason::Error,
+                                                    };
+
+                                                    // Record metrics before using end_reason
+                                                    let duration = start_time.elapsed();
+                                                    metrics_collector.record_response_time(duration.as_millis() as u64);
+                                                    session_observability::log_stream_end(&session_id, &format!("{end_reason:?}"), None);
+
+                                                    let end_delta = MessageDelta {
+                                                        session_id: session_id.clone(),
+                                                        message_id: message_id.clone(),
+                                                        sequence: 1,
+                                                        delta: MessageDeltaContent::StreamEnd { reason: end_reason },
+                                                        timestamp: stream_delta.timestamp,
+                                                    };
+                                                    let _ = delta_tx.send(end_delta);
+                                                    break;
+                                                },
+                                                DeltaType::ToolCall { .. } => {
+                                                    // Handle tool calls in aggregated mode (future work)
+                                                    warn!("Tool calls not yet supported in aggregated mode");
+                                                },
+                                                DeltaType::Error(err) => {
+                                                    error!(error = %err.message, "LLM error in aggregated mode");
+                                                    break;
+                                                },
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!(error = %e, "Stream error in aggregated mode");
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Original delta streaming mode
+                                while let Some(delta_result) = delta_stream.next().await {
+                                    match delta_result {
+                                        Ok(stream_delta) => {
+                                            // Convert StreamDelta to MessageDelta
+                                            let message_delta = match stream_delta.delta {
                                             DeltaType::Text { content } => {
                                                 assistant_response.push_str(&content);
                                                 MessageDelta {
@@ -523,6 +597,7 @@ impl ChatSessionManager {
                                     }
                                 }
                             }
+                            } // End of delta streaming mode
                         }
                         Err(e) => {
                             error!(error = %e, "Failed to start LLM stream for session");

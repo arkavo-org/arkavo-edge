@@ -171,7 +171,7 @@ This is a consequence of BUG #1 (no LLM planning) and BUG #2 (missing "calculato
 **User Experience Impact**:
 If a user runs:
 ```bash
-cargo run --bin arkavo -- ui --blank --prompt "Build a calculator"
+cargo run --bin arkavo -- ui --prompt "Build a calculator"
 ```
 
 They will get:

@@ -876,3 +876,240 @@ pub struct AgentConfigRestoreResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ConfigError>,
 }
+
+/// Task offer from LocalAIAgent to Orchestrator when user triggers intent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskOffer {
+    /// Unique intent identifier
+    pub intent_id: String,
+    /// Hints about what capabilities might be needed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities_hint: Option<Vec<String>>,
+    /// Device capabilities available
+    pub device_caps: DeviceCapabilities,
+    /// The user's intent or goal
+    pub intent: String,
+    /// Optional context from the app
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Value>,
+}
+
+/// Device capabilities available on the local device
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceCapabilities {
+    /// On-device AI capabilities
+    pub ai_capabilities: Vec<AiCapability>,
+    /// Available sensors
+    pub sensors: Vec<SensorType>,
+    /// Device platform
+    pub platform: DevicePlatform,
+    /// OS version
+    pub os_version: String,
+}
+
+/// On-device AI capability
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiCapability {
+    /// Foundation Models (structured generation, tool calling)
+    FoundationModels,
+    /// Writing Tools (text refinement, proofreading)
+    WritingTools,
+    /// Image Playground (on-device image synthesis)
+    ImagePlayground,
+    /// Speech recognition
+    SpeechRecognition,
+    /// Text-to-speech
+    TextToSpeech,
+}
+
+/// Device platform
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum DevicePlatform {
+    Ios,
+    Macos,
+    Tvos,
+    Watchos,
+}
+
+/// Type of sensor available on device
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SensorType {
+    /// GPS location
+    Location,
+    /// Camera
+    Camera,
+    /// Microphone
+    Microphone,
+    /// Motion sensors (accelerometer, gyroscope)
+    Motion,
+    /// Nearby devices (BLE, WiFi, mDNS)
+    NearbyDevices,
+    /// Compass
+    Compass,
+    /// Ambient light sensor
+    AmbientLight,
+    /// Barometer
+    Barometer,
+}
+
+/// Request for sensor data from LocalAIAgent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SensorRequest {
+    /// Task ID this sensor request is part of
+    pub task_id: String,
+    /// Type of sensor to access
+    pub sensor: SensorType,
+    /// Level of detail required
+    pub scope: DataScope,
+    /// How long to retain the data
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention: Option<u64>,
+    /// Sampling rate in Hz (samples per second)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    /// Policy tag for audit trail
+    pub policy_tag: String,
+}
+
+/// Level of detail for sensor data
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DataScope {
+    /// Minimal data (e.g., city-level location)
+    Minimal,
+    /// Standard data (e.g., street-level location)
+    Standard,
+    /// Detailed data (e.g., precise GPS coordinates)
+    Detailed,
+}
+
+/// Response with sensor data
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SensorResponse {
+    /// Task ID this response is for
+    pub task_id: String,
+    /// The sensor data payload
+    pub payload: serde_json::Value,
+    /// List of redactions applied
+    #[serde(default)]
+    pub redactions: Vec<String>,
+    /// Timestamp of sensor reading
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Tool call with locality specification
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ToolCall {
+    /// Tool call ID for correlation
+    pub tool_call_id: String,
+    /// Name of the tool to invoke
+    pub name: String,
+    /// Arguments for the tool
+    pub args: serde_json::Value,
+    /// Where the tool should execute
+    pub locality: Locality,
+}
+
+/// Where a tool should execute
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Locality {
+    /// Execute on local device (on-device AI, sensors)
+    Local,
+    /// Execute remotely (cloud APIs, web services)
+    Remote,
+}
+
+/// Tool call result
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ToolCallResult {
+    /// Tool call ID this result is for
+    pub tool_call_id: String,
+    /// Whether the call succeeded
+    pub success: bool,
+    /// Result data if successful
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    /// Error message if failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Request for human assistance
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HumanAssistRequest {
+    /// Agent requesting human assistance
+    pub agent_id: String,
+    /// Reason for requesting human help
+    pub reason: String,
+    /// Context handle for the conversation
+    pub context_handle: String,
+    /// Optional suggested questions for the human
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_questions: Option<Vec<String>>,
+}
+
+/// Task result with artifacts and citations
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TaskResult {
+    /// Task ID this result is for
+    pub task_id: String,
+    /// Result artifacts
+    pub artifacts: Vec<Artifact>,
+    /// Citations for sources used
+    #[serde(default)]
+    pub citations: Vec<Citation>,
+    /// Policy tag for audit trail
+    pub policy_tag: String,
+    /// Timestamp of completion
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Result artifact
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Artifact {
+    /// Artifact type
+    pub artifact_type: ArtifactType,
+    /// Artifact content or reference
+    pub content: serde_json::Value,
+    /// Optional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Type of artifact
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactType {
+    /// Text content
+    Text,
+    /// Image content
+    Image,
+    /// Audio content
+    Audio,
+    /// Video content
+    Video,
+    /// Structured data
+    Data,
+    /// File reference
+    File,
+}
+
+/// Citation for sources
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Citation {
+    /// Source identifier
+    pub source: String,
+    /// Citation URL if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Timestamp of source
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<DateTime<Utc>>,
+    /// Additional metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}

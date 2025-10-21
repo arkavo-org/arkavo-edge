@@ -27,6 +27,7 @@ kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini"]
 llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp"]
+cef-ui = ["arkavo-agui/cef-ui"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
