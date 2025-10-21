@@ -26,6 +26,7 @@ deepseek = ["arkavo-cli/deepseek"]
 gemini = ["arkavo-cli/gemini"]
 llama-cpp = ["arkavo-cli/llama-cpp"]
 test-harness = ["arkavo-cli/test-harness"]
+cef-ui = ["arkavo-cli/cef-ui"]
 
 [dependencies]
 arkavo-cli = { path = "../arkavo-cli", default-features = false }

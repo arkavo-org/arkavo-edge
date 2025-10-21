@@ -30,7 +30,7 @@ use jsonrpsee::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[rpc(server)]
 pub trait A2aRpc {
@@ -100,6 +100,10 @@ pub trait A2aRpc {
     /// Subscribe to message deltas for a session
     #[subscription(name = "chat_stream", unsubscribe = "chat_stream_unsubscribe", item = MessageDelta)]
     async fn chat_stream(&self, session_id: String) -> SubscriptionResult;
+
+    /// Acknowledge received message deltas (for back-pressure management)
+    #[method(name = "chat_metrics_ack")]
+    async fn chat_metrics_ack(&self, session_id: String, last_seq: u64) -> RpcResult<()>;
 
     /// Query another agent
     #[method(name = "agent_query")]
@@ -748,22 +752,28 @@ impl A2aRpcServer for A2aRpcImpl {
     }
 
     async fn chat_send(&self, session_id: String, message: UserMessage) -> RpcResult<()> {
+        info!(session.id = %session_id, content_len = message.content.len(), "chat_send called");
         let timer = RpcTimer::new("chat_send".to_string(), self.metrics.clone());
 
         // Check rate limit
         if let Err(e) = self.rate_limiter.check_rate_limit() {
+            warn!(session.id = %session_id, "Rate limit exceeded for chat_send");
             self.metrics.record_rate_limit_blocked(None);
             timer.error();
             return Err(e);
         }
 
+        info!(session.id = %session_id, "Forwarding message to chat session manager");
+
         // Send message to the session
         match self.chat_sessions.send_message(&session_id, message).await {
             Ok(()) => {
+                info!(session.id = %session_id, "Message sent successfully to session");
                 timer.success();
                 Ok(())
             }
             Err(e) => {
+                error!(session.id = %session_id, error = %e, "Failed to send message to session");
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     e.to_json_rpc_code(),
@@ -799,19 +809,26 @@ impl A2aRpcServer for A2aRpcImpl {
         sink: PendingSubscriptionSink,
         session_id: String,
     ) -> SubscriptionResult {
+        info!(session.id = %session_id, "chat_stream subscription requested");
         let timer = RpcTimer::new("chat_stream".to_string(), self.metrics.clone());
 
         // Check rate limit
         if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            warn!(session.id = %session_id, "Rate limit exceeded for chat_stream");
             self.metrics.record_rate_limit_blocked(None);
             timer.error();
             return Ok(());
         }
 
         // Accept the subscription
+        info!(session.id = %session_id, "Accepting chat_stream subscription");
         let sink = match sink.accept().await {
-            Ok(sink) => sink,
-            Err(_) => {
+            Ok(sink) => {
+                info!(session.id = %session_id, "Subscription accepted successfully");
+                sink
+            }
+            Err(e) => {
+                error!(session.id = %session_id, error = ?e, "Failed to accept subscription");
                 timer.error();
                 return Ok(());
             }
@@ -819,24 +836,53 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Get delta stream for this session
         if let Some(mut delta_rx) = self.chat_sessions.get_delta_stream(&session_id).await {
+            info!(session.id = %session_id, "Got delta stream, spawning forwarder task");
+
             // Spawn a task to forward deltas to the subscription
             tokio::spawn(async move {
+                info!(session.id = %session_id, "Delta forwarder task started");
+                let mut delta_count = 0;
                 while let Some(delta) = delta_rx.recv().await {
+                    delta_count += 1;
+                    info!(session.id = %session_id, delta_count, "Forwarding delta to client");
                     if let Ok(msg) = SubscriptionMessage::from_json(&delta)
                         && sink.send(msg).await.is_err()
                     {
+                        warn!(session.id = %session_id, "Client disconnected, stopping delta forwarding");
                         break; // Client disconnected
                     }
                 }
+                info!(session.id = %session_id, total_deltas = delta_count, "Delta forwarder task ended");
             });
 
             timer.success();
             Ok(())
         } else {
+            error!(session.id = %session_id, "Session not found for chat_stream subscription");
             timer.error();
             // Session not found - subscription will be closed
             Ok(())
         }
+    }
+
+    async fn chat_metrics_ack(&self, session_id: String, last_seq: u64) -> RpcResult<()> {
+        debug!(
+            session.id = %session_id,
+            last_seq = last_seq,
+            "Received delta acknowledgment"
+        );
+
+        let timer = RpcTimer::new("chat_metrics_ack".to_string(), self.metrics.clone());
+
+        // Update session metrics for back-pressure management
+        // This helps the server know the client has processed deltas up to last_seq
+        // and can resume sending more if throttled
+
+        // Note: ChatSessionManager can use this to manage buffer sizes
+        // For now, just acknowledge receipt
+
+        timer.success();
+        Ok(())
     }
 
     async fn chat_subscribe(
@@ -2148,11 +2194,15 @@ impl A2aServer {
         let api_keys = metadata.api_keys.clone();
         drop(metadata); // Release lock before creating adapter
 
-        if let Ok(adapter) = self.create_llm_adapter(&model, &api_keys) {
-            *self.llm_adapter.write().await = Some(adapter);
-            info!("Created LLM adapter with model: {}", model);
-        } else {
-            error!(model = model, "Failed to create LLM adapter for model");
+        info!("Attempting to create LLM adapter for model: {}", model);
+        match self.create_llm_adapter(&model, &api_keys) {
+            Ok(adapter) => {
+                *self.llm_adapter.write().await = Some(adapter);
+                info!("✓ Successfully created LLM adapter with model: {}", model);
+            }
+            Err(e) => {
+                error!(model = model, error = %e, "✗ Failed to create LLM adapter");
+            }
         }
     }
 
@@ -2162,7 +2212,7 @@ impl A2aServer {
         api_keys: &std::collections::HashMap<String, String>,
     ) -> Result<Arc<LlmClientAdapter>> {
         // Parse the model URL to extract provider and configuration
-        // Format: provider://host:port/model
+        // Format: provider://host:port/model OR bare model name
         if let Some((provider, rest)) = model_url.split_once("://") {
             match provider {
                 "ollama" => {
@@ -2211,9 +2261,25 @@ impl A2aServer {
                 ))),
             }
         } else {
-            Err(A2aError::InvalidRequest(format!(
-                "Invalid model URL format: {model_url}"
-            )))
+            // Bare model name without provider prefix - try to infer from environment or use LlmClient::from_env
+            info!(
+                "Model '{}' has no provider prefix, attempting to create from environment variables",
+                model_url
+            );
+
+            // Try to create client from environment variables (LLM_PROVIDER, etc.)
+            let client = LlmClient::from_env().map_err(|e| {
+                A2aError::InvalidRequest(format!(
+                    "Failed to create LLM client for model '{model_url}' from environment: {e}. \
+                     Either use format 'provider://host:port/model' or set LLM_PROVIDER env var"
+                ))
+            })?;
+
+            info!(
+                "Successfully created LLM client from environment for model: {}",
+                model_url
+            );
+            Ok(Arc::new(LlmClientAdapter::new(client)))
         }
     }
 
@@ -2339,6 +2405,13 @@ impl A2aServer {
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
         let llm_adapter = self.llm_adapter.read().await.clone();
+
+        if llm_adapter.is_some() {
+            info!("✓ ChatSessionManager will be created WITH LLM adapter");
+        } else {
+            warn!("✗ ChatSessionManager will be created WITHOUT LLM adapter - messages will fail!");
+        }
+
         let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::with_config(
             llm_adapter.clone(),
             3600, // 1 hour TTL
@@ -2653,5 +2726,102 @@ mod tests {
         let err = result2.unwrap_err();
         assert_eq!(err.code(), -32001);
         assert!(err.message().contains("Rate limit"));
+    }
+
+    #[tokio::test]
+    async fn test_llm_adapter_creation_with_provider_url() {
+        let config = ServerConfig::default();
+        let server = A2aServer::new(config);
+
+        // Test parsing logic for Ollama provider URL format
+        let api_keys = std::collections::HashMap::new();
+        let result = server.create_llm_adapter("ollama://127.0.0.1:11434/qwen3:0.6b", &api_keys);
+
+        // Should succeed in creating adapter (whether or not Ollama is running)
+        match result {
+            Ok(_adapter) => {
+                // Success! The adapter was created
+            }
+            Err(e) => {
+                // The only valid failure here is if we can't actually connect,
+                // not if the parsing failed
+                let error_msg = format!("{:?}", e);
+                assert!(
+                    !error_msg.contains("Invalid model URL format")
+                        && !error_msg.contains("Invalid Ollama URL format"),
+                    "URL parsing should succeed for valid Ollama URL format: {:?}",
+                    e
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_llm_adapter_creation_with_bare_model_name() {
+        let config = ServerConfig::default();
+        let server = A2aServer::new(config);
+
+        // Set up environment for bare model name to work
+        unsafe {
+            std::env::set_var("LLM_PROVIDER", "ollama");
+            std::env::set_var("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
+            std::env::set_var("OLLAMA_MODEL", "qwen3:0.6b");
+        }
+
+        // Test parsing logic for bare model name (no provider prefix)
+        let api_keys = std::collections::HashMap::new();
+        let result = server.create_llm_adapter("gemini-2.5-pro", &api_keys);
+
+        // Should attempt to create from environment
+        match result {
+            Ok(_adapter) => {
+                // Success! The adapter was created from environment
+            }
+            Err(e) => {
+                // The only valid failure here is if the provider can't initialize,
+                // not if the bare model name was rejected
+                let error_msg = format!("{:?}", e);
+                assert!(
+                    !error_msg.contains("Invalid model URL format"),
+                    "Bare model names should be supported via environment fallback, got: {:?}",
+                    e
+                );
+            }
+        }
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("LLM_PROVIDER");
+            std::env::remove_var("OLLAMA_BASE_URL");
+            std::env::remove_var("OLLAMA_MODEL");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_llm_adapter_invalid_provider_url() {
+        let config = ServerConfig::default();
+        let server = A2aServer::new(config);
+
+        // Test that invalid provider URLs are rejected
+        let api_keys = std::collections::HashMap::new();
+
+        // Invalid: unknown provider
+        let result = server.create_llm_adapter("unknown://127.0.0.1:11434/model", &api_keys);
+        assert!(result.is_err(), "Unknown provider should be rejected");
+        if let Err(e) = result {
+            let error_msg = format!("{:?}", e);
+            assert!(error_msg.contains("Unsupported LLM provider"));
+        }
+
+        // Invalid: Ollama URL without model name
+        let result2 = server.create_llm_adapter("ollama://127.0.0.1:11434", &api_keys);
+        assert!(
+            result2.is_err(),
+            "Ollama URL without model should be rejected"
+        );
+        if let Err(e) = result2 {
+            let error_msg = format!("{:?}", e);
+            assert!(error_msg.contains("Invalid Ollama URL format"));
+        }
     }
 }
