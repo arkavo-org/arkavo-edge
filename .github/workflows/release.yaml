@@ -504,7 +504,7 @@ jobs:
           TEAM_ID: M8GS7ZT95Y
         run: |
           set -euo pipefail
-          OUT_JSON="$(mktemp)"
+          OUT_JSON="notary-submit.json"
           xcrun notarytool submit "arkavo-${VERSION}-macos-arm64.pkg" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
@@ -512,19 +512,18 @@ jobs:
             --wait \
             --output-format json | tee "$OUT_JSON"
 
-          STATUS=$(python3 - <<'PY'
-          import json,sys; print(json.load(open(sys.argv[1]))["status"])
-          PY
-          "$OUT_JSON")
-
-          ID=$(python3 - <<'PY'
-          import json,sys; print(json.load(open(sys.argv[1]))["id"])
-          PY
-          "$OUT_JSON")
+          STATUS=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['status'])")
+          ID=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['id'])")
 
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "submission_id=$ID" >> "$GITHUB_OUTPUT"
           echo "Submission status: $STATUS  id: $ID"
+
+          # Exit with error if not Accepted
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $STATUS"
+            exit 1
+          fi
 
       - name: Fetch notary log (always)
         if: ${{ always() }}
@@ -535,18 +534,15 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           TEAM_ID: M8GS7ZT95Y
         run: |
-          set -euo pipefail
+          set +e  # Don't exit on error
           ID="${{ steps.notarize.outputs.submission_id || '' }}"
+
           if [[ -z "$ID" ]]; then
             echo "No submission id captured; try history fallback…"
-            ID=$(xcrun notarytool history --apple-id "$APPLE_ID" \
+            HISTORY_JSON=$(xcrun notarytool history --apple-id "$APPLE_ID" \
                  --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" \
-                 --output-format json | python3 - <<'PY'
-          import json,sys
-          h=json.load(sys.stdin).get("history",[])
-          print(h[0]["id"] if h else "")
-          PY
-            || true)
+                 --output-format json 2>/dev/null || echo "{}")
+            ID=$(echo "$HISTORY_JSON" | python3 -c "import json,sys; h=json.load(sys.stdin).get('history',[]); print(h[0]['id'] if h else '')" 2>/dev/null || echo "")
           fi
 
           if [[ -z "$ID" ]]; then
@@ -559,14 +555,14 @@ jobs:
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$TEAM_ID" \
-            --output-format json | tee notary.json
+            notary.json 2>&1 || echo "Failed to fetch log" > notary.json
 
-          python3 - <<'PY' notary.json > notary.log || cp notary.json notary.log
-          import json,sys
-          j=json.load(open(sys.argv[1]))
-          notes=j.get("issues") or j.get("log") or j
-          print(json.dumps(notes, indent=2))
-          PY
+          # Create readable log
+          if [ -f notary.json ]; then
+            python3 -c "import json,sys; j=json.load(open('notary.json')); print(json.dumps(j.get('issues') or j.get('log') or j, indent=2))" > notary.log 2>&1 || cp notary.json notary.log
+          else
+            echo "No log file generated" > notary.log
+          fi
 
       - name: Upload notary logs
         if: ${{ always() }}
