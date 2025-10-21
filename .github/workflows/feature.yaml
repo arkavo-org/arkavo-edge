@@ -680,21 +680,30 @@ jobs:
       - name: Notarize pkg
         continue-on-error: true
         env:
-          MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          if [ -z "$MACOS_NOTARY_PROFILE" ]; then
-            echo "⚠️ MACOS_NOTARY_PROFILE not set - skipping notarization"
-            echo "To enable notarization, run: xcrun notarytool store-credentials <profile-name>"
-            echo "Then add MACOS_NOTARY_PROFILE secret with the profile name"
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
+            echo "⚠️ APPLE_ID or APPLE_APP_PASSWORD not set - skipping notarization"
+            echo "To enable notarization:"
+            echo "1. Create app-specific password at https://appleid.apple.com/account/manage"
+            echo "2. Add APPLE_ID secret (your Apple ID email)"
+            echo "3. Add APPLE_APP_PASSWORD secret (the app-specific password)"
             exit 0
           fi
 
           echo "Submitting for notarization..."
           xcrun notarytool submit arkavo-$VERSION-macos-arm64.pkg \
-            --keychain-profile "$MACOS_NOTARY_PROFILE" \
-            --wait
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id M8GS7ZT95Y \
+            --wait \
+            --timeout 600 || {
+              echo "⚠️ Notarization failed - continuing anyway"
+              exit 0
+            }
 
           echo "Stapling notarization ticket..."
           xcrun stapler staple arkavo-$VERSION-macos-arm64.pkg
