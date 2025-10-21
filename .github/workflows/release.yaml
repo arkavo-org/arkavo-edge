@@ -413,7 +413,12 @@ jobs:
           mkdir -p Arkavo.app/Contents/Resources
           mkdir -p Arkavo.app/Contents/Frameworks
 
-          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo
+          # Copy the actual binary as arkavo-bin
+          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo-bin
+
+          # Copy the launcher script as the main executable
+          cp packaging/macos/launcher.sh Arkavo.app/Contents/MacOS/arkavo
+
           cp packaging/macos/Info.plist Arkavo.app/Contents/Info.plist
 
           # Copy CEF framework (~100MB)
@@ -427,7 +432,9 @@ jobs:
           # Update version in Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.release.outputs.version }}" Arkavo.app/Contents/Info.plist
 
+          # Make both executables
           chmod +x Arkavo.app/Contents/MacOS/arkavo
+          chmod +x Arkavo.app/Contents/MacOS/arkavo-bin
 
       - name: Codesign app
         run: |
@@ -476,9 +483,15 @@ jobs:
               "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
           fi
 
-          # Sign the main binary with entitlements
+          # Sign the actual binary with entitlements
           codesign --force --options runtime --timestamp \
             --entitlements packaging/macos/entitlements.plist \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
+            Arkavo.app/Contents/MacOS/arkavo-bin
+
+          # Sign the launcher script
+          codesign --force --options runtime --timestamp \
             --keychain build.keychain \
             --sign "$CERT_APP" \
             Arkavo.app/Contents/MacOS/arkavo
