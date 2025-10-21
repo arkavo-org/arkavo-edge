@@ -523,7 +523,7 @@ jobs:
           echo "Building version: $VERSION"
 
       - name: Import signing certificates
-        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        if: secrets.MACOS_CERTIFICATE != ''
         run: |
           echo "Creating and configuring keychain..."
           security create-keychain -p "" build.keychain
