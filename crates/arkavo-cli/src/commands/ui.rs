@@ -37,6 +37,13 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Prevent unused variable/assignment warnings when CEF UI is not enabled
+    #[cfg(not(feature = "cef-ui"))]
+    {
+        let _ = port;
+        let _ = &initial_prompt;
+    }
+
     let run_async = async move {
         // Determine which renderer to use
         #[cfg(feature = "cef-ui")]
