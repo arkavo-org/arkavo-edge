@@ -522,6 +522,35 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
+      - name: Import signing certificates
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        run: |
+          echo "Creating and configuring keychain..."
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          # Import Developer ID Application certificate
+          if [ -n "${{ secrets.MACOS_CERTIFICATE }}" ]; then
+            echo "Importing Application certificate..."
+            echo "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode > /tmp/cert-app.p12
+            security import /tmp/cert-app.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm /tmp/cert-app.p12
+          fi
+
+          # Import Developer ID Installer certificate
+          if [ -n "${{ secrets.MACOS_CERT_INSTALLER }}" ]; then
+            echo "Importing Installer certificate..."
+            echo "${{ secrets.MACOS_CERT_INSTALLER }}" | base64 --decode > /tmp/cert-installer.p12
+            security import /tmp/cert-installer.p12 -k build.keychain -P "${{ secrets.MACOS_CERT_INSTALLER_PASSWORD }}" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm /tmp/cert-installer.p12
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          echo "✅ Certificates imported successfully"
+          security find-identity -v -p codesigning build.keychain
+
       - name: Cache CEF framework
         id: cache-cef
         uses: actions/cache@v4
@@ -581,18 +610,20 @@ jobs:
 
       - name: Codesign app
         continue-on-error: true
-        env:
-          MACOS_DEV_ID_APP: ${{ secrets.MACOS_DEV_ID_APP }}
         run: |
-          if [ -z "$MACOS_DEV_ID_APP" ]; then
-            echo "⚠️ MACOS_DEV_ID_APP not set - skipping codesign"
-            echo "To enable signing, add MACOS_DEV_ID_APP secret with your Developer ID Application certificate name"
+          # Check if certificates are available
+          CERT_APP=$(security find-identity -v -p codesigning build.keychain 2>/dev/null | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+
+          if [ -z "$CERT_APP" ]; then
+            echo "⚠️ Developer ID Application certificate not found - skipping codesign"
+            echo "To enable signing, add MACOS_CERTIFICATE and MACOS_CERTIFICATE_PASSWORD secrets"
             exit 0
           fi
 
-          echo "Signing app with hardened runtime..."
+          echo "Signing app with hardened runtime using: $CERT_APP"
           codesign --force --options runtime --timestamp \
-            --sign "$MACOS_DEV_ID_APP" \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
             Arkavo.app
 
           codesign --verify --deep --strict --verbose Arkavo.app
@@ -613,21 +644,23 @@ jobs:
 
       - name: Sign installer
         continue-on-error: true
-        env:
-          MACOS_DEV_ID_INSTALLER: ${{ secrets.MACOS_DEV_ID_INSTALLER }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          if [ -z "$MACOS_DEV_ID_INSTALLER" ]; then
-            echo "⚠️ MACOS_DEV_ID_INSTALLER not set - creating unsigned pkg"
-            echo "To enable signing, add MACOS_DEV_ID_INSTALLER secret with your Developer ID Installer certificate name"
+          # Check if installer certificate is available
+          CERT_INSTALLER=$(security find-identity -v -p codesigning build.keychain 2>/dev/null | grep "Developer ID Installer" | head -1 | awk -F'"' '{print $2}')
+
+          if [ -z "$CERT_INSTALLER" ]; then
+            echo "⚠️ Developer ID Installer certificate not found - creating unsigned pkg"
+            echo "To enable signing, add MACOS_CERT_INSTALLER and MACOS_CERT_INSTALLER_PASSWORD secrets"
             mv arkavo-$VERSION.component.pkg arkavo-$VERSION-macos-arm64.pkg
             exit 0
           fi
 
-          echo "Signing installer..."
+          echo "Signing installer with: $CERT_INSTALLER"
           productsign \
-            --sign "$MACOS_DEV_ID_INSTALLER" \
+            --keychain build.keychain \
+            --sign "$CERT_INSTALLER" \
             arkavo-$VERSION.component.pkg \
             arkavo-$VERSION-macos-arm64.pkg
 
