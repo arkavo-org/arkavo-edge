@@ -429,10 +429,24 @@ jobs:
             echo "⚠️ CEF framework not found - .pkg will not include CEF support"
           fi
 
+          # Find and copy the CEF renderer binary
+          echo "Looking for CEF renderer binary..."
+          RENDERER_PATH=$(find target/aarch64-apple-darwin/release/build -name "arkavo-cef-renderer" -path "*/out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer" | head -1)
+          if [ -n "$RENDERER_PATH" ] && [ -f "$RENDERER_PATH" ]; then
+            echo "Found CEF renderer at: $RENDERER_PATH"
+            cp "$RENDERER_PATH" Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            chmod +x Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            echo "✅ CEF renderer included in bundle"
+          else
+            echo "⚠️ CEF renderer not found - UI may not work"
+            echo "Searched in: target/aarch64-apple-darwin/release/build"
+            find target/aarch64-apple-darwin/release/build -name "arkavo-cef*" -type d | head -5
+          fi
+
           # Update version in Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.release.outputs.version }}" Arkavo.app/Contents/Info.plist
 
-          # Make both executables
+          # Make executables
           chmod +x Arkavo.app/Contents/MacOS/arkavo
           chmod +x Arkavo.app/Contents/MacOS/arkavo-edge
 
@@ -481,6 +495,16 @@ jobs:
               --keychain build.keychain \
               --sign "$CERT_APP" \
               "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          fi
+
+          # Sign the CEF renderer binary if it exists
+          if [ -f "Arkavo.app/Contents/MacOS/arkavo-cef-renderer" ]; then
+            echo "Signing CEF renderer..."
+            codesign --force --options runtime --timestamp \
+              --entitlements packaging/macos/entitlements.plist \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              Arkavo.app/Contents/MacOS/arkavo-cef-renderer
           fi
 
           # Sign the actual binary with entitlements
