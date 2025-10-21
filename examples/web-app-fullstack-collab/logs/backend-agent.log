@@ -1,0 +1,11 @@
+Starting agent: backend-agent
+Purpose: Maintain backend services, APIs, and data integrity for the shared web application
+Model: gemma-3-270m
+Listen: 127.0.0.1:8351
+mDNS enabled: false
+Initializing memory tools...
+Registered MCP test tools from arkavo-mcp-macos
+Registered Arkavo MCP tools (runtime and test tools)
+mDNS broadcasting disabled
+Agent server started on 127.0.0.1:8351
+Press Ctrl+C to stop

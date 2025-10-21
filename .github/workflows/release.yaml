@@ -394,8 +394,8 @@ jobs:
           echo "✅ CEF loaded from cache"
           ls -lh vendor/cef/ || echo "CEF cache verification failed"
 
-      - name: Build ARM64 binary
-        run: cargo build --release --target aarch64-apple-darwin
+      - name: Build ARM64 binary with CEF
+        run: cargo build --release --target aarch64-apple-darwin --features cef-ui
 
       - name: Check binary size
         run: |
@@ -413,8 +413,8 @@ jobs:
           mkdir -p Arkavo.app/Contents/Resources
           mkdir -p Arkavo.app/Contents/Frameworks
 
-          # Copy the actual binary as arkavo-bin
-          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo-bin
+          # Copy the actual binary as arkavo-edge
+          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo-edge
 
           # Copy the launcher script as the main executable
           cp packaging/macos/launcher.sh Arkavo.app/Contents/MacOS/arkavo
@@ -434,7 +434,7 @@ jobs:
 
           # Make both executables
           chmod +x Arkavo.app/Contents/MacOS/arkavo
-          chmod +x Arkavo.app/Contents/MacOS/arkavo-bin
+          chmod +x Arkavo.app/Contents/MacOS/arkavo-edge
 
       - name: Codesign app
         run: |
@@ -488,7 +488,7 @@ jobs:
             --entitlements packaging/macos/entitlements.plist \
             --keychain build.keychain \
             --sign "$CERT_APP" \
-            Arkavo.app/Contents/MacOS/arkavo-bin
+            Arkavo.app/Contents/MacOS/arkavo-edge
 
           # Sign the launcher script
           codesign --force --options runtime --timestamp \
