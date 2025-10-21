@@ -558,7 +558,8 @@ jobs:
 
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           echo "✅ Certificates imported successfully"
-          security find-identity -v -p codesigning build.keychain
+          echo "Available identities:"
+          security find-identity -v build.keychain
 
       - name: Cache CEF framework
         id: cache-cef
@@ -656,8 +657,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # Check if installer certificate is available
-          CERT_INSTALLER=$(security find-identity -v -p codesigning build.keychain 2>/dev/null | grep "Developer ID Installer" | head -1 | awk -F'"' '{print $2}')
+          # Check if installer certificate is available (use -p basic to see all signing identities)
+          CERT_INSTALLER=$(security find-identity -v build.keychain 2>/dev/null | grep "Developer ID Installer" | head -1 | awk -F'"' '{print $2}')
 
           if [ -z "$CERT_INSTALLER" ]; then
             echo "⚠️ Developer ID Installer certificate not found - creating unsigned pkg"
