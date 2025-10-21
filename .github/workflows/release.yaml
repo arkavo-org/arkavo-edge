@@ -444,21 +444,33 @@ jobs:
           # Sign the CEF framework first (it's already signed by Chromium, need to re-sign)
           if [ -d "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
             echo "Re-signing CEF framework..."
-            # Sign all nested frameworks and helpers within CEF
-            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) | while read f; do
+            # List the actual structure for debugging
+            ls -la "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework/" || true
+
+            # Find and sign the actual framework binary (may be directly in the framework or in subdirectories)
+            # Sign from innermost to outermost
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f \( -name "*.dylib" -o -name "*.so" \) -print0 | while IFS= read -r -d '' f; do
+              echo "Signing: $f"
               codesign --force --options runtime --timestamp \
                 --keychain build.keychain \
                 --sign "$CERT_APP" \
-                "$f" 2>/dev/null || true
+                "$f" 2>&1 || true
             done
 
-            # Sign the framework itself
-            codesign --force --options runtime --timestamp \
-              --keychain build.keychain \
-              --sign "$CERT_APP" \
-              "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/Current/Chromium Embedded Framework"
+            # Sign any helper executables
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f -perm +111 ! -name "*.dylib" ! -name "*.so" -print0 | while IFS= read -r -d '' f; do
+              if file "$f" | grep -q "Mach-O"; then
+                echo "Signing executable: $f"
+                codesign --force --options runtime --timestamp \
+                  --keychain build.keychain \
+                  --sign "$CERT_APP" \
+                  "$f" 2>&1 || true
+              fi
+            done
 
-            codesign --force --options runtime --timestamp \
+            # Sign the framework bundle itself with deep to catch anything we missed
+            echo "Signing CEF framework bundle..."
+            codesign --force --deep --options runtime --timestamp \
               --keychain build.keychain \
               --sign "$CERT_APP" \
               "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
