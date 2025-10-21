@@ -491,29 +491,93 @@ jobs:
           rm arkavo-$VERSION.component.pkg
           echo "✅ Installer signed successfully"
 
-      - name: Notarize pkg
+      - name: Submit to notary service (wait)
+        id: notarize
+        shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
+        run: |
+          set -euo pipefail
+          OUT_JSON="$(mktemp)"
+          xcrun notarytool submit "arkavo-${VERSION}-macos-arm64.pkg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait \
+            --output-format json | tee "$OUT_JSON"
+
+          STATUS=$(python3 - <<'PY'
+          import json,sys; print(json.load(open(sys.argv[1]))["status"])
+          PY
+          "$OUT_JSON")
+
+          ID=$(python3 - <<'PY'
+          import json,sys; print(json.load(open(sys.argv[1]))["id"])
+          PY
+          "$OUT_JSON")
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "submission_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Submission status: $STATUS  id: $ID"
+
+      - name: Fetch notary log (always)
+        if: ${{ always() }}
+        id: fetchlog
+        shell: bash
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
-
-          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
-            echo "ERROR: APPLE_ID or APPLE_APP_PASSWORD not set"
-            exit 1
+          set -euo pipefail
+          ID="${{ steps.notarize.outputs.submission_id || '' }}"
+          if [[ -z "$ID" ]]; then
+            echo "No submission id captured; try history fallback…"
+            ID=$(xcrun notarytool history --apple-id "$APPLE_ID" \
+                 --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" \
+                 --output-format json | python3 - <<'PY'
+          import json,sys
+          h=json.load(sys.stdin).get("history",[])
+          print(h[0]["id"] if h else "")
+          PY
+            || true)
           fi
 
-          echo "Submitting for notarization..."
-          xcrun notarytool submit arkavo-$VERSION-macos-arm64.pkg \
+          if [[ -z "$ID" ]]; then
+            echo "Still no submission id; cannot fetch log." | tee notary.log
+            exit 0
+          fi
+
+          echo "Fetching notary log for $ID…"
+          xcrun notarytool log "$ID" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
-            --team-id M8GS7ZT95Y \
-            --wait \
-            --timeout 600
+            --team-id "$TEAM_ID" \
+            --output-format json | tee notary.json
 
-          echo "Stapling notarization ticket..."
-          xcrun stapler staple arkavo-$VERSION-macos-arm64.pkg
+          python3 - <<'PY' notary.json > notary.log || cp notary.json notary.log
+          import json,sys
+          j=json.load(open(sys.argv[1]))
+          notes=j.get("issues") or j.get("log") or j
+          print(json.dumps(notes, indent=2))
+          PY
 
+      - name: Upload notary logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-logs
+          path: |
+            notary.json
+            notary.log
+
+      - name: Staple (only on Accepted)
+        if: ${{ steps.notarize.outputs.status == 'Accepted' }}
+        run: |
+          xcrun stapler staple "arkavo-${{ needs.release.outputs.version }}-macos-arm64.pkg"
           echo "✅ Pkg notarized and stapled successfully"
 
       - name: Generate checksum
