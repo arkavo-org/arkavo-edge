@@ -444,19 +444,41 @@ jobs:
           # Sign the CEF framework first (it's already signed by Chromium, need to re-sign)
           if [ -d "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
             echo "Re-signing CEF framework..."
+            # Sign all nested frameworks and helpers within CEF
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) | while read f; do
+              codesign --force --options runtime --timestamp \
+                --keychain build.keychain \
+                --sign "$CERT_APP" \
+                "$f" 2>/dev/null || true
+            done
+
+            # Sign the framework itself
+            codesign --force --options runtime --timestamp \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/Current/Chromium Embedded Framework"
+
             codesign --force --options runtime --timestamp \
               --keychain build.keychain \
               --sign "$CERT_APP" \
               "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
           fi
 
-          # Sign the main app bundle with deep flag to cover all components
-          codesign --force --deep --options runtime --timestamp \
+          # Sign the main binary with entitlements
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
+            Arkavo.app/Contents/MacOS/arkavo
+
+          # Sign the app bundle itself  (without --deep)
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
             --keychain build.keychain \
             --sign "$CERT_APP" \
             Arkavo.app
 
-          codesign --verify --deep --strict --verbose Arkavo.app
+          codesign --verify --strict --verbose=4 Arkavo.app
           echo "✅ App signed successfully"
 
       - name: Build component pkg
