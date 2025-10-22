@@ -2,11 +2,13 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     name: Create Release
     runs-on: ubuntu-22.04
     outputs:
@@ -391,8 +393,8 @@ jobs:
           echo "✅ CEF loaded from cache"
           ls -lh vendor/cef/ || echo "CEF cache verification failed"
 
-      - name: Build ARM64 binary
-        run: cargo build --release --target aarch64-apple-darwin
+      - name: Build ARM64 binary with CEF
+        run: cargo build --release --target aarch64-apple-darwin --features cef-ui
 
       - name: Check binary size
         run: |
@@ -410,7 +412,10 @@ jobs:
           mkdir -p Arkavo.app/Contents/Resources
           mkdir -p Arkavo.app/Contents/Frameworks
 
+          # Copy the binary as arkavo (main executable)
+          # It auto-detects app bundle context and launches UI
           cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo
+
           cp packaging/macos/Info.plist Arkavo.app/Contents/Info.plist
 
           # Copy CEF framework (~100MB)
@@ -421,9 +426,24 @@ jobs:
             echo "⚠️ CEF framework not found - .pkg will not include CEF support"
           fi
 
+          # Find and copy the CEF renderer binary
+          echo "Looking for CEF renderer binary..."
+          RENDERER_PATH=$(find target/aarch64-apple-darwin/release/build -name "arkavo-cef-renderer" -path "*/out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer" | head -1)
+          if [ -n "$RENDERER_PATH" ] && [ -f "$RENDERER_PATH" ]; then
+            echo "Found CEF renderer at: $RENDERER_PATH"
+            cp "$RENDERER_PATH" Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            chmod +x Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            echo "✅ CEF renderer included in bundle"
+          else
+            echo "⚠️ CEF renderer not found - UI may not work"
+            echo "Searched in: target/aarch64-apple-darwin/release/build"
+            find target/aarch64-apple-darwin/release/build -name "arkavo-cef*" -type d | head -5
+          fi
+
           # Update version in Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.release.outputs.version }}" Arkavo.app/Contents/Info.plist
 
+          # Make executable
           chmod +x Arkavo.app/Contents/MacOS/arkavo
 
       - name: Codesign app
@@ -441,19 +461,63 @@ jobs:
           # Sign the CEF framework first (it's already signed by Chromium, need to re-sign)
           if [ -d "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
             echo "Re-signing CEF framework..."
-            codesign --force --options runtime --timestamp \
+            # List the actual structure for debugging
+            ls -la "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework/" || true
+
+            # Find and sign the actual framework binary (may be directly in the framework or in subdirectories)
+            # Sign from innermost to outermost
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f \( -name "*.dylib" -o -name "*.so" \) -print0 | while IFS= read -r -d '' f; do
+              echo "Signing: $f"
+              codesign --force --options runtime --timestamp \
+                --keychain build.keychain \
+                --sign "$CERT_APP" \
+                "$f" 2>&1 || true
+            done
+
+            # Sign any helper executables
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f -perm +111 ! -name "*.dylib" ! -name "*.so" -print0 | while IFS= read -r -d '' f; do
+              if file "$f" | grep -q "Mach-O"; then
+                echo "Signing executable: $f"
+                codesign --force --options runtime --timestamp \
+                  --keychain build.keychain \
+                  --sign "$CERT_APP" \
+                  "$f" 2>&1 || true
+              fi
+            done
+
+            # Sign the framework bundle itself with deep to catch anything we missed
+            echo "Signing CEF framework bundle..."
+            codesign --force --deep --options runtime --timestamp \
               --keychain build.keychain \
               --sign "$CERT_APP" \
               "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
           fi
 
-          # Sign the main app bundle with deep flag to cover all components
-          codesign --force --deep --options runtime --timestamp \
+          # Sign the CEF renderer binary if it exists
+          if [ -f "Arkavo.app/Contents/MacOS/arkavo-cef-renderer" ]; then
+            echo "Signing CEF renderer..."
+            codesign --force --options runtime --timestamp \
+              --entitlements packaging/macos/entitlements.plist \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+          fi
+
+          # Sign the main binary with entitlements
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
+            Arkavo.app/Contents/MacOS/arkavo
+
+          # Sign the app bundle itself  (without --deep)
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
             --keychain build.keychain \
             --sign "$CERT_APP" \
             Arkavo.app
 
-          codesign --verify --deep --strict --verbose Arkavo.app
+          codesign --verify --strict --verbose=4 Arkavo.app
           echo "✅ App signed successfully"
 
       - name: Build component pkg
@@ -491,29 +555,89 @@ jobs:
           rm arkavo-$VERSION.component.pkg
           echo "✅ Installer signed successfully"
 
-      - name: Notarize pkg
+      - name: Submit to notary service (wait)
+        id: notarize
+        shell: bash
         env:
+          VERSION: ${{ needs.release.outputs.version }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
+          set -euo pipefail
+          OUT_JSON="notary-submit.json"
+          xcrun notarytool submit "arkavo-${VERSION}-macos-arm64.pkg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait \
+            --output-format json | tee "$OUT_JSON"
 
-          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
-            echo "ERROR: APPLE_ID or APPLE_APP_PASSWORD not set"
+          STATUS=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['status'])")
+          ID=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['id'])")
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "submission_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Submission status: $STATUS  id: $ID"
+
+          # Exit with error if not Accepted
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $STATUS"
             exit 1
           fi
 
-          echo "Submitting for notarization..."
-          xcrun notarytool submit arkavo-$VERSION-macos-arm64.pkg \
+      - name: Fetch notary log (always)
+        if: ${{ always() }}
+        id: fetchlog
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
+        run: |
+          set +e  # Don't exit on error
+          ID="${{ steps.notarize.outputs.submission_id || '' }}"
+
+          if [[ -z "$ID" ]]; then
+            echo "No submission id captured; try history fallback…"
+            HISTORY_JSON=$(xcrun notarytool history --apple-id "$APPLE_ID" \
+                 --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" \
+                 --output-format json 2>/dev/null || echo "{}")
+            ID=$(echo "$HISTORY_JSON" | python3 -c "import json,sys; h=json.load(sys.stdin).get('history',[]); print(h[0]['id'] if h else '')" 2>/dev/null || echo "")
+          fi
+
+          if [[ -z "$ID" ]]; then
+            echo "Still no submission id; cannot fetch log." | tee notary.log
+            exit 0
+          fi
+
+          echo "Fetching notary log for $ID…"
+          xcrun notarytool log "$ID" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
-            --team-id M8GS7ZT95Y \
-            --wait \
-            --timeout 600
+            --team-id "$TEAM_ID" \
+            notary.json 2>&1 || echo "Failed to fetch log" > notary.json
 
-          echo "Stapling notarization ticket..."
-          xcrun stapler staple arkavo-$VERSION-macos-arm64.pkg
+          # Create readable log
+          if [ -f notary.json ]; then
+            python3 -c "import json,sys; j=json.load(open('notary.json')); print(json.dumps(j.get('issues') or j.get('log') or j, indent=2))" > notary.log 2>&1 || cp notary.json notary.log
+          else
+            echo "No log file generated" > notary.log
+          fi
 
+      - name: Upload notary logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-logs
+          path: |
+            notary.json
+            notary.log
+
+      - name: Staple (only on Accepted)
+        if: ${{ steps.notarize.outputs.status == 'Accepted' }}
+        run: |
+          xcrun stapler staple "arkavo-${{ needs.release.outputs.version }}-macos-arm64.pkg"
           echo "✅ Pkg notarized and stapled successfully"
 
       - name: Generate checksum
