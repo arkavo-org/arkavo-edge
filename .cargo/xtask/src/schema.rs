@@ -33,7 +33,15 @@ fn generate_openrpc_schema(schemas_dir: &Path, check: bool) -> Result<()> {
 
     // Run the export-schema binary
     let output = Command::new("cargo")
-        .args(["run", "-p", "arkavo-protocol", "--bin", "export-schema"])
+        .args([
+            "run",
+            "-p",
+            "arkavo-protocol",
+            "--bin",
+            "export-schema",
+            "--features",
+            "demo",
+        ])
         .output()
         .context("Failed to run export-schema")?;
 
