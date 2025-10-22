@@ -233,15 +233,113 @@ fn execute_ai_task(
     _validate: bool,
     _message: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use std::env;
+
     println!("=== AI Task Execution ===\n");
     println!("Task: {task}\n");
 
-    // Delegate to chat command with the task as prompt
-    println!("Delegating to AI agent...\n");
+    // Lightweight API key detection (no model loading)
+    let available_llms = detect_available_llms();
 
-    // Use chat command to execute the task
-    let chat_args = vec!["--prompt".to_string(), task.to_string()];
+    // Display available models
+    println!("Available LLMs:");
+    for llm in &available_llms {
+        println!("  ✓ {} ({}) - {}", llm.name, llm.provider, llm.model);
+    }
+    println!();
+
+    // Simple heuristic model selection (no classifier needed)
+    let selected_model = select_model_for_task(task, &available_llms);
+
+    println!("Selected Model: {}", selected_model);
+    println!("Executing task...\n");
+
+    // Use chat command with selected model
+    let chat_args = vec![
+        "--prompt".to_string(),
+        task.to_string(),
+        "--model".to_string(),
+        selected_model,
+    ];
     crate::commands::chat::execute(&chat_args)
+}
+
+#[derive(Debug, Clone)]
+struct LlmInfo {
+    name: String,
+    provider: String,
+    model: String,
+}
+
+fn detect_available_llms() -> Vec<LlmInfo> {
+    use std::env;
+    let mut llms = Vec::new();
+
+    // Check for Gemini
+    if env::var("GEMINI_API_KEY").is_ok() {
+        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+        llms.push(LlmInfo {
+            name: "Gemini".to_string(),
+            provider: "Google".to_string(),
+            model,
+        });
+    }
+
+    // Check for OpenAI
+    if env::var("OPENAI_API_KEY").is_ok() {
+        llms.push(LlmInfo {
+            name: "OpenAI".to_string(),
+            provider: "OpenAI".to_string(),
+            model: "gpt-4".to_string(),
+        });
+    }
+
+    // Check for DeepSeek
+    if env::var("DEEPSEEK_API_KEY").is_ok() {
+        llms.push(LlmInfo {
+            name: "DeepSeek".to_string(),
+            provider: "DeepSeek".to_string(),
+            model: "deepseek-chat".to_string(),
+        });
+    }
+
+    // Always include local model
+    llms.push(LlmInfo {
+        name: "Local Gemma".to_string(),
+        provider: "Local".to_string(),
+        model: "gemma-3-270m-it".to_string(),
+    });
+
+    llms
+}
+
+fn select_model_for_task(task: &str, llms: &[LlmInfo]) -> String {
+    let task_lower = task.to_lowercase();
+
+    // Prefer cloud models for complex tasks
+    let is_complex = task_lower.contains("refactor")
+        || task_lower.contains("design")
+        || task_lower.contains("architect")
+        || task_lower.contains("implement")
+        || task_lower.contains("fix all")
+        || task.len() > 100;
+
+    if is_complex {
+        // Prefer Gemini for complex tasks
+        if let Some(gemini) = llms.iter().find(|llm| llm.provider == "Google") {
+            return gemini.model.clone();
+        }
+        // Fallback to OpenAI
+        if let Some(openai) = llms.iter().find(|llm| llm.provider == "OpenAI") {
+            return openai.model.clone();
+        }
+    }
+
+    // For simple tasks or if no cloud models, use local
+    llms.iter()
+        .find(|llm| llm.provider == "Local")
+        .map(|llm| llm.model.clone())
+        .unwrap_or_else(|| "gemma-3-270m-it".to_string())
 }
 
 fn print_usage() {
