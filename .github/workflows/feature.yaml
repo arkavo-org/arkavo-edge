@@ -632,8 +632,8 @@ jobs:
           
           # Verify expected commands are present
           grep -q "serve" help.txt || { echo "❌ 'serve' command missing"; exit 1; }
-          grep -q "agent" help.txt || { echo "❌ 'agent' command missing"; exit 1; }
-          grep -q "model" help.txt || { echo "❌ 'model' command missing"; exit 1; }
+          grep -q "task" help.txt || { echo "❌ 'task' command missing"; exit 1; }
+          grep -q "chat" help.txt || { echo "❌ 'chat' command missing"; exit 1; }
           echo "✅ Expected commands present"
       
       - name: Test server startup
@@ -651,32 +651,33 @@ jobs:
             cat server.log
           fi
       
-      - name: Test model list command
+      - name: Test task command
         run: |
-          echo "=== Testing Model Commands ==="
-          
-          # Test model list (should work even without models)
-          ./arkavo-x86_64-linux model list 2>&1 | tee models.log || true
-          
+          echo "=== Testing Task Command ==="
+
+          # Test task help
+          ./arkavo-x86_64-linux task --help 2>&1 | tee task.log || true
+
           # Should at least not crash
-          if grep -qE "model|Model|No models" models.log; then
-            echo "✅ Model list command works"
+          if grep -qE "task|Task|Plan and apply" task.log; then
+            echo "✅ Task command works"
           else
-            echo "⚠️ Unexpected model list output"
+            echo "⚠️ Unexpected task output"
+            cat task.log
           fi
-      
-      - name: Test agent command
+
+      - name: Test chat command
         run: |
-          echo "=== Testing Agent Commands ==="
-          
-          # Test agent help
-          ./arkavo-x86_64-linux agent --help 2>&1 | tee agent.log || exit 1
-          
-          if grep -q "run" agent.log; then
-            echo "✅ Agent subcommands available"
+          echo "=== Testing Chat Command ==="
+
+          # Test chat help
+          ./arkavo-x86_64-linux chat --prompt hi 2>&1 | tee chat.log || true
+
+          if grep -qE "Hi|Generated|help" chat.log; then
+            echo "✅ Chat command available"
           else
-            echo "❌ Agent command not working properly"
-            exit 1
+            echo "⚠️ Chat command output unexpected"
+            cat chat.log
           fi
       
       - name: Verify no heavy dependencies

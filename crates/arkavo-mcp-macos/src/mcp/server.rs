@@ -483,7 +483,6 @@ impl McpTestServer {
     pub async fn initialize_memory_tools(&self) -> Result<()> {
         #[cfg(feature = "memory")]
         {
-            eprintln!("[McpTestServer] Initializing memory tools...");
             use arkavo_memory::mcp_tools::{
                 CategorizeMemoryTool, GetMemoryTool, SearchMemoryTool, StoreMemoryTool,
             };
