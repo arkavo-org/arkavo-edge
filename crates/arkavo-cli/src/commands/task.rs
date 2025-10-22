@@ -266,8 +266,8 @@ You are a planning agent with access to MCP tools. Your job is to:
 4. List exactly what files need to be changed and how
 
 **Available MCP Tools:**
-- @filesystem_tools {{\"action\": \"read_file\", \"file_path\": \"path\"}} - Read file contents
-- @filesystem_tools {{\"action\": \"list_directory\", \"dir_path\": \"path\"}} - List directory
+- @filesystem {{\"action\": \"read_file\", \"file_path\": \"path\"}} - Read file contents
+- @filesystem {{\"action\": \"list_directory\", \"dir_path\": \"path\"}} - List directory
 - @git_status - Check git status
 - @git_diff - See git diff
 
@@ -328,8 +328,8 @@ Be specific and thorough.",
 Task: {}
 
 Use MCP tools to make the actual changes:
-- @filesystem_tools {{\"action\": \"write_file\", \"file_path\": \"path\", \"content\": \"...\"}} - Write file
-- @filesystem_tools {{\"action\": \"edit_file\", \"file_path\": \"path\", \"line_number\": N, \"new_content\": \"...\", \"mode\": \"replace\"}} - Edit specific line
+- @filesystem {{\"action\": \"write_file\", \"file_path\": \"path\", \"content\": \"...\"}} - Write file
+- @filesystem {{\"action\": \"edit_file\", \"file_path\": \"path\", \"line_number\": N, \"new_content\": \"...\", \"mode\": \"replace\"}} - Edit specific line
 - @git_status - Check changes
 - @git_diff - Verify modifications
 
@@ -466,49 +466,6 @@ fn select_planning_model(llms: &[LlmInfo]) -> String {
     }
 
     // Fallback to local (will warn user that planning may not work well)
-    llms.iter()
-        .find(|llm| llm.provider == "Local")
-        .map(|llm| llm.model.clone())
-        .unwrap_or_else(|| "gemma-3-270m-it".to_string())
-}
-
-fn select_model_for_task(task: &str, llms: &[LlmInfo]) -> String {
-    let task_lower = task.to_lowercase();
-
-    // Always prefer cloud models when available (they have tool use capability)
-    // Cloud models are much better at using MCP tools
-
-    // Check if task requires tools (filesystem, git, code operations)
-    let needs_tools = task_lower.contains("list")
-        || task_lower.contains("read")
-        || task_lower.contains("write")
-        || task_lower.contains("file")
-        || task_lower.contains("git")
-        || task_lower.contains("fix")
-        || task_lower.contains("refactor")
-        || task_lower.contains("design")
-        || task_lower.contains("architect")
-        || task_lower.contains("implement")
-        || task_lower.contains("change")
-        || task_lower.contains("update")
-        || task.len() > 100;
-
-    if needs_tools || llms.len() > 1 {
-        // Prefer Gemini for tool-based tasks
-        if let Some(gemini) = llms.iter().find(|llm| llm.provider == "Google") {
-            return gemini.model.clone();
-        }
-        // Fallback to OpenAI
-        if let Some(openai) = llms.iter().find(|llm| llm.provider == "OpenAI") {
-            return openai.model.clone();
-        }
-        // Fallback to DeepSeek
-        if let Some(deepseek) = llms.iter().find(|llm| llm.provider == "DeepSeek") {
-            return deepseek.model.clone();
-        }
-    }
-
-    // Only use local model if no cloud models available or for pure Q&A
     llms.iter()
         .find(|llm| llm.provider == "Local")
         .map(|llm| llm.model.clone())
