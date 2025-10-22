@@ -228,14 +228,14 @@ fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error
 
 fn execute_ai_task(
     task: &str,
-    _auto_approve: bool,
-    _push: bool,
-    _validate: bool,
-    _message: Option<String>,
+    auto_approve: bool,
+    push: bool,
+    validate: bool,
+    message: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::env;
 
-    println!("=== AI Task Execution ===\n");
+    println!("=== Task: Plan and Execute ===\n");
     println!("Task: {task}\n");
 
     // Lightweight API key detection (no model loading)
@@ -248,28 +248,144 @@ fn execute_ai_task(
     }
     println!();
 
-    // Simple heuristic model selection (no classifier needed)
-    let selected_model = select_model_for_task(task, &available_llms);
+    // Select planning model (prefer capable cloud models)
+    let planning_model = select_planning_model(&available_llms);
+    println!("Planning Model: {}", planning_model);
+    println!();
 
-    println!("Selected Model: {}", selected_model);
-    println!("Executing task...\n");
+    // Step 1: Generate plan using capable model with MCP tools
+    println!("=== Step 1: Planning ===\n");
 
-    // Call chat execute with routing info included in task prompt
-    let enhanced_task = format!(
-        "{}
+    let planning_prompt = format!(
+        "Task: {}
 
-Context: You have access to MCP tools for filesystem and git operations. Use @read_file, @write_file, @git_diff, @git_status, etc. to complete the task.",
+You are a planning agent with access to MCP tools. Your job is to:
+1. Analyze the task requirements
+2. Use @read_file, @git_status, @git_diff to understand current state
+3. Create a detailed step-by-step plan
+4. List exactly what files need to be changed and how
+
+Use MCP tools to gather information. Output your plan in this format:
+
+## Analysis
+[What you discovered using tools]
+
+## Plan
+1. [Step 1]
+2. [Step 2]
+...
+
+## Files to Modify
+- file1.rs: [what to change]
+- file2.rs: [what to change]
+
+Be specific and thorough.",
         task
     );
 
-    // Use chat command with selected model
-    let chat_args = vec![
+    let plan_args = vec![
         "--prompt".to_string(),
-        enhanced_task,
+        planning_prompt,
         "--model".to_string(),
-        selected_model,
+        planning_model.clone(),
     ];
-    crate::commands::chat::execute(&chat_args)
+
+    println!("Generating plan with {}...\n", planning_model);
+    crate::commands::chat::execute(&plan_args)?;
+
+    println!("\n=== Step 2: Review Plan ===\n");
+
+    if !auto_approve {
+        print!("Execute this plan? [y/N]: ");
+        use std::io::{self, Write};
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Task cancelled");
+            return Ok(());
+        }
+    }
+
+    println!("\n=== Step 3: Execute Plan ===\n");
+
+    let execution_prompt = format!(
+        "Based on the plan above, execute the changes:
+
+Task: {}
+
+Use MCP tools to make the actual changes:
+- @write_file to modify files
+- @git_status to check changes
+- @git_diff to verify modifications
+
+Execute the plan step by step. Show what you're doing.",
+        task
+    );
+
+    let exec_args = vec![
+        "--prompt".to_string(),
+        execution_prompt,
+        "--model".to_string(),
+        planning_model.clone(),
+    ];
+
+    crate::commands::chat::execute(&exec_args)?;
+
+    println!("\n=== Step 4: Commit Changes ===\n");
+
+    // Now commit the changes if there are any
+    let git_manager = GitManager::new();
+    let current_dir = env::current_dir()?;
+
+    if let Ok(repo) = git_manager.open_repo(&current_dir) {
+        let status = git_manager.status(&repo)?;
+        let total_changes = status.modified.len() + status.added.len()
+            + status.deleted.len() + status.untracked.len();
+
+        if total_changes > 0 {
+            println!("Found {total_changes} changed files");
+
+            // Create commit with provided message or auto-generate
+            let mut guard = RepoGuard::new(&repo)?;
+            if validate {
+                println!("Running validation...");
+                guard = guard.with_fmt_check().with_clippy_check();
+            }
+
+            let result = guard.transaction(|repo| {
+                if let Some(msg) = message.as_ref() {
+                    git_manager.add_all(repo)?;
+                    git_manager.commit_changes(repo, msg)
+                } else {
+                    git_manager.auto_commit(repo)
+                }
+            });
+
+            match result {
+                Ok(oid) => {
+                    println!("✓ Committed: {oid}");
+
+                    if push {
+                        println!("Pushing to remote...");
+                        git_manager.publish(&repo)?;
+                        println!("✓ Pushed");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to commit: {e}");
+                    return Err(e.into());
+                }
+            }
+        } else {
+            println!("No changes to commit");
+        }
+    }
+
+    println!("\n✓ Task completed");
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -321,19 +437,52 @@ fn detect_available_llms() -> Vec<LlmInfo> {
     llms
 }
 
+fn select_planning_model(llms: &[LlmInfo]) -> String {
+    // For planning, always prefer the most capable model
+    // Priority: Gemini > OpenAI > DeepSeek > Local
+
+    if let Some(gemini) = llms.iter().find(|llm| llm.provider == "Google") {
+        return gemini.model.clone();
+    }
+
+    if let Some(openai) = llms.iter().find(|llm| llm.provider == "OpenAI") {
+        return openai.model.clone();
+    }
+
+    if let Some(deepseek) = llms.iter().find(|llm| llm.provider == "DeepSeek") {
+        return deepseek.model.clone();
+    }
+
+    // Fallback to local (will warn user that planning may not work well)
+    llms.iter()
+        .find(|llm| llm.provider == "Local")
+        .map(|llm| llm.model.clone())
+        .unwrap_or_else(|| "gemma-3-270m-it".to_string())
+}
+
 fn select_model_for_task(task: &str, llms: &[LlmInfo]) -> String {
     let task_lower = task.to_lowercase();
 
-    // Prefer cloud models for complex tasks
-    let is_complex = task_lower.contains("refactor")
+    // Always prefer cloud models when available (they have tool use capability)
+    // Cloud models are much better at using MCP tools
+
+    // Check if task requires tools (filesystem, git, code operations)
+    let needs_tools = task_lower.contains("list")
+        || task_lower.contains("read")
+        || task_lower.contains("write")
+        || task_lower.contains("file")
+        || task_lower.contains("git")
+        || task_lower.contains("fix")
+        || task_lower.contains("refactor")
         || task_lower.contains("design")
         || task_lower.contains("architect")
         || task_lower.contains("implement")
-        || task_lower.contains("fix all")
+        || task_lower.contains("change")
+        || task_lower.contains("update")
         || task.len() > 100;
 
-    if is_complex {
-        // Prefer Gemini for complex tasks
+    if needs_tools || llms.len() > 1 {
+        // Prefer Gemini for tool-based tasks
         if let Some(gemini) = llms.iter().find(|llm| llm.provider == "Google") {
             return gemini.model.clone();
         }
@@ -341,9 +490,13 @@ fn select_model_for_task(task: &str, llms: &[LlmInfo]) -> String {
         if let Some(openai) = llms.iter().find(|llm| llm.provider == "OpenAI") {
             return openai.model.clone();
         }
+        // Fallback to DeepSeek
+        if let Some(deepseek) = llms.iter().find(|llm| llm.provider == "DeepSeek") {
+            return deepseek.model.clone();
+        }
     }
 
-    // For simple tasks or if no cloud models, use local
+    // Only use local model if no cloud models available or for pure Q&A
     llms.iter()
         .find(|llm| llm.provider == "Local")
         .map(|llm| llm.model.clone())
