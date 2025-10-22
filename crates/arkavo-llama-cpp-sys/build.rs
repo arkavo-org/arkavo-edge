@@ -88,8 +88,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Accelerate");
         println!("cargo:rustc-link-lib=framework=Foundation");
     } else if cfg!(target_os = "windows") {
-        // Windows specific libraries
-        println!("cargo:rustc-link-lib=dylib=c++");
+        // Windows MSVC uses automatic C++ runtime linking via /MD or /MT flag
+        // CMake handles this automatically based on CMAKE_MSVC_RUNTIME_LIBRARY
+        // No explicit cargo:rustc-link-lib needed for C++ runtime
     } else {
         // Linux specific libraries
         println!("cargo:rustc-link-lib=stdc++");
