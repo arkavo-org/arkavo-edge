@@ -1,0 +1,224 @@
+use arkavo_git::{GitManager, safety::RepoGuard};
+use std::env;
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+
+pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse arguments
+    let mut auto_approve = false;
+    let mut push = false;
+    let mut message: Option<String> = None;
+    let mut validate = true;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--yes" | "-y" => auto_approve = true,
+            "--push" => push = true,
+            "--no-validate" => validate = false,
+            "--message" | "-m" => {
+                if i + 1 < args.len() {
+                    message = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--message requires an argument".into());
+                }
+            }
+            "--help" | "-h" => {
+                print_usage();
+                return Ok(());
+            }
+            _ => {
+                return Err(format!("Unknown argument: {}", args[i]).into());
+            }
+        }
+        i += 1;
+    }
+
+    let git_manager = GitManager::new();
+    let current_dir = env::current_dir()?;
+
+    // Check if we're in a git repository
+    let repo = if let Ok(repo) = git_manager.open_repo(&current_dir) {
+        repo
+    } else {
+        eprintln!("Error: Not in a git repository");
+        return Err("Task command requires a git repository".into());
+    };
+
+    // Step 1: Generate plan
+    println!("=== Generating Change Plan ===\n");
+    println!("Repository: {}", current_dir.display());
+    println!();
+
+    let status = git_manager.status(&repo)?;
+    let total_changes =
+        status.modified.len() + status.added.len() + status.deleted.len() + status.untracked.len();
+
+    if total_changes == 0 {
+        println!("No changes to apply");
+        return Ok(());
+    }
+
+    println!("Found {total_changes} changed files:");
+    if !status.modified.is_empty() {
+        println!("  Modified: {}", status.modified.len());
+        for file in &status.modified {
+            println!("    - {file}");
+        }
+    }
+    if !status.added.is_empty() {
+        println!("  Added: {}", status.added.len());
+        for file in &status.added {
+            println!("    - {file}");
+        }
+    }
+    if !status.deleted.is_empty() {
+        println!("  Deleted: {}", status.deleted.len());
+        for file in &status.deleted {
+            println!("    - {file}");
+        }
+    }
+    if !status.untracked.is_empty() {
+        println!("  Untracked: {}", status.untracked.len());
+        for file in &status.untracked {
+            println!("    - {file}");
+        }
+    }
+
+    println!();
+
+    // Show plan summary
+    show_plan_summary(&current_dir)?;
+
+    // Step 2: Ask for approval (unless auto-approve)
+    if !auto_approve {
+        println!();
+        print!("Apply this plan and commit changes? [y/N]: ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Task cancelled");
+            return Ok(());
+        }
+    }
+
+    // Step 3: Apply changes
+    println!("\n=== Applying Changes ===\n");
+
+    // Create RepoGuard for safe operations
+    let mut guard = RepoGuard::new(&repo)?;
+
+    if validate {
+        println!("Running pre-commit validation...");
+        guard = guard.with_fmt_check().with_clippy_check();
+    }
+
+    // Perform the commit
+    let result = guard.transaction(|repo| {
+        if let Some(msg) = message.as_ref() {
+            // Use provided message
+            git_manager.add_all(repo)?;
+            git_manager.commit_changes(repo, msg)
+        } else {
+            // Use auto-generated message
+            println!("Generating commit message...");
+            git_manager.auto_commit(repo)
+        }
+    });
+
+    match result {
+        Ok(oid) => {
+            println!("\n✓ Successfully created commit: {oid}");
+
+            // Get the commit message for display
+            if let Ok(commit) = repo.find_commit(oid)
+                && let Some(msg) = commit.message()
+            {
+                println!("Message: {}", msg.lines().next().unwrap_or(""));
+            }
+
+            if push {
+                println!("\nPushing to remote...");
+                match git_manager.publish(&repo) {
+                    Ok(()) => println!("✓ Successfully pushed to remote"),
+                    Err(e) => {
+                        eprintln!("Failed to push: {e}");
+                        eprintln!("You can manually push with: git push");
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("\nFailed to apply changes: {e}");
+            if validate && e.to_string().contains("PreCommitFailed") {
+                eprintln!("\nPre-commit validation failed. You can:");
+                eprintln!("  - Fix the issues and run 'arkavo task' again");
+                eprintln!("  - Use --no-validate to skip validation");
+            }
+            return Err(e.into());
+        }
+    }
+
+    Ok(())
+}
+
+fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Plan Summary ===\n");
+
+    match fs::read_dir(current_dir) {
+        Ok(entries) => {
+            let mut source_files = Vec::new();
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+
+                if !path.is_dir()
+                    && (name.ends_with(".rs")
+                        || name.ends_with(".toml")
+                        || name.ends_with(".md")
+                        || name.ends_with(".json")
+                        || name.ends_with(".yaml")
+                        || name.ends_with(".yml"))
+                {
+                    source_files.push(name);
+                }
+            }
+
+            source_files.sort();
+
+            if source_files.is_empty() {
+                println!("No source files found in current directory");
+            } else {
+                println!("Potential files affected:");
+                for file in source_files {
+                    println!("  • {file}");
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: Could not read directory: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+fn print_usage() {
+    println!("Plan and apply code changes");
+    println!();
+    println!("USAGE:");
+    println!("    arkavo task [OPTIONS]");
+    println!();
+    println!("OPTIONS:");
+    println!("    -y, --yes          Auto-approve without prompting");
+    println!("    --push             Push to remote after committing");
+    println!("    --no-validate      Skip pre-commit validation");
+    println!("    -m, --message <M>  Use custom commit message");
+    println!("    -h, --help         Show this help");
+}
