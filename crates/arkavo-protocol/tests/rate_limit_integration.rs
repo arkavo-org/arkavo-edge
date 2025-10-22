@@ -1,6 +1,6 @@
 #![allow(clippy::disallowed_methods)]
 
-use arkavo_protocol::{spawn_cleanup_task, IpRateLimiter, RateLimitConfig};
+use arkavo_protocol::{IpRateLimiter, RateLimitConfig, spawn_cleanup_task};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;

@@ -2,7 +2,7 @@ use crate::roi_metrics::{CostMetrics, HourlyCost, ROICalculator, ROIDashboard};
 use crate::types::AgUiEvent;
 use arkavo_router::{CostOrchestrator, WorkflowCostPredictor};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 pub struct CostHandler {
     orchestrator: Option<Arc<RwLock<CostOrchestrator>>>,

@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::payload::EventPayload;
 use crate::SCHEMA_VERSION;
+use crate::payload::EventPayload;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {

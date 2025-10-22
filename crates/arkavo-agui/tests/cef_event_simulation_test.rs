@@ -1,7 +1,7 @@
 #![cfg(feature = "cef-ui")]
 
-use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 use arkavo_agui::renderer::UiRenderer;
+use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;

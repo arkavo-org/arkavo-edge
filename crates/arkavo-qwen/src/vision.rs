@@ -1,6 +1,6 @@
 use crate::error::{QwenError, Result};
 use crate::types::{ContentPart, ImageUrl};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
 
 pub fn create_image_part(base64_data: &str) -> ContentPart {

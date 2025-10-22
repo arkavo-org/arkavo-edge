@@ -1,6 +1,6 @@
 use super::{
-    llm_config::{load_llm_config, LlmConfiguration},
     NodeProcessor,
+    llm_config::{LlmConfiguration, load_llm_config},
 };
 use anyhow::Result;
 use arkavo_llm::ollama::OllamaClient;
@@ -8,11 +8,11 @@ use arkavo_llm::providers::factory::{ProviderConfig, ProviderFactoryRegistry, Pr
 use arkavo_llm::{Message, Provider};
 use async_trait::async_trait;
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]

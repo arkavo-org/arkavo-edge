@@ -2,7 +2,7 @@ use crate::auth::SessionAuth;
 use crate::error::{A2aError, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePool, Row};
+use sqlx::{Row, sqlite::SqlitePool};
 use std::path::Path;
 use tracing::info;
 

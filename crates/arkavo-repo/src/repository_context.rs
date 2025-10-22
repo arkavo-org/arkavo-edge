@@ -14,7 +14,7 @@ use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
-use tiktoken_rs::{cl100k_base, CoreBPE};
+use tiktoken_rs::{CoreBPE, cl100k_base};
 use tokio::sync::Mutex;
 
 const MAX_CONTEXT_TOKENS: usize = 2000; // Conservative default for Ollama

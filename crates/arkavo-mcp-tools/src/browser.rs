@@ -1,5 +1,5 @@
-use crate::server::{Tool, ToolSchema};
 use crate::ToolError;
+use crate::server::{Tool, ToolSchema};
 use arkavo_browser::BrowserTool as BrowserToolImpl;
 use arkavo_mcp::Tool as McpTool;
 use async_trait::async_trait;

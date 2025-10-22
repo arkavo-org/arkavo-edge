@@ -2,8 +2,8 @@ use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message};
 use arkavo_memory::storage::MemoryStorage;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Runtime;
 
 // Global flag to control whether to show debug messages

@@ -1,6 +1,6 @@
 #![cfg(feature = "cef-ui")]
 
-use arkavo_agui::renderer::{create_renderer, RendererType};
+use arkavo_agui::renderer::{RendererType, create_renderer};
 use std::time::Duration;
 use tokio::time::timeout;
 

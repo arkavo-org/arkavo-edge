@@ -156,9 +156,7 @@ fn main() {
 
     // Only regenerate bindings if they don't exist or header changed
     let should_regenerate = !bindings_path.exists() || {
-        let header_mtime = std::fs::metadata(&header)
-            .and_then(|m| m.modified())
-            .ok();
+        let header_mtime = std::fs::metadata(&header).and_then(|m| m.modified()).ok();
         let bindings_mtime = std::fs::metadata(&bindings_path)
             .and_then(|m| m.modified())
             .ok();

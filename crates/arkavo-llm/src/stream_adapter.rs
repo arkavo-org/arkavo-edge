@@ -1,12 +1,12 @@
 use crate::{
-    create_bounded_stream, ChatRequest, DeltaStream, DeltaType, EndReason, LlmClient, Result, StreamControl,
-    StreamDelta, StreamId, StreamLlmModel,
+    ChatRequest, DeltaStream, DeltaType, EndReason, LlmClient, Result, StreamControl, StreamDelta,
+    StreamId, StreamLlmModel, create_bounded_stream,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 
 /// Adapter to convert LlmClient into StreamLlmModel
 pub struct LlmClientAdapter {

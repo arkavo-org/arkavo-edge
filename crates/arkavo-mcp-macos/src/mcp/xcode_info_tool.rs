@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use super::xcode_version::XcodeVersion;
 use crate::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct XcodeInfoTool {
     schema: ToolSchema,

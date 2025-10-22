@@ -1,8 +1,8 @@
-use arkavo_mcp_macos::mcp::server::ToolRequest;
 use arkavo_mcp_macos::TestHarness;
+use arkavo_mcp_macos::mcp::server::ToolRequest;
 use jsonschema::{Draft, ValidationOptions, Validator};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use std::sync::OnceLock;
 

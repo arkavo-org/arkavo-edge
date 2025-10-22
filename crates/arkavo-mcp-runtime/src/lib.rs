@@ -7,7 +7,7 @@ pub mod tools;
 
 // Re-export core types for convenience
 pub use arkavo_mcp_core::{
-    error_codes, RpcError, RpcRequest, RpcResponse, Tool, ToolRequest, ToolResponse, ToolSchema,
+    RpcError, RpcRequest, RpcResponse, Tool, ToolRequest, ToolResponse, ToolSchema, error_codes,
 };
 
 pub use server::McpServer;

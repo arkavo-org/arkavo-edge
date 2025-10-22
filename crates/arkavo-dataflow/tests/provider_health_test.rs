@@ -6,7 +6,7 @@
 #![allow(clippy::needless_collect)]
 
 use arkavo_llm::providers::{CircuitBreaker, ProviderHealthMonitor};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[tokio::test]
 async fn test_health_monitor_metrics() {

@@ -2,7 +2,7 @@ use crate::server::Tool;
 use arkavo_mcp::ToolSchema;
 use arkavo_observability::health_reporter::{HealthRegistry, HealthReport};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct HealthCheckTool {
     schema: ToolSchema,

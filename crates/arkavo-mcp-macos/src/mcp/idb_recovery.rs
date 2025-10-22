@@ -228,7 +228,7 @@ impl IdbRecovery {
 
         #[cfg(target_os = "macos")]
         {
-            use crate::mcp::idb_wrapper::{IdbWrapper, CONNECTED_DEVICES};
+            use crate::mcp::idb_wrapper::{CONNECTED_DEVICES, IdbWrapper};
 
             // Step 1: Remove from connected devices tracking
             {
@@ -325,7 +325,7 @@ impl IdbRecovery {
 
         #[cfg(target_os = "macos")]
         {
-            use crate::mcp::idb_wrapper::{IdbWrapper, CONNECTED_DEVICES};
+            use crate::mcp::idb_wrapper::{CONNECTED_DEVICES, IdbWrapper};
 
             // Step 1: Clear all device connections from tracking
             {

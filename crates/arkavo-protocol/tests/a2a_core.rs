@@ -3,7 +3,7 @@
 // Core A2A protocol integration tests
 use arkavo_protocol::{
     file_transfer::{
-        calculate_chunks, FileChunk, FileMetadata, FileTransferManager, FileUploadRequest,
+        FileChunk, FileMetadata, FileTransferManager, FileUploadRequest, calculate_chunks,
     },
     oauth2::{GrantType, OAuth2Config, OAuth2Provider, TokenRequest},
 };

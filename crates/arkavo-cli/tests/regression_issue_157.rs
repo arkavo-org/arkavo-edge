@@ -22,7 +22,6 @@
 /// Issue: https://github.com/arkavo-org/arkavo-edge/issues/157
 use std::process::Command;
 
-
 #[tokio::test]
 async fn test_mcp_server_spawn_from_agent() {
     // This simulates the scenario where an agent spawns an MCP server

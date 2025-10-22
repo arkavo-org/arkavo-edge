@@ -24,9 +24,9 @@ use futures::StreamExt;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use jsonrpsee::types::ErrorObjectOwned;
 use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult}, proc_macros::rpc,
-    PendingSubscriptionSink,
-    SubscriptionMessage,
+    PendingSubscriptionSink, SubscriptionMessage,
+    core::{RpcResult, SubscriptionResult},
+    proc_macros::rpc,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;

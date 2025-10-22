@@ -2,7 +2,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use arkavo_protocol::config::ServerConfig;
-use arkavo_protocol::{generate_openrpc_schema, openrpc_to_json, A2aServer};
+use arkavo_protocol::{A2aServer, generate_openrpc_schema, openrpc_to_json};
 
 #[tokio::test]
 async fn test_openrpc_schema_generation() {

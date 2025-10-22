@@ -18,7 +18,7 @@ use futures::{SinkExt, StreamExt};
 use reqwest::{Client, Response};
 use serde::Serialize;
 use std::time::Duration;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 
 pub struct TestHttpClient {
     pub client: Client,

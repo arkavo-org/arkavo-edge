@@ -3,7 +3,7 @@
 use arkavo_protocol::auth::{AuthBackend, JwtAuthBackend, SessionAuth};
 use arkavo_protocol::chat_session::ChatSessionManager;
 use arkavo_protocol::types::{ClientMetrics, MetricsAck};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

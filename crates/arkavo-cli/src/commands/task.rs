@@ -1,4 +1,4 @@
-use arkavo_git::{safety::RepoGuard, GitManager};
+use arkavo_git::{GitManager, safety::RepoGuard};
 use std::env;
 use std::fs;
 use std::io::{self, Write};

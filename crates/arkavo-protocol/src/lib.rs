@@ -43,10 +43,10 @@ pub use metrics::{MetricsCollector, RpcTimer};
 pub use metrics_subscription::{
     MetricsApi, MetricsServiceConfig, MetricsSubscriptionServer, MetricsSubscriptionService,
 };
-pub use network::{get_service_ip, NetworkError};
+pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
-    spawn_cleanup_task, IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter,
+    IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;

@@ -1,9 +1,9 @@
 use crate::error::{CefError, Result};
-use nix::sys::signal::{kill, Signal};
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
 pub struct CefProcess {

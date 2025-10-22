@@ -3,7 +3,7 @@ use arkavo_mcp_core::{Tool, ToolSchema};
 use arkavo_memory::storage::MemoryStorage;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize, Serialize)]

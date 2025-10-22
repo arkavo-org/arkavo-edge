@@ -8,5 +8,5 @@ pub use blueprint::{
     TransformType,
 };
 pub use migration::{BlueprintMigration, MigrationRegistry};
-pub use schema::{get_schema_json, validate_json_schema, BLUEPRINT_SCHEMA};
+pub use schema::{BLUEPRINT_SCHEMA, get_schema_json, validate_json_schema};
 pub use validation::{BlueprintValidator, ValidationError};

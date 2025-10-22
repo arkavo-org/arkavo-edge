@@ -13,9 +13,9 @@ use arkavo_observability::{
 };
 use futures::StreamExt;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Notify, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 

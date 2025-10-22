@@ -14,7 +14,7 @@ use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
 use super::frameworks_data;
-use super::idb_error_handler::{get_troubleshooting_guide, IdbErrorHandler};
+use super::idb_error_handler::{IdbErrorHandler, get_troubleshooting_guide};
 use super::idb_port_manager::IdbPortManager;
 use crate::{Result, TestError};
 

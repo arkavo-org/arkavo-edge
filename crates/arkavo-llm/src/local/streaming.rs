@@ -4,8 +4,8 @@ use candle_transformers::models::quantized_llama::ModelWeights;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::Stream;
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Create a streaming response for quantized models
 pub fn create_quantized_stream(

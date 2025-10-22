@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tracing::subscriber::set_global_default;
-use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, Layer};
+use tracing_subscriber::{Layer, filter::EnvFilter, layer::SubscriberExt};
 
 pub mod agent_detection;
 pub mod config;

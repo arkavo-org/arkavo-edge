@@ -1,7 +1,7 @@
 use anyhow::Result;
 use arkavo_mcp_core::{Tool, ToolSchema};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Health check tool
 #[derive(Debug)]

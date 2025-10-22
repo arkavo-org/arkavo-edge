@@ -19,13 +19,13 @@ use std::sync::Arc;
 ))]
 use tokio::sync::Mutex;
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llm::LlamaCppProvider;
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
     feature = "llm-local"
 ))]
 use arkavo_llm::local::LocalProvider;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-use arkavo_llm::LlamaCppProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum TaskCategory {

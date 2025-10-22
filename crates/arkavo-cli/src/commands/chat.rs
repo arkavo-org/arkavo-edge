@@ -1,6 +1,6 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
-use arkavo_llm::{encode_image_file, LlmClient, Message};
+use arkavo_llm::{LlmClient, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,8 +9,8 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
 use tokio_stream::StreamExt;
 use uuid;

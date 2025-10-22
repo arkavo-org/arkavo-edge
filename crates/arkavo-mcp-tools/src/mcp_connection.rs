@@ -8,7 +8,7 @@ use crate::{
     tui::{interaction::TuiInteractionKit, keyboard::TuiKeyboardKit, screenshot::TuiScreenshotKit},
 };
 #[allow(unused_imports)]
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};

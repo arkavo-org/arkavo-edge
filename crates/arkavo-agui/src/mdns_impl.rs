@@ -6,7 +6,7 @@ pub mod mdns {
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{RwLock, mpsc};
     use tracing::{info, warn};
 
     /// Discovers A2A agents using mDNS
@@ -218,7 +218,7 @@ pub mod mdns {
 pub mod mdns {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{RwLock, mpsc};
 
     pub async fn discover_agents(
         _agents: Arc<RwLock<Vec<serde_json::Value>>>,

@@ -11,8 +11,8 @@ use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::time::{Duration, sleep};
 
 /// Represents a persistent connection to an AI agent
 #[derive(Clone)]

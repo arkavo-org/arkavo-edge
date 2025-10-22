@@ -6,7 +6,7 @@ use crate::types::{
     DecisionRequest, EntityIdentifier, GetDecisionBulkRequest, GetDecisionBulkResponse,
     GetDecisionRequest, GetDecisionResponse, McpToolMapping, Resource,
 };
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 use std::time::Duration;

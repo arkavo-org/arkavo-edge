@@ -4,7 +4,7 @@ use arkavo_git::attribution::format_commit_message;
 use arkavo_git::safety::sanitize_repo_path;
 use arkavo_git::{DiffOptions, GitManager};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::env;
 use std::path::Path;
 

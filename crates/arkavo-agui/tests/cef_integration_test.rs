@@ -1,6 +1,6 @@
 #![cfg(feature = "cef-ui")]
 
-use arkavo_agui::renderer::{create_renderer, RendererType, UiRenderer};
+use arkavo_agui::renderer::{RendererType, UiRenderer, create_renderer};
 use arkavo_ui_generator::{UiContext, UiGenerationRequest, UiGenerator, UiPreferences};
 use std::path::Path;
 use tokio::time::Duration;
