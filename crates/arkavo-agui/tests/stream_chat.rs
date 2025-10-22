@@ -4,7 +4,7 @@
 
 use arkavo_agui::types::{AgUiEvent, MessageDeltaContent};
 use tokio::sync::mpsc;
-use tokio::time::{Duration, timeout};
+use tokio::time::{timeout, Duration};
 
 #[tokio::test]
 async fn test_streaming_chat_lifecycle() {

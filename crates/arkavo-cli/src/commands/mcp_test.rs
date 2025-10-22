@@ -4,7 +4,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::io::Write;
     use std::process::{Command, Stdio};
-    
+
     fn run_mcp_request(request: Value) -> Result<Value, Box<dyn std::error::Error>> {
         let mut child = Command::new("cargo")
             .args(&["run", "--bin", "arkavo", "--", "serve"])

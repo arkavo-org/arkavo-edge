@@ -3,6 +3,7 @@
 use arkavo_mcp_tools::mcp_connection::McpConnection;
 use serde_json::json;
 
+
 #[test]
 fn test_tui_keyboard_functionality() {
     // Skip keyboard tests in CI to avoid platform-specific issues

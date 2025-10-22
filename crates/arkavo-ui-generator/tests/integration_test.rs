@@ -10,7 +10,7 @@ use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 /// Test directory for screenshots and artifacts
 fn test_output_dir() -> PathBuf {

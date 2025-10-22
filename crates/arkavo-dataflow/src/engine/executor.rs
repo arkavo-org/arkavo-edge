@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
 type OutputChannels = Arc<RwLock<Vec<(Link, mpsc::Sender<Message>)>>>;

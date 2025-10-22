@@ -1,7 +1,7 @@
 use crate::{CodeSearchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;

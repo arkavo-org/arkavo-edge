@@ -8,7 +8,7 @@ use crate::dsl::Blueprint;
 use anyhow::Result;
 use dashmap::DashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]

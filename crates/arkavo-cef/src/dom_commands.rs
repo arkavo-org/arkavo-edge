@@ -1,7 +1,7 @@
 use crate::error::{CefError, Result};
 use crate::uds::UdsTransport;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 const MAX_HTML_PAYLOAD_SIZE: usize = 1_048_576;

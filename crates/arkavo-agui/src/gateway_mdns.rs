@@ -1,7 +1,7 @@
 use crate::agent_connection::{AgentConnection, TelemetryEvent};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 
 /// Run mDNS discovery for A2A agents
 pub async fn run_mdns_discovery(

@@ -24,12 +24,6 @@ arkavo-mcp-core = { path = "../arkavo-mcp-core" }
 arkavo-authorization = { path = "../arkavo-authorization" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
-arkavo-observability = { path = "../arkavo-observability" }
 
 [build-dependencies]
 anyhow = "1.0"
-
-[dev-dependencies]
-tempfile = "3.8"
-mockall = "0.13"
-tokio-test = "0.4"

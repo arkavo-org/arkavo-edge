@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::env;
 use std::process::Command;
 use uuid::Uuid;

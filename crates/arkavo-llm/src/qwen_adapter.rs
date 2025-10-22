@@ -102,7 +102,6 @@ impl Provider for QwenProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::Message;
 
     #[test]

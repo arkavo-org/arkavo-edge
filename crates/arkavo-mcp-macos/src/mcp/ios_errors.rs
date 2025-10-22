@@ -1,5 +1,5 @@
-use serde_json::Value;
 use serde_json::json;
+use serde_json::Value;
 
 pub enum IOSToolError {
     NoSimulatorAvailable,

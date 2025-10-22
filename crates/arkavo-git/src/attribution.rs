@@ -1,6 +1,7 @@
 /// Attribution utilities for Arkavo Edge generated content
 use std::fmt::Write as _;
 
+
 const ARKAVO_EDGE_URL: &str = "https://arkavo.ai/edge";
 const ARKAVO_EDGE_EMAIL: &str = "edge@arkavo.com";
 const ARKAVO_EDGE_NAME: &str = "Arkavo Edge";

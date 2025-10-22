@@ -3,7 +3,7 @@ use crate::{Result, ToolError};
 use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::process::Command;
 
 pub struct TuiScreenshotKit {
@@ -232,7 +232,7 @@ impl TuiScreenshotKit {
 
     #[cfg(target_os = "macos")]
     fn capture_terminal_image_macos(&self, params: &ScreenshotParams) -> Result<String> {
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
         use std::fs;
 
         let temp_file = format!("/tmp/tui_screenshot_{}.png", std::process::id());
@@ -272,7 +272,7 @@ impl TuiScreenshotKit {
 
     #[cfg(target_os = "linux")]
     fn capture_terminal_image_linux(&self, params: &ScreenshotParams) -> Result<String> {
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
         use std::fs;
 
         let temp_file = format!("/tmp/tui_screenshot_{}.png", std::process::id());

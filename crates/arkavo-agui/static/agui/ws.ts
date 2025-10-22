@@ -1,4 +1,4 @@
-import { AgUiEvent, AgUiEventHandlers } from './events';
+import {AgUiEvent, AgUiEventHandlers} from './events';
 
 export class AgUiWebSocket {
     private ws: WebSocket | null = null;

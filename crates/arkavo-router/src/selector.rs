@@ -1,6 +1,6 @@
-use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
+use crate::Result;
 
 pub struct ModelSelector {
     budget_threshold: f64,

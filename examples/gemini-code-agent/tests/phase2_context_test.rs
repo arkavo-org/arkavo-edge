@@ -1,4 +1,4 @@
-use arkavo_context::{CompressionPipeline, SemanticChunker, Deduplicator};
+use arkavo_context::{CompressionPipeline, Deduplicator, SemanticChunker};
 
 #[tokio::test]
 async fn test_context_compression_pipeline() {

@@ -3,7 +3,7 @@ use super::server::{Tool, ToolSchema};
 use super::simulator_interaction::SimulatorInteraction;
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::process::Command;
 use std::sync::Arc;
 use std::thread;

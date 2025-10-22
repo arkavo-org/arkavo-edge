@@ -1,6 +1,6 @@
-use crate::Result;
 use crate::ai::{AnalysisEngine, BugAnalysis, CodeContext, Property, TestCase as AiTestCase};
 use crate::execution::state::StateManager;
+use crate::Result;
 use std::path::Path;
 use std::time::Instant;
 

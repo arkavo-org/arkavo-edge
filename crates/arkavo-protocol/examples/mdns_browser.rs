@@ -12,7 +12,7 @@ use arkavo_protocol::discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryServ
 use arkavo_protocol::mdns::MdnsServiceInfo;
 use std::time::Duration;
 use tokio::time;
-use tracing::{Level, info};
+use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]

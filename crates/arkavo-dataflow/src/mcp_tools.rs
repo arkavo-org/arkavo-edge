@@ -1,15 +1,15 @@
 use crate::nodes::auth_manager::{AuthManager, AuthMethod};
 use crate::nodes::llm_config::{
-    LlmConfigBuilder, LlmConfiguration, load_llm_config, store_llm_config,
+    load_llm_config, store_llm_config, LlmConfigBuilder, LlmConfiguration,
 };
 use crate::nodes::llm_discovery::{
     discover_ollama_providers, get_llm_capability_info, suggest_llm_node_config,
 };
-use crate::nodes::model_registry::{ModelRegistry, get_default_models};
+use crate::nodes::model_registry::{get_default_models, ModelRegistry};
 use arkavo_llm::providers::ProviderHealthMonitor;
 use arkavo_mcp::{Tool, ToolSchema};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// MCP tool for discovering available LLM providers
 pub struct DiscoverLlmProvidersTool;

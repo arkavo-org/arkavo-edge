@@ -5,7 +5,7 @@
 #![allow(clippy::redundant_pub_crate)]
 #![allow(clippy::needless_collect)]
 
-use arkavo_dataflow::nodes::model_registry::{ModelCapabilities, ModelInfo, get_default_models};
+use arkavo_dataflow::nodes::model_registry::{get_default_models, ModelCapabilities, ModelInfo};
 use chrono::Utc;
 
 #[tokio::test]

@@ -5,7 +5,7 @@ use arkavo_events::{Event, EventWriter, EventWriterConfig};
 use arkavo_memory::storage::MemoryStorage;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 
 /// Handles debug event streaming and storage
 pub struct DebugHandler {

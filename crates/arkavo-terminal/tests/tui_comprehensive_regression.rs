@@ -7,6 +7,7 @@ use serde_json::json;
 use std::time::Duration;
 use tokio::time::sleep;
 
+
 #[tokio::test]
 #[ignore = "Interactive test - requires terminal UI"]
 async fn test_vim_mode_transitions() {

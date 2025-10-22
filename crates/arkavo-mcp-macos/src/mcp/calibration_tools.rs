@@ -2,7 +2,7 @@ use super::calibration::server::{CalibrationRequest, CalibrationResponse, Calibr
 use super::server::{Tool, ToolSchema};
 use crate::{Result, TestError};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;

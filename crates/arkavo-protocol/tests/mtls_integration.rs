@@ -12,7 +12,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 fn test_certs_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/certs");

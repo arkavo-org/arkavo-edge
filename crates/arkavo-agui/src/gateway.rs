@@ -6,22 +6,22 @@ use crate::types::*;
 use arkavo_observability::metrics_snapshot::{MetricsSampler, MetricsSamplerConfig};
 use arkavo_protocol::types::ConfigError;
 use axum::{
-    Json, Router,
     extract::{
-        Path as AxumPath, State,
-        ws::{Message, WebSocket},
-    },
-    response::{
-        Html, IntoResponse, Response,
-        sse::{Event, Sse},
+        ws::{Message, WebSocket}, Path as AxumPath,
+        State,
+    }, response::{
+        sse::{Event, Sse}, Html, IntoResponse,
+        Response,
     },
     routing::{get, post},
+    Json,
+    Router,
 };
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 
 /// Connection information for active WebSocket clients
 struct ConnectionInfo {

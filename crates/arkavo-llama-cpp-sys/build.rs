@@ -23,9 +23,29 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
+
+    // Determine build type based on profile
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let build_type = if profile == "release" {
+        "Release" // Full optimizations, no debug info
+    } else {
+        "MinSizeRel" // Optimize for size in debug builds, much faster to compile
+    };
+
     config
         .define("BUILD_SHARED_LIBS", "OFF")
-        .define("CMAKE_BUILD_TYPE", "RelWithDebInfo"); // Optimized with debug info
+        .define("CMAKE_BUILD_TYPE", build_type);
+
+    // Enable parallel compilation
+    if let Ok(num_jobs) = env::var("NUM_JOBS") {
+        config.build_arg(format!("-j{}", num_jobs));
+    } else {
+        // Use number of CPUs
+        let num_cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        config.build_arg(format!("-j{}", num_cpus));
+    }
 
     // Platform-specific GPU acceleration
     if cfg!(target_os = "macos") {
@@ -58,7 +78,18 @@ fn main() {
     config
         .define("GGML_OPENCL", "OFF")
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
-        .define("LLAMA_CURL", "OFF"); // Disable CURL requirement (not needed for local inference)
+        .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
+        .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
+        .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples
+        .define("LLAMA_BUILD_SERVER", "OFF"); // Don't build server
+
+    // Use ccache if available for faster rebuilds
+    if let Ok(ccache) = which::which("ccache") {
+        config
+            .define("CMAKE_C_COMPILER_LAUNCHER", ccache.to_str().unwrap())
+            .define("CMAKE_CXX_COMPILER_LAUNCHER", ccache.to_str().unwrap());
+        println!("cargo:warning=Using ccache for faster C++ compilation");
+    }
 
     let dst = config.build();
 
@@ -112,6 +143,7 @@ fn main() {
     }
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings_path = out_path.join("bindings.rs");
     let header = out_path.join("include").join("llama.h");
 
     // Check if header exists
@@ -122,15 +154,34 @@ fn main() {
         );
     }
 
-    let bindings = bindgen::Builder::default()
-        .header(header.to_str().unwrap())
-        .clang_arg(format!("-I{}", out_path.join("include").display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .generate()
-        .expect("Unable to generate bindings");
+    // Only regenerate bindings if they don't exist or header changed
+    let should_regenerate = !bindings_path.exists() || {
+        let header_mtime = std::fs::metadata(&header)
+            .and_then(|m| m.modified())
+            .ok();
+        let bindings_mtime = std::fs::metadata(&bindings_path)
+            .and_then(|m| m.modified())
+            .ok();
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
+        match (header_mtime, bindings_mtime) {
+            (Some(h), Some(b)) => h > b,
+            _ => true,
+        }
+    };
+
+    if should_regenerate {
+        println!("cargo:warning=Generating Rust bindings for llama.cpp");
+        let bindings = bindgen::Builder::default()
+            .header(header.to_str().unwrap())
+            .clang_arg(format!("-I{}", out_path.join("include").display()))
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+            .generate()
+            .expect("Unable to generate bindings");
+
+        bindings
+            .write_to_file(&bindings_path)
+            .expect("Couldn't write bindings!");
+    } else {
+        println!("cargo:warning=Reusing existing bindings (header unchanged)");
+    }
 }

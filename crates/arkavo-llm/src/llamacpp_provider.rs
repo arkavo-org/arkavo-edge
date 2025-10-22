@@ -1,14 +1,14 @@
 use crate::{Error, Message, Provider, Result, Role, StreamResponse};
 use arkavo_llama_cpp::{
-    LlamaContext, LlamaModel, apply_chat_template, batch_free, batch_get_one_with_logits,
-    batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain, decode_batch, ffi,
-    init_llama_logging, test_minimal_init, token_to_piece, tokenize_with_model,
+    apply_chat_template, batch_free, batch_get_one_with_logits, batch_get_one_with_offset, batch_init_with_tokens,
+    create_sampler_chain, decode_batch, ffi, init_llama_logging, test_minimal_init,
+    token_to_piece, tokenize_with_model, LlamaContext, LlamaModel,
 };
 use async_trait::async_trait;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 // Debug flag for llama.cpp provider
 static DEBUG_LLAMACPP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

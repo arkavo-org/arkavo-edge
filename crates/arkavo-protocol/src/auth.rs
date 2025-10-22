@@ -1,6 +1,6 @@
 use crate::error::{A2aError, Result};
 use async_trait::async_trait;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -155,7 +155,7 @@ impl AuthBackend for MultiAuthBackend {
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{EncodingKey, Header, encode};
+    use jsonwebtoken::{encode, EncodingKey, Header};
 
     #[tokio::test]
     async fn test_jwt_auth_backend() {

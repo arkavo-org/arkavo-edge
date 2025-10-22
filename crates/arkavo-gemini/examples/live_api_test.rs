@@ -6,7 +6,7 @@
 use arkavo_gemini::{LiveSessionClient, ToolDispatcher, ToolRegistry};
 use serde_json::json;
 use std::env;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

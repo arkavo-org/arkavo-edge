@@ -2,7 +2,7 @@ use super::server::{Tool, ToolSchema};
 use super::xcode_version::XcodeVersion;
 use crate::Result;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// A placeholder tool that returns helpful error messages when Xcode is not available
 pub struct XcodeUnavailableTool {

@@ -10,22 +10,17 @@ description = "AI-driven UI code generation for Arkavo Edge"
 [dependencies]
 # Core dependencies
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
-tokio-stream = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 
 # Arkavo dependencies
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
-arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
 
 # Template rendering
-handlebars = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }

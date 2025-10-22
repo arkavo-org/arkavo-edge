@@ -6,9 +6,9 @@ use crossterm::{
     terminal,
 };
 use ratatui::{
-    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
+    Terminal,
 };
 use std::collections::HashMap;
 use std::io;
@@ -20,8 +20,8 @@ use crate::helix::HelixEditor;
 use crate::renderer::Renderable;
 use crate::telemetry::UITelemetry;
 use crate::ui::{
-    TaskManager, chat::ChatView, code::CodeView, dataflow::DataflowView, debug::DebugView,
-    diff::DiffView,
+    chat::ChatView, code::CodeView, dataflow::DataflowView, debug::DebugView, diff::DiffView,
+    TaskManager,
 };
 use crate::vim::VimState;
 use crate::{LlmRequest, LlmResponse};

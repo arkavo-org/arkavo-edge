@@ -1,4 +1,4 @@
-use arkavo_protocol::{McpConnectionTrait, get_service_ip};
+use arkavo_protocol::{get_service_ip, McpConnectionTrait};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;

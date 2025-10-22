@@ -5,7 +5,7 @@ use arkavo_observability::metrics_snapshot::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{broadcast, RwLock};
 use tracing::{info, instrument, warn};
 
 /// Simple metrics API for AG-UI integration

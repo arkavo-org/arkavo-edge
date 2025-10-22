@@ -1,8 +1,8 @@
 #![allow(clippy::disallowed_methods)]
 #![cfg(target_os = "macos")]
 
-use arkavo_mcp_macos::Result;
 use arkavo_mcp_macos::mcp::idb_wrapper::IdbWrapper;
+use arkavo_mcp_macos::Result;
 
 #[tokio::test]
 async fn test_idb_companion_can_start() -> Result<()> {

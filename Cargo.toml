@@ -6,7 +6,6 @@ members = [
     "crates/arkavo-repo",
     "crates/arkavo-git",
     "crates/arkavo-protocol",
-    "crates/arkavo-encryption",
     "crates/arkavo-authorization",
     "crates/arkavo-mcp-macos",
     "crates/arkavo-llm",
@@ -91,7 +90,6 @@ bytes = "1.8"
 
 # UI generation dependencies
 handlebars = "6.2"
-similar = "2.6"
 
 # Terminal and UI
 ratatui = "0.29.0"
@@ -109,7 +107,6 @@ walkdir = "2.5.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
 
 # HTTP and networking
-warp = { version = "0.3.7", features = ["tls"] }
 jsonrpsee = { version = "0.24.9", features = ["client", "server", "ws-client", "macros"] }
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
@@ -139,6 +136,10 @@ candle-transformers = { version = "0.9.1", default-features = false }
 fastembed = "4"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.6"
+
+# Force single versions to reduce duplicates
+fancy-regex = "0.16"
+itertools = "0.14"
 
 # Dev dependencies
 criterion = { version = "0.5", features = ["async_tokio"] }

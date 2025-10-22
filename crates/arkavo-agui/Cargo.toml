@@ -25,8 +25,6 @@ futures = { workspace = true }
 
 # Web server and WebSocket
 axum = { workspace = true, features = ["ws"] }
-tower = { workspace = true }
-tower-http = { workspace = true, features = ["fs", "cors"] }
 reqwest = { workspace = true }
 
 # Protocol dependencies
@@ -54,7 +52,6 @@ regex = { workspace = true }
 
 # mDNS discovery
 mdns-sd = { workspace = true, optional = true }
-bincode = { workspace = true }
 
 # CEF renderer (optional)
 arkavo-cef = { path = "../arkavo-cef", optional = true }

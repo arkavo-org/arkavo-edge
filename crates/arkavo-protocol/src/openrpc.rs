@@ -5,7 +5,7 @@ use crate::types::{
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskRequest, TaskResponse, TaskStatus,
     UserMessage,
 };
-use schemars::{JsonSchema, schema_for};
+use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;

@@ -3,8 +3,8 @@
 
 use arkavo_protocol::{
     file_transfer::{
-        FileChunk, FileDownloadRequest, FileMetadata, FileTransferManager, FileUploadRequest,
-        calculate_chunks,
+        calculate_chunks, FileChunk, FileDownloadRequest, FileMetadata, FileTransferManager,
+        FileUploadRequest,
     },
     oauth2::{GrantType, OAuth2Config, OAuth2Provider, TokenRequest},
     push_notifications::{

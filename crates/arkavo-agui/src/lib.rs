@@ -19,6 +19,6 @@ pub mod ui_handler;
 
 pub use coding_agent_bridge::CodingAgentBridge;
 pub use gateway::AgUiGateway;
-pub use renderer::{RendererType, UiRenderer, create_renderer, default_renderer_type};
+pub use renderer::{create_renderer, default_renderer_type, RendererType, UiRenderer};
 pub use types::*;
 pub use ui_handler::UiHandler;

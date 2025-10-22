@@ -19,9 +19,7 @@ futures = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-tokio-stream = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
 bytes = { workspace = true }
 
 # Schema validation for strict mode
@@ -32,8 +30,6 @@ url = { workspace = true }
 
 [dev-dependencies]
 wiremock = "0.6"
-tempfile = { workspace = true }
-serial_test = "3"
 
 [lints]
 workspace = true

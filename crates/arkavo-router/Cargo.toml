@@ -8,7 +8,6 @@ repository.workspace = true
 description = "Intelligent model routing for cost-optimized AI agent execution"
 
 [dependencies]
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,9 +24,6 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
-
-[dev-dependencies]
-tokio-test = "0.4"
 
 [features]
 default = ["llama-cpp", "gemini"]

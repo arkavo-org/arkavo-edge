@@ -11,12 +11,12 @@ use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{
-    Connector, MaybeTlsStream, WebSocketStream, connect_async_tls_with_config,
+    connect_async_tls_with_config, Connector, MaybeTlsStream, WebSocketStream,
 };
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;

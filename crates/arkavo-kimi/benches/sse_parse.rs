@@ -1,8 +1,8 @@
 #![allow(clippy::disallowed_methods)] // Benchmarks need block_on
 
 use bytes::Bytes;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use futures::{StreamExt, stream};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use futures::{stream, StreamExt};
 use std::time::Duration;
 
 /// Generate a realistic SSE response chunk

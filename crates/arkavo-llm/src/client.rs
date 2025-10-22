@@ -110,7 +110,7 @@ impl LlmClient {
     ) -> Result<Self> {
         #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
-            use crate::{LlamaCppProvider, llamacpp_provider::SamplingConfig};
+            use crate::{llamacpp_provider::SamplingConfig, LlamaCppProvider};
             let config = SamplingConfig {
                 temperature,
                 top_p,
