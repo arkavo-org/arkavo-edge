@@ -117,7 +117,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_usage() {
-    println!("Arkavo Edge - Developer-centric agentic CLI");
+    println!("Arkavo Edge");
     println!();
     println!("USAGE:");
     println!("    arkavo [COMMAND] [OPTIONS]");
