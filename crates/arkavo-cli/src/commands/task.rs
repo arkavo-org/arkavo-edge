@@ -254,10 +254,18 @@ fn execute_ai_task(
     println!("Selected Model: {}", selected_model);
     println!("Executing task...\n");
 
+    // Call chat execute with routing info included in task prompt
+    let enhanced_task = format!(
+        "{}
+
+Context: You have access to MCP tools for filesystem and git operations. Use @read_file, @write_file, @git_diff, @git_status, etc. to complete the task.",
+        task
+    );
+
     // Use chat command with selected model
     let chat_args = vec![
         "--prompt".to_string(),
-        task.to_string(),
+        enhanced_task,
         "--model".to_string(),
         selected_model,
     ];
