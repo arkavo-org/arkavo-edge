@@ -261,9 +261,20 @@ fn execute_ai_task(
 
 You are a planning agent with access to MCP tools. Your job is to:
 1. Analyze the task requirements
-2. Use @read_file, @git_status, @git_diff to understand current state
+2. Use MCP tools to understand current state
 3. Create a detailed step-by-step plan
 4. List exactly what files need to be changed and how
+
+**Available MCP Tools:**
+- @filesystem_tools {{\"action\": \"read_file\", \"file_path\": \"path\"}} - Read file contents
+- @filesystem_tools {{\"action\": \"list_directory\", \"dir_path\": \"path\"}} - List directory
+- @git_status - Check git status
+- @git_diff - See git diff
+
+**Note:** There is NO @cargo tool. To check build errors:
+1. Read Cargo.toml to understand the project
+2. Read source files to find issues
+3. Plan fixes based on code analysis
 
 Use MCP tools to gather information. Output your plan in this format:
 
@@ -317,9 +328,10 @@ Be specific and thorough.",
 Task: {}
 
 Use MCP tools to make the actual changes:
-- @write_file to modify files
-- @git_status to check changes
-- @git_diff to verify modifications
+- @filesystem_tools {{\"action\": \"write_file\", \"file_path\": \"path\", \"content\": \"...\"}} - Write file
+- @filesystem_tools {{\"action\": \"edit_file\", \"file_path\": \"path\", \"line_number\": N, \"new_content\": \"...\", \"mode\": \"replace\"}} - Edit specific line
+- @git_status - Check changes
+- @git_diff - Verify modifications
 
 Execute the plan step by step. Show what you're doing.",
         task
