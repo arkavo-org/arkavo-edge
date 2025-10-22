@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - 'feature/fix-pkg-notarization-stapling'
   workflow_dispatch:
 
 jobs:

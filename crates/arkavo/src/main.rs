@@ -38,7 +38,9 @@ fn main() {
     // Also skip if --prompt is provided (for testing/CI) or from app bundle
     #[cfg(target_os = "macos")]
     if !from_app_bundle
-        && command_args.first().is_some_and(|s| s != "serve" && s != "agent" && s != "ui")
+        && command_args
+            .first()
+            .is_some_and(|s| s != "serve" && s != "agent" && s != "ui")
         && !args.iter().any(|arg| arg == "--prompt")
     {
         maybe_relaunch_in_terminal(&command_args);
