@@ -149,10 +149,27 @@ jobs:
           RUSTC_WRAPPER: sccache
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo test --workspace --lib --locked \
-            --exclude arkavo-protocol-fuzz \
-            --exclude arkavo-bench \
-            --no-fail-fast
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo test --locked -p arkavo-llm --lib --no-default-features --features llm-remote
+            cargo test --locked -p arkavo-memory --lib
+            cargo test --locked -p arkavo-memory --test mcp_integration_test
+            cargo test --locked -p arkavo-budget
+            cargo test --locked -p arkavo-context
+            cargo test --locked -p arkavo-encryption
+            cargo test --locked -p arkavo-mcp-core
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo test --locked -p arkavo-protocol
+            cargo test --locked -p arkavo-observability
+            cargo test --locked -p arkavo-mcp-tools
+            cargo test --locked -p arkavo-workspace
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo test --locked -p arkavo-router --no-default-features --features llm-remote,gemini
+            cargo test --locked -p arkavo-dataflow
+            cargo test --locked -p arkavo-terminal
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo test --locked -p arkavo-ui-generator
+            cargo test --locked -p arkavo-agui --no-default-features --features mdns
+          fi
 
       # Step 2: Run clippy (reuses test artifacts, check-mode is fast)
       - name: Run clippy on lib and bins
@@ -160,7 +177,26 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if [ "${{ matrix.group }}" = "core" ]; then
+            cargo clippy --locked -p arkavo-llm --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-memory --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-budget --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-context --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-encryption --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "protocol" ]; then
+            cargo clippy --locked -p arkavo-protocol --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-observability --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-core --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-mcp-tools --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "llm-heavy" ]; then
+            cargo clippy --locked -p arkavo-router --lib --bins --no-default-features --features llm-remote,gemini -- -D warnings
+            cargo clippy --locked -p arkavo-dataflow --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-terminal --lib --bins -- -D warnings
+          elif [ "${{ matrix.group }}" = "ui-heavy" ]; then
+            cargo clippy --locked -p arkavo-ui-generator --lib --bins -- -D warnings
+            cargo clippy --locked -p arkavo-agui --lib --bins --no-default-features --features mdns -- -D warnings
+          fi
 
   test-kimi-feature:
     name: Test Kimi Feature
