@@ -347,7 +347,6 @@ dependencies = [
  "arkavo-memory",
  "arkavo-protocol",
  "arkavo-repo",
- "arkavo-router",
  "arkavo-terminal",
  "async-trait",
  "chrono",

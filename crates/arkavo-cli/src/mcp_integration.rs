@@ -26,9 +26,6 @@ impl McpConnection {
     #[cfg(all(target_os = "macos", feature = "test-harness"))]
     #[allow(clippy::disallowed_methods)]
     pub fn new_in_process() -> Result<Self, Box<dyn std::error::Error>> {
-        // Initialize memory tools first
-        eprintln!("Initializing memory tools...");
-
         // Check if we're in a runtime to determine how to initialize memory
         let memory_integration = match Handle::try_current() {
             Ok(handle) => {
@@ -54,9 +51,6 @@ impl McpConnection {
 
     #[cfg(all(target_os = "macos", feature = "test-harness"))]
     pub async fn new_in_process_async() -> Result<Self, Box<dyn std::error::Error>> {
-        // Initialize memory tools first
-        eprintln!("Initializing memory tools...");
-
         // Initialize memory asynchronously
         let memory_integration = MemoryIntegration::new().await?;
 

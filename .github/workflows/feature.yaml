@@ -671,9 +671,9 @@ jobs:
           echo "=== Testing Chat Command ==="
 
           # Test chat help
-          ./arkavo-x86_64-linux chat --help 2>&1 | tee chat.log || true
+          ./arkavo-x86_64-linux chat --prompt hi 2>&1 | tee chat.log || true
 
-          if grep -qE "chat|Chat|prompt" chat.log; then
+          if grep -qE "Hi|Generated|help" chat.log; then
             echo "✅ Chat command available"
           else
             echo "⚠️ Chat command output unexpected"
