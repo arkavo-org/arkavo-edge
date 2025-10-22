@@ -154,14 +154,6 @@ opt-level = 3
 panic = "abort"
 debug = false
 
-# CI profile - faster builds for PR testing
-# Inherits from release but optimized for build speed over runtime performance
-[profile.ci]
-inherits = "release"
-lto = "thin"           # Much faster than "fat", still provides good optimization
-codegen-units = 16     # Parallel compilation (vs 1 for release)
-opt-level = 2          # Faster compilation than opt-level = 3
-
 [profile.dev]
 opt-level = 0
 debug = true
