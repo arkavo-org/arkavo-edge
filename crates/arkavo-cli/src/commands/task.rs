@@ -10,6 +10,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut push = false;
     let mut message: Option<String> = None;
     let mut validate = true;
+    let mut task_description: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -29,11 +30,27 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 print_usage();
                 return Ok(());
             }
-            _ => {
-                return Err(format!("Unknown argument: {}", args[i]).into());
+            arg => {
+                // First non-flag argument is the task description
+                if !arg.starts_with('-') {
+                    task_description = Some(arg.to_string());
+                    // Collect remaining args as part of task description
+                    if i + 1 < args.len() {
+                        let remaining: Vec<String> = args[i + 1..].to_vec();
+                        task_description = Some(format!("{} {}", arg, remaining.join(" ")));
+                        break;
+                    }
+                } else {
+                    return Err(format!("Unknown argument: {}", arg).into());
+                }
             }
         }
         i += 1;
+    }
+
+    // If task description provided, run AI agent mode
+    if let Some(task) = task_description {
+        return execute_ai_task(&task, auto_approve, push, validate, message);
     }
 
     let git_manager = GitManager::new();
@@ -209,11 +226,34 @@ fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+fn execute_ai_task(
+    task: &str,
+    _auto_approve: bool,
+    _push: bool,
+    _validate: bool,
+    _message: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== AI Task Execution ===\n");
+    println!("Task: {task}\n");
+
+    // Delegate to chat command with the task as prompt
+    println!("Delegating to AI agent...\n");
+
+    // Use chat command to execute the task
+    let chat_args = vec!["--prompt".to_string(), task.to_string()];
+    crate::commands::chat::execute(&chat_args)
+}
+
 fn print_usage() {
     println!("Plan and apply code changes");
     println!();
     println!("USAGE:");
-    println!("    arkavo task [OPTIONS]");
+    println!("    arkavo task [TASK]              Execute AI task");
+    println!("    arkavo task [OPTIONS]           Commit existing changes");
+    println!();
+    println!("EXAMPLES:");
+    println!("    arkavo task 'fix all warnings'");
+    println!("    arkavo task --yes               # Auto-approve commit");
     println!();
     println!("OPTIONS:");
     println!("    -y, --yes          Auto-approve without prompting");
