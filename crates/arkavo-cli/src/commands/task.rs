@@ -2,7 +2,121 @@ use arkavo_git::{GitManager, safety::RepoGuard};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone)]
+enum ModelCapability {
+    Small,  // <2B params - info gathering, simple tasks
+    Medium, // 2-7B params - planning, tool use, reasoning
+    Large,  // >7B params - complex planning, multi-step
+}
+
+#[derive(Debug, Clone)]
+struct LocalModelInfo {
+    name: String,
+    path: PathBuf,
+    size_gb: f64,
+    capability: ModelCapability,
+}
+
+fn infer_capability(name: &str, size_gb: f64) -> ModelCapability {
+    let name_lower = name.to_lowercase();
+
+    // Parse parameter count from name or size
+    if name_lower.contains("270m") || name_lower.contains("1b") || size_gb < 2.0 {
+        ModelCapability::Small
+    } else if name_lower.contains("2b")
+        || name_lower.contains("4b")
+        || (2.0..8.0).contains(&size_gb)
+    {
+        ModelCapability::Medium
+    } else {
+        // 7b, 12b, or size >= 8GB
+        ModelCapability::Large
+    }
+}
+
+fn discover_local_models() -> Vec<LocalModelInfo> {
+    let mut models = Vec::new();
+
+    // Get HuggingFace cache directory
+    let Some(hf_cache_dir) = dirs::home_dir().map(|d| d.join(".cache/huggingface/hub")) else {
+        return models;
+    };
+
+    if !hf_cache_dir.exists() {
+        return models;
+    }
+
+    // Scan for GGUF models in the cache
+    let Ok(entries) = std::fs::read_dir(&hf_cache_dir) else {
+        return models;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        // Check if it's a model directory
+        if !dir_name.starts_with("models--") {
+            continue;
+        }
+
+        // Look for GGUF files in snapshots
+        let snapshots_dir = path.join("snapshots");
+        if !snapshots_dir.exists() {
+            continue;
+        }
+
+        let Ok(snapshot_entries) = std::fs::read_dir(&snapshots_dir) else {
+            continue;
+        };
+
+        for snapshot in snapshot_entries.flatten() {
+            let snapshot_path = snapshot.path();
+            if !snapshot_path.is_dir() {
+                continue;
+            }
+
+            // Check for .gguf files
+            let Ok(files) = std::fs::read_dir(&snapshot_path) else {
+                continue;
+            };
+
+            for file in files.flatten() {
+                let file_name_os = file.file_name();
+                let Some(file_name) = file_name_os.to_str() else {
+                    continue;
+                };
+
+                if !file_name.ends_with(".gguf") {
+                    continue;
+                }
+
+                let file_path = file.path();
+                let size_bytes = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+                let size_gb = size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+
+                let capability = infer_capability(file_name, size_gb);
+
+                models.push(LocalModelInfo {
+                    name: file_name.to_string(),
+                    path: file_path,
+                    size_gb,
+                    capability,
+                });
+            }
+        }
+    }
+
+    models
+}
 
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Parse arguments
@@ -41,7 +155,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                 } else {
-                    return Err(format!("Unknown argument: {}", arg).into());
+                    return Err(format!("Unknown argument: {arg}").into());
                 }
             }
         }
@@ -238,77 +352,166 @@ fn execute_ai_task(
     println!("=== Task: Plan and Execute ===\n");
     println!("Task: {task}\n");
 
-    // Lightweight API key detection (no model loading)
-    let available_llms = detect_available_llms();
+    // Discover available models
+    let cloud_llms = detect_available_llms();
+    let local_models = discover_local_models();
 
-    // Display available models
-    println!("Available LLMs:");
-    for llm in &available_llms {
-        println!("  ✓ {} ({}) - {}", llm.name, llm.provider, llm.model);
+    // Select models for task
+    let (local_model_path, cloud_model) = select_models_for_task(&cloud_llms, &local_models);
+
+    // Display discovered models
+    println!("=== Available Models ===\n");
+
+    if !local_models.is_empty() {
+        println!("Local Models:");
+        for model in &local_models {
+            let cap_str = match model.capability {
+                ModelCapability::Small => "Small",
+                ModelCapability::Medium => "Medium",
+                ModelCapability::Large => "Large",
+            };
+            println!("  ✓ {} ({}) - {:.1} GB", model.name, cap_str, model.size_gb);
+        }
+        println!();
     }
+
+    if !cloud_llms.is_empty() {
+        println!("Cloud Models:");
+        for llm in &cloud_llms {
+            println!("  ✓ {} ({})", llm.name, llm.model);
+        }
+        println!();
+    }
+
+    // Determine final models to use
+    let planning_model = cloud_model.as_ref().or(local_model_path.as_ref()).cloned();
+    let local_model = local_model_path.as_ref().or(cloud_model.as_ref()).cloned();
+
+    if planning_model.is_none() {
+        eprintln!("Error: No models available");
+        eprintln!("Please either:");
+        eprintln!("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
+        eprintln!(
+            "  - Download a local model with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF"
+        );
+        return Err("No models available".into());
+    }
+
+    let planning_model = planning_model.unwrap();
+    let local_model = local_model.unwrap();
+
+    println!("=== Selected for Task ===");
+    if cloud_model.is_some() {
+        println!("Planning: {planning_model} (cloud)");
+    } else {
+        let model_name = local_models
+            .iter()
+            .find(|m| m.path.to_string_lossy() == local_model)
+            .map(|m| m.name.as_str())
+            .unwrap_or("local");
+        println!("Planning: {model_name} (local)");
+    }
+
+    let model_name = local_models
+        .iter()
+        .find(|m| m.path.to_string_lossy() == local_model)
+        .map(|m| m.name.as_str())
+        .unwrap_or(&local_model);
+    let cap = local_models
+        .iter()
+        .find(|m| m.path.to_string_lossy() == local_model)
+        .map(|m| match m.capability {
+            ModelCapability::Small => "Small",
+            ModelCapability::Medium => "Medium",
+            ModelCapability::Large => "Large",
+        })
+        .unwrap_or("Unknown");
+    println!("Info Gathering: {model_name} ({cap})");
+    println!("Verification: {model_name} ({cap})");
     println!();
 
-    // Select planning model (prefer capable cloud models)
-    let planning_model = select_planning_model(&available_llms);
-    println!("Planning Model: {}", planning_model);
-    println!();
+    // Step 1: Multi-agent planning (local gathers info, cloud refines)
+    println!("=== Step 1: Collaborative Planning ===\n");
 
-    // Step 1: Generate plan using capable model with MCP tools
-    println!("=== Step 1: Planning ===\n");
+    // Round 1: Local model gathers information
+    println!("[Local Agent] Gathering information with {model_name}...\n");
 
-    let planning_prompt = format!(
-        "Task: {}
+    let gather_prompt = format!(
+        "Task: {task}
 
-You are a planning agent with access to MCP tools. Your job is to:
-1. Analyze the task requirements
-2. Use MCP tools to understand current state
-3. Create a detailed step-by-step plan
-4. List exactly what files need to be changed and how
+Use MCP tools to gather information. Be concise.
+- @filesystem {{\"action\": \"list_directory\", \"dir_path\": \".\"}}
+- @git_status
+
+Report your findings in 3-4 sentences. Then ask the planning agent 2-3 specific questions about what needs to be done."
+    );
+
+    let gather_args = vec![
+        "--prompt".to_string(),
+        gather_prompt,
+        "--model".to_string(),
+        local_model.clone(),
+    ];
+    crate::commands::chat::execute(&gather_args)?;
+
+    // Round 2: Cloud model creates initial plan
+    println!("\n[Cloud Agent] Creating plan with {planning_model}...\n");
+
+    let plan_prompt = format!(
+        "Task: {task}
+
+Based on the local agent's findings above, create a detailed plan.
 
 **Available MCP Tools:**
-- @filesystem {{\"action\": \"read_file\", \"file_path\": \"path\"}} - Read file contents
-- @filesystem {{\"action\": \"list_directory\", \"dir_path\": \"path\"}} - List directory
-- @git_status - Check git status
-- @git_diff - See git diff
+- @filesystem {{\"action\": \"read_file\", \"file_path\": \"path\"}}
+- @filesystem {{\"action\": \"list_directory\", \"dir_path\": \"path\"}}
+- @git_status
+- @git_diff
 
-**Note:** There is NO @cargo tool. To check build errors:
-1. Read Cargo.toml to understand the project
-2. Read source files to find issues
-3. Plan fixes based on code analysis
-
-Use MCP tools to gather information. Output your plan in this format:
+Use tools to verify your assumptions. Output your plan:
 
 ## Analysis
-[What you discovered using tools]
+[Key findings]
 
 ## Plan
-1. [Step 1]
-2. [Step 2]
-...
+1. [Step]
+2. [Step]
 
 ## Files to Modify
-- file1.rs: [what to change]
-- file2.rs: [what to change]
+- file: [changes]
 
-Be specific and thorough.",
-        task
+Ask the local agent to verify anything uncertain."
     );
 
     let plan_args = vec![
         "--prompt".to_string(),
-        planning_prompt,
+        plan_prompt,
         "--model".to_string(),
         planning_model.clone(),
     ];
-
-    println!("Generating plan with {}...\n", planning_model);
     crate::commands::chat::execute(&plan_args)?;
 
-    println!("\n=== Step 2: Review Plan ===\n");
+    // Round 3: Local model verifies
+    println!("\n[Local Agent] Verifying plan...\n");
 
+    let verify_prompt = "Based on the cloud agent's plan above, verify the details using MCP tools.
+Read the mentioned files and confirm the plan makes sense. Report any issues."
+        .to_string();
+
+    let verify_args = vec![
+        "--prompt".to_string(),
+        verify_prompt,
+        "--model".to_string(),
+        local_model.clone(),
+    ];
+    crate::commands::chat::execute(&verify_args)?;
+
+    println!("\n=== Step 2: Review Plan ===\n");
+    println!("Plan created through collaboration between local and cloud agents.");
+
+    use std::io::{self, Write};
     if !auto_approve {
-        print!("Execute this plan? [y/N]: ");
-        use std::io::{self, Write};
+        print!("\nExecute this plan? [y/N]: ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -323,9 +526,9 @@ Be specific and thorough.",
     println!("\n=== Step 3: Execute Plan ===\n");
 
     let execution_prompt = format!(
-        "Based on the plan above, execute the changes:
+        "Based on the plan from our conversation, execute the changes:
 
-Task: {}
+Task: {task}
 
 Use MCP tools to make the actual changes:
 - @filesystem {{\"action\": \"write_file\", \"file_path\": \"path\", \"content\": \"...\"}} - Write file
@@ -333,15 +536,14 @@ Use MCP tools to make the actual changes:
 - @git_status - Check changes
 - @git_diff - Verify modifications
 
-Execute the plan step by step. Show what you're doing.",
-        task
+Execute the plan step by step. Show what you're doing."
     );
 
     let exec_args = vec![
         "--prompt".to_string(),
         execution_prompt,
         "--model".to_string(),
-        planning_model.clone(),
+        planning_model,
     ];
 
     crate::commands::chat::execute(&exec_args)?;
@@ -354,8 +556,10 @@ Execute the plan step by step. Show what you're doing.",
 
     if let Ok(repo) = git_manager.open_repo(&current_dir) {
         let status = git_manager.status(&repo)?;
-        let total_changes = status.modified.len() + status.added.len()
-            + status.deleted.len() + status.untracked.len();
+        let total_changes = status.modified.len()
+            + status.added.len()
+            + status.deleted.len()
+            + status.untracked.len();
 
         if total_changes > 0 {
             println!("Found {total_changes} changed files");
@@ -449,27 +653,38 @@ fn detect_available_llms() -> Vec<LlmInfo> {
     llms
 }
 
-fn select_planning_model(llms: &[LlmInfo]) -> String {
-    // For planning, always prefer the most capable model
-    // Priority: Gemini > OpenAI > DeepSeek > Local
+fn select_models_for_task(
+    cloud_llms: &[LlmInfo],
+    local_models: &[LocalModelInfo],
+) -> (Option<String>, Option<String>) {
+    // Returns (local_model_path, cloud_model_name)
 
-    if let Some(gemini) = llms.iter().find(|llm| llm.provider == "Google") {
-        return gemini.model.clone();
-    }
+    // Select cloud model: Gemini > OpenAI > DeepSeek
+    let cloud = cloud_llms
+        .iter()
+        .find(|llm| llm.provider == "Google")
+        .or_else(|| cloud_llms.iter().find(|llm| llm.provider == "OpenAI"))
+        .or_else(|| cloud_llms.iter().find(|llm| llm.provider == "DeepSeek"))
+        .map(|llm| llm.model.clone());
 
-    if let Some(openai) = llms.iter().find(|llm| llm.provider == "OpenAI") {
-        return openai.model.clone();
-    }
+    // Select local model: prefer Medium > Large > Small
+    // Medium (4B) is ideal: fast + capable for tool use
+    // Large (12B) works but slower
+    // Small (270M) only as fallback
+    let local = local_models
+        .iter()
+        .filter(|m| matches!(m.capability, ModelCapability::Medium))
+        .max_by_key(|m| (m.size_gb * 1000.0) as u64)
+        .or_else(|| {
+            local_models
+                .iter()
+                .filter(|m| matches!(m.capability, ModelCapability::Large))
+                .min_by_key(|m| (m.size_gb * 1000.0) as u64)
+        })
+        .or_else(|| local_models.first())
+        .map(|m| m.path.to_string_lossy().to_string());
 
-    if let Some(deepseek) = llms.iter().find(|llm| llm.provider == "DeepSeek") {
-        return deepseek.model.clone();
-    }
-
-    // Fallback to local (will warn user that planning may not work well)
-    llms.iter()
-        .find(|llm| llm.provider == "Local")
-        .map(|llm| llm.model.clone())
-        .unwrap_or_else(|| "gemma-3-270m-it".to_string())
+    (local, cloud)
 }
 
 fn print_usage() {
