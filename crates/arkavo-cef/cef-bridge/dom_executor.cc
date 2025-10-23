@@ -232,6 +232,34 @@ void DOMExecutor::ExecuteReplaceInnerHTML(uint32_t id, const std::string& select
 
     frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);
 
+    // Re-attach prompt bar event listeners after HTML replacement
+    std::ostringstream setup_js;
+    setup_js << "(function() {"
+             << "  var input = document.getElementById('prompt-input');"
+             << "  var button = document.getElementById('prompt-submit');"
+             << "  if (!input || !button) return;"
+             << "  "
+             << "  function submitPrompt() {"
+             << "    var value = input.value.trim();"
+             << "    if (value.length === 0) return;"
+             << "    if (typeof window.ArkavoEventBridge === 'function') {"
+             << "      window.ArkavoEventBridge({"
+             << "        event_type: 'submit',"
+             << "        selector: '#prompt-input',"
+             << "        target_id: 'prompt-input',"
+             << "        value: value,"
+             << "        data: '{}'"
+             << "      });"
+             << "      input.value = '';"
+             << "    }"
+             << "  }"
+             << "  "
+             << "  button.onclick = submitPrompt;"
+             << "  input.onkeypress = function(e) { if (e.key === 'Enter') submitPrompt(); };"
+             << "})();";
+
+    frame_->ExecuteJavaScript(setup_js.str(), frame_->GetURL(), 0);
+
     DOMFeedback feedback = {id, 0, 0, "OK"};
     SendFeedback(feedback);
 }

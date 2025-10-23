@@ -19,7 +19,11 @@ impl CefRendererImpl {
 
         let mut renderer = CefRenderer::new(renderer_path).await?;
 
+        // Wait for V8 context to initialize
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
         // Initialize the page with complete HTML structure from Rust
+        // Note: Event listeners will be attached by C++ OnLoadEnd handler
         let initial_html = r#"<html><head><style>
 body { margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; height:100vh; display:flex; flex-direction:column; }
 #content { flex:1; overflow:auto; padding:20px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; }
@@ -33,9 +37,9 @@ body { margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; heig
 </style></head><body>
 <div id='content'>
 <div class='welcome'>
-<h1>Arkavo UI Generator</h1>
-<p>CEF Renderer Ready</p>
-<p style='opacity:0.7;'>Enter your prompt below to generate UI or chat</p>
+<h1>Arkavo Edge</h1>
+<p>Ready</p>
+<p style='opacity:0.7;'>Enter your prompt below</p>
 </div>
 </div>
 <div id='prompt-bar'>

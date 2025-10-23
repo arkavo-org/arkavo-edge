@@ -112,14 +112,8 @@ void ArkavoBrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
                                               CefRefPtr<CefFrame> frame,
                                               CefRefPtr<CefContextMenuParams> params,
                                               CefRefPtr<CefMenuModel> model) {
+    // Disable context menu to prevent crashes
     model->Clear();
-
-    // Add debug menu items
-    const int CMD_VIEW_HTML = 26500;
-    const int CMD_VIEW_CONSOLE = 26501;
-
-    model->AddItem(CMD_VIEW_HTML, "View HTML Source");
-    model->AddItem(CMD_VIEW_CONSOLE, "Show Developer Console");
 }
 
 bool ArkavoBrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
