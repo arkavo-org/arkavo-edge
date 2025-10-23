@@ -96,6 +96,10 @@ void DOMExecutor::HandleDOMEvent(const std::string& event_type, const std::strin
 }
 
 void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {
+    std::cout << "[DEBUG C++] ProcessCommand called: op=" << static_cast<int>(cmd.op)
+              << ", id=" << cmd.id
+              << ", selector='" << cmd.selector << "'" << std::endl;
+
     auto start = std::chrono::high_resolution_clock::now();
 
     switch (cmd.op) {

@@ -87,30 +87,51 @@ impl CefRendererImpl {
     pub async fn poll_events(&mut self) -> Result<()> {
         Ok(())
     }
+
+    pub async fn try_recv_event(&mut self) -> Result<Option<arkavo_cef::DOMEvent>> {
+        self.renderer
+            .try_recv_event()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF event error: {}", e))
+    }
 }
 
 #[async_trait::async_trait]
 impl UiRenderer for CefRendererImpl {
     async fn render(&mut self, html: &str, css: &str, _js: &str) -> Result<()> {
-        self.commands()
-            .replace_inner_html("body", html)
+        println!(
+            "[DEBUG] CefRendererImpl::render() called with {} bytes HTML, {} bytes CSS",
+            html.len(),
+            css.len()
+        );
+
+        let content_html = if css.is_empty() {
+            html.to_string()
+        } else {
+            format!("<style>{}</style>{}", css, html)
+        };
+
+        println!(
+            "[DEBUG] Calling replace_inner_html with {} bytes",
+            content_html.len()
+        );
+
+        match self
+            .commands()
+            .replace_inner_html("#content", &content_html)
             .await
-            .map_err(|e| {
+        {
+            Ok(_) => {
+                println!("[DEBUG] replace_inner_html succeeded");
+                info!("CEF renderer: Rendered HTML and CSS successfully");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[ERROR] replace_inner_html failed: {}", e);
                 error!("Failed to render HTML: {}", e);
-                anyhow::anyhow!("CEF render error: {}", e)
-            })?;
-
-        let css_rule = format!("<style>{}</style>", css);
-        self.commands()
-            .replace_inner_html("head", &css_rule)
-            .await
-            .map_err(|e| {
-                error!("Failed to render CSS: {}", e);
-                anyhow::anyhow!("CEF CSS error: {}", e)
-            })?;
-
-        info!("CEF renderer: Rendered HTML and CSS successfully");
-        Ok(())
+                Err(anyhow::anyhow!("CEF render error: {}", e))
+            }
+        }
     }
 
     async fn update_element(&mut self, selector: &str, html: &str) -> Result<()> {

@@ -4,6 +4,7 @@
 #include "include/wrapper/cef_helpers.h"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <ctime>
 
 #ifdef __APPLE__
@@ -51,6 +52,40 @@ void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                                     int httpStatusCode) {
     if (frame->IsMain()) {
         std::cout << "Page loaded successfully" << std::endl;
+
+        std::ostringstream js;
+        js << "(function() {"
+           << "  var input = document.getElementById('prompt-input');"
+           << "  var button = document.getElementById('prompt-submit');"
+           << "  "
+           << "  function submitPrompt() {"
+           << "    var value = input.value.trim();"
+           << "    if (value.length === 0) return;"
+           << "    "
+           << "    if (typeof window.ArkavoEventBridge === 'function') {"
+           << "      window.ArkavoEventBridge({"
+           << "        event_type: 'submit',"
+           << "        selector: '#prompt-input',"
+           << "        target_id: 'prompt-input',"
+           << "        value: value,"
+           << "        data: '{}'"
+           << "      });"
+           << "      input.value = '';"
+           << "    } else {"
+           << "      console.error('ArkavoEventBridge not available');"
+           << "    }"
+           << "  }"
+           << "  "
+           << "  button.addEventListener('click', submitPrompt);"
+           << "  input.addEventListener('keypress', function(e) {"
+           << "    if (e.key === 'Enter') submitPrompt();"
+           << "  });"
+           << "  "
+           << "  console.log('Prompt bar event listeners registered');"
+           << "})();";
+
+        frame->ExecuteJavaScript(js.str(), frame->GetURL(), 0);
+        std::cout << "Prompt bar event listeners initialized" << std::endl;
     }
 }
 

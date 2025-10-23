@@ -72,82 +72,98 @@ async fn use_cef_renderer(
     _port: u16,
     initial_prompt: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_agui::{create_renderer, default_renderer_type};
-
-    let renderer_type = default_renderer_type().ok_or("CEF renderer not available")?;
+    use arkavo_agui::UiRenderer;
+    use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
 
     println!("Creating CEF renderer...");
-    let mut renderer = create_renderer(renderer_type).await?;
+    let mut cef_renderer = CefRendererImpl::new().await?;
 
-    println!("CEF window opened successfully!");
+    println!("CEF window opened with prompt bar!");
 
-    let html = r#"
-        <div id="app">
-            <h1>Arkavo UI Generator</h1>
-            <p>Native CEF rendering with Rust-driven DOM</p>
-            <p style="color: #888;">Waiting for UI generation...</p>
-        </div>
-    "#;
-
-    let css = r#"
-        body {
-            margin: 0;
-            padding: 40px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            min-height: 100vh;
-        }
-        #app {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        h1 {
-            font-size: 2.5em;
-            margin-bottom: 20px;
-        }
-    "#;
-
-    renderer.render(html, css, "").await?;
+    // Wait for page to fully load before processing initial prompt
+    println!("[DEBUG] Waiting for page to load...");
+    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+    println!("[DEBUG] Page should be loaded now");
 
     if let Some(prompt) = initial_prompt {
-        println!("Processing initial prompt: {}", prompt);
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-        let generated_html = format!(
-            r#"<div id="app">
-                <h1>Generated from prompt</h1>
-                <p>"{}"</p>
-                <button>Action Button</button>
-            </div>"#,
-            prompt
-        );
-        renderer.render(&generated_html, css, "").await?;
+        println!("Processing initial prompt: {prompt}");
+        handle_prompt(&mut cef_renderer, &prompt).await?;
     }
 
-    println!("CEF renderer is running. Close the window or press Ctrl+C to exit.");
+    println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
 
+    // Event loop - poll for prompt submissions
     loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        if !renderer.is_running() {
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        if !cef_renderer.is_running() {
             break;
+        }
+
+        // Poll for events from the prompt bar
+        if let Ok(Some(event)) = cef_renderer.try_recv_event().await
+            && event.event_type == "submit"
+            && !event.value.trim().is_empty()
+        {
+            let value = &event.value;
+            println!("\n[Prompt received]: {value}");
+            handle_prompt(&mut cef_renderer, &event.value).await?;
         }
     }
 
     // Renderer stopped - clean shutdown
-    match Box::new(renderer).shutdown().await {
+    match Box::new(cef_renderer).shutdown().await {
         Ok(_) => {
             println!("Application closed gracefully");
             Ok(())
         }
         Err(e) => {
-            // Ignore connection errors during shutdown - they're expected
             if e.to_string().contains("Connection closed") {
                 println!("Application closed");
                 Ok(())
             } else {
                 Err(e.into())
             }
+        }
+    }
+}
+
+#[cfg(feature = "cef-ui")]
+async fn handle_prompt(
+    renderer: &mut dyn arkavo_agui::UiRenderer,
+    prompt: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Generating UI from prompt: \"{prompt}\"");
+
+    // Generate UI based on prompt
+    let generated_html = format!(
+        r#"
+        <div style="padding: 40px;">
+            <h1 style="color: #667eea; margin-bottom: 20px;">Generated UI</h1>
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h2 style="color: #333; margin-top: 0;">Your Request</h2>
+                <p style="color: #666; font-size: 16px; line-height: 1.6;">{prompt}</p>
+                <button style="background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px;">
+                    Action Button
+                </button>
+            </div>
+        </div>
+        "#
+    );
+
+    let css = "";
+
+    let html_len = generated_html.len();
+    println!("[DEBUG] About to call renderer.render() with {html_len} bytes of HTML");
+    match renderer.render(&generated_html, css, "").await {
+        Ok(_) => {
+            println!("[DEBUG] renderer.render() returned Ok");
+            println!("UI updated successfully!");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("[ERROR] renderer.render() failed: {e}");
+            Err(e.into())
         }
     }
 }

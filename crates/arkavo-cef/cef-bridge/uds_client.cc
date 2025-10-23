@@ -153,19 +153,35 @@ void UdsClient::StopListening() {
 
 void UdsClient::ListenLoop() {
     uint8_t buffer[4096];
+    std::cout << "[DEBUG C++] ListenLoop started" << std::endl;
+
+    // Wait for connection (with timeout)
+    for (int i = 0; i < 100 && running_; i++) {
+        {
+            std::lock_guard<std::mutex> lock(conn_mutex_);
+            if (conn_state_.connected && conn_state_.sock_fd >= 0) {
+                std::cout << "[DEBUG C++] ListenLoop: connection established" << std::endl;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
     while (running_) {
         int socket_fd;
         {
             std::lock_guard<std::mutex> lock(conn_mutex_);
             if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+                std::cout << "[DEBUG C++] ListenLoop: not connected, exiting" << std::endl;
                 break;
             }
             socket_fd = conn_state_.sock_fd;
         }
 
+        std::cout << "[DEBUG C++] ListenLoop: waiting for command..." << std::endl;
         uint32_t msg_len;
         ssize_t n = recv(socket_fd, &msg_len, sizeof(msg_len), 0);
+        std::cout << "[DEBUG C++] recv returned " << n << " bytes, msg_len=" << msg_len << std::endl;
 
         if (n <= 0) {
             if (n < 0) {
@@ -191,9 +207,49 @@ void UdsClient::ListenLoop() {
             continue;
         }
 
+        // Deserialize the command from buffer
         DOMCommand cmd;
-        cmd.id = 0;
-        cmd.op = DOMOp::ReplaceInnerHTML;
+        uint32_t offset = 0;
+
+        // Read id (4 bytes)
+        if (offset + 4 > msg_len) continue;
+        memcpy(&cmd.id, &buffer[offset], 4);
+        offset += 4;
+
+        // Read op (1 byte)
+        if (offset + 1 > msg_len) continue;
+        cmd.op = static_cast<DOMOp>(buffer[offset]);
+        offset += 1;
+
+        // Read selector (length-prefixed string)
+        if (offset + 4 > msg_len) continue;
+        uint32_t selector_len;
+        memcpy(&selector_len, &buffer[offset], 4);
+        offset += 4;
+        if (offset + selector_len > msg_len) continue;
+        cmd.selector = std::string(reinterpret_cast<char*>(&buffer[offset]), selector_len);
+        offset += selector_len;
+
+        // Read payload (length-prefixed string)
+        if (offset + 4 > msg_len) continue;
+        uint32_t payload_len;
+        memcpy(&payload_len, &buffer[offset], 4);
+        offset += 4;
+        if (offset + payload_len > msg_len) continue;
+        cmd.payload = std::string(reinterpret_cast<char*>(&buffer[offset]), payload_len);
+        offset += payload_len;
+
+        // Read property (length-prefixed string, optional)
+        if (offset + 4 > msg_len) continue;
+        uint32_t property_len;
+        memcpy(&property_len, &buffer[offset], 4);
+        offset += 4;
+        if (property_len > 0 && offset + property_len <= msg_len) {
+            cmd.property = std::string(reinterpret_cast<char*>(&buffer[offset]), property_len);
+        }
+
+        std::cout << "[DEBUG C++] Deserialized command: selector='" << cmd.selector
+                  << "', payload_len=" << cmd.payload.length() << std::endl;
 
         if (command_callback_) {
             command_callback_(cmd);

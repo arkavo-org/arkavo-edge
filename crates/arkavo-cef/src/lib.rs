@@ -50,6 +50,17 @@ impl CefRenderer {
         self.commands.as_mut().expect("Commands not initialized")
     }
 
+    /// Attempts to receive an event from the CEF renderer (non-blocking).
+    ///
+    /// Returns `Ok(Some(event))` if an event was received, `Ok(None)` if no event is available.
+    pub async fn try_recv_event(&mut self) -> Result<Option<DOMEvent>> {
+        if let Some(commands) = &mut self.commands {
+            commands.try_recv_event().await
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn is_running(&mut self) -> bool {
         self.process.is_running()
     }
