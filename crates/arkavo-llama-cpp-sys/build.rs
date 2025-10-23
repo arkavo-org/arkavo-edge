@@ -139,13 +139,23 @@ fn main() {
         let target = env::var("TARGET").unwrap_or_default();
         if target.contains("aarch64") || target.contains("arm64") {
             // ARM64 library paths for cross-compilation and native builds
+            // Try multiple GCC versions (Ubuntu 22.04 typically has GCC 11-12)
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/12");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/10");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/9");
             println!("cargo:rustc-link-search=native=/usr/lib/aarch64-linux-gnu");
             println!("cargo:rustc-link-search=native=/usr/aarch64-linux-gnu/lib");
+            // Also check cross-compilation sysroot
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
         } else {
             // x86_64 library paths
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/12");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
