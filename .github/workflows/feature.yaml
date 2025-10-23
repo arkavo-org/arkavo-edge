@@ -273,21 +273,16 @@ jobs:
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
-          # Install both runtime and static OpenMP libraries for static linking
-          # Use gcc-multilib which includes static libgomp.a
-          sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
 
           # Install ARM64 cross-compilation toolchain if needed
           if [ "${{ matrix.cross }}" = "true" ]; then
-            # Add ARM64 architecture for cross-compilation
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-
             # Install ARM64 cross-compilation toolchain
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-            # Install ARM64 libraries including OpenMP
-            sudo apt-get install -y libgomp1:arm64 libstdc++6:arm64 libc6:arm64
+            # Use crossbuild-essential which includes all necessary libraries
+            sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          else
+            # Install both runtime and static OpenMP libraries for static linking
+            # Use gcc-multilib which includes static libgomp.a
+            sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
       - uses: dtolnay/rust-toolchain@stable
         with:
