@@ -51,6 +51,14 @@ struct DOMEvent {
     std::string data;
 };
 
+struct DOMError {
+    std::string error_type;
+    std::string severity;
+    std::string message;
+    std::string source;
+    uint32_t line;
+};
+
 class UdsClient {
 public:
     explicit UdsClient(const std::string& socket_path);
@@ -64,6 +72,7 @@ public:
 
     bool SendFeedback(const DOMFeedback& feedback);
     bool SendEvent(const DOMEvent& event);
+    bool SendError(const DOMError& error);
 
 private:
     void ListenLoop();

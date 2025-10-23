@@ -94,6 +94,13 @@ impl CefRendererImpl {
             .await
             .map_err(|e| anyhow::anyhow!("CEF event error: {}", e))
     }
+
+    pub async fn try_recv_error(&mut self) -> Result<Option<arkavo_cef::DOMError>> {
+        self.renderer
+            .try_recv_error()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF error polling error: {}", e))
+    }
 }
 
 #[async_trait::async_trait]

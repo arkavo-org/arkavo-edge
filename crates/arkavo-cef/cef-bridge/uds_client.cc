@@ -338,3 +338,49 @@ bool UdsClient::SendEvent(const DOMEvent& event) {
 
     return true;
 }
+
+bool UdsClient::SendError(const DOMError& error) {
+    std::lock_guard<std::mutex> lock(conn_mutex_);
+
+    if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+        std::cerr << "Cannot send error: not connected" << std::endl;
+        return false;
+    }
+
+    uint8_t buffer[2048];
+    uint32_t offset = 0;
+
+    uint8_t msg_type = 0x03;
+    buffer[offset++] = msg_type;
+
+    auto write_string = [&](const std::string& str) {
+        uint32_t len = str.size();
+        memcpy(buffer + offset, &len, sizeof(len));
+        offset += sizeof(len);
+        memcpy(buffer + offset, str.c_str(), len);
+        offset += len;
+    };
+
+    write_string(error.error_type);
+    write_string(error.severity);
+    write_string(error.message);
+    write_string(error.source);
+
+    memcpy(buffer + offset, &error.line, sizeof(error.line));
+    offset += sizeof(error.line);
+
+    uint32_t frame_len = offset;
+    ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
+    if (n < 0) {
+        std::cerr << "Failed to send error frame length: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    n = send(conn_state_.sock_fd, buffer, offset, 0);
+    if (n < 0) {
+        std::cerr << "Failed to send error: " << strerror(errno) << std::endl;
+        return false;
+    }
+
+    return true;
+}

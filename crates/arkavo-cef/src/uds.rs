@@ -94,6 +94,11 @@ impl UdsTransport {
         Protocol::deserialize_event(&data)
     }
 
+    pub async fn recv_error(&mut self) -> Result<crate::protocol::DOMError> {
+        let data = self.recv_raw().await?;
+        Protocol::deserialize_error(&data)
+    }
+
     pub async fn try_recv_message(&mut self) -> Result<Option<ReceivedMessage>> {
         let data = self.recv_raw().await?;
 
@@ -110,6 +115,10 @@ impl UdsTransport {
                 let event = Protocol::deserialize_event(&data)?;
                 Ok(Some(ReceivedMessage::Event(event)))
             }
+            0x03 => {
+                let error = Protocol::deserialize_error(&data)?;
+                Ok(Some(ReceivedMessage::Error(error)))
+            }
             _ => Err(CefError::ProtocolError(format!(
                 "Unknown message type: {}",
                 data[0]
@@ -122,6 +131,7 @@ impl UdsTransport {
 pub enum ReceivedMessage {
     Feedback(crate::protocol::DOMFeedbackSimple),
     Event(crate::protocol::DOMEvent),
+    Error(crate::protocol::DOMError),
 }
 
 #[cfg(test)]

@@ -37,24 +37,27 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Prevent unused variable/assignment warnings when CEF UI is not enabled
-    #[cfg(not(feature = "cef-ui"))]
-    {
-        let _ = port;
-        let _ = &initial_prompt;
-    }
-
     let run_async = async move {
-        // Determine which renderer to use
         #[cfg(feature = "cef-ui")]
         {
             println!("Starting Arkavo UI with native CEF renderer...");
             use_cef_renderer(port, initial_prompt).await
         }
 
-        #[cfg(not(feature = "cef-ui"))]
+        #[cfg(all(feature = "web-ui", not(feature = "cef-ui")))]
         {
-            Err("No UI renderer available. Build with --features cef-ui".into())
+            println!("Starting Arkavo UI with web renderer...");
+            use_web_gateway(port, initial_prompt).await
+        }
+
+        #[cfg(not(any(feature = "cef-ui", feature = "web-ui")))]
+        {
+            let _ = port;
+            let _ = initial_prompt;
+            Err(
+                "No UI renderer available. Build with --features cef-ui or --features web-ui"
+                    .into(),
+            )
         }
     };
 
@@ -92,12 +95,46 @@ async fn use_cef_renderer(
 
     println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
 
-    // Event loop - poll for prompt submissions
+    // Event loop - poll for prompt submissions and errors
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         if !cef_renderer.is_running() {
             break;
+        }
+
+        // Poll for errors from CEF
+        if let Ok(Some(error)) = cef_renderer.try_recv_error().await {
+            eprintln!(
+                "\n[CEF {} Error] {}: {} ({}:{})",
+                error.error_type, error.severity, error.message, error.source, error.line
+            );
+
+            // Show error in UI
+            let error_html = format!(
+                r#"
+                <div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                    <div style="background: #fee; border-left: 4px solid #f44; padding: 16px; border-radius: 4px;">
+                        <strong style="color: #c33;">Error: {}</strong><br>
+                        <span style="color: #666;">{}</span><br>
+                        <small style="color: #999;">{}:{}</small>
+                    </div>
+                </div>
+                "#,
+                error.error_type,
+                error
+                    .message
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                error
+                    .source
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;"),
+                error.line
+            );
+            let _ = cef_renderer.render(&error_html, "", "").await;
         }
 
         // Poll for events from the prompt bar
@@ -294,6 +331,27 @@ async fn create_client_from_routing(
             }
         }
     }
+}
+
+#[cfg(feature = "web-ui")]
+#[allow(dead_code)]
+async fn use_web_gateway(
+    port: u16,
+    initial_prompt: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Creating web UI gateway...");
+    let mut gateway = arkavo_agui::AgUiGateway::new(port);
+
+    if let Some(prompt) = initial_prompt {
+        println!("Starting UI with initial prompt: {prompt}");
+        println!("UI will generate incrementally - you can interrupt and modify at any time");
+        gateway.set_initial_prompt(prompt);
+    }
+
+    println!("Web UI is available at http://localhost:{port}");
+    println!("Press Ctrl+C to exit");
+
+    gateway.start().await
 }
 
 fn print_usage() {

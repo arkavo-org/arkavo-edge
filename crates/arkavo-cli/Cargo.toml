@@ -13,9 +13,9 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 # Default features - portable across all platforms with pure Rust mDNS
-default = ["memory", "mdns", "test-harness", "llm-remote", "llama-cpp"]
+default = ["memory", "mdns", "test-harness", "llm-remote", "llama-cpp", "web-ui"]
 # Default features for Windows (no C++ dependencies)
-windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows"]
+windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows", "web-ui"]
 test-harness = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
@@ -26,8 +26,9 @@ llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-ter
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp"]
-cef-ui = ["arkavo-agui/cef-ui"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp"]
+cef-ui = ["arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
+web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
@@ -42,6 +43,7 @@ arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
+arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }

@@ -46,6 +46,28 @@ impl DOMCommandBuilder {
         }
     }
 
+    /// Attempts to receive an error from the transport (non-blocking).
+    pub async fn try_recv_error(&mut self) -> crate::Result<Option<crate::protocol::DOMError>> {
+        use tokio::time::Duration;
+        match tokio::time::timeout(Duration::from_millis(10), self.transport.recv_error()).await {
+            Ok(Ok(error)) => Ok(Some(error)),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Attempts to receive any message (feedback, event, or error) from the transport (non-blocking).
+    pub async fn try_recv_message(&mut self) -> crate::Result<Option<crate::uds::ReceivedMessage>> {
+        use tokio::time::Duration;
+        match tokio::time::timeout(Duration::from_millis(10), self.transport.try_recv_message())
+            .await
+        {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+
     fn next_id(&self) -> u32 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }

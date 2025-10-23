@@ -83,6 +83,15 @@ pub struct DOMEvent {
     pub data: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct DOMError {
+    pub error_type: String,
+    pub severity: String,
+    pub message: String,
+    pub source: String,
+    pub line: u32,
+}
+
 impl Protocol {
     pub fn deserialize_event(data: &[u8]) -> Result<DOMEvent> {
         if data.is_empty() || data[0] != 0x02 {
@@ -129,6 +138,65 @@ impl Protocol {
             target_id,
             value,
             data: data_field,
+        })
+    }
+
+    pub fn deserialize_error(data: &[u8]) -> Result<DOMError> {
+        if data.is_empty() || data[0] != 0x03 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Invalid error message type".to_string(),
+            ));
+        }
+
+        let mut cursor = 1;
+
+        let read_string = |cursor: &mut usize| -> Result<String> {
+            if data.len() < *cursor + 4 {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string length".to_string(),
+                ));
+            }
+            let len = u32::from_le_bytes([
+                data[*cursor],
+                data[*cursor + 1],
+                data[*cursor + 2],
+                data[*cursor + 3],
+            ]) as usize;
+            *cursor += 4;
+
+            if data.len() < *cursor + len {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string data".to_string(),
+                ));
+            }
+            let s = String::from_utf8_lossy(&data[*cursor..*cursor + len]).to_string();
+            *cursor += len;
+            Ok(s)
+        };
+
+        let error_type = read_string(&mut cursor)?;
+        let severity = read_string(&mut cursor)?;
+        let message = read_string(&mut cursor)?;
+        let source = read_string(&mut cursor)?;
+
+        let line = if data.len() >= cursor + 4 {
+            let l = u32::from_le_bytes([
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
+            ]);
+            l
+        } else {
+            0
+        };
+
+        Ok(DOMError {
+            error_type,
+            severity,
+            message,
+            source,
+            line,
         })
     }
 }

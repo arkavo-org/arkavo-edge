@@ -7,7 +7,7 @@ pub mod uds;
 pub use dom_commands::{DOMCommandBuilder, DOMOp};
 pub use error::{CefError, Result};
 pub use process::CefProcess;
-pub use protocol::DOMEvent;
+pub use protocol::{DOMError, DOMEvent};
 pub use uds::{ReceivedMessage, UdsTransport};
 
 use std::path::Path;
@@ -56,6 +56,17 @@ impl CefRenderer {
     pub async fn try_recv_event(&mut self) -> Result<Option<DOMEvent>> {
         if let Some(commands) = &mut self.commands {
             commands.try_recv_event().await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Attempts to receive an error from the CEF renderer (non-blocking).
+    ///
+    /// Returns `Ok(Some(error))` if an error was received, `Ok(None)` if no error is available.
+    pub async fn try_recv_error(&mut self) -> Result<Option<DOMError>> {
+        if let Some(commands) = &mut self.commands {
+            commands.try_recv_error().await
         } else {
             Ok(None)
         }

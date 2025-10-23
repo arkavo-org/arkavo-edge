@@ -433,3 +433,9 @@ void DOMExecutor::SendFeedback(const DOMFeedback& feedback) {
         uds_client_->SendFeedback(feedback);
     }
 }
+
+void DOMExecutor::SendError(const DOMError& error) {
+    if (uds_client_) {
+        uds_client_->SendError(error);
+    }
+}
