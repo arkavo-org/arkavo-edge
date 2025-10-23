@@ -186,13 +186,12 @@ impl Protocol {
         let source = read_string(&mut cursor)?;
 
         let line = if data.len() >= cursor + 4 {
-            let l = u32::from_le_bytes([
+            u32::from_le_bytes([
                 data[cursor],
                 data[cursor + 1],
                 data[cursor + 2],
                 data[cursor + 3],
-            ]);
-            l
+            ])
         } else {
             0
         };

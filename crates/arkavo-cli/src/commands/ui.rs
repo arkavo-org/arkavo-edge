@@ -190,10 +190,9 @@ async fn handle_prompt(
             .join("\n");
 
         format!(
-            "Previous UI rendering had the following errors:\n\n{}\n\n\
+            "Previous UI rendering had the following errors:\n\n{error_summary}\n\n\
              Please help fix these errors and regenerate the content.\n\n\
-             User request: {}",
-            error_summary, prompt
+             User request: {prompt}"
         )
     } else {
         prompt.to_string()
