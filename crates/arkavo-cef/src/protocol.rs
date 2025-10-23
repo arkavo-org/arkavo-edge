@@ -92,6 +92,12 @@ pub struct DOMError {
     pub line: u32,
 }
 
+impl DOMError {
+    pub fn format_for_llm(&self) -> String {
+        format!("{}:{} - {}", self.source, self.line, self.message)
+    }
+}
+
 impl Protocol {
     pub fn deserialize_event(data: &[u8]) -> Result<DOMEvent> {
         if data.is_empty() || data[0] != 0x02 {

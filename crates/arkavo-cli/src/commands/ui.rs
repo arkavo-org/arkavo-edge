@@ -77,6 +77,7 @@ async fn use_cef_renderer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_agui::UiRenderer;
     use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
+    use arkavo_cef::DOMError;
 
     println!("Creating CEF renderer...");
     let mut cef_renderer = CefRendererImpl::new().await?;
@@ -88,9 +89,11 @@ async fn use_cef_renderer(
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     println!("[DEBUG] Page should be loaded now");
 
+    let mut error_buffer: Vec<DOMError> = Vec::new();
+
     if let Some(prompt) = initial_prompt {
         println!("Processing initial prompt: {prompt}");
-        handle_prompt(&mut cef_renderer, &prompt).await?;
+        handle_prompt(&mut cef_renderer, &prompt, &mut error_buffer).await?;
     }
 
     println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
@@ -109,6 +112,9 @@ async fn use_cef_renderer(
                 "\n[CEF {} Error] {}: {} ({}:{})",
                 error.error_type, error.severity, error.message, error.source, error.line
             );
+
+            // Buffer error for LLM feedback
+            error_buffer.push(error.clone());
 
             // Show error in UI
             let error_html = format!(
@@ -144,7 +150,7 @@ async fn use_cef_renderer(
         {
             let value = &event.value;
             println!("\n[Prompt received]: {value}");
-            handle_prompt(&mut cef_renderer, &event.value).await?;
+            handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
         }
     }
 
@@ -169,12 +175,37 @@ async fn use_cef_renderer(
 async fn handle_prompt(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
+    error_buffer: &mut Vec<arkavo_cef::DOMError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_llm::Message;
     use arkavo_router::Router;
     use tokio_stream::StreamExt;
 
+    // Build enhanced prompt with error feedback if errors exist
+    let enhanced_prompt = if !error_buffer.is_empty() {
+        let error_summary = error_buffer
+            .iter()
+            .map(|e| e.format_for_llm())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        format!(
+            "Previous UI rendering had the following errors:\n\n{}\n\n\
+             Please help fix these errors and regenerate the content.\n\n\
+             User request: {}",
+            error_summary, prompt
+        )
+    } else {
+        prompt.to_string()
+    };
+
     println!("Processing prompt: \"{prompt}\"");
+    if !error_buffer.is_empty() {
+        println!(
+            "Including {} error(s) for LLM correction",
+            error_buffer.len()
+        );
+    }
 
     // Check for API key availability to determine if we should use cloud models
     let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
@@ -186,7 +217,7 @@ async fn handle_prompt(
         Router::new_offline().await?
     };
 
-    let routing_decision = router.route(prompt).await?;
+    let routing_decision = router.route(&enhanced_prompt).await?;
 
     println!(
         "Router selected: {} (cost: ${:.4})",
@@ -197,7 +228,7 @@ async fn handle_prompt(
 
     let client = create_client_from_routing(&routing_decision).await?;
 
-    let messages = vec![Message::user(prompt)];
+    let messages = vec![Message::user(&enhanced_prompt)];
 
     println!("Calling LLM...");
     let mut response_text = String::new();
@@ -264,6 +295,8 @@ async fn handle_prompt(
     match renderer.render(&html, css, "").await {
         Ok(_) => {
             println!("[DEBUG] UI updated with response");
+            // Clear error buffer after successful render
+            error_buffer.clear();
             Ok(())
         }
         Err(e) => {

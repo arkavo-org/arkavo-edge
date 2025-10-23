@@ -27,7 +27,7 @@ kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
 gemini = ["arkavo-llm/gemini"]
 llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp"]
-cef-ui = ["arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
+cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 
 [dependencies]
@@ -44,6 +44,7 @@ arkavo-repo = { path = "../arkavo-repo" }
 arkavo-router = { path = "../arkavo-router" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
+arkavo-cef = { path = "../arkavo-cef", optional = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }
