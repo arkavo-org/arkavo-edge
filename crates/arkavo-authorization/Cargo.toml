@@ -26,7 +26,6 @@ tonic = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 
 [dev-dependencies]
-mockito = "1.6"
 tokio = { workspace = true, features = ["full"] }
 wiremock = "0.6"
 

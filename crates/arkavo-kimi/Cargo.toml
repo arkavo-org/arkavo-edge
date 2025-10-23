@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 description = "Native Kimi (Moonshot) API integration for Arkavo Edge"
 readme = "README.md"
-keywords = ["cli", "ai", "agent", "llm", "kimi", "moonshot"]
+keywords = ["kimi", "moonshot"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
@@ -22,7 +22,6 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio-stream = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
 
 # For retry logic
 rand = { workspace = true }
@@ -36,7 +35,6 @@ bytes = { workspace = true }
 
 [dev-dependencies]
 wiremock = "0.6"
-tokio-test = "0.4"
 criterion = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 

@@ -99,18 +99,15 @@ tracing-subscriber = { workspace = true }
 # For tests
 tempfile = { workspace = true }
 
-[[example]]
-name = "mdns_browser"
-required-features = ["mdns", "demo"]
-
-
 [[bin]]
 name = "export-schema"
 path = "src/bin/export-schema.rs"
+required-features = ["demo"]
 
 [[bin]]
 name = "validate-schema"
 path = "src/bin/validate-schema.rs"
+required-features = ["demo"]
 
 [lints]
 workspace = true
