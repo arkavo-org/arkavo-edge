@@ -166,10 +166,23 @@ impl LlamaContext {
             .unwrap_or(8); // Fallback to 8 if detection fails
         let thread_count = num_cores.min(16) as i32; // Cap at 16 for diminishing returns
 
-        // Set context size to utilize the full capacity of the model
-        params.n_ctx = 32768; // Context window: 32K tokens (full model capacity)
-        params.n_batch = 2048; // Increased batch size for prefill optimization
-        params.n_ubatch = 512; // Micro-batch size (keep reasonable for memory)
+        // Detect if running on resource-constrained device (e.g., Raspberry Pi)
+        let is_low_power = std::env::var("ARKAVO_RASPBERRY_PI")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or_else(|_| num_cores <= 4);
+
+        // Set context size based on device capabilities
+        if is_low_power {
+            // Raspberry Pi optimizations: reduce context and batch for faster inference
+            params.n_ctx = 2048; // Smaller context window for edge devices
+            params.n_batch = 512; // Reduced batch size for lower memory pressure
+            params.n_ubatch = 256; // Smaller micro-batch
+        } else {
+            // Full-size context for powerful systems
+            params.n_ctx = 32768; // Context window: 32K tokens (full model capacity)
+            params.n_batch = 2048; // Increased batch size for prefill optimization
+            params.n_ubatch = 512; // Micro-batch size (keep reasonable for memory)
+        }
         params.n_seq_max = 1; // Single sequence
         params.n_threads = thread_count; // Auto-detected CPU threads
         params.n_threads_batch = thread_count; // Batch processing threads
@@ -180,9 +193,10 @@ impl LlamaContext {
 
         // Show context configuration if debug is enabled
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            let mode = if is_low_power { "Low-Power/Pi" } else { "Full" };
             eprintln!(
-                "Context: cores={}, threads={}, n_batch={}, KV offload={}, flash_attn=auto",
-                num_cores, thread_count, params.n_batch, params.offload_kqv
+                "Context[{}]: cores={}, threads={}, n_ctx={}, n_batch={}, KV offload={}, flash_attn=auto",
+                mode, num_cores, thread_count, params.n_ctx, params.n_batch, params.offload_kqv
             );
         }
 
