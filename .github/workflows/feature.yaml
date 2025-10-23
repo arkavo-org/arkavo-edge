@@ -262,6 +262,10 @@ jobs:
           - target: x86_64-unknown-linux-musl
             features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
+          - target: aarch64-unknown-linux-gnu
+            features: default
+            artifact_name: arkavo-aarch64-linux
+            cross: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -272,6 +276,11 @@ jobs:
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+
+          # Install ARM64 cross-compilation toolchain if needed
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -297,12 +306,17 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
+          # ARM64 cross-compilation toolchain
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support and static OpenMP
             cargo build --release --target ${{ matrix.target }} -p arkavo
           else
@@ -315,10 +329,13 @@ jobs:
           mkdir -p release-package
           cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
           chmod +x release-package/${{ matrix.artifact_name }}
-          
+
           # Create feature manifest
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
+            if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+              echo "Optimized for Raspberry Pi 5 and ARM64 systems" >> release-package/features.txt
+            fi
           else
             echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
           fi
