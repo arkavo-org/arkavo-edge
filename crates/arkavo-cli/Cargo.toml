@@ -40,8 +40,8 @@ arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
+arkavo-router = { path = "../arkavo-router" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
-arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }

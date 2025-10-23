@@ -52,6 +52,47 @@ void ArkavoBrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
                                               CefRefPtr<CefContextMenuParams> params,
                                               CefRefPtr<CefMenuModel> model) {
     model->Clear();
+
+    // Add debug menu items
+    const int CMD_VIEW_HTML = 26500;
+    const int CMD_VIEW_CONSOLE = 26501;
+
+    model->AddItem(CMD_VIEW_HTML, "View HTML Source");
+    model->AddItem(CMD_VIEW_CONSOLE, "Show Developer Console");
+}
+
+bool ArkavoBrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                                               CefRefPtr<CefFrame> frame,
+                                               CefRefPtr<CefContextMenuParams> params,
+                                               int command_id,
+                                               EventFlags event_flags) {
+    const int CMD_VIEW_HTML = 26500;
+    const int CMD_VIEW_CONSOLE = 26501;
+
+    if (command_id == CMD_VIEW_HTML) {
+        // Get HTML source and log it
+        auto frame_ptr = browser->GetMainFrame();
+        if (frame_ptr) {
+            std::string js =
+                "(function() {"
+                "  var html = document.documentElement.outerHTML;"
+                "  console.log('=== HTML SOURCE ===');"
+                "  console.log(html);"
+                "  console.log('=== END HTML SOURCE ===');"
+                "  return html.substring(0, 500);"
+                "})();";
+
+            frame_ptr->ExecuteJavaScript(js, frame_ptr->GetURL(), 0);
+            std::cout << "View HTML requested - check browser console" << std::endl;
+        }
+        return true;
+    }
+    else if (command_id == CMD_VIEW_CONSOLE) {
+        browser->GetHost()->ShowDevTools(CefWindowInfo(), browser->GetHost()->GetClient(), CefBrowserSettings(), CefPoint());
+        return true;
+    }
+
+    return false;
 }
 
 void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,

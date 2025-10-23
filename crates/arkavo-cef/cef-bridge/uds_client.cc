@@ -153,14 +153,12 @@ void UdsClient::StopListening() {
 
 void UdsClient::ListenLoop() {
     uint8_t buffer[4096];
-    std::cout << "[DEBUG C++] ListenLoop started" << std::endl;
 
     // Wait for connection (with timeout)
     for (int i = 0; i < 100 && running_; i++) {
         {
             std::lock_guard<std::mutex> lock(conn_mutex_);
             if (conn_state_.connected && conn_state_.sock_fd >= 0) {
-                std::cout << "[DEBUG C++] ListenLoop: connection established" << std::endl;
                 break;
             }
         }
@@ -172,16 +170,13 @@ void UdsClient::ListenLoop() {
         {
             std::lock_guard<std::mutex> lock(conn_mutex_);
             if (!conn_state_.connected || conn_state_.sock_fd < 0) {
-                std::cout << "[DEBUG C++] ListenLoop: not connected, exiting" << std::endl;
                 break;
             }
             socket_fd = conn_state_.sock_fd;
         }
 
-        std::cout << "[DEBUG C++] ListenLoop: waiting for command..." << std::endl;
         uint32_t msg_len;
         ssize_t n = recv(socket_fd, &msg_len, sizeof(msg_len), 0);
-        std::cout << "[DEBUG C++] recv returned " << n << " bytes, msg_len=" << msg_len << std::endl;
 
         if (n <= 0) {
             if (n < 0) {
@@ -191,7 +186,6 @@ void UdsClient::ListenLoop() {
         }
 
         if (msg_len > sizeof(buffer)) {
-            std::cerr << "Message too large: " << msg_len << std::endl;
             continue;
         }
 
@@ -247,9 +241,6 @@ void UdsClient::ListenLoop() {
         if (property_len > 0 && offset + property_len <= msg_len) {
             cmd.property = std::string(reinterpret_cast<char*>(&buffer[offset]), property_len);
         }
-
-        std::cout << "[DEBUG C++] Deserialized command: selector='" << cmd.selector
-                  << "', payload_len=" << cmd.payload.length() << std::endl;
 
         if (command_callback_) {
             command_callback_(cmd);

@@ -133,19 +133,51 @@ async fn handle_prompt(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use arkavo_llm::{LlmClient, Message};
+    use arkavo_llm::Message;
+    use arkavo_router::Router;
     use tokio_stream::StreamExt;
 
     println!("Processing prompt: \"{prompt}\"");
 
-    let client = LlmClient::from_env()?;
-    println!("Using LLM: {}", client.provider_name());
+    // Check for API key availability to determine if we should use cloud models
+    let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
+
+    let router = if gemini_available {
+        Router::new().await?
+    } else {
+        println!("No GEMINI_API_KEY found - using local models only");
+        Router::new_offline().await?
+    };
+
+    let routing_decision = router.route(prompt).await?;
+
+    println!(
+        "Router selected: {} (cost: ${:.4})",
+        routing_decision.recommended_model.name(),
+        routing_decision.estimated_cost_usd
+    );
+    println!("Reasoning: {}", routing_decision.reasoning);
+
+    let client = create_client_from_routing(&routing_decision).await?;
 
     let messages = vec![Message::user(prompt)];
 
     println!("Calling LLM...");
     let mut response_text = String::new();
-    let mut stream = client.stream(messages).await?;
+
+    let stream_result = client.stream(messages).await;
+    let mut stream = match stream_result {
+        Ok(s) => s,
+        Err(e) => {
+            let error_msg = e.to_string();
+            if error_msg.contains("Connection refused") || error_msg.contains("connect") {
+                eprintln!("\n[ERROR] Cannot connect to Ollama. Please start Ollama:");
+                eprintln!("  brew services start ollama");
+                eprintln!("  OR run: ollama serve\n");
+            }
+            return Err(e.into());
+        }
+    };
 
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
@@ -178,9 +210,17 @@ async fn handle_prompt(
             <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: pre-wrap; line-height: 1.6;">
                 {escaped_response}
             </div>
+            <div style="margin-top: 16px; padding: 8px 12px; background: #f0f0f0; border-radius: 4px; font-size: 12px; color: #666;">
+                Model: {} | Cost: ${:.4}
+            </div>
         </div>
-        "#
+        "#,
+        routing_decision.recommended_model.name(),
+        routing_decision.estimated_cost_usd
     );
+
+    println!("[DEBUG UI] HTML being sent ({} bytes):", html.len());
+    println!("{}", &html[..html.len().min(200)]);
 
     let css = "";
 
@@ -192,6 +232,66 @@ async fn handle_prompt(
         Err(e) => {
             eprintln!("[ERROR] renderer.render() failed: {e}");
             Err(e.into())
+        }
+    }
+}
+
+#[cfg(feature = "cef-ui")]
+async fn create_client_from_routing(
+    decision: &arkavo_router::RoutingDecision,
+) -> Result<arkavo_llm::LlmClient, Box<dyn std::error::Error>> {
+    use arkavo_llm::{LlmClient, Message};
+    use arkavo_router::ModelChoice;
+
+    match decision.recommended_model {
+        ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+            #[cfg(feature = "gemini")]
+            {
+                use arkavo_llm::GeminiProvider;
+                let provider = Box::new(GeminiProvider::new()?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "gemini"))]
+            {
+                Err("Gemini feature not enabled".into())
+            }
+        }
+        ModelChoice::LocalGemma270M | ModelChoice::LocalGemma4B | ModelChoice::LocalGemma12B => {
+            // Try Ollama first (from_env defaults to ollama)
+            println!("Checking for Ollama...");
+            if let Ok(client) = LlmClient::from_env() {
+                // Test if ollama is actually running
+                if client.complete(vec![Message::user("ping")]).await.is_ok() {
+                    println!("Using Ollama for local model");
+                    return Ok(client);
+                }
+            }
+
+            // Fall back to llama.cpp - use same logic as chat command
+            #[cfg(feature = "llama-cpp")]
+            {
+                println!("Ollama not available, using embedded llama.cpp...");
+
+                let model_name = decision.recommended_model.name();
+
+                // Use chat command's initialization logic by calling with default params
+                super::chat::initialize_llm_for_ui(model_name)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("\nError loading local model: {e}");
+                        eprintln!(
+                            "Please run 'arkavo chat --prompt hi' first to download a model.\n"
+                        );
+                        e
+                    })
+            }
+            #[cfg(not(feature = "llama-cpp"))]
+            {
+                Err(
+                    "No local LLM available. Please install Ollama or enable llama-cpp feature."
+                        .into(),
+                )
+            }
         }
     }
 }
