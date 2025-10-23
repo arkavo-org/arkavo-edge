@@ -280,6 +280,7 @@ When `ARKAVO_DEBUG_CHAT=1`:
 - **ARKAVO_MAX_TOKENS**: Sets default max tokens for LLM generation (default: 4096)
 - **ARKAVO_MAX_HISTORY_TURNS**: Maximum conversation turns to include in context (default: 2 for <1B models, 10 for larger)
 - **ARKAVO_REPO_CONTEXT**: Controls repository context injection: auto|on|off (default: auto)
+- **ARKAVO_RASPBERRY_PI**: Enables Raspberry Pi optimizations for llama.cpp (set to `1` or `true`). Automatically detected when CPU cores <= 4. Reduces context window to 2048 tokens and batch size to 512 for better performance on edge devices.
 - remove dead code instead of adding `#[allow(dead_code)]`
 - Debug output is now controlled by the ARKAVO_DEBUG_CHAT environment variable. By default, all those
   verbose debug statements are suppressed. To enable them for debugging, users can run:
