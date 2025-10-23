@@ -20,6 +20,8 @@ brew tap arkavo-org/homebrew-arkavo
 brew install arkavo
 ```
 
+**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup with gemma-3 270M model.
+
 ### Install on Windows
 Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and run the .exe file.
 
