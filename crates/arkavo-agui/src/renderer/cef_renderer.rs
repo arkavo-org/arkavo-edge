@@ -17,7 +17,19 @@ impl CefRendererImpl {
         let renderer_path = Self::find_renderer_binary()?;
         info!("Initializing CEF renderer from {:?}", renderer_path);
 
-        let renderer = CefRenderer::new(renderer_path).await?;
+        let mut renderer = CefRenderer::new(renderer_path).await?;
+
+        // Initialize the page with complete HTML structure from Rust
+        let initial_html = r#"<html><head><style>body{margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;height:100vh;}#content{min-height:100vh;}</style></head><body><div id='content' style='padding:40px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></div></body></html>"#;
+
+        // Replace the entire document
+        renderer
+            .commands()
+            .replace_inner_html("html", initial_html)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to set initial HTML: {}", e))?;
+
+        info!("CEF renderer initialized with initial page structure");
 
         Ok(Self {
             renderer,

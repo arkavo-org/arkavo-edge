@@ -110,6 +110,9 @@ void UdsClient::AcceptLoop() {
     server_fd_ = -1;
 
     std::cout << "UDS client connected" << std::endl;
+
+    // Flush any queued errors
+    FlushErrorQueue();
 }
 
 void UdsClient::Disconnect() {
@@ -339,12 +342,68 @@ bool UdsClient::SendEvent(const DOMEvent& event) {
     return true;
 }
 
+void UdsClient::FlushErrorQueue() {
+    std::lock_guard<std::mutex> queue_lock(error_queue_mutex_);
+
+    size_t flushed_count = 0;
+
+    while (!error_queue_.empty()) {
+        const DOMError& queued_error = error_queue_.front();
+
+        // Try to send without taking the queue lock again
+        {
+            std::lock_guard<std::mutex> conn_lock(conn_mutex_);
+            if (conn_state_.connected && conn_state_.sock_fd >= 0) {
+                uint8_t buffer[2048];
+                uint32_t offset = 0;
+
+                buffer[offset++] = 0x03;
+
+                auto write_string = [&](const std::string& str) {
+                    uint32_t len = str.size();
+                    memcpy(buffer + offset, &len, sizeof(len));
+                    offset += sizeof(len);
+                    memcpy(buffer + offset, str.c_str(), len);
+                    offset += len;
+                };
+
+                write_string(queued_error.error_type);
+                write_string(queued_error.severity);
+                write_string(queued_error.message);
+                write_string(queued_error.source);
+
+                memcpy(buffer + offset, &queued_error.line, sizeof(queued_error.line));
+                offset += sizeof(queued_error.line);
+
+                uint32_t frame_len = offset;
+                ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
+                if (n >= 0) {
+                    send(conn_state_.sock_fd, buffer, offset, 0);
+                    flushed_count++;
+                }
+            }
+        }
+
+        error_queue_.pop();
+    }
+
+    if (flushed_count > 0) {
+        std::cout << "Flushed " << flushed_count << " queued error(s)" << std::endl;
+    }
+}
+
 bool UdsClient::SendError(const DOMError& error) {
     std::lock_guard<std::mutex> lock(conn_mutex_);
 
     if (!conn_state_.connected || conn_state_.sock_fd < 0) {
-        std::cerr << "Cannot send error: not connected" << std::endl;
-        return false;
+        // Queue error for later delivery
+        std::lock_guard<std::mutex> queue_lock(error_queue_mutex_);
+        error_queue_.push(error);
+
+        if (error_queue_.size() == 1) {
+            std::cout << "Queuing error (not connected yet): " << error.message << std::endl;
+        }
+        return true;  // Return true since we queued it
     }
 
     uint8_t buffer[2048];

@@ -6,6 +6,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <queue>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -77,6 +78,7 @@ public:
 private:
     void ListenLoop();
     void AcceptLoop();
+    void FlushErrorQueue();
 
     std::string socket_path_;
     ConnectionState conn_state_;
@@ -85,6 +87,8 @@ private:
     std::thread listen_thread_;
     std::thread accept_thread_;
     std::mutex conn_mutex_;
+    std::mutex error_queue_mutex_;
+    std::queue<DOMError> error_queue_;
     std::function<void(const DOMCommand&)> command_callback_;
 };
 
