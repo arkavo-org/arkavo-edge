@@ -133,46 +133,60 @@ async fn handle_prompt(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Generating UI from prompt: \"{prompt}\"");
+    use arkavo_llm::{LlmClient, Message};
+    use tokio_stream::StreamExt;
 
-    let ui_generator = arkavo_ui_generator::UiGenerator::new().await?;
+    println!("Processing prompt: \"{prompt}\"");
 
-    let request = arkavo_ui_generator::UiGenerationRequest {
-        user_intent: prompt.to_string(),
-        context: arkavo_ui_generator::UiContext {
-            available_agents: vec![],
-            active_telemetry: vec![],
-            current_page: None,
-        },
-        preferences: arkavo_ui_generator::UiPreferences::default(),
-    };
+    let client = LlmClient::from_env()?;
+    println!("Using LLM: {}", client.provider_name());
 
-    println!("Calling UI generator...");
-    let generated_ui = ui_generator.generate(request).await?;
+    let messages = vec![Message::user(prompt)];
 
-    let html_len = generated_ui.html.len();
-    println!(
-        "[DEBUG] Generated UI: {html_len} bytes HTML, {} bytes CSS",
-        generated_ui.css.len()
+    println!("Calling LLM...");
+    let mut response_text = String::new();
+    let mut stream = client.stream(messages).await?;
+
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                response_text.push_str(&chunk.content);
+                print!("{}", chunk.content);
+                std::io::Write::flush(&mut std::io::stdout())?;
+            }
+            Err(e) => {
+                eprintln!("\n[ERROR] Stream error: {e}");
+                return Err(e.into());
+            }
+        }
+    }
+    println!("\n");
+
+    let escaped_response = response_text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;");
+
+    let html = format!(
+        r#"
+        <div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                <strong style="color: #667eea;">You:</strong> {prompt}
+            </div>
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: pre-wrap; line-height: 1.6;">
+                {escaped_response}
+            </div>
+        </div>
+        "#
     );
-    println!(
-        "[DEBUG] Model: {}, Cost: ${:.4}, Time: {}ms",
-        generated_ui.metadata.model_used,
-        generated_ui.metadata.cost_usd,
-        generated_ui.metadata.generation_time_ms
-    );
 
-    match renderer
-        .render(
-            &generated_ui.html,
-            &generated_ui.css,
-            &generated_ui.javascript,
-        )
-        .await
-    {
+    let css = "";
+
+    match renderer.render(&html, css, "").await {
         Ok(_) => {
-            println!("[DEBUG] renderer.render() returned Ok");
-            println!("UI updated successfully!");
+            println!("[DEBUG] UI updated with response");
             Ok(())
         }
         Err(e) => {
