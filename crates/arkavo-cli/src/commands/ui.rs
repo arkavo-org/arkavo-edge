@@ -108,11 +108,6 @@ async fn use_cef_renderer(
 
         // Poll for errors from CEF
         if let Ok(Some(error)) = cef_renderer.try_recv_error().await {
-            eprintln!(
-                "\n[CEF {} Error] {}: {} ({}:{})",
-                error.error_type, error.severity, error.message, error.source, error.line
-            );
-
             // Buffer error for LLM feedback
             error_buffer.push(error.clone());
 
@@ -148,8 +143,6 @@ async fn use_cef_renderer(
             && event.event_type == "submit"
             && !event.value.trim().is_empty()
         {
-            let value = &event.value;
-            println!("\n[Prompt received]: {value}");
             handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
         }
     }
@@ -198,39 +191,36 @@ async fn handle_prompt(
         prompt.to_string()
     };
 
-    println!("Processing prompt: \"{prompt}\"");
-    if !error_buffer.is_empty() {
-        println!(
-            "Including {} error(s) for LLM correction",
-            error_buffer.len()
-        );
-    }
-
     // Check for API key availability to determine if we should use cloud models
     let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
 
     let router = if gemini_available {
         Router::new().await?
     } else {
-        println!("No GEMINI_API_KEY found - using local models only");
         Router::new_offline().await?
     };
 
     let routing_decision = router.route(&enhanced_prompt).await?;
 
-    println!(
-        "Router selected: {} (cost: ${:.4})",
-        routing_decision.recommended_model.name(),
-        routing_decision.estimated_cost_usd
-    );
-    println!("Reasoning: {}", routing_decision.reasoning);
-
     let client = create_client_from_routing(&routing_decision).await?;
 
     let messages = vec![Message::user(&enhanced_prompt)];
 
-    println!("Calling LLM...");
-    let mut response_text = String::new();
+    // Show "thinking" indicator in UI
+    let thinking_html = format!(
+        r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                <strong style="color: #667eea;">You:</strong> {prompt}
+            </div>
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <div style="display:flex;gap:8px;align-items:center;color:#667eea;">
+                    <div style="width:8px;height:8px;background:#667eea;border-radius:50%;animation:pulse 1.5s ease-in-out infinite;"></div>
+                    <span>Thinking...</span>
+                </div>
+            </div>
+        </div>"#
+    );
+    renderer.render(&thinking_html, "", "").await?;
 
     let stream_result = client.stream(messages).await;
     let mut stream = match stream_result {
@@ -238,62 +228,71 @@ async fn handle_prompt(
         Err(e) => {
             let error_msg = e.to_string();
             if error_msg.contains("Connection refused") || error_msg.contains("connect") {
-                eprintln!("\n[ERROR] Cannot connect to Ollama. Please start Ollama:");
-                eprintln!("  brew services start ollama");
-                eprintln!("  OR run: ollama serve\n");
+                let error_html = format!(
+                    r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                        <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                            <strong style="color: #667eea;">You:</strong> {prompt}
+                        </div>
+                        <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
+                            <strong style="color: #c33;">Connection Error</strong><br>
+                            <span>Cannot connect to Ollama. Please start Ollama:</span><br>
+                            <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">brew services start ollama</code>
+                        </div>
+                    </div>"#
+                );
+                renderer.render(&error_html, "", "").await?;
             }
             return Err(e.into());
         }
     };
 
+    let mut response_text = String::new();
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(chunk) => {
                 response_text.push_str(&chunk.content);
-                print!("{}", chunk.content);
-                std::io::Write::flush(&mut std::io::stdout())?;
             }
             Err(e) => {
-                eprintln!("\n[ERROR] Stream error: {e}");
+                eprintln!("[ERROR] Stream error: {e}");
                 return Err(e.into());
             }
         }
     }
-    println!("\n");
 
-    let escaped_response = response_text
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;");
+    // Detect if response is HTML (contains <html> or multiple HTML tags)
+    let is_html = response_text.contains("<html")
+        || (response_text.contains("<div") && response_text.contains("<style"));
 
-    let html = format!(
-        r#"
-        <div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                <strong style="color: #667eea;">You:</strong> {prompt}
-            </div>
-            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); white-space: pre-wrap; line-height: 1.6;">
-                {escaped_response}
-            </div>
-            <div style="margin-top: 16px; padding: 8px 12px; background: #f0f0f0; border-radius: 4px; font-size: 12px; color: #666;">
-                Model: {} | Cost: ${:.4}
-            </div>
-        </div>
-        "#,
-        routing_decision.recommended_model.name(),
-        routing_decision.estimated_cost_usd
-    );
+    let html = if is_html {
+        // LLM generated UI - render it directly
+        response_text.clone()
+    } else {
+        // Chat response - format as conversation
+        let escaped_response = response_text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\n', "<br>");
 
-    println!("[DEBUG UI] HTML being sent ({} bytes):", html.len());
-    println!("{}", &html[..html.len().min(200)]);
+        format!(
+            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                    <strong style="color: #667eea;">You:</strong> {prompt}
+                </div>
+                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6;">
+                    {escaped_response}
+                </div>
+                <div style="margin-top: 16px; padding: 8px 12px; background: #f0f0f0; border-radius: 4px; font-size: 12px; color: #666;">
+                    Model: {} | Cost: ${:.4}
+                </div>
+            </div>"#,
+            routing_decision.recommended_model.name(),
+            routing_decision.estimated_cost_usd
+        )
+    };
 
-    let css = "";
-
-    match renderer.render(&html, css, "").await {
+    match renderer.render(&html, "", "").await {
         Ok(_) => {
-            println!("[DEBUG] UI updated with response");
             // Clear error buffer after successful render
             error_buffer.clear();
             Ok(())

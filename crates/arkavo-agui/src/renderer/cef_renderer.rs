@@ -20,7 +20,29 @@ impl CefRendererImpl {
         let mut renderer = CefRenderer::new(renderer_path).await?;
 
         // Initialize the page with complete HTML structure from Rust
-        let initial_html = r#"<html><head><style>body{margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;height:100vh;}#content{min-height:100vh;}</style></head><body><div id='content' style='padding:40px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></div></body></html>"#;
+        let initial_html = r#"<html><head><style>
+body { margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; height:100vh; display:flex; flex-direction:column; }
+#content { flex:1; overflow:auto; padding:20px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; }
+#prompt-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; padding:12px; box-shadow:0 -2px 8px rgba(0,0,0,0.1); display:flex; gap:8px; z-index:1000; }
+#prompt-input { flex:1; padding:10px; border:1px solid #ddd; border-radius:4px; font-size:14px; }
+#prompt-submit { padding:10px 20px; background:#667eea; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:600; }
+#prompt-submit:hover { background:#5568d3; }
+.welcome { text-align:center; padding-top:20vh; }
+.welcome h1 { font-size:3em; margin:0; }
+.welcome p { font-size:1.2em; opacity:0.9; margin-top:1em; }
+</style></head><body>
+<div id='content'>
+<div class='welcome'>
+<h1>Arkavo UI Generator</h1>
+<p>CEF Renderer Ready</p>
+<p style='opacity:0.7;'>Enter your prompt below to generate UI or chat</p>
+</div>
+</div>
+<div id='prompt-bar'>
+<input type='text' id='prompt-input' placeholder='Enter your prompt...' />
+<button id='prompt-submit'>Submit</button>
+</div>
+</body></html>"#;
 
         // Replace the entire document
         renderer

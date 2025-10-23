@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
 
     CefWindowInfo window_info;
     CefBrowserSettings browser_settings;
-    browser_settings.javascript = STATE_DISABLED;
+    browser_settings.javascript = STATE_ENABLED;
 
 #ifdef __APPLE__
     // On macOS, use windowless rendering for now (no visible window yet)
