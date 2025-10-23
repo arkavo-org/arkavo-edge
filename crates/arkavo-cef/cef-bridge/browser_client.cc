@@ -47,6 +47,13 @@ void ArkavoBrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     std::cout << "Message loop quit requested" << std::endl;
 }
 
+void ArkavoBrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                                              CefRefPtr<CefFrame> frame,
+                                              CefRefPtr<CefContextMenuParams> params,
+                                              CefRefPtr<CefMenuModel> model) {
+    model->Clear();
+}
+
 void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefFrame> frame,
                                     int httpStatusCode) {

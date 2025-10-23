@@ -2,12 +2,14 @@
 #define BROWSER_CLIENT_H
 
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
 #include "include/cef_render_handler.h"
 #include <string>
 
 class ArkavoBrowserClient : public CefClient,
+                            public CefContextMenuHandler,
                             public CefLifeSpanHandler,
                             public CefLoadHandler,
                             public CefRenderHandler {
@@ -25,6 +27,15 @@ public:
     CefRefPtr<CefRenderHandler> GetRenderHandler() override {
         return this;
     }
+
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+        return this;
+    }
+
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                            CefRefPtr<CefFrame> frame,
+                            CefRefPtr<CefContextMenuParams> params,
+                            CefRefPtr<CefMenuModel> model) override;
 
     void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override;
     void OnPaint(CefRefPtr<CefBrowser> browser,
