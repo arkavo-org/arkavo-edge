@@ -1,4 +1,4 @@
-import { Message, MessageDeltaEvent, MessagesSnapshotEvent } from '../events';
+import {Message, MessageDeltaEvent, MessagesSnapshotEvent} from '../events';
 
 export class MessageHandler {
     private messages: Map<string, Message> = new Map();

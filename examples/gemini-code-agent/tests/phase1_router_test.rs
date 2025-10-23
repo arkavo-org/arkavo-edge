@@ -10,6 +10,7 @@
 
 use arkavo_router::{Router, TaskCategory};
 
+
 #[tokio::test]
 async fn test_frontend_task_routing() {
     let router = Router::new().await.expect("Failed to create router");

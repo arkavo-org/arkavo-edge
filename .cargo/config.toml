@@ -1,0 +1,11 @@
+# Cargo build configuration for faster compilation
+
+[build]
+# Enable pipelining to overlap compilation of different crates
+# This allows rustc to start compiling dependents while dependencies are still being codegen'd
+pipelining = true
+
+[term]
+# Reduce terminal noise during builds
+verbose = false
+quiet = false

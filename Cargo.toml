@@ -6,7 +6,6 @@ members = [
     "crates/arkavo-repo",
     "crates/arkavo-git",
     "crates/arkavo-protocol",
-    "crates/arkavo-encryption",
     "crates/arkavo-authorization",
     "crates/arkavo-mcp-macos",
     "crates/arkavo-llm",
@@ -41,7 +40,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.37.7"
+version = "0.37.8"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -91,7 +90,6 @@ bytes = "1.8"
 
 # UI generation dependencies
 handlebars = "6.2"
-similar = "2.6"
 
 # Terminal and UI
 ratatui = "0.29.0"
@@ -109,7 +107,6 @@ walkdir = "2.5.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "macros", "uuid", "chrono", "migrate"] }
 
 # HTTP and networking
-warp = { version = "0.3.7", features = ["tls"] }
 jsonrpsee = { version = "0.24.9", features = ["client", "server", "ws-client", "macros"] }
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
@@ -139,6 +136,10 @@ candle-transformers = { version = "0.9.1", default-features = false }
 fastembed = "4"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.6"
+
+# Force single versions to reduce duplicates
+fancy-regex = "0.16"
+itertools = "0.14"
 
 # Dev dependencies
 criterion = { version = "0.5", features = ["async_tokio"] }
@@ -172,15 +173,15 @@ debug = false
 codegen-units = 16
 incremental = true
 
-# Profile for `cargo test`. Tuned for CI performance.
+# Profile for `cargo test`. Optimized for local development speed.
 # This profile inherits from `dev` but overrides settings for test builds.
-# It prioritizes fast compilation and linking over runtime performance and debuggability.
+# It prioritizes fast compilation for quick test iterations.
 [profile.test]
-opt-level = 1          # Basic optimizations, faster to compile than opt-level=3
-debug = 0              # No debug info, significantly speeds up linking
-split-debuginfo = "off" # Disable separate debug files to reduce target dir size
-codegen-units = 16     # More parallelism during compilation
-incremental = false      # Not useful in clean CI builds
+opt-level = 0          # No optimizations for fastest compilation
+debug = 1              # Minimal debug info for better error messages
+split-debuginfo = "unpacked" # Same as dev profile for consistency
+codegen-units = 256    # Maximum parallelism during compilation
+incremental = true     # Enable incremental compilation for local dev
 debug-assertions = true  # Keep safety checks enabled for tests
 overflow-checks = true   # Keep safety checks enabled for tests
 
