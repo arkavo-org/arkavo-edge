@@ -135,27 +135,41 @@ async fn handle_prompt(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Generating UI from prompt: \"{prompt}\"");
 
-    // Generate UI based on prompt
-    let generated_html = format!(
-        r#"
-        <div style="padding: 40px;">
-            <h1 style="color: #667eea; margin-bottom: 20px;">Generated UI</h1>
-            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <h2 style="color: #333; margin-top: 0;">Your Request</h2>
-                <p style="color: #666; font-size: 16px; line-height: 1.6;">{prompt}</p>
-                <button style="background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px;">
-                    Action Button
-                </button>
-            </div>
-        </div>
-        "#
+    let ui_generator = arkavo_ui_generator::UiGenerator::new().await?;
+
+    let request = arkavo_ui_generator::UiGenerationRequest {
+        user_intent: prompt.to_string(),
+        context: arkavo_ui_generator::UiContext {
+            available_agents: vec![],
+            active_telemetry: vec![],
+            current_page: None,
+        },
+        preferences: arkavo_ui_generator::UiPreferences::default(),
+    };
+
+    println!("Calling UI generator...");
+    let generated_ui = ui_generator.generate(request).await?;
+
+    let html_len = generated_ui.html.len();
+    println!(
+        "[DEBUG] Generated UI: {html_len} bytes HTML, {} bytes CSS",
+        generated_ui.css.len()
+    );
+    println!(
+        "[DEBUG] Model: {}, Cost: ${:.4}, Time: {}ms",
+        generated_ui.metadata.model_used,
+        generated_ui.metadata.cost_usd,
+        generated_ui.metadata.generation_time_ms
     );
 
-    let css = "";
-
-    let html_len = generated_html.len();
-    println!("[DEBUG] About to call renderer.render() with {html_len} bytes of HTML");
-    match renderer.render(&generated_html, css, "").await {
+    match renderer
+        .render(
+            &generated_ui.html,
+            &generated_ui.css,
+            &generated_ui.javascript,
+        )
+        .await
+    {
         Ok(_) => {
             println!("[DEBUG] renderer.render() returned Ok");
             println!("UI updated successfully!");

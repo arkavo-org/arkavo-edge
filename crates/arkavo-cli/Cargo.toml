@@ -41,6 +41,7 @@ arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, featu
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
+arkavo-ui-generator = { path = "../arkavo-ui-generator" }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }

@@ -330,6 +330,7 @@ dependencies = [
  "arkavo-protocol",
  "arkavo-repo",
  "arkavo-terminal",
+ "arkavo-ui-generator",
  "async-trait",
  "chrono",
  "clap",
