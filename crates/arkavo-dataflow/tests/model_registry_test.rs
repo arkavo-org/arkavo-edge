@@ -59,6 +59,7 @@ fn test_model_info_serialization() {
         updated_at: Utc::now(),
         metadata: None,
         pricing: None,
+        snpe_metadata: None,
     };
 
     // Test serialization
@@ -99,6 +100,7 @@ async fn test_model_search_by_capability() {
         updated_at: Utc::now(),
         metadata: None,
         pricing: None,
+        snpe_metadata: None,
     };
 
     let vision_model = ModelInfo {
@@ -124,6 +126,7 @@ async fn test_model_search_by_capability() {
         updated_at: Utc::now(),
         metadata: None,
         pricing: None,
+        snpe_metadata: None,
     };
 
     // Test capability filtering
