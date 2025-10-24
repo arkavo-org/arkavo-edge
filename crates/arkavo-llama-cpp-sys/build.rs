@@ -105,18 +105,37 @@ fn main() {
 
     let lib_dir = dst.join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=llama");
-    println!("cargo:rustc-link-lib=static=ggml");
 
-    // Only link libraries that actually exist
-    if lib_dir.join("libggml-base.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-base");
-    }
-    if lib_dir.join("libggml-cpu.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-cpu");
-    }
-    if lib_dir.join("libggml-blas.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-blas");
+    // Dynamically discover and link all static libraries built by CMake
+    // This handles both Unix (.a) and Windows (.lib) naming conventions
+    if cfg!(target_os = "windows") {
+        // Windows: look for *.lib files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.ends_with(".lib") && !fname.ends_with(".dll.lib") {
+                    let libname = fname.trim_end_matches(".lib");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
+    } else {
+        // Unix: look for lib*.a files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.starts_with("lib") && fname.ends_with(".a") {
+                    let libname = fname.trim_start_matches("lib").trim_end_matches(".a");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
     }
 
     // Platform-specific linking
