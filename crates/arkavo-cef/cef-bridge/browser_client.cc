@@ -4,6 +4,7 @@
 #include "include/wrapper/cef_helpers.h"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <ctime>
 
 #ifdef __APPLE__
@@ -46,11 +47,153 @@ void ArkavoBrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     std::cout << "Message loop quit requested" << std::endl;
 }
 
+bool ArkavoBrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                                          cef_log_severity_t level,
+                                          const CefString& message,
+                                          const CefString& source,
+                                          int line) {
+    std::string severity_str;
+    switch (level) {
+        case LOGSEVERITY_ERROR:
+            severity_str = "error";
+            break;
+        case LOGSEVERITY_WARNING:
+            severity_str = "warning";
+            break;
+        case LOGSEVERITY_INFO:
+            severity_str = "info";
+            break;
+        default:
+            severity_str = "debug";
+            break;
+    }
+
+    std::cout << "[Console " << severity_str << "] " << message.ToString()
+              << " (" << source.ToString() << ":" << line << ")" << std::endl;
+
+    if (level == LOGSEVERITY_ERROR) {
+        DOMError error;
+        error.error_type = "console";
+        error.severity = severity_str;
+        error.message = message.ToString();
+        error.source = source.ToString();
+        error.line = static_cast<uint32_t>(line);
+
+        DOMExecutor::GetInstance()->SendError(error);
+    }
+
+    return false;
+}
+
+void ArkavoBrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser,
+                                     CefRefPtr<CefFrame> frame,
+                                     ErrorCode errorCode,
+                                     const CefString& errorText,
+                                     const CefString& failedUrl) {
+    if (errorCode == ERR_ABORTED) {
+        return;
+    }
+
+    std::cout << "[Load Error] Code: " << errorCode
+              << ", Text: " << errorText.ToString()
+              << ", URL: " << failedUrl.ToString() << std::endl;
+
+    DOMError error;
+    error.error_type = "load";
+    error.severity = "error";
+    error.message = "Failed to load: " + errorText.ToString();
+    error.source = failedUrl.ToString();
+    error.line = 0;
+
+    DOMExecutor::GetInstance()->SendError(error);
+}
+
+void ArkavoBrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                                              CefRefPtr<CefFrame> frame,
+                                              CefRefPtr<CefContextMenuParams> params,
+                                              CefRefPtr<CefMenuModel> model) {
+    // Disable context menu to prevent crashes
+    model->Clear();
+}
+
+bool ArkavoBrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                                               CefRefPtr<CefFrame> frame,
+                                               CefRefPtr<CefContextMenuParams> params,
+                                               int command_id,
+                                               EventFlags event_flags) {
+    const int CMD_VIEW_HTML = 26500;
+    const int CMD_VIEW_CONSOLE = 26501;
+
+    if (command_id == CMD_VIEW_HTML) {
+        // Get HTML source and log it
+        auto frame_ptr = browser->GetMainFrame();
+        if (frame_ptr) {
+            std::string js =
+                "(function() {"
+                "  var html = document.documentElement.outerHTML;"
+                "  console.log('=== HTML SOURCE ===');"
+                "  console.log(html);"
+                "  console.log('=== END HTML SOURCE ===');"
+                "  return html.substring(0, 500);"
+                "})();";
+
+            frame_ptr->ExecuteJavaScript(js, frame_ptr->GetURL(), 0);
+            std::cout << "View HTML requested - check browser console" << std::endl;
+        }
+        return true;
+    }
+    else if (command_id == CMD_VIEW_CONSOLE) {
+        browser->GetHost()->ShowDevTools(CefWindowInfo(), browser->GetHost()->GetClient(), CefBrowserSettings(), CefPoint());
+        return true;
+    }
+
+    return false;
+}
+
 void ArkavoBrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefFrame> frame,
                                     int httpStatusCode) {
     if (frame->IsMain()) {
         std::cout << "Page loaded successfully" << std::endl;
+
+        std::ostringstream js;
+        js << "(function() {"
+           << "  var input = document.getElementById('prompt-input');"
+           << "  var button = document.getElementById('prompt-submit');"
+           << "  "
+           << "  if (!input || !button) {"
+           << "    console.log('Prompt bar elements not found (expected for initial page)');"
+           << "    return;"
+           << "  }"
+           << "  "
+           << "  function submitPrompt() {"
+           << "    var value = input.value.trim();"
+           << "    if (value.length === 0) return;"
+           << "    "
+           << "    if (typeof window.ArkavoEventBridge === 'function') {"
+           << "      window.ArkavoEventBridge({"
+           << "        event_type: 'submit',"
+           << "        selector: '#prompt-input',"
+           << "        target_id: 'prompt-input',"
+           << "        value: value,"
+           << "        data: '{}'"
+           << "      });"
+           << "      input.value = '';"
+           << "    } else {"
+           << "      console.error('ArkavoEventBridge not available');"
+           << "    }"
+           << "  }"
+           << "  "
+           << "  button.addEventListener('click', submitPrompt);"
+           << "  input.addEventListener('keypress', function(e) {"
+           << "    if (e.key === 'Enter') submitPrompt();"
+           << "  });"
+           << "  "
+           << "  console.log('Prompt bar event listeners registered');"
+           << "})();";
+
+        frame->ExecuteJavaScript(js.str(), frame->GetURL(), 0);
+        std::cout << "Prompt bar event listeners initialized" << std::endl;
     }
 }
 

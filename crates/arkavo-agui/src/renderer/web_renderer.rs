@@ -1,10 +1,12 @@
 use super::UiRenderer;
 use anyhow::Result;
+use tokio::sync::broadcast;
 
 pub struct WebRenderer {
     html_content: String,
     css_content: String,
     js_content: String,
+    broadcast_tx: Option<broadcast::Sender<String>>,
 }
 
 impl WebRenderer {
@@ -13,7 +15,13 @@ impl WebRenderer {
             html_content: String::new(),
             css_content: String::new(),
             js_content: String::new(),
+            broadcast_tx: None,
         })
+    }
+
+    pub fn with_broadcast(mut self, tx: broadcast::Sender<String>) -> Self {
+        self.broadcast_tx = Some(tx);
+        self
     }
 }
 
@@ -23,22 +31,58 @@ impl UiRenderer for WebRenderer {
         self.html_content = html.to_string();
         self.css_content = css.to_string();
         self.js_content = js.to_string();
-        tracing::debug!("Web renderer: Updated content");
+
+        if let Some(ref tx) = self.broadcast_tx {
+            let message = serde_json::json!({
+                "type": "render",
+                "html": html,
+                "css": css,
+                "js": js
+            })
+            .to_string();
+
+            let _ = tx.send(message);
+            tracing::debug!(
+                "Web renderer: Broadcasted render update ({} bytes)",
+                html.len()
+            );
+        } else {
+            tracing::debug!("Web renderer: Updated content (no broadcast channel)");
+        }
+
         Ok(())
     }
 
     async fn update_element(&mut self, selector: &str, html: &str) -> Result<()> {
-        tracing::debug!("Web renderer: Update element {} with {}", selector, html);
+        if let Some(ref tx) = self.broadcast_tx {
+            let message = serde_json::json!({
+                "type": "update_element",
+                "selector": selector,
+                "html": html
+            })
+            .to_string();
+
+            let _ = tx.send(message);
+            tracing::debug!("Web renderer: Broadcasted element update for {}", selector);
+        }
+
         Ok(())
     }
 
     async fn set_style(&mut self, selector: &str, property: &str, value: &str) -> Result<()> {
-        tracing::debug!(
-            "Web renderer: Set style {} on {} to {}",
-            property,
-            selector,
-            value
-        );
+        if let Some(ref tx) = self.broadcast_tx {
+            let message = serde_json::json!({
+                "type": "set_style",
+                "selector": selector,
+                "property": property,
+                "value": value
+            })
+            .to_string();
+
+            let _ = tx.send(message);
+            tracing::debug!("Web renderer: Broadcasted style update for {}", selector);
+        }
+
         Ok(())
     }
 
@@ -52,7 +96,7 @@ impl UiRenderer for WebRenderer {
     }
 
     fn is_running(&self) -> bool {
-        true
+        self.broadcast_tx.is_some()
     }
 
     async fn shutdown(self: Box<Self>) -> Result<()> {

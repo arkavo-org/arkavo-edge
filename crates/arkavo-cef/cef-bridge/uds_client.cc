@@ -110,6 +110,9 @@ void UdsClient::AcceptLoop() {
     server_fd_ = -1;
 
     std::cout << "UDS client connected" << std::endl;
+
+    // Flush any queued errors
+    FlushErrorQueue();
 }
 
 void UdsClient::Disconnect() {
@@ -154,6 +157,17 @@ void UdsClient::StopListening() {
 void UdsClient::ListenLoop() {
     uint8_t buffer[4096];
 
+    // Wait for connection (with timeout)
+    for (int i = 0; i < 100 && running_; i++) {
+        {
+            std::lock_guard<std::mutex> lock(conn_mutex_);
+            if (conn_state_.connected && conn_state_.sock_fd >= 0) {
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
     while (running_) {
         int socket_fd;
         {
@@ -175,7 +189,6 @@ void UdsClient::ListenLoop() {
         }
 
         if (msg_len > sizeof(buffer)) {
-            std::cerr << "Message too large: " << msg_len << std::endl;
             continue;
         }
 
@@ -191,9 +204,46 @@ void UdsClient::ListenLoop() {
             continue;
         }
 
+        // Deserialize the command from buffer
         DOMCommand cmd;
-        cmd.id = 0;
-        cmd.op = DOMOp::ReplaceInnerHTML;
+        uint32_t offset = 0;
+
+        // Read id (4 bytes)
+        if (offset + 4 > msg_len) continue;
+        memcpy(&cmd.id, &buffer[offset], 4);
+        offset += 4;
+
+        // Read op (1 byte)
+        if (offset + 1 > msg_len) continue;
+        cmd.op = static_cast<DOMOp>(buffer[offset]);
+        offset += 1;
+
+        // Read selector (length-prefixed string)
+        if (offset + 4 > msg_len) continue;
+        uint32_t selector_len;
+        memcpy(&selector_len, &buffer[offset], 4);
+        offset += 4;
+        if (offset + selector_len > msg_len) continue;
+        cmd.selector = std::string(reinterpret_cast<char*>(&buffer[offset]), selector_len);
+        offset += selector_len;
+
+        // Read payload (length-prefixed string)
+        if (offset + 4 > msg_len) continue;
+        uint32_t payload_len;
+        memcpy(&payload_len, &buffer[offset], 4);
+        offset += 4;
+        if (offset + payload_len > msg_len) continue;
+        cmd.payload = std::string(reinterpret_cast<char*>(&buffer[offset]), payload_len);
+        offset += payload_len;
+
+        // Read property (length-prefixed string, optional)
+        if (offset + 4 > msg_len) continue;
+        uint32_t property_len;
+        memcpy(&property_len, &buffer[offset], 4);
+        offset += 4;
+        if (property_len > 0 && offset + property_len <= msg_len) {
+            cmd.property = std::string(reinterpret_cast<char*>(&buffer[offset]), property_len);
+        }
 
         if (command_callback_) {
             command_callback_(cmd);
@@ -211,6 +261,9 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 
     uint8_t buffer[1024];
     uint32_t offset = 0;
+
+    // Message type 0x01 for feedback
+    buffer[offset++] = 0x01;
 
     memcpy(buffer + offset, &feedback.id, sizeof(feedback.id));
     offset += sizeof(feedback.id);
@@ -251,8 +304,11 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 bool UdsClient::SendEvent(const DOMEvent& event) {
     std::lock_guard<std::mutex> lock(conn_mutex_);
 
+    std::cerr << "[UDS] SendEvent called - connected=" << conn_state_.connected
+              << " fd=" << conn_state_.sock_fd << std::endl;
+
     if (!conn_state_.connected || conn_state_.sock_fd < 0) {
-        std::cerr << "Cannot send event: not connected" << std::endl;
+        std::cerr << "[UDS ERROR] Cannot send event: not connected" << std::endl;
         return false;
     }
 
@@ -277,15 +333,122 @@ bool UdsClient::SendEvent(const DOMEvent& event) {
     write_string(event.data);
 
     uint32_t frame_len = offset;
+    std::cerr << "[UDS] Sending frame_len=" << frame_len << " bytes (payload=" << offset << " bytes)" << std::endl;
+
     ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
     if (n < 0) {
-        std::cerr << "Failed to send event frame length: " << strerror(errno) << std::endl;
+        std::cerr << "[UDS ERROR] Failed to send event frame length: " << strerror(errno) << std::endl;
+        return false;
+    }
+    std::cerr << "[UDS] Sent frame_len header: " << n << " bytes" << std::endl;
+
+    n = send(conn_state_.sock_fd, buffer, offset, 0);
+    if (n < 0) {
+        std::cerr << "[UDS ERROR] Failed to send event: " << strerror(errno) << std::endl;
+        return false;
+    }
+    std::cerr << "[UDS] Sent event payload: " << n << " bytes (event_type="
+              << event.event_type << ", value=" << event.value << ")" << std::endl;
+
+    return true;
+}
+
+void UdsClient::FlushErrorQueue() {
+    std::lock_guard<std::mutex> queue_lock(error_queue_mutex_);
+
+    size_t flushed_count = 0;
+
+    while (!error_queue_.empty()) {
+        const DOMError& queued_error = error_queue_.front();
+
+        // Try to send without taking the queue lock again
+        {
+            std::lock_guard<std::mutex> conn_lock(conn_mutex_);
+            if (conn_state_.connected && conn_state_.sock_fd >= 0) {
+                uint8_t buffer[2048];
+                uint32_t offset = 0;
+
+                buffer[offset++] = 0x03;
+
+                auto write_string = [&](const std::string& str) {
+                    uint32_t len = str.size();
+                    memcpy(buffer + offset, &len, sizeof(len));
+                    offset += sizeof(len);
+                    memcpy(buffer + offset, str.c_str(), len);
+                    offset += len;
+                };
+
+                write_string(queued_error.error_type);
+                write_string(queued_error.severity);
+                write_string(queued_error.message);
+                write_string(queued_error.source);
+
+                memcpy(buffer + offset, &queued_error.line, sizeof(queued_error.line));
+                offset += sizeof(queued_error.line);
+
+                uint32_t frame_len = offset;
+                ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
+                if (n >= 0) {
+                    send(conn_state_.sock_fd, buffer, offset, 0);
+                    flushed_count++;
+                }
+            }
+        }
+
+        error_queue_.pop();
+    }
+
+    if (flushed_count > 0) {
+        std::cout << "Flushed " << flushed_count << " queued error(s)" << std::endl;
+    }
+}
+
+bool UdsClient::SendError(const DOMError& error) {
+    std::lock_guard<std::mutex> lock(conn_mutex_);
+
+    if (!conn_state_.connected || conn_state_.sock_fd < 0) {
+        // Queue error for later delivery
+        std::lock_guard<std::mutex> queue_lock(error_queue_mutex_);
+        error_queue_.push(error);
+
+        if (error_queue_.size() == 1) {
+            std::cout << "Queuing error (not connected yet): " << error.message << std::endl;
+        }
+        return true;  // Return true since we queued it
+    }
+
+    uint8_t buffer[2048];
+    uint32_t offset = 0;
+
+    uint8_t msg_type = 0x03;
+    buffer[offset++] = msg_type;
+
+    auto write_string = [&](const std::string& str) {
+        uint32_t len = str.size();
+        memcpy(buffer + offset, &len, sizeof(len));
+        offset += sizeof(len);
+        memcpy(buffer + offset, str.c_str(), len);
+        offset += len;
+    };
+
+    write_string(error.error_type);
+    write_string(error.severity);
+    write_string(error.message);
+    write_string(error.source);
+
+    memcpy(buffer + offset, &error.line, sizeof(error.line));
+    offset += sizeof(error.line);
+
+    uint32_t frame_len = offset;
+    ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
+    if (n < 0) {
+        std::cerr << "Failed to send error frame length: " << strerror(errno) << std::endl;
         return false;
     }
 
     n = send(conn_state_.sock_fd, buffer, offset, 0);
     if (n < 0) {
-        std::cerr << "Failed to send event: " << strerror(errno) << std::endl;
+        std::cerr << "Failed to send error: " << strerror(errno) << std::endl;
         return false;
     }
 

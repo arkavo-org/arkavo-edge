@@ -84,7 +84,7 @@ fn main() {
         .define("CEF_ROOT", cef_root.to_str().unwrap())
         .define("CMAKE_BUILD_TYPE", "Release");
 
-    println!("cargo:warning=Building CEF bridge...");
+    eprintln!("Building CEF bridge...");
     let _dst = config.build();
 
     // NOTE: We do NOT link CEF into the Rust binary!
@@ -92,5 +92,5 @@ fn main() {
     // which is a separate C++ binary that has CEF linked.
     // This avoids loading CEF framework into the main process.
 
-    println!("cargo:warning=CEF bridge built successfully");
+    eprintln!("CEF bridge built successfully");
 }

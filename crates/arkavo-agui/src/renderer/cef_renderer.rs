@@ -17,7 +17,45 @@ impl CefRendererImpl {
         let renderer_path = Self::find_renderer_binary()?;
         info!("Initializing CEF renderer from {:?}", renderer_path);
 
-        let renderer = CefRenderer::new(renderer_path).await?;
+        let mut renderer = CefRenderer::new(renderer_path).await?;
+
+        // Wait for V8 context to initialize
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Initialize the page with complete HTML structure from Rust
+        // Note: Event listeners will be attached by C++ OnLoadEnd handler
+        let initial_html = r#"<html><head><style>
+body { margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; height:100vh; display:flex; flex-direction:column; }
+#content { flex:1; overflow:auto; padding:20px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; }
+#prompt-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; padding:12px; box-shadow:0 -2px 8px rgba(0,0,0,0.1); display:flex; gap:8px; z-index:1000; }
+#prompt-input { flex:1; padding:10px; border:1px solid #ddd; border-radius:4px; font-size:14px; }
+#prompt-submit { padding:10px 20px; background:#667eea; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:600; }
+#prompt-submit:hover { background:#5568d3; }
+.welcome { text-align:center; padding-top:20vh; }
+.welcome h1 { font-size:3em; margin:0; }
+.welcome p { font-size:1.2em; opacity:0.9; margin-top:1em; }
+</style></head><body>
+<div id='content'>
+<div class='welcome'>
+<h1>Arkavo Edge</h1>
+<p>Ready</p>
+<p style='opacity:0.7;'>Enter your prompt below</p>
+</div>
+</div>
+<div id='prompt-bar'>
+<input type='text' id='prompt-input' placeholder='Enter your prompt...' />
+<button id='prompt-submit'>Submit</button>
+</div>
+</body></html>"#;
+
+        // Replace the entire document
+        renderer
+            .commands()
+            .replace_inner_html("html", initial_html)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to set initial HTML: {}", e))?;
+
+        info!("CEF renderer initialized with initial page structure");
 
         Ok(Self {
             renderer,
@@ -87,30 +125,66 @@ impl CefRendererImpl {
     pub async fn poll_events(&mut self) -> Result<()> {
         Ok(())
     }
+
+    pub async fn try_recv_event(&mut self) -> Result<Option<arkavo_cef::DOMEvent>> {
+        self.renderer
+            .try_recv_event()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF event error: {}", e))
+    }
+
+    pub async fn try_recv_error(&mut self) -> Result<Option<arkavo_cef::DOMError>> {
+        self.renderer
+            .try_recv_error()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF error polling error: {}", e))
+    }
+
+    pub async fn try_recv_message(&mut self) -> Result<Option<arkavo_cef::uds::ReceivedMessage>> {
+        self.renderer
+            .commands()
+            .try_recv_message()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF message polling error: {}", e))
+    }
 }
 
 #[async_trait::async_trait]
 impl UiRenderer for CefRendererImpl {
     async fn render(&mut self, html: &str, css: &str, _js: &str) -> Result<()> {
-        self.commands()
-            .replace_inner_html("body", html)
+        println!(
+            "[DEBUG] CefRendererImpl::render() called with {} bytes HTML, {} bytes CSS",
+            html.len(),
+            css.len()
+        );
+
+        let content_html = if css.is_empty() {
+            html.to_string()
+        } else {
+            format!("<style>{}</style>{}", css, html)
+        };
+
+        println!(
+            "[DEBUG] Calling replace_inner_html with {} bytes",
+            content_html.len()
+        );
+
+        match self
+            .commands()
+            .replace_inner_html("#content", &content_html)
             .await
-            .map_err(|e| {
+        {
+            Ok(_) => {
+                println!("[DEBUG] replace_inner_html succeeded");
+                info!("CEF renderer: Rendered HTML and CSS successfully");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[ERROR] replace_inner_html failed: {}", e);
                 error!("Failed to render HTML: {}", e);
-                anyhow::anyhow!("CEF render error: {}", e)
-            })?;
-
-        let css_rule = format!("<style>{}</style>", css);
-        self.commands()
-            .replace_inner_html("head", &css_rule)
-            .await
-            .map_err(|e| {
-                error!("Failed to render CSS: {}", e);
-                anyhow::anyhow!("CEF CSS error: {}", e)
-            })?;
-
-        info!("CEF renderer: Rendered HTML and CSS successfully");
-        Ok(())
+                Err(anyhow::anyhow!("CEF render error: {}", e))
+            }
+        }
     }
 
     async fn update_element(&mut self, selector: &str, html: &str) -> Result<()> {
@@ -138,6 +212,9 @@ impl UiRenderer for CefRendererImpl {
     }
 
     fn is_running(&self) -> bool {
+        // Note: Cannot check actual process status because trait requires &self
+        // but CefRenderer::is_running() requires &mut self.
+        // Shutdown is detected via explicit shutdown signal from CEF.
         true
     }
 

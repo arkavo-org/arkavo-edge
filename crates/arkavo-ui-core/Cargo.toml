@@ -1,0 +1,43 @@
+[package]
+name = "arkavo-ui-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core UI abstractions and LLM integration for Arkavo Edge"
+
+[features]
+default = []
+cef-ui = ["arkavo-agui/cef-ui"]
+web-ui = ["arkavo-agui/web-ui"]
+llama-cpp = ["arkavo-llm/llama-cpp"]
+gemini = ["arkavo-llm/gemini"]
+
+[dependencies]
+# Core async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# Error handling
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+
+# LLM and routing
+arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-router = { path = "../arkavo-router", default-features = false }
+
+# UI implementations (always available for adapters)
+arkavo-agui = { path = "../arkavo-agui", default-features = false }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTML escaping for safe rendering
+html-escape = "0.2"
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
