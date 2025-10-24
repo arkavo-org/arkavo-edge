@@ -282,6 +282,7 @@ mod tests {
                 updated_at: Utc::now(),
                 metadata: None,
                 pricing: None,
+                snpe_metadata: None,
             },
             ModelInfo {
                 model_id: "gpt-3.5-turbo".to_string(),
@@ -306,6 +307,7 @@ mod tests {
                 updated_at: Utc::now(),
                 metadata: None,
                 pricing: None,
+                snpe_metadata: None,
             },
             ModelInfo {
                 model_id: "claude-3-haiku-20240307".to_string(),
@@ -330,6 +332,7 @@ mod tests {
                 updated_at: Utc::now(),
                 metadata: None,
                 pricing: None,
+                snpe_metadata: None,
             },
             ModelInfo {
                 model_id: "llama3.2:latest".to_string(),
@@ -359,6 +362,7 @@ mod tests {
                     effective_date: Utc::now(),
                     currency: "USD".to_string(),
                 }),
+                snpe_metadata: None,
             },
         ]
     }
