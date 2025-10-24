@@ -105,7 +105,7 @@ async fn use_cef_renderer(
         loop_count += 1;
 
         if loop_count % 50 == 0 {
-            eprintln!("[HEARTBEAT] Event loop iteration {}", loop_count);
+            eprintln!("[HEARTBEAT] Event loop iteration {loop_count}");
         }
 
         if !cef_renderer.is_running() {
@@ -184,7 +184,7 @@ async fn use_cef_renderer(
                         eprintln!("[DEBUG] CEF connection closed, shutting down");
                         connection_closed = true;
                     } else {
-                        eprintln!("[ERROR] Failed to receive message: {}", e);
+                        eprintln!("[ERROR] Failed to receive message: {e}");
                     }
                     break;
                 }
@@ -206,12 +206,12 @@ async fn use_cef_renderer(
             Ok(())
         }
         Err(e) => {
-            eprintln!("[DEBUG] Shutdown error: {}", e);
+            eprintln!("[DEBUG] Shutdown error: {e}");
             if e.to_string().contains("Connection closed") {
                 println!("✓ Application closed");
                 Ok(())
             } else {
-                eprintln!("⚠ Shutdown error (non-fatal): {}", e);
+                eprintln!("⚠ Shutdown error (non-fatal): {e}");
                 println!("✓ Application closed");
                 Ok(())
             }
