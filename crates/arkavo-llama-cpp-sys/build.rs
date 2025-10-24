@@ -72,6 +72,13 @@ fn main() {
             .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON") // Required for static linking
             .define("GGML_STATIC", "ON") // Build static libraries
             .define("GGML_OPENMP", "ON"); // Enable OpenMP but link statically
+
+        // ARM64-specific optimizations for Raspberry Pi and similar systems
+        if target.contains("aarch64") || target.contains("arm64") {
+            config
+                .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
+                .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
+        }
     }
 
     // Common settings for all platforms
@@ -129,11 +136,31 @@ fn main() {
         println!("cargo:rustc-link-lib=m"); // math library
 
         // Static linking of OpenMP for zero-config deployment
-        // Try multiple possible GCC library paths
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
-        println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
+        let target = env::var("TARGET").unwrap_or_default();
+        if target.contains("aarch64") || target.contains("arm64") {
+            // ARM64 library paths for cross-compilation and native builds
+            // Try multiple GCC versions (Ubuntu 22.04 typically has GCC 11-12)
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/10");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/9");
+            println!("cargo:rustc-link-search=native=/usr/lib/aarch64-linux-gnu");
+            println!("cargo:rustc-link-search=native=/usr/aarch64-linux-gnu/lib");
+            // Also check cross-compilation sysroot
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
+        } else {
+            // x86_64 library paths
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
+            println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
+        }
         println!("cargo:rustc-link-lib=static=gomp"); // Static OpenMP
     }
 
