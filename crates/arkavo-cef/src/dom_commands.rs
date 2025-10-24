@@ -36,6 +36,37 @@ impl DOMCommandBuilder {
         }
     }
 
+    /// Attempts to receive an event from the transport (non-blocking).
+    pub async fn try_recv_event(&mut self) -> crate::Result<Option<crate::protocol::DOMEvent>> {
+        match self.transport.try_recv_message().await? {
+            Some(crate::uds::ReceivedMessage::Event(event)) => Ok(Some(event)),
+            Some(other_msg) => {
+                // Re-queue non-event messages so they can be retrieved by try_recv_message
+                self.transport.requeue_message(other_msg);
+                Ok(None)
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Attempts to receive an error from the transport (non-blocking).
+    pub async fn try_recv_error(&mut self) -> crate::Result<Option<crate::protocol::DOMError>> {
+        match self.transport.try_recv_message().await? {
+            Some(crate::uds::ReceivedMessage::Error(error)) => Ok(Some(error)),
+            Some(other_msg) => {
+                // Re-queue non-error messages so they can be retrieved by try_recv_message
+                self.transport.requeue_message(other_msg);
+                Ok(None)
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Attempts to receive any message (feedback, event, or error) from the transport (non-blocking).
+    pub async fn try_recv_message(&mut self) -> crate::Result<Option<crate::uds::ReceivedMessage>> {
+        self.transport.try_recv_message().await
+    }
+
     fn next_id(&self) -> u32 {
         self.next_id.fetch_add(1, Ordering::SeqCst)
     }
@@ -67,24 +98,45 @@ impl DOMCommandBuilder {
     /// # Panics
     /// Panics if the internal rate limiter semaphore is closed, which should never happen in normal operation.
     pub async fn replace_inner_html(&mut self, selector: &str, html: &str) -> Result<()> {
+        println!(
+            "[DEBUG] replace_inner_html called: selector='{}', html_len={}",
+            selector,
+            html.len()
+        );
+
         self.validate_html_size(html)?;
+        println!("[DEBUG] HTML size validation passed");
 
         let _permit = self
             .rate_limiter
             .acquire()
             .await
             .expect("Semaphore should never be closed");
+        println!("[DEBUG] Rate limiter permit acquired");
 
         let id = self.next_id();
+        println!("[DEBUG] Sending command with id={id}");
+
         self.transport
             .send_command(id, DOMOp::ReplaceInnerHTML as u8, selector, html, None)
             .await?;
+        println!("[DEBUG] Command sent, waiting for feedback");
 
         let feedback = self.transport.recv_feedback().await?;
+        println!(
+            "[DEBUG] Received feedback: status={}, message='{}'",
+            feedback.status, feedback.message
+        );
+
         if feedback.status != 0 {
+            eprintln!(
+                "[ERROR] DOM command failed with status {}: {}",
+                feedback.status, feedback.message
+            );
             return Err(CefError::DomCommandFailed(feedback.message));
         }
 
+        println!("[DEBUG] replace_inner_html completed successfully");
         Ok(())
     }
 

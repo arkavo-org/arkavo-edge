@@ -77,8 +77,8 @@ int main(int argc, char* argv[]) {
     settings.windowless_rendering_enabled = false;
 #endif
 
-    // Enable verbose logging for debugging
-    settings.log_severity = LOGSEVERITY_VERBOSE;
+    // Suppress Chromium internal errors (GCM, etc)
+    settings.log_severity = LOGSEVERITY_FATAL;
     CefString(&settings.log_file).FromASCII("/tmp/arkavo_cef.log");
 
 #ifdef __APPLE__
@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
 
     CefWindowInfo window_info;
     CefBrowserSettings browser_settings;
-    browser_settings.javascript = STATE_DISABLED;
+    browser_settings.javascript = STATE_ENABLED;
 
 #ifdef __APPLE__
     // On macOS, use windowless rendering for now (no visible window yet)
@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
     window_info.SetAsPopup(nullptr, "Arkavo UI Generator");
 #endif
 
-    std::string url = "data:text/html,<html><body style='margin:0;padding:20px;font-family:system-ui;background:linear-gradient(135deg,%20%23667eea%200%25,%20%23764ba2%20100%25);color:%23fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></body></html>";
+    std::string url = "data:text/html,<html><head><style>body{margin:0;padding:0;font-family:system-ui;height:100vh;display:flex;flex-direction:column;}#content{flex:1;overflow:auto;}</style></head><body><div id='content' style='padding:40px;background:linear-gradient(135deg,%23667eea%200%25,%23764ba2%20100%25);color:%23fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></div></body></html>";
 
     std::cout << "Creating browser (windowless mode)..." << std::endl;
     CefBrowserHost::CreateBrowser(window_info, client, url, browser_settings, nullptr, nullptr);

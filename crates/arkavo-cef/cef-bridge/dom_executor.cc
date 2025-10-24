@@ -96,6 +96,10 @@ void DOMExecutor::HandleDOMEvent(const std::string& event_type, const std::strin
 }
 
 void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {
+    std::cout << "[DEBUG C++] ProcessCommand called: op=" << static_cast<int>(cmd.op)
+              << ", id=" << cmd.id
+              << ", selector='" << cmd.selector << "'" << std::endl;
+
     auto start = std::chrono::high_resolution_clock::now();
 
     switch (cmd.op) {
@@ -227,6 +231,34 @@ void DOMExecutor::ExecuteReplaceInnerHTML(uint32_t id, const std::string& select
        << "})();";
 
     frame_->ExecuteJavaScript(js.str(), frame_->GetURL(), 0);
+
+    // Re-attach prompt bar event listeners after HTML replacement
+    std::ostringstream setup_js;
+    setup_js << "(function() {"
+             << "  var input = document.getElementById('prompt-input');"
+             << "  var button = document.getElementById('prompt-submit');"
+             << "  if (!input || !button) return;"
+             << "  "
+             << "  function submitPrompt() {"
+             << "    var value = input.value.trim();"
+             << "    if (value.length === 0) return;"
+             << "    if (typeof window.ArkavoEventBridge === 'function') {"
+             << "      window.ArkavoEventBridge({"
+             << "        event_type: 'submit',"
+             << "        selector: '#prompt-input',"
+             << "        target_id: 'prompt-input',"
+             << "        value: value,"
+             << "        data: '{}'"
+             << "      });"
+             << "      input.value = '';"
+             << "    }"
+             << "  }"
+             << "  "
+             << "  button.onclick = submitPrompt;"
+             << "  input.onkeypress = function(e) { if (e.key === 'Enter') submitPrompt(); };"
+             << "})();";
+
+    frame_->ExecuteJavaScript(setup_js.str(), frame_->GetURL(), 0);
 
     DOMFeedback feedback = {id, 0, 0, "OK"};
     SendFeedback(feedback);
@@ -420,12 +452,23 @@ void DOMExecutor::ExecuteAddEventListener(uint32_t id, const std::string& select
 
 void DOMExecutor::SendEvent(const DOMEvent& event) {
     if (uds_client_) {
-        uds_client_->SendEvent(event);
+        bool success = uds_client_->SendEvent(event);
+        if (!success) {
+            std::cerr << "[ERROR] Failed to send event through UDS" << std::endl;
+        }
+    } else {
+        std::cerr << "[ERROR] Cannot send event: uds_client_ is null" << std::endl;
     }
 }
 
 void DOMExecutor::SendFeedback(const DOMFeedback& feedback) {
     if (uds_client_) {
         uds_client_->SendFeedback(feedback);
+    }
+}
+
+void DOMExecutor::SendError(const DOMError& error) {
+    if (uds_client_) {
+        uds_client_->SendError(error);
     }
 }

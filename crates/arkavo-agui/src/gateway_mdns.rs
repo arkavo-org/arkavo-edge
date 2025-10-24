@@ -16,6 +16,7 @@ pub async fn run_mdns_discovery(
 
     #[cfg(not(feature = "mdns"))]
     {
+        let _ = (agents, agent_connections, telemetry_tx);
         println!("mDNS discovery not compiled in");
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;

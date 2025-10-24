@@ -1,5 +1,7 @@
 #include "cef_app.h"
 #include "browser_client.h"
+#include "dom_executor.h"
+#include "uds_client.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/wrapper/cef_helpers.h"
@@ -54,17 +56,48 @@
     if (_browser) {
         _browser->GetHost()->CloseBrowser(true);
 
-        // Give CEF 1 second to clean up, then force exit
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+        // Send shutdown signal async after tiny delay to not block window fade
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            // Send shutdown signal to Rust
+            DOMError shutdown_signal;
+            shutdown_signal.error_type = "shutdown";
+            shutdown_signal.severity = "info";
+            shutdown_signal.message = "CEF window closed by user";
+            shutdown_signal.source = "main.mm";
+            shutdown_signal.line = 0;
+            DOMExecutor::GetInstance()->SendError(shutdown_signal);
+            std::cout << "Shutdown signal sent to Rust" << std::endl;
+        });
+
+        // Give CEF 500ms to clean up, then force exit
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                       dispatch_get_main_queue(), ^{
             std::cout << "Shutdown complete" << std::endl;
             CefQuitMessageLoop();
             exit(0);
         });
     } else {
-        std::cout << "Shutdown complete" << std::endl;
-        CefQuitMessageLoop();
-        exit(0);
+        // Send shutdown signal async
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            DOMError shutdown_signal;
+            shutdown_signal.error_type = "shutdown";
+            shutdown_signal.severity = "info";
+            shutdown_signal.message = "CEF window closed by user";
+            shutdown_signal.source = "main.mm";
+            shutdown_signal.line = 0;
+            DOMExecutor::GetInstance()->SendError(shutdown_signal);
+            std::cout << "Shutdown signal sent to Rust" << std::endl;
+        });
+
+        // Give Rust time to process shutdown signal
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            std::cout << "Shutdown complete" << std::endl;
+            CefQuitMessageLoop();
+            exit(0);
+        });
     }
     return NO;
 }
@@ -153,10 +186,13 @@ int main(int argc, char* argv[]) {
     std::string cache_path = "/tmp/arkavo_cef_cache_" + cache_id;
     CefString(&settings.cache_path).FromASCII(cache_path.c_str());
 
-    // Enable verbose logging for debugging
-    settings.log_severity = LOGSEVERITY_INFO;
+    // Suppress Chromium internal errors
+    settings.log_severity = LOGSEVERITY_FATAL;
     std::string log_file = "/tmp/arkavo_cef_" + cache_id + ".log";
     CefString(&settings.log_file).FromASCII(log_file.c_str());
+
+    // Disable background networking
+    CefString(&settings.user_agent_product).FromASCII("ArkavoEdge/1.0");
 
 #ifdef __APPLE__
     if (!exe_dir.empty()) {
@@ -191,7 +227,7 @@ int main(int argc, char* argv[]) {
 
     CefWindowInfo window_info;
     CefBrowserSettings browser_settings;
-    browser_settings.javascript = STATE_DISABLED;
+    browser_settings.javascript = STATE_ENABLED;
 
 #ifdef __APPLE__
     // Create a visible window on macOS
@@ -222,7 +258,29 @@ int main(int argc, char* argv[]) {
     window_info.SetAsPopup(nullptr, "Arkavo UI Generator");
 #endif
 
-    std::string url = "data:text/html,<html><body style='margin:0;padding:20px;font-family:system-ui;background:linear-gradient(135deg,%20%23667eea%200%25,%20%23764ba2%20100%25);color:%23fff;min-height:100vh;display:flex;align-items:center;justify-content:center;'><div style='text-align:center;'><h1 style='font-size:3em;margin:0;'>Arkavo UI Generator</h1><p style='font-size:1.5em;opacity:0.9;'>CEF Renderer Ready</p><p style='opacity:0.7;'>Waiting for AI-generated content...</p></div></body></html>";
+    std::string url = "data:text/html,<html><head><style>"
+        "body { margin:0; padding:0; font-family:system-ui; height:100vh; display:flex; flex-direction:column; }"
+        "#content { flex:1; overflow:auto; padding:20px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; }"
+        "#prompt-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; padding:12px; box-shadow:0 -2px 8px rgba(0,0,0,0.1); display:flex; gap:8px; }"
+        "#prompt-input { flex:1; padding:10px; border:1px solid #ddd; border-radius:4px; font-size:14px; }"
+        "#prompt-submit { padding:10px 20px; background:#667eea; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:600; }"
+        "#prompt-submit:hover { background:#5568d3; }"
+        ".welcome { text-align:center; padding-top:20vh; }"
+        ".welcome h1 { font-size:3em; margin:0; }"
+        ".welcome p { font-size:1.2em; opacity:0.9; margin-top:1em; }"
+        "</style></head><body>"
+        "<div id='content'>"
+        "<div class='welcome'>"
+        "<h1>Arkavo UI Generator</h1>"
+        "<p>CEF Renderer Ready</p>"
+        "<p style='opacity:0.7;'>Enter your prompt below to generate UI</p>"
+        "</div>"
+        "</div>"
+        "<div id='prompt-bar'>"
+        "<input type='text' id='prompt-input' placeholder='Enter your prompt...' />"
+        "<button id='prompt-submit'>Submit</button>"
+        "</div>"
+        "</body></html>";
 
     std::cout << "Creating browser (windowed mode)..." << std::endl;
     CefBrowserHost::CreateBrowser(window_info, client, url, browser_settings, nullptr, nullptr);

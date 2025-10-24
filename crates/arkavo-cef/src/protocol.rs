@@ -32,12 +32,83 @@ impl Protocol {
         Ok(buf.to_vec())
     }
 
-    pub fn deserialize_feedback(_data: &[u8]) -> Result<DOMFeedbackSimple> {
+    pub fn deserialize_feedback(data: &[u8]) -> Result<DOMFeedbackSimple> {
+        if data.is_empty() || data[0] != 0x01 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Invalid feedback message type".to_string(),
+            ));
+        }
+
+        let mut cursor = 1;
+
+        // Read ID (4 bytes)
+        if data.len() < cursor + 4 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Incomplete feedback ID".to_string(),
+            ));
+        }
+        let id = u32::from_le_bytes([
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+        ]);
+        cursor += 4;
+
+        // Read Status (1 byte - uint8_t in C++)
+        if data.len() < cursor + 1 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Incomplete feedback status".to_string(),
+            ));
+        }
+        let status = data[cursor];
+        cursor += 1;
+
+        // Read exec_time_ns (8 bytes)
+        if data.len() < cursor + 8 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Incomplete feedback exec_time_ns".to_string(),
+            ));
+        }
+        let exec_time_ns = u64::from_le_bytes([
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+            data[cursor + 4],
+            data[cursor + 5],
+            data[cursor + 6],
+            data[cursor + 7],
+        ]);
+        cursor += 8;
+
+        // Read message length (4 bytes)
+        if data.len() < cursor + 4 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Incomplete feedback message length".to_string(),
+            ));
+        }
+        let msg_len = u32::from_le_bytes([
+            data[cursor],
+            data[cursor + 1],
+            data[cursor + 2],
+            data[cursor + 3],
+        ]) as usize;
+        cursor += 4;
+
+        // Read message string
+        if data.len() < cursor + msg_len {
+            return Err(crate::error::CefError::ProtocolError(
+                "Incomplete feedback message".to_string(),
+            ));
+        }
+        let message = String::from_utf8_lossy(&data[cursor..cursor + msg_len]).to_string();
+
         Ok(DOMFeedbackSimple {
-            id: 0,
-            status: 0,
-            exec_time_ns: 0,
-            message: String::new(),
+            id,
+            status,
+            exec_time_ns,
+            message,
         })
     }
 
@@ -81,6 +152,21 @@ pub struct DOMEvent {
     pub target_id: String,
     pub value: String,
     pub data: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DOMError {
+    pub error_type: String,
+    pub severity: String,
+    pub message: String,
+    pub source: String,
+    pub line: u32,
+}
+
+impl DOMError {
+    pub fn format_for_llm(&self) -> String {
+        format!("{}:{} - {}", self.source, self.line, self.message)
+    }
 }
 
 impl Protocol {
@@ -129,6 +215,64 @@ impl Protocol {
             target_id,
             value,
             data: data_field,
+        })
+    }
+
+    pub fn deserialize_error(data: &[u8]) -> Result<DOMError> {
+        if data.is_empty() || data[0] != 0x03 {
+            return Err(crate::error::CefError::ProtocolError(
+                "Invalid error message type".to_string(),
+            ));
+        }
+
+        let mut cursor = 1;
+
+        let read_string = |cursor: &mut usize| -> Result<String> {
+            if data.len() < *cursor + 4 {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string length".to_string(),
+                ));
+            }
+            let len = u32::from_le_bytes([
+                data[*cursor],
+                data[*cursor + 1],
+                data[*cursor + 2],
+                data[*cursor + 3],
+            ]) as usize;
+            *cursor += 4;
+
+            if data.len() < *cursor + len {
+                return Err(crate::error::CefError::ProtocolError(
+                    "Incomplete string data".to_string(),
+                ));
+            }
+            let s = String::from_utf8_lossy(&data[*cursor..*cursor + len]).to_string();
+            *cursor += len;
+            Ok(s)
+        };
+
+        let error_type = read_string(&mut cursor)?;
+        let severity = read_string(&mut cursor)?;
+        let message = read_string(&mut cursor)?;
+        let source = read_string(&mut cursor)?;
+
+        let line = if data.len() >= cursor + 4 {
+            u32::from_le_bytes([
+                data[cursor],
+                data[cursor + 1],
+                data[cursor + 2],
+                data[cursor + 3],
+            ])
+        } else {
+            0
+        };
+
+        Ok(DOMError {
+            error_type,
+            severity,
+            message,
+            source,
+            line,
         })
     }
 }

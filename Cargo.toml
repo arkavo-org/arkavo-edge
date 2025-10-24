@@ -34,13 +34,14 @@ members = [
     "crates/arkavo-workspace",
     "crates/arkavo-bench",
     "crates/arkavo-ui-generator",
+    "crates/arkavo-ui-core",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.37.9"
+version = "0.37.10"
 edition = "2024"
 authors = ["Arkavo Edge Contributors"]
 license = "Apache-2.0"
@@ -136,10 +137,6 @@ candle-transformers = { version = "0.9.1", default-features = false }
 fastembed = "4"
 hnsw_rs = "0.3"
 tiktoken-rs = "0.6"
-
-# Force single versions to reduce duplicates
-fancy-regex = "0.16"
-itertools = "0.14"
 
 # Dev dependencies
 criterion = { version = "0.5", features = ["async_tokio"] }

@@ -6,6 +6,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <queue>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -51,6 +52,14 @@ struct DOMEvent {
     std::string data;
 };
 
+struct DOMError {
+    std::string error_type;
+    std::string severity;
+    std::string message;
+    std::string source;
+    uint32_t line;
+};
+
 class UdsClient {
 public:
     explicit UdsClient(const std::string& socket_path);
@@ -64,10 +73,12 @@ public:
 
     bool SendFeedback(const DOMFeedback& feedback);
     bool SendEvent(const DOMEvent& event);
+    bool SendError(const DOMError& error);
 
 private:
     void ListenLoop();
     void AcceptLoop();
+    void FlushErrorQueue();
 
     std::string socket_path_;
     ConnectionState conn_state_;
@@ -76,6 +87,8 @@ private:
     std::thread listen_thread_;
     std::thread accept_thread_;
     std::mutex conn_mutex_;
+    std::mutex error_queue_mutex_;
+    std::queue<DOMError> error_queue_;
     std::function<void(const DOMCommand&)> command_callback_;
 };
 

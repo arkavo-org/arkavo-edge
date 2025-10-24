@@ -36,16 +36,19 @@ fn main() {
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_BUILD_TYPE", build_type);
 
-    // Enable parallel compilation
-    if let Ok(num_jobs) = env::var("NUM_JOBS") {
-        config.build_arg(format!("-j{}", num_jobs));
-    } else {
-        // Use number of CPUs
-        let num_cpus = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        config.build_arg(format!("-j{}", num_cpus));
+    // Enable parallel compilation (skip -j for Windows/MSBuild)
+    if !target.contains("windows") {
+        if let Ok(num_jobs) = env::var("NUM_JOBS") {
+            config.build_arg(format!("-j{}", num_jobs));
+        } else {
+            // Use number of CPUs
+            let num_cpus = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            config.build_arg(format!("-j{}", num_cpus));
+        }
     }
+    // MSBuild handles parallelism automatically with /m flag (set by cmake internally)
 
     // Platform-specific GPU acceleration
     if cfg!(target_os = "macos") {
@@ -95,25 +98,44 @@ fn main() {
         config
             .define("CMAKE_C_COMPILER_LAUNCHER", ccache.to_str().unwrap())
             .define("CMAKE_CXX_COMPILER_LAUNCHER", ccache.to_str().unwrap());
-        println!("cargo:warning=Using ccache for faster C++ compilation");
+        eprintln!("Using ccache for faster C++ compilation");
     }
 
     let dst = config.build();
 
     let lib_dir = dst.join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=llama");
-    println!("cargo:rustc-link-lib=static=ggml");
 
-    // Only link libraries that actually exist
-    if lib_dir.join("libggml-base.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-base");
-    }
-    if lib_dir.join("libggml-cpu.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-cpu");
-    }
-    if lib_dir.join("libggml-blas.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-blas");
+    // Dynamically discover and link all static libraries built by CMake
+    // This handles both Unix (.a) and Windows (.lib) naming conventions
+    if cfg!(target_os = "windows") {
+        // Windows: look for *.lib files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.ends_with(".lib") && !fname.ends_with(".dll.lib") {
+                    let libname = fname.trim_end_matches(".lib");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
+    } else {
+        // Unix: look for lib*.a files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.starts_with("lib") && fname.ends_with(".a") {
+                    let libname = fname.trim_start_matches("lib").trim_end_matches(".a");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
     }
 
     // Platform-specific linking
@@ -195,7 +217,7 @@ fn main() {
     };
 
     if should_regenerate {
-        println!("cargo:warning=Generating Rust bindings for llama.cpp");
+        eprintln!("Generating Rust bindings for llama.cpp");
         let bindings = bindgen::Builder::default()
             .header(header.to_str().unwrap())
             .clang_arg(format!("-I{}", out_path.join("include").display()))
@@ -206,7 +228,5 @@ fn main() {
         bindings
             .write_to_file(&bindings_path)
             .expect("Couldn't write bindings!");
-    } else {
-        println!("cargo:warning=Reusing existing bindings (header unchanged)");
     }
 }
