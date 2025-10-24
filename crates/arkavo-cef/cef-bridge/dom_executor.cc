@@ -452,7 +452,12 @@ void DOMExecutor::ExecuteAddEventListener(uint32_t id, const std::string& select
 
 void DOMExecutor::SendEvent(const DOMEvent& event) {
     if (uds_client_) {
-        uds_client_->SendEvent(event);
+        bool success = uds_client_->SendEvent(event);
+        if (!success) {
+            std::cerr << "[ERROR] Failed to send event through UDS" << std::endl;
+        }
+    } else {
+        std::cerr << "[ERROR] Cannot send event: uds_client_ is null" << std::endl;
     }
 }
 

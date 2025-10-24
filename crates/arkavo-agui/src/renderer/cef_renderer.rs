@@ -139,6 +139,14 @@ body { margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; heig
             .await
             .map_err(|e| anyhow::anyhow!("CEF error polling error: {}", e))
     }
+
+    pub async fn try_recv_message(&mut self) -> Result<Option<arkavo_cef::uds::ReceivedMessage>> {
+        self.renderer
+            .commands()
+            .try_recv_message()
+            .await
+            .map_err(|e| anyhow::anyhow!("CEF message polling error: {}", e))
+    }
 }
 
 #[async_trait::async_trait]
@@ -204,6 +212,9 @@ impl UiRenderer for CefRendererImpl {
     }
 
     fn is_running(&self) -> bool {
+        // Note: Cannot check actual process status because trait requires &self
+        // but CefRenderer::is_running() requires &mut self.
+        // Shutdown is detected via explicit shutdown signal from CEF.
         true
     }
 

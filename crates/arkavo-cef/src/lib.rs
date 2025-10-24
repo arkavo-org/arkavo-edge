@@ -8,6 +8,8 @@ pub use dom_commands::{DOMCommandBuilder, DOMOp};
 pub use error::{CefError, Result};
 pub use process::CefProcess;
 pub use protocol::{DOMError, DOMEvent};
+
+// Re-export uds module for external access
 pub use uds::{ReceivedMessage, UdsTransport};
 
 use std::path::Path;

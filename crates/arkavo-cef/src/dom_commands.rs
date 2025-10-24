@@ -38,34 +38,33 @@ impl DOMCommandBuilder {
 
     /// Attempts to receive an event from the transport (non-blocking).
     pub async fn try_recv_event(&mut self) -> crate::Result<Option<crate::protocol::DOMEvent>> {
-        use tokio::time::Duration;
-        match tokio::time::timeout(Duration::from_millis(10), self.transport.recv_event()).await {
-            Ok(Ok(event)) => Ok(Some(event)),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Ok(None),
+        match self.transport.try_recv_message().await? {
+            Some(crate::uds::ReceivedMessage::Event(event)) => Ok(Some(event)),
+            Some(other_msg) => {
+                // Re-queue non-event messages so they can be retrieved by try_recv_message
+                self.transport.requeue_message(other_msg);
+                Ok(None)
+            }
+            None => Ok(None),
         }
     }
 
     /// Attempts to receive an error from the transport (non-blocking).
     pub async fn try_recv_error(&mut self) -> crate::Result<Option<crate::protocol::DOMError>> {
-        use tokio::time::Duration;
-        match tokio::time::timeout(Duration::from_millis(10), self.transport.recv_error()).await {
-            Ok(Ok(error)) => Ok(Some(error)),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Ok(None),
+        match self.transport.try_recv_message().await? {
+            Some(crate::uds::ReceivedMessage::Error(error)) => Ok(Some(error)),
+            Some(other_msg) => {
+                // Re-queue non-error messages so they can be retrieved by try_recv_message
+                self.transport.requeue_message(other_msg);
+                Ok(None)
+            }
+            None => Ok(None),
         }
     }
 
     /// Attempts to receive any message (feedback, event, or error) from the transport (non-blocking).
     pub async fn try_recv_message(&mut self) -> crate::Result<Option<crate::uds::ReceivedMessage>> {
-        use tokio::time::Duration;
-        match tokio::time::timeout(Duration::from_millis(10), self.transport.try_recv_message())
-            .await
-        {
-            Ok(Ok(msg)) => Ok(msg),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Ok(None),
-        }
+        self.transport.try_recv_message().await
     }
 
     fn next_id(&self) -> u32 {

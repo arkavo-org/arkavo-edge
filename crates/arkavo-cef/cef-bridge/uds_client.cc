@@ -262,6 +262,9 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
     uint8_t buffer[1024];
     uint32_t offset = 0;
 
+    // Message type 0x01 for feedback
+    buffer[offset++] = 0x01;
+
     memcpy(buffer + offset, &feedback.id, sizeof(feedback.id));
     offset += sizeof(feedback.id);
 
@@ -301,8 +304,11 @@ bool UdsClient::SendFeedback(const DOMFeedback& feedback) {
 bool UdsClient::SendEvent(const DOMEvent& event) {
     std::lock_guard<std::mutex> lock(conn_mutex_);
 
+    std::cerr << "[UDS] SendEvent called - connected=" << conn_state_.connected
+              << " fd=" << conn_state_.sock_fd << std::endl;
+
     if (!conn_state_.connected || conn_state_.sock_fd < 0) {
-        std::cerr << "Cannot send event: not connected" << std::endl;
+        std::cerr << "[UDS ERROR] Cannot send event: not connected" << std::endl;
         return false;
     }
 
@@ -327,17 +333,22 @@ bool UdsClient::SendEvent(const DOMEvent& event) {
     write_string(event.data);
 
     uint32_t frame_len = offset;
+    std::cerr << "[UDS] Sending frame_len=" << frame_len << " bytes (payload=" << offset << " bytes)" << std::endl;
+
     ssize_t n = send(conn_state_.sock_fd, &frame_len, sizeof(frame_len), 0);
     if (n < 0) {
-        std::cerr << "Failed to send event frame length: " << strerror(errno) << std::endl;
+        std::cerr << "[UDS ERROR] Failed to send event frame length: " << strerror(errno) << std::endl;
         return false;
     }
+    std::cerr << "[UDS] Sent frame_len header: " << n << " bytes" << std::endl;
 
     n = send(conn_state_.sock_fd, buffer, offset, 0);
     if (n < 0) {
-        std::cerr << "Failed to send event: " << strerror(errno) << std::endl;
+        std::cerr << "[UDS ERROR] Failed to send event: " << strerror(errno) << std::endl;
         return false;
     }
+    std::cerr << "[UDS] Sent event payload: " << n << " bytes (event_type="
+              << event.event_type << ", value=" << event.value << ")" << std::endl;
 
     return true;
 }

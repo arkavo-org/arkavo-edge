@@ -1,6 +1,7 @@
 use crate::error::{CefError, Result};
 use crate::protocol::Protocol;
 use bytes::BytesMut;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -9,6 +10,7 @@ use tokio::net::UnixStream;
 pub struct UdsTransport {
     stream: UnixStream,
     read_buf: BytesMut,
+    message_queue: VecDeque<ReceivedMessage>,
 }
 
 impl UdsTransport {
@@ -42,6 +44,7 @@ impl UdsTransport {
         Ok(Self {
             stream,
             read_buf: BytesMut::with_capacity(8192),
+            message_queue: VecDeque::new(),
         })
     }
 
@@ -57,6 +60,11 @@ impl UdsTransport {
     pub async fn recv_raw(&mut self) -> Result<Vec<u8>> {
         loop {
             if let Some(data) = Protocol::unframe_message(&mut self.read_buf)? {
+                eprintln!(
+                    "[UDS RUST] recv_raw returning {} bytes (msg_type={})",
+                    data.len(),
+                    if data.is_empty() { 0 } else { data[0] }
+                );
                 return Ok(data);
             }
 
@@ -66,8 +74,49 @@ impl UdsTransport {
                 .await
                 .map_err(|e| CefError::UdsTransportError(e.to_string()))?;
 
+            eprintln!("[UDS RUST] recv_raw read {n} bytes from socket");
+
             if n == 0 {
                 return Err(CefError::UdsTransportError("Connection closed".to_string()));
+            }
+        }
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn try_recv_raw(&mut self) -> Result<Option<Vec<u8>>> {
+        if let Some(data) = Protocol::unframe_message(&mut self.read_buf)? {
+            eprintln!(
+                "[UDS RUST] try_recv_raw returning buffered {} bytes (msg_type={})",
+                data.len(),
+                if data.is_empty() { 0 } else { data[0] }
+            );
+            return Ok(Some(data));
+        }
+
+        let mut temp_buf = vec![0u8; 4096];
+        match self.stream.try_read(&mut temp_buf) {
+            Ok(0) => {
+                eprintln!("[UDS RUST] try_recv_raw: connection closed");
+                Err(CefError::UdsTransportError("Connection closed".to_string()))
+            }
+            Ok(n) => {
+                eprintln!("[UDS RUST] try_recv_raw read {n} bytes from socket");
+                self.read_buf.extend_from_slice(&temp_buf[..n]);
+
+                if let Some(data) = Protocol::unframe_message(&mut self.read_buf)? {
+                    eprintln!(
+                        "[UDS RUST] try_recv_raw returning {} bytes (msg_type={})",
+                        data.len(),
+                        if data.is_empty() { 0 } else { data[0] }
+                    );
+                    return Ok(Some(data));
+                }
+                Ok(None)
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(e) => {
+                eprintln!("[UDS RUST ERROR] try_recv_raw failed: {e}");
+                Err(CefError::UdsTransportError(e.to_string()))
             }
         }
     }
@@ -85,8 +134,44 @@ impl UdsTransport {
     }
 
     pub async fn recv_feedback(&mut self) -> Result<crate::protocol::DOMFeedbackSimple> {
-        let data = self.recv_raw().await?;
-        Protocol::deserialize_feedback(&data)
+        loop {
+            let data = self.recv_raw().await?;
+
+            if data.is_empty() {
+                continue;
+            }
+
+            match data[0] {
+                0x01 => {
+                    // Feedback message - return it
+                    return Protocol::deserialize_feedback(&data);
+                }
+                0x02 => {
+                    // Event message - queue it for later
+                    let event = Protocol::deserialize_event(&data)?;
+                    eprintln!(
+                        "[UDS RUST] recv_feedback: queuing EVENT (type={}, value={})",
+                        event.event_type, event.value
+                    );
+                    self.message_queue.push_back(ReceivedMessage::Event(event));
+                }
+                0x03 => {
+                    // Error message - queue it for later
+                    let error = Protocol::deserialize_error(&data)?;
+                    eprintln!(
+                        "[UDS RUST] recv_feedback: queuing ERROR (type={})",
+                        error.error_type
+                    );
+                    self.message_queue.push_back(ReceivedMessage::Error(error));
+                }
+                _ => {
+                    return Err(CefError::ProtocolError(format!(
+                        "Unknown message type: {}",
+                        data[0]
+                    )));
+                }
+            }
+        }
     }
 
     pub async fn recv_event(&mut self) -> Result<crate::protocol::DOMEvent> {
@@ -99,24 +184,51 @@ impl UdsTransport {
         Protocol::deserialize_error(&data)
     }
 
+    pub fn requeue_message(&mut self, msg: ReceivedMessage) {
+        self.message_queue.push_front(msg);
+    }
+
     pub async fn try_recv_message(&mut self) -> Result<Option<ReceivedMessage>> {
-        let data = self.recv_raw().await?;
+        // Check queue first
+        if let Some(msg) = self.message_queue.pop_front() {
+            eprintln!("[UDS RUST] try_recv_message: returning queued message");
+            return Ok(Some(msg));
+        }
+
+        let data = match self.try_recv_raw().await? {
+            Some(d) => d,
+            None => return Ok(None),
+        };
 
         if data.is_empty() {
             return Ok(None);
         }
 
+        eprintln!(
+            "[UDS RUST] try_recv_message processing msg_type={}",
+            data[0]
+        );
+
         match data[0] {
             0x01 => {
                 let feedback = Protocol::deserialize_feedback(&data)?;
+                eprintln!("[UDS RUST] Received FEEDBACK message (id={})", feedback.id);
                 Ok(Some(ReceivedMessage::Feedback(feedback)))
             }
             0x02 => {
                 let event = Protocol::deserialize_event(&data)?;
+                eprintln!(
+                    "[UDS RUST] Received EVENT message (type={}, value={})",
+                    event.event_type, event.value
+                );
                 Ok(Some(ReceivedMessage::Event(event)))
             }
             0x03 => {
                 let error = Protocol::deserialize_error(&data)?;
+                eprintln!(
+                    "[UDS RUST] Received ERROR message (type={})",
+                    error.error_type
+                );
                 Ok(Some(ReceivedMessage::Error(error)))
             }
             _ => Err(CefError::ProtocolError(format!(

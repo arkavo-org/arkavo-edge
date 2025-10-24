@@ -1,5 +1,7 @@
 #include "cef_app.h"
 #include "browser_client.h"
+#include "dom_executor.h"
+#include "uds_client.h"
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 #include "include/wrapper/cef_helpers.h"
@@ -54,17 +56,48 @@
     if (_browser) {
         _browser->GetHost()->CloseBrowser(true);
 
-        // Give CEF 1 second to clean up, then force exit
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+        // Send shutdown signal async after tiny delay to not block window fade
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            // Send shutdown signal to Rust
+            DOMError shutdown_signal;
+            shutdown_signal.error_type = "shutdown";
+            shutdown_signal.severity = "info";
+            shutdown_signal.message = "CEF window closed by user";
+            shutdown_signal.source = "main.mm";
+            shutdown_signal.line = 0;
+            DOMExecutor::GetInstance()->SendError(shutdown_signal);
+            std::cout << "Shutdown signal sent to Rust" << std::endl;
+        });
+
+        // Give CEF 500ms to clean up, then force exit
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                       dispatch_get_main_queue(), ^{
             std::cout << "Shutdown complete" << std::endl;
             CefQuitMessageLoop();
             exit(0);
         });
     } else {
-        std::cout << "Shutdown complete" << std::endl;
-        CefQuitMessageLoop();
-        exit(0);
+        // Send shutdown signal async
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            DOMError shutdown_signal;
+            shutdown_signal.error_type = "shutdown";
+            shutdown_signal.severity = "info";
+            shutdown_signal.message = "CEF window closed by user";
+            shutdown_signal.source = "main.mm";
+            shutdown_signal.line = 0;
+            DOMExecutor::GetInstance()->SendError(shutdown_signal);
+            std::cout << "Shutdown signal sent to Rust" << std::endl;
+        });
+
+        // Give Rust time to process shutdown signal
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            std::cout << "Shutdown complete" << std::endl;
+            CefQuitMessageLoop();
+            exit(0);
+        });
     }
     return NO;
 }
@@ -153,10 +186,13 @@ int main(int argc, char* argv[]) {
     std::string cache_path = "/tmp/arkavo_cef_cache_" + cache_id;
     CefString(&settings.cache_path).FromASCII(cache_path.c_str());
 
-    // Enable verbose logging for debugging
-    settings.log_severity = LOGSEVERITY_INFO;
+    // Suppress Chromium internal errors
+    settings.log_severity = LOGSEVERITY_FATAL;
     std::string log_file = "/tmp/arkavo_cef_" + cache_id + ".log";
     CefString(&settings.log_file).FromASCII(log_file.c_str());
+
+    // Disable background networking
+    CefString(&settings.user_agent_product).FromASCII("ArkavoEdge/1.0");
 
 #ifdef __APPLE__
     if (!exe_dir.empty()) {

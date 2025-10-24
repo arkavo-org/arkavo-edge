@@ -77,8 +77,8 @@ int main(int argc, char* argv[]) {
     settings.windowless_rendering_enabled = false;
 #endif
 
-    // Enable verbose logging for debugging
-    settings.log_severity = LOGSEVERITY_VERBOSE;
+    // Suppress Chromium internal errors (GCM, etc)
+    settings.log_severity = LOGSEVERITY_FATAL;
     CefString(&settings.log_file).FromASCII("/tmp/arkavo_cef.log");
 
 #ifdef __APPLE__

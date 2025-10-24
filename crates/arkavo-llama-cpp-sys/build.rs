@@ -88,7 +88,7 @@ fn main() {
         config
             .define("CMAKE_C_COMPILER_LAUNCHER", ccache.to_str().unwrap())
             .define("CMAKE_CXX_COMPILER_LAUNCHER", ccache.to_str().unwrap());
-        println!("cargo:warning=Using ccache for faster C++ compilation");
+        eprintln!("Using ccache for faster C++ compilation");
     }
 
     let dst = config.build();
@@ -168,7 +168,7 @@ fn main() {
     };
 
     if should_regenerate {
-        println!("cargo:warning=Generating Rust bindings for llama.cpp");
+        eprintln!("Generating Rust bindings for llama.cpp");
         let bindings = bindgen::Builder::default()
             .header(header.to_str().unwrap())
             .clang_arg(format!("-I{}", out_path.join("include").display()))
@@ -179,7 +179,5 @@ fn main() {
         bindings
             .write_to_file(&bindings_path)
             .expect("Couldn't write bindings!");
-    } else {
-        println!("cargo:warning=Reusing existing bindings (header unchanged)");
     }
 }

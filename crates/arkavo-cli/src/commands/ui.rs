@@ -99,15 +99,28 @@ async fn use_cef_renderer(
     println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
 
     // Event loop - poll for prompt submissions and errors
+    let mut loop_count = 0;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        loop_count += 1;
+
+        if loop_count % 50 == 0 {
+            eprintln!("[HEARTBEAT] Event loop iteration {}", loop_count);
+        }
 
         if !cef_renderer.is_running() {
+            eprintln!("[DEBUG] CEF renderer is no longer running, breaking event loop");
             break;
         }
 
         // Poll for errors from CEF
         if let Ok(Some(error)) = cef_renderer.try_recv_error().await {
+            // Check for shutdown signal from CEF
+            if error.error_type == "shutdown" {
+                eprintln!("[DEBUG] Received shutdown signal from CEF");
+                break;
+            }
+
             // Buffer error for LLM feedback
             error_buffer.push(error.clone());
 
@@ -138,27 +151,69 @@ async fn use_cef_renderer(
             let _ = cef_renderer.render(&error_html, "", "").await;
         }
 
-        // Poll for events from the prompt bar
-        if let Ok(Some(event)) = cef_renderer.try_recv_event().await
-            && event.event_type == "submit"
-            && !event.value.trim().is_empty()
-        {
-            handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
+        // Poll for all messages (events, feedback, errors)
+        // We must drain all message types, not just events
+        use arkavo_cef::ReceivedMessage;
+        let mut connection_closed = false;
+        loop {
+            match cef_renderer.try_recv_message().await {
+                Ok(Some(ReceivedMessage::Event(event))) => {
+                    eprintln!(
+                        "[DEBUG] Event received: type={}, value={}",
+                        event.event_type, event.value
+                    );
+                    if event.event_type == "submit" && !event.value.trim().is_empty() {
+                        eprintln!("[DEBUG] Processing submit event");
+                        handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
+                    }
+                }
+                Ok(Some(ReceivedMessage::Feedback(_))) => {
+                    // Ignore feedback messages (already handled by command sender)
+                }
+                Ok(Some(ReceivedMessage::Error(error))) => {
+                    // Handle error messages
+                    error_buffer.push(error);
+                }
+                Ok(None) => {
+                    // No more messages available
+                    break;
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    if error_msg.contains("Connection closed") {
+                        eprintln!("[DEBUG] CEF connection closed, shutting down");
+                        connection_closed = true;
+                    } else {
+                        eprintln!("[ERROR] Failed to receive message: {}", e);
+                    }
+                    break;
+                }
+            }
+        }
+
+        if connection_closed {
+            break;
         }
     }
 
     // Renderer stopped - clean shutdown
+    println!("CEF window closed, shutting down...");
+    eprintln!("[DEBUG] Calling renderer.shutdown()");
     match Box::new(cef_renderer).shutdown().await {
         Ok(_) => {
-            println!("Application closed gracefully");
+            eprintln!("[DEBUG] Shutdown successful");
+            println!("✓ Application closed gracefully");
             Ok(())
         }
         Err(e) => {
+            eprintln!("[DEBUG] Shutdown error: {}", e);
             if e.to_string().contains("Connection closed") {
-                println!("Application closed");
+                println!("✓ Application closed");
                 Ok(())
             } else {
-                Err(e.into())
+                eprintln!("⚠ Shutdown error (non-fatal): {}", e);
+                println!("✓ Application closed");
+                Ok(())
             }
         }
     }
@@ -209,8 +264,8 @@ async fn handle_prompt(
     // Show "thinking" indicator in UI
     let thinking_html = format!(
         r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                <strong style="color: #667eea;">You:</strong> {prompt}
+            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
             </div>
             <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <div style="display:flex;gap:8px;align-items:center;color:#667eea;">
@@ -276,10 +331,10 @@ async fn handle_prompt(
 
         format!(
             r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                    <strong style="color: #667eea;">You:</strong> {prompt}
+                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
                 </div>
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6;">
+                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); line-height: 1.6; color: #333;">
                     {escaped_response}
                 </div>
                 <div style="margin-top: 16px; padding: 8px 12px; background: #f0f0f0; border-radius: 4px; font-size: 12px; color: #666;">
@@ -290,6 +345,13 @@ async fn handle_prompt(
             routing_decision.estimated_cost_usd
         )
     };
+
+    eprintln!(
+        "[DEBUG] Rendering response ({} bytes, is_html={})",
+        html.len(),
+        is_html
+    );
+    eprintln!("[DEBUG] First 200 chars: {}", &html[..html.len().min(200)]);
 
     match renderer.render(&html, "", "").await {
         Ok(_) => {
