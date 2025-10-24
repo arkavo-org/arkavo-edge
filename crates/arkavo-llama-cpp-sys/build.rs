@@ -36,16 +36,19 @@ fn main() {
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_BUILD_TYPE", build_type);
 
-    // Enable parallel compilation
-    if let Ok(num_jobs) = env::var("NUM_JOBS") {
-        config.build_arg(format!("-j{}", num_jobs));
-    } else {
-        // Use number of CPUs
-        let num_cpus = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        config.build_arg(format!("-j{}", num_cpus));
+    // Enable parallel compilation (skip -j for Windows/MSBuild)
+    if !target.contains("windows") {
+        if let Ok(num_jobs) = env::var("NUM_JOBS") {
+            config.build_arg(format!("-j{}", num_jobs));
+        } else {
+            // Use number of CPUs
+            let num_cpus = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            config.build_arg(format!("-j{}", num_cpus));
+        }
     }
+    // MSBuild handles parallelism automatically with /m flag (set by cmake internally)
 
     // Platform-specific GPU acceleration
     if cfg!(target_os = "macos") {
