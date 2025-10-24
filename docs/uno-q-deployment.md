@@ -2,6 +2,12 @@
 
 This guide covers deploying Arkavo Edge on Arduino UNO Q (Dragonwing QRB2210) with Qualcomm SNPE for hardware-accelerated ML inference.
 
+## Important: SNPE SDK Licensing
+
+**Pre-built binaries (Homebrew, .pkg, GitHub releases) do NOT include SNPE support.**
+
+The Qualcomm SNPE SDK is proprietary and cannot be redistributed. To enable hardware acceleration on UNO Q, you must build from source with the SDK. See `docs/uno-q-quickstart.md` for simplified instructions.
+
 ## Hardware Specifications
 
 **Arduino UNO Q (Dragonwing QRB2210)**
