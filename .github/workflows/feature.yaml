@@ -266,6 +266,7 @@ jobs:
             features: default
             artifact_name: arkavo-aarch64-linux
             cross: true
+            snpe: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -283,6 +284,43 @@ jobs:
             # Install both runtime and static OpenMP libraries for static linking
             # Use gcc-multilib which includes static libgomp.a
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
+          fi
+
+      # SNPE SDK Setup for UNO Q Platform
+      # The Qualcomm Neural Processing SDK for AI (SNPE) enables hardware-accelerated
+      # inference on Arduino UNO Q (QRB2210) with GPU/DSP support.
+      #
+      # Download: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
+      # Location: Extract to vendor/qairt/
+      # License: Proprietary (cannot redistribute - must download separately)
+      #
+      # Without SDK: Build succeeds but SNPE features are disabled
+      # With SDK: Enables GPU (Adreno 702) and DSP (Hexagon) acceleration
+      - name: Setup SNPE SDK for UNO Q
+        if: matrix.snpe == true
+        run: |
+          echo "Setting up Qualcomm Neural Processing SDK for AI (SNPE)..."
+
+          # Create vendor directory
+          mkdir -p vendor/qairt
+
+          # Copy SNPE SDK from vendor/qairt if it exists (downloaded separately)
+          if [ -d "vendor/qairt" ] && [ -n "$(ls -A vendor/qairt)" ]; then
+            echo "Using existing SNPE SDK from vendor/qairt"
+            export SNPE_ROOT=$PWD/vendor/qairt
+          else
+            echo "SNPE SDK not found at vendor/qairt"
+            echo "Note: SNPE SDK must be downloaded separately from Qualcomm"
+            echo "Skipping SNPE features (build will succeed without SDK)"
+            export SNPE_ROOT=""
+          fi
+
+          # Export for subsequent steps
+          echo "SNPE_ROOT=$SNPE_ROOT" >> $GITHUB_ENV
+
+          if [ -n "$SNPE_ROOT" ]; then
+            echo "SNPE SDK location: $SNPE_ROOT"
+            ls -lh $SNPE_ROOT/lib/aarch64-linux/ || echo "SNPE libraries not found"
           fi
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -319,9 +357,19 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support and static OpenMP
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Full featured build with local LLM support and static OpenMP (x86_64)
             cargo build --release --target ${{ matrix.target }} -p arkavo
+          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            # Full featured build with local LLM support for ARM64
+            # Include SNPE feature if SDK is available
+            if [ -n "$SNPE_ROOT" ]; then
+              echo "Building with SNPE support for UNO Q"
+              cargo build --release --target ${{ matrix.target }} -p arkavo --features snpe
+            else
+              echo "Building without SNPE (SDK not available)"
+              cargo build --release --target ${{ matrix.target }} -p arkavo
+            fi
           else
             # Static build for containers with memory and mDNS
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
@@ -338,6 +386,9 @@ jobs:
             echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
             if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
               echo "Optimized for Raspberry Pi 5 and ARM64 systems" >> release-package/features.txt
+              if [ -n "$SNPE_ROOT" ]; then
+                echo "Includes Qualcomm SNPE support for Arduino UNO Q (QRB2210)" >> release-package/features.txt
+              fi
             fi
           else
             echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
