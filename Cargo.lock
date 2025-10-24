@@ -808,6 +808,7 @@ dependencies = [
  "anyhow",
  "cc",
  "libc",
+ "libloading",
  "log",
  "serde",
  "serde_json",

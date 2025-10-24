@@ -2,35 +2,59 @@
 
 Qualcomm SNPE (Snapdragon Neural Processing Engine) backend for Arkavo Edge on Arduino UNO Q (QRB2210) platform.
 
-## Important: Licensing and Distribution
+## Dynamic Loading Architecture
 
-**The SNPE feature is NOT included in pre-built binaries.**
+**Pre-built binaries include SNPE support via dynamic loading.**
 
-The Qualcomm SNPE SDK is proprietary software that cannot be redistributed. Pre-built binaries distributed via:
-- Homebrew
-- macOS .pkg installers
-- GitHub releases
+This crate uses `dlopen`/`dlsym` to load the SNPE SDK at runtime:
 
-...will NOT include SNPE support and will use CPU inference only.
+- **No build-time dependency** on SNPE SDK
+- **Portable binaries** work on any aarch64-linux system
+- **Automatic fallback** to CPU inference if SDK not installed
+- **GPU/DSP acceleration** when SDK is available
 
-## Building with SNPE
+### How It Works
 
-To enable hardware acceleration on UNO Q, you must:
+1. **Build time**: No SNPE linking required, binary is portable
+2. **Runtime**: Searches for `libSNPE.so` in:
+   - `/opt/snpe/lib/aarch64-linux`
+   - `$SNPE_ROOT/lib/aarch64-linux`
+   - Paths in `$LD_LIBRARY_PATH`
+3. **If found**: GPU/DSP hardware acceleration enabled
+4. **If not found**: Gracefully falls back to CPU inference
 
-1. **Obtain SNPE SDK**: Download from [Qualcomm Developer Network](https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk)
-2. **Accept License**: Review and accept Qualcomm's license agreement
-3. **Build from Source**: Build Arkavo Edge with the `snpe` feature flag
+## For End Users
+
+Install Arkavo Edge via Homebrew, .pkg, or GitHub releases:
 
 ```bash
-export SNPE_ROOT=/path/to/snpe-sdk
+# Download pre-built binary
+wget https://github.com/arkavo-org/arkavo-edge/releases/latest/download/arkavo-aarch64-linux
+chmod +x arkavo-aarch64-linux
+
+# Run (CPU-only if SNPE SDK not installed)
+./arkavo-aarch64-linux --version
+```
+
+To enable SNPE acceleration, install the SDK:
+
+1. Download SNPE SDK from [Qualcomm Developer Network](https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk)
+2. Extract to `/opt/snpe` or set `SNPE_ROOT`
+3. Configure `LD_LIBRARY_PATH`:
+   ```bash
+   export LD_LIBRARY_PATH=/opt/snpe/lib/aarch64-linux:$LD_LIBRARY_PATH
+   ```
+4. Run Arkavo Edge - SNPE will be auto-detected
+
+## For Developers
+
+Build from source with `snpe` feature:
+
+```bash
 cargo build --release -p arkavo --features snpe
 ```
 
-For automated builds on UNO Q, use the provided build script:
-
-```bash
-bash scripts/build-uno-q.sh
-```
+No SNPE SDK required at build time. The binary will dynamically load the SDK at runtime if available.
 
 ## Platform Support
 

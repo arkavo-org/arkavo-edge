@@ -2,191 +2,116 @@
 
 This guide shows how to enable Qualcomm SNPE hardware acceleration on Arduino UNO Q.
 
-## Important: SNPE SDK Licensing
+## Dynamic Loading: No Build Required!
 
-The Qualcomm SNPE SDK is proprietary software that cannot be redistributed. Therefore:
+**Pre-built binaries include SNPE support via dynamic loading.**
 
-**Pre-built binaries (Homebrew, .pkg, GitHub releases) do NOT include SNPE support.**
+Arkavo Edge uses `dlopen` to load the SNPE SDK at runtime:
+- Pre-built binaries work on any aarch64-linux system
+- SNPE SDK auto-detected if installed
+- Gracefully falls back to CPU if SDK not found
+- No build required for hardware acceleration!
 
-To use SNPE hardware acceleration on UNO Q, you must build from source with the SDK.
+## Option 1: Use Pre-built Binary (Recommended)
 
-## Prerequisites
-
-**On UNO Q**:
-- Debian Linux 64-bit (aarch64)
-- SNPE SDK installed from Qualcomm Developer Network
-- SSH access enabled (for remote builds)
-- Network connectivity
-
-## For End Users: Pre-built Binary (No SNPE)
-
-End users who install via Homebrew, .pkg, or GitHub releases will get a binary that works on UNO Q but uses CPU inference only:
+Download and run the pre-built binary. SNPE will be auto-detected if installed:
 
 ```bash
 # Download latest aarch64-linux binary
 wget https://github.com/arkavo-org/arkavo-edge/releases/latest/download/arkavo-aarch64-linux
 chmod +x arkavo-aarch64-linux
 
-# Run (CPU inference only)
+# Run (auto-detects SNPE SDK)
 ./arkavo-aarch64-linux --version
 ```
 
-**Performance**: CPU-only inference (~200ms latency vs ~20ms with GPU acceleration)
+**To enable GPU/DSP acceleration**, install the SNPE SDK:
 
-## For Developers: Build with SNPE
+### Install SNPE SDK
 
-To enable SNPE hardware acceleration, build from source on or for the UNO Q:
+1. Download from [Qualcomm Developer Network](https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk)
+2. Extract to `/opt/snpe`:
+   ```bash
+   sudo mkdir -p /opt/snpe
+   sudo tar -xzf snpe-*.tar.gz -C /opt/snpe --strip-components=1
+   ```
+3. Configure environment:
+   ```bash
+   cat >> ~/.bashrc <<'EOF'
+   export SNPE_ROOT=/opt/snpe
+   export LD_LIBRARY_PATH=$SNPE_ROOT/lib/aarch64-linux:${LD_LIBRARY_PATH}
+   export ARKAVO_SNPE_RUNTIME=GPU_FP16
+   EOF
+   source ~/.bashrc
+   ```
+4. Run Arkavo Edge - SNPE will be automatically loaded:
+   ```bash
+   ./arkavo-aarch64-linux --version
+   # Should show: "SNPE library loaded successfully"
+   ```
 
-### Step 1: Obtain SNPE SDK
+**Performance**:
+- Without SDK: CPU inference (~200ms latency)
+- With SDK: GPU acceleration (~20ms latency, 10x faster!)
 
-Download the Qualcomm Neural Processing SDK from:
-https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
+## Option 2: Build from Source (Optional)
 
-Extract to `/opt/snpe` on the UNO Q or your preferred location.
-
-### Step 2: Install Build Dependencies
+For developers who want to build from source:
 
 ```bash
-# On UNO Q
-sudo apt update
-sudo apt install -y build-essential cmake clang libclang-dev pkg-config curl git
-
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
-```
 
-### Step 3: Set SNPE Environment
-
-```bash
-# Point to your SNPE SDK installation
-export SNPE_ROOT=/opt/snpe  # or wherever you installed it
-
-# Verify SNPE is accessible
-ls -lh $SNPE_ROOT/lib/aarch64-linux/libSNPE.so
-```
-
-### Step 4: Clone and Build
-
-```bash
 # Clone repository
 git clone --recursive https://github.com/arkavo-org/arkavo-edge.git
 cd arkavo-edge
 
-# Build with SNPE support (use build script for interactive setup)
-bash scripts/build-uno-q.sh
-
-# Or build directly with cargo
+# Build (no SNPE SDK required at build time!)
 cargo build --release -p arkavo --features snpe
 
 # Binary location
 ./target/release/arkavo --version
 ```
 
-The `build-uno-q.sh` script will automatically:
-- Detect your SNPE SDK installation
-- Verify required dependencies
-- Build with appropriate feature flags
-- Offer to install the binary system-wide
+No SNPE SDK required at build time. The binary uses dynamic loading at runtime.
 
-### Step 5: Install
+## Cross-Compilation (Optional)
+
+Cross-compile on x86_64 Linux for UNO Q:
 
 ```bash
-# Copy to system location
-sudo cp target/release/arkavo /usr/local/bin/
-sudo chmod +x /usr/local/bin/arkavo
-
-# Configure environment
-cat >> ~/.bashrc <<'EOF'
-export SNPE_ROOT=/opt/snpe
-export LD_LIBRARY_PATH=$SNPE_ROOT/lib/aarch64-linux:${LD_LIBRARY_PATH}
-export ARKAVO_SNPE_RUNTIME=GPU_FP16
-EOF
-
-source ~/.bashrc
-
-# Verify installation
-arkavo --version
-```
-
-## Advanced: Cross-Compile with SNPE
-
-Advanced users can cross-compile on a development machine with SNPE SDK, then deploy to UNO Q:
-
-### On Development Machine (x86_64 Linux)
-
-```bash
-# Install cross-compilation toolchain
-sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+# Install toolchain
+sudo apt install -y gcc-aarch64-linux-gnu
 rustup target add aarch64-unknown-linux-gnu
 
-# Copy SNPE SDK to development machine
-# Extract SNPE SDK to vendor/qairt/
-
-# Set SNPE environment
-export SNPE_ROOT=$PWD/vendor/qairt
-
-# Configure Cargo for cross-compilation
+# Configure linker
+mkdir -p ~/.cargo
 cat >> ~/.cargo/config.toml <<EOF
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
 EOF
 
-# Build with SNPE
+# Build
 cargo build --release --target aarch64-unknown-linux-gnu -p arkavo --features snpe
 
-# Binary location
-ls -lh target/aarch64-unknown-linux-gnu/release/arkavo
-```
-
-### Deploy to UNO Q
-
-```bash
-# Copy binary
-scp target/aarch64-unknown-linux-gnu/release/arkavo debian@uno-q:/tmp/
-
-# Copy SNPE runtime libraries (only if UNO Q doesn't have them)
-scp -r vendor/qairt/lib/aarch64-linux debian@uno-q:/tmp/snpe-lib/
-
-# On UNO Q
-ssh debian@uno-q
-
-# Install binary
-sudo mv /tmp/arkavo /usr/local/bin/
-sudo chmod +x /usr/local/bin/arkavo
-
-# Install SNPE libraries (if needed)
-sudo mkdir -p /opt/snpe/lib
-sudo mv /tmp/snpe-lib /opt/snpe/lib/aarch64-linux
-
-# Configure environment
-cat >> ~/.bashrc <<'EOF'
-export SNPE_ROOT=/opt/snpe
-export LD_LIBRARY_PATH=$SNPE_ROOT/lib/aarch64-linux:${LD_LIBRARY_PATH}
-export ARKAVO_SNPE_RUNTIME=GPU_FP16
-EOF
-
-source ~/.bashrc
-
-# Verify
-arkavo --version
+# Deploy to UNO Q
+scp target/aarch64-unknown-linux-gnu/release/arkavo debian@uno-q:/usr/local/bin/
 ```
 
 ## Testing SNPE Acceleration
 
-Once installed, verify SNPE is working:
+Verify SNPE is loaded:
 
 ```bash
-# Check SNPE libraries are accessible
-ldd /usr/local/bin/arkavo | grep SNPE
-
-# Check GPU device
+# Check GPU device available
 ls -l /dev/kgsl-3d0
 
-# Set debug mode to see SNPE logs
-export ARKAVO_DEBUG=1
+# Run with debug logging
+ARKAVO_DEBUG=1 arkavo --version
+# Should show: "SNPE library loaded successfully"
 
-# Run a simple inference
+# Test inference (once models are deployed)
 arkavo chat --model snpe --prompt "test"
 ```
 
@@ -246,30 +171,20 @@ export ARKAVO_SNPE_RUNTIME=CPU
 
 ## Summary
 
-**For End Users (No Build Required)**:
-- Download pre-built binary from GitHub releases
-- Works on UNO Q with CPU inference
-- No SNPE acceleration due to licensing restrictions
+**Dynamic Loading Approach**:
+- ✅ Pre-built binaries include SNPE support
+- ✅ No build required for hardware acceleration
+- ✅ SNPE SDK loaded at runtime via dlopen
+- ✅ Automatic fallback to CPU if SDK not found
+- ✅ 10x faster inference with GPU (20ms vs 200ms)
 
-**For Developers (Hardware Acceleration)**:
-- Build from source on UNO Q with SNPE SDK
-- Enables GPU/DSP acceleration (10x faster)
-- Requires Qualcomm SDK license agreement
-- Use `scripts/build-uno-q.sh` for automated setup
-
-**Build Time on UNO Q**:
-- First build: ~20 minutes
-- Incremental rebuilds: ~2-5 minutes
-- One-time setup, updates as needed
+**Quick Start**:
+1. Download pre-built binary from GitHub releases
+2. Install SNPE SDK to `/opt/snpe` (optional, for GPU acceleration)
+3. Run - SNPE will be auto-detected
 
 ## Next Steps
 
-**End Users**:
-1. Download arkavo-aarch64-linux from releases
-2. Transfer to UNO Q and run
-
-**Developers with SNPE SDK**:
-1. Build on UNO Q using `scripts/build-uno-q.sh`
-2. Deploy a DLC model (see `docs/uno-q-deployment.md`)
-3. Run inference tests with hardware acceleration
-4. Monitor performance and thermal characteristics
+1. Deploy a DLC model (see `docs/uno-q-deployment.md`)
+2. Run inference tests
+3. Monitor performance and thermal

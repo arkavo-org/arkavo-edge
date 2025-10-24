@@ -9,6 +9,9 @@ pub enum SnpeError {
     )]
     SdkNotFound,
 
+    #[error("Failed to load SNPE library: {0}")]
+    LibraryLoadFailed(String),
+
     #[error("Invalid SNPE SDK path: {0}")]
     InvalidSdkPath(String),
 
