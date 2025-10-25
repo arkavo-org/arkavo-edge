@@ -287,16 +287,8 @@ jobs:
 
           if [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Installing Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
-            sudo apt-get install -y cmake clang libclang-dev build-essential \
+            sudo apt-get install -y cmake ninja-build clang libclang-dev build-essential git python3 \
               libvulkan-dev vulkan-tools glslang-tools glslang-dev spirv-tools libshaderc-dev mesa-vulkan-drivers libgomp1
-            echo "Verifying Vulkan installation:"
-            dpkg -l | grep -E '(vulkan|shaderc|glslang)' || true
-            echo "Checking for glslc:"
-            which glslc || echo "glslc not in PATH"
-            echo "Checking for glslangValidator:"
-            which glslangValidator || echo "glslangValidator not in PATH"
-            echo "Searching for glslc in /usr:"
-            find /usr -name glslc 2>/dev/null || echo "glslc not found"
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
@@ -304,6 +296,21 @@ jobs:
             echo "Installing dependencies for x86_64 builds"
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
+
+      - name: Build glslc from source (UNO Q Vulkan requirement)
+        if: matrix.device == 'uno-q'
+        run: |
+          echo "Building glslc compiler from source for Vulkan support"
+          cd /tmp
+          git clone --depth 1 https://github.com/google/shaderc.git
+          cd shaderc
+          ./utils/git-sync-deps
+          mkdir build && cd build
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON ..
+          ninja glslc
+          sudo install -m 755 glslc/glslc /usr/local/bin/
+          glslc --version
+          echo "glslc installed successfully"
 
       # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
       # The Qualcomm Neural Processing SDK enables hardware-accelerated inference
