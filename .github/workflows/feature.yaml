@@ -258,7 +258,7 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-            features: default
+            features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
@@ -269,12 +269,11 @@ jobs:
             features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
-          # Arduino UNO Q (QRB2210) with Adreno 702 GPU
-          # Vulkan backend via Mesa Turnip driver (with FP32 fallback patch)
-          # Note: OpenCL unavailable - Mesa implementations don't support Adreno
-          # See: docs/uno-q-vulkan-status.md for details
+          # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
+          # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
+          # See: docs/uno-q-hardware-acceleration-blockers.md for details
           - os: ubuntu-24.04-arm
-            features: llama-cpp,snpe,memory,mdns,gemini
+            features: memory,mdns,llm-remote,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
     steps:
@@ -290,9 +289,8 @@ jobs:
           echo "DEBUG: matrix.features = '${{ matrix.features }}'"
 
           if [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Installing Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
-            sudo apt-get install -y cmake ninja-build clang libclang-dev build-essential git python3 \
-              libvulkan-dev vulkan-tools glslang-tools glslang-dev spirv-tools libshaderc-dev mesa-vulkan-drivers libgomp1
+            echo "Installing dependencies for Arduino UNO Q (CPU only - hardware acceleration blocked)"
+            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
@@ -301,28 +299,6 @@ jobs:
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
 
-      - name: Build glslc from source (UNO Q Vulkan requirement)
-        if: matrix.device == 'uno-q'
-        run: |
-          echo "Building glslc compiler from source for Vulkan support"
-          cd /tmp
-          git clone --depth 1 https://github.com/google/shaderc.git
-          cd shaderc
-          ./utils/git-sync-deps
-          mkdir build && cd build
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON ..
-          ninja
-          sudo install -m 755 glslc/glslc /usr/local/bin/glslc
-          /usr/local/bin/glslc --version
-          echo "glslc installed successfully"
-
-      # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
-      # The Qualcomm Neural Processing SDK enables hardware-accelerated inference
-      # on Arduino UNO Q (QRB2210) with GPU/DSP support.
-      #
-      # Runtime detection: Binary searches /opt/snpe, $SNPE_ROOT, $LD_LIBRARY_PATH
-      # Download SDK from: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
-      # License: Proprietary (cannot redistribute - users install separately)
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target || '' }}
@@ -359,16 +335,15 @@ jobs:
             export ARKAVO_TARGET_DEVICE=rpi5
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build with Vulkan GPU acceleration (Cortex-A53)
-            # Using updated llama.cpp with Mesa Turnip driver (patched for FP32 fallback)
-            # Includes Oct 25 memory allocation fixes that may resolve device loss issues
-            echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
-            echo "Note: llama.cpp updated to 5d195f17bc with Vulkan memory allocation fixes"
+            # Arduino UNO Q - Native ARM64 build (Cortex-A53, CPU-only)
+            # Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)
+            # See docs/uno-q-hardware-acceleration-blockers.md for investigation details
+            echo "Building for Arduino UNO Q (native ARM64, CPU-only)"
             export ARKAVO_TARGET_DEVICE=uno-q
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support (x86_64)
-            cargo build --release --target ${{ matrix.target }} -p arkavo
+            # Full featured build (x86_64, no llama-cpp - submodule removed)
+            cargo build --release --target ${{ matrix.target }} -p arkavo --no-default-features --features ${{ matrix.features }}
           else
             # Static musl build for containers
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
@@ -388,18 +363,14 @@ jobs:
           # Create feature manifest
           if [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
-            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
-            echo "llama.cpp with Vulkan GPU backend:" >> release-package/features.txt
-            echo "  - Mesa Turnip driver for Adreno 702" >> release-package/features.txt
-            echo "  - FP32 fallback patch for 16-bit storage" >> release-package/features.txt
-            echo "  - Updated to 5d195f17bc (Oct 25) with memory allocation fixes" >> release-package/features.txt
-            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
+            echo "Arduino UNO Q build (Cortex-A53, native ARM64, CPU-only)" > release-package/features.txt
+            echo "Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)" >> release-package/features.txt
+            echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build (x86_64)" > release-package/features.txt
+            echo "Full featured build (x86_64, no llama-cpp)" > release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           else
             echo "Static build (${{ matrix.target }})" > release-package/features.txt
