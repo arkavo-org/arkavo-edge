@@ -57,14 +57,25 @@ echo ""
 
 # Build Docker image
 echo "Building Docker image..."
-docker build -t snpe-converter - <<'EOF'
-FROM ubuntu:22.04
+docker build --platform linux/amd64 -t snpe-converter - <<'EOF'
+FROM --platform=linux/amd64 ubuntu:22.04
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    libc++-dev \
+    libc++abi-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages required by SNPE
+# Use specific onnx version compatible with SNPE 2.39
+RUN pip3 install --no-cache-dir \
+    numpy==1.24.3 \
+    onnx==1.14.0 \
+    protobuf==3.20.3 \
+    pyyaml \
+    packaging
 
 # SNPE SDK will be mounted at /snpe
 WORKDIR /workspace
@@ -75,7 +86,7 @@ EOF
 # Run conversion in Docker
 echo ""
 echo "Running conversion..."
-docker run --rm \
+docker run --rm --platform linux/amd64 \
     -v "$SNPE_SDK_PATH:/snpe:ro" \
     -v "$(dirname "$ONNX_FILE"):/input:ro" \
     -v "$OUTPUT_DIR:/output" \
@@ -83,6 +94,7 @@ docker run --rm \
     bash -c "
         export SNPE_ROOT=/snpe
         export PYTHONPATH=/snpe/lib/python
+        export LD_LIBRARY_PATH=/snpe/lib/x86_64-linux-clang:\$LD_LIBRARY_PATH
         export PATH=/snpe/bin/x86_64-linux-clang:\$PATH
 
         echo 'Converting ONNX to DLC...'

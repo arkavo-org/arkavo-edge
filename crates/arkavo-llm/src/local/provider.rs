@@ -366,6 +366,12 @@ impl Provider for LocalProvider {
                                 Error::Model(format!("Phi forward pass failed: {e}"))
                             })?
                         }
+                        #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "snpe"))]
+                        Some(Model::Snpe(_)) => {
+                            return Err(Error::Inference(
+                                "SNPE models use async execution, not forward pass".to_string(),
+                            ));
+                        }
                         None => {
                             return Err(Error::Model("Model not loaded".to_string()));
                         }
