@@ -258,7 +258,7 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-            features: memory,mdns,gemini
+            features: default
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
@@ -266,33 +266,41 @@ jobs:
             artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
           - os: ubuntu-24.04-arm
-            features: memory,mdns,gemini
+            features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
           # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
           # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
           # See: docs/uno-q-hardware-acceleration-blockers.md for details
           - os: ubuntu-24.04-arm
-            features: memory,mdns,gemini
+            features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
 
           echo "DEBUG: matrix.device = '${{ matrix.device }}'"
           echo "DEBUG: matrix.target = '${{ matrix.target }}'"
-          echo "DEBUG: matrix.features = '${{ matrix.features }}'"
+          echo "DEBUG: matrix.features = '${{ matrix.feature }}'"
 
           if [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Installing dependencies for Arduino UNO Q (CPU only - hardware acceleration blocked)"
+            echo "Installing dependencies for Arduino UNO Q (llama.cpp with CPU backend)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
+            echo "Installing dependencies for Raspberry Pi 5 (llama.cpp with CPU backend)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           else
             echo "Installing dependencies for x86_64 builds"
@@ -335,15 +343,15 @@ jobs:
             export ARKAVO_TARGET_DEVICE=rpi5
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build (Cortex-A53, CPU-only)
+            # Arduino UNO Q - Native ARM64 build (Cortex-A53 with llama.cpp)
             # Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)
             # See docs/uno-q-hardware-acceleration-blockers.md for investigation details
-            echo "Building for Arduino UNO Q (native ARM64, CPU-only)"
+            echo "Building for Arduino UNO Q (Cortex-A53 with llama.cpp CPU backend)"
             export ARKAVO_TARGET_DEVICE=uno-q
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Minimal build (x86_64, no llama-cpp/web-ui/mdns - submodule removed)
-            cargo build --release --target ${{ matrix.target }} -p arkavo --no-default-features --features ${{ matrix.features }}
+            # Full featured build with local LLM support (x86_64)
+            cargo build --release --target ${{ matrix.target }} -p arkavo
           else
             # Static musl build for containers
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
@@ -363,14 +371,17 @@ jobs:
           # Create feature manifest
           if [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
+            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53, native ARM64, CPU-only)" > release-package/features.txt
-            echo "Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)" >> release-package/features.txt
+            echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
+            echo "llama.cpp with CPU backend (GPU acceleration blocked)" >> release-package/features.txt
+            echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable" >> release-package/features.txt
             echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
+            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build (x86_64, no llama-cpp/web-ui)" > release-package/features.txt
+            echo "Full featured build (x86_64)" > release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           else
             echo "Static build (${{ matrix.target }})" > release-package/features.txt
