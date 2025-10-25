@@ -288,10 +288,10 @@ jobs:
           if [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Installing Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
             sudo apt-get install -y cmake clang libclang-dev build-essential \
-              libvulkan-dev vulkan-tools glslang-tools mesa-vulkan-drivers libgomp1
+              libvulkan-dev vulkan-tools glslang-tools shaderc mesa-vulkan-drivers libgomp1
             echo "Verifying Vulkan installation:"
-            dpkg -l | grep vulkan || true
-            which glslc || true
+            dpkg -l | grep -E '(vulkan|shaderc)' || true
+            which glslc || echo "glslc not found in PATH"
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
