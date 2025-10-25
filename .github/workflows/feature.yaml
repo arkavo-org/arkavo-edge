@@ -251,26 +251,30 @@ jobs:
 
   build-linux:
     name: Build Linux (${{ matrix.target }})
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
             features: default
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
             features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
           - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
             features: default
             artifact_name: arkavo-aarch64-linux-rpi5
             cross: true
             device: rpi5
           - target: aarch64-unknown-linux-gnu
-            features: snpe,memory,mdns,llm-remote,gemini
+            os: ubuntu-22.04-arm
+            features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
-            cross: true
+            cross: false
             device: uno-q
     steps:
       - uses: actions/checkout@v4
@@ -282,15 +286,13 @@ jobs:
 
           # Install ARM64 cross-compilation toolchain if needed
           if [ "${{ matrix.cross }}" = "true" ]; then
-            # Install ARM64 cross-compilation toolchain
+            # Install ARM64 cross-compilation toolchain for Raspberry Pi 5
             # Use crossbuild-essential which includes all necessary libraries
             sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-            # Install ARM64 Vulkan libraries for GPU acceleration (required for UNO Q with Adreno support)
-            # We need ARM64 versions of these libraries for cross-compilation
-            sudo dpkg --add-architecture arm64
-            sudo apt-get update
-            sudo apt-get install -y libvulkan-dev:arm64 glslang-tools
+          elif [ "${{ matrix.device }}" = "uno-q" ]; then
+            # Native ARM64 build for Arduino UNO Q with Vulkan GPU acceleration
+            # Install Vulkan libraries and GLSL compiler for llama.cpp GPU support
+            sudo apt-get install -y cmake clang libclang-dev build-essential libvulkan-dev glslang-tools libgomp1
           else
             # Install both runtime and static OpenMP libraries for static linking
             # Use gcc-multilib which includes static libgomp.a
@@ -347,9 +349,9 @@ jobs:
             echo "Building for Raspberry Pi 5 with llama.cpp support"
             cargo build --release --target ${{ matrix.target }} -p arkavo
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - No llama.cpp (Cortex-A53 incompatible)
-            # SNPE dynamically loaded at runtime when SNPE_ROOT is set
-            echo "Building for Arduino UNO Q (Cortex-A53, SNPE runtime-detected)"
+            # Arduino UNO Q - Native ARM64 build with llama.cpp + Vulkan GPU acceleration
+            # Also includes SNPE (dynamically loaded at runtime when SNPE_ROOT is set)
+            echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
             cargo build --release --target ${{ matrix.target }} -p arkavo --no-default-features --features ${{ matrix.features }}
           else
             # Static build for containers with memory and mDNS
@@ -370,9 +372,10 @@ jobs:
             echo "Includes llama.cpp for local LLM inference (Cortex-A76 optimized)" >> release-package/features.txt
             echo "Memory management and mDNS discovery support" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Arduino UNO Q build (Cortex-A53 compatible)" > release-package/features.txt
-            echo "SNPE runtime support for GPU/DSP acceleration (dynamic loading)" >> release-package/features.txt
-            echo "Remote LLM support (Gemini, OpenAI, Anthropic, etc.)" >> release-package/features.txt
+            echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
+            echo "llama.cpp with Vulkan GPU acceleration for local LLM inference" >> release-package/features.txt
+            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
+            echo "Remote LLM support via Gemini API" >> release-package/features.txt
             echo "Memory management and mDNS discovery support" >> release-package/features.txt
           else
             echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
