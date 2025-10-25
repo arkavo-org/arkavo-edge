@@ -82,26 +82,18 @@ fn main() {
                 .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
                 .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
 
-            // Enable both OpenCL and Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
-            // OpenCL: Actively maintained by Qualcomm, with Adreno-specific optimizations
-            // Vulkan: Mesa Turnip driver for Adreno 702 (experimental)
-            eprintln!(
-                "Enabling OpenCL + Vulkan GPU acceleration for aarch64-linux (Adreno support)"
-            );
-            config.define("GGML_OPENCL", "ON");
-            config.define("GGML_OPENCL_USE_ADRENO_KERNELS", "ON"); // Use optimized Adreno kernels
+            // Enable Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
+            // Mesa Turnip driver provides Vulkan support for Adreno 702
+            // Note: OpenCL not available - Mesa's Rusticl/Clover don't support Adreno,
+            //       and Qualcomm's proprietary OpenCL driver is not installed
+            eprintln!("Enabling Vulkan GPU acceleration for aarch64-linux (Adreno 702 via Turnip)");
             config.define("GGML_VULKAN", "ON");
-
-            // Link against OpenCL library
-            println!("cargo:rustc-link-lib=OpenCL");
-        } else {
-            // Disable OpenCL on non-ARM64 platforms
-            config.define("GGML_OPENCL", "OFF");
         }
     }
 
     // Common settings for all platforms
     config
+        .define("GGML_OPENCL", "OFF") // Mesa OpenCL doesn't support Adreno GPUs
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
         .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
         .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
