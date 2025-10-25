@@ -1,8 +1,8 @@
 #![cfg(all(target_os = "linux", target_arch = "aarch64"))]
 
 use crate::error::{Result, SnpeError};
-use libloading::{Library, Symbol};
-use std::path::{Path, PathBuf};
+use libloading::Library;
+use std::path::PathBuf;
 use std::sync::Once;
 
 static INIT: Once = Once::new();
@@ -43,8 +43,9 @@ fn get_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     if let Ok(snpe_root) = std::env::var("SNPE_ROOT") {
-        paths.push(PathBuf::from(snpe_root).join("lib").join("aarch64-linux"));
-        paths.push(PathBuf::from(snpe_root).join("lib"));
+        let root = PathBuf::from(snpe_root);
+        paths.push(root.join("lib").join("aarch64-linux"));
+        paths.push(root.join("lib"));
     }
 
     paths.push(PathBuf::from("/opt/snpe/lib/aarch64-linux"));
