@@ -171,8 +171,18 @@ impl LlamaContext {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or_else(|_| num_cores <= 4);
 
+        // Detect Qualcomm Adreno GPU (via GGML_VK_MAX_BATCH env var or ARM64+Vulkan build)
+        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok()
+            || (cfg!(target_arch = "aarch64") && cfg!(feature = "llama-cpp"));
+
         // Set context size based on device capabilities
-        if is_low_power {
+        if is_adreno {
+            // Qualcomm Adreno GPU optimizations: strict batch size limits
+            // Adreno GPUs have hardware limit of batch < 33, use 16 for safety margin
+            params.n_ctx = 2048; // Smaller context window for mobile GPU
+            params.n_batch = 16; // Maximum safe batch size for Adreno (hardware limit ~32)
+            params.n_ubatch = 16; // Match micro-batch to batch size
+        } else if is_low_power {
             // Raspberry Pi optimizations: reduce context and batch for faster inference
             params.n_ctx = 2048; // Smaller context window for edge devices
             params.n_batch = 512; // Reduced batch size for lower memory pressure
@@ -193,10 +203,16 @@ impl LlamaContext {
 
         // Show context configuration if debug is enabled
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            let mode = if is_low_power { "Low-Power/Pi" } else { "Full" };
+            let mode = if is_adreno {
+                "Adreno/Vulkan"
+            } else if is_low_power {
+                "Low-Power/Pi"
+            } else {
+                "Full"
+            };
             eprintln!(
-                "Context[{}]: cores={}, threads={}, n_ctx={}, n_batch={}, KV offload={}, flash_attn=auto",
-                mode, num_cores, thread_count, params.n_ctx, params.n_batch, params.offload_kqv
+                "Context[{}]: cores={}, threads={}, n_ctx={}, n_batch={}, n_ubatch={}, KV offload={}, flash_attn=auto",
+                mode, num_cores, thread_count, params.n_ctx, params.n_batch, params.n_ubatch, params.offload_kqv
             );
         }
 
