@@ -285,6 +285,9 @@ jobs:
             # Install ARM64 cross-compilation toolchain
             # Use crossbuild-essential which includes all necessary libraries
             sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+            # Install Vulkan SDK for GPU acceleration (required for UNO Q with Adreno support)
+            sudo apt-get install -y libvulkan-dev vulkan-tools glslang-tools
           else
             # Install both runtime and static OpenMP libraries for static linking
             # Use gcc-multilib which includes static libgomp.a
