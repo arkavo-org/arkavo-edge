@@ -218,3 +218,12 @@ Based on upstream llama.cpp Issue #5186:
 4. **Alternate models** - Try CPU-optimized quantizations (Q4_K_M, Q5_K_M)
 
 **Status**: Vulkan GPU acceleration not viable on UNO Q with Mesa Turnip at this time.
+
+## Complete Hardware Acceleration Investigation
+
+See `docs/uno-q-hardware-acceleration-blockers.md` for comprehensive analysis of all acceleration paths:
+- Vulkan (GPU) - Driver bugs
+- OpenCL (GPU) - Not supported by Mesa
+- Hexagon NPU - Missing device tree configuration
+
+All paths are blocked by either driver limitations or build constraints (no Docker, OOM on native builds).
