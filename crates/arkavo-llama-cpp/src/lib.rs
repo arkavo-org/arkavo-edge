@@ -20,11 +20,18 @@ use std::ffi::CString;
 #[cfg(not(target_env = "musl"))]
 use std::os::raw::{c_char, c_void};
 #[cfg(not(target_env = "musl"))]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::panic;
+#[cfg(not(target_env = "musl"))]
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // Global flag to control llama.cpp logging
 #[cfg(not(target_env = "musl"))]
 static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
+
+// Global flag to track if GPU has failed (avoid retrying)
+// 0 = not tried, 1 = GPU works, 2 = GPU failed (use CPU)
+#[cfg(not(target_env = "musl"))]
+static GPU_STATUS: AtomicU32 = AtomicU32::new(0);
 
 // Custom log callback that filters based on log level and our debug flag
 #[cfg(not(target_env = "musl"))]
@@ -103,22 +110,48 @@ impl LlamaModel {
         }
 
         let c_path = CString::new(path).unwrap();
-        let mut params = unsafe { ffi::llama_model_default_params() };
 
-        // Enable GPU acceleration - offload all layers to GPU/Metal
-        params.n_gpu_layers = 999; // Offload all layers (999 = all)
-        params.main_gpu = 0; // Use GPU 0 (primary GPU)
+        // Check if GPU has already failed
+        let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
+        let try_gpu = gpu_status != 2; // Don't try if previously failed
 
-        // Show GPU offloading info if debug is enabled
-        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            eprintln!("GPU: Offloading all layers to Metal/GPU");
+        if try_gpu {
+            // First attempt: GPU acceleration
+            let mut params = unsafe { ffi::llama_model_default_params() };
+            params.n_gpu_layers = 999; // Offload all layers (999 = all)
+            params.main_gpu = 0; // Use GPU 0 (primary GPU)
+
+            if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+                eprintln!("Attempting GPU acceleration (offloading all layers)");
+            }
+
+            let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
+
+            if !model.is_null() {
+                GPU_STATUS.store(1, Ordering::Relaxed); // GPU works
+                if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+                    eprintln!("✓ GPU model loaded successfully");
+                }
+                return Ok(Self { ptr: model });
+            }
+
+            // GPU failed - mark it and fall back to CPU
+            GPU_STATUS.store(2, Ordering::Relaxed);
+            eprintln!("⚠ GPU model loading failed, falling back to CPU-only mode");
+        } else if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Skipping GPU (previous failure), using CPU-only mode");
         }
 
-        let model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), params) };
-        if model.is_null() {
-            Err("Failed to load model".to_string())
+        // CPU fallback
+        let mut cpu_params = unsafe { ffi::llama_model_default_params() };
+        cpu_params.n_gpu_layers = 0; // CPU only
+
+        let cpu_model = unsafe { ffi::llama_load_model_from_file(c_path.as_ptr(), cpu_params) };
+        if cpu_model.is_null() {
+            Err("Failed to load model (CPU attempt failed)".to_string())
         } else {
-            Ok(Self { ptr: model })
+            eprintln!("✓ CPU-only model loaded successfully");
+            Ok(Self { ptr: cpu_model })
         }
     }
 

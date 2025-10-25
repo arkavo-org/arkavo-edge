@@ -84,12 +84,14 @@ fn main() {
 
             // Enable Vulkan only for UNO Q (Qualcomm Adreno GPU), not Raspberry Pi
             // Check ARKAVO_TARGET_DEVICE environment variable set by CI workflow
+            // Note: Runtime will gracefully fall back to CPU if Vulkan fails
             if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
                 if device == "uno-q" {
                     // Mesa Turnip driver provides Vulkan support for Adreno 702
-                    // Note: OpenCL not available - Mesa's Rusticl/Clover don't support Adreno,
-                    //       and Qualcomm's proprietary OpenCL driver is not installed
+                    // Note: Runtime includes graceful fallback to CPU if GPU fails
+                    //       See docs/uno-q-hardware-acceleration-blockers.md for known driver issues
                     eprintln!("Enabling Vulkan GPU acceleration for UNO Q (Adreno 702 via Turnip)");
+                    eprintln!("Note: Runtime will fall back to CPU if GPU initialization fails");
                     config.define("GGML_VULKAN", "ON");
                 } else {
                     eprintln!("Building CPU-only for device: {}", device);
