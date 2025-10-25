@@ -265,11 +265,11 @@ jobs:
             features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-24.04-arm
             features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-24.04-arm
             features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
