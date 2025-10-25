@@ -258,22 +258,22 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-            features: memory,gemini
+            features: memory,mdns,gemini
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
-            features: memory
+            features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
           - os: ubuntu-24.04-arm
-            features: memory,gemini
+            features: memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
           # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
           # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
           # See: docs/uno-q-hardware-acceleration-blockers.md for details
           - os: ubuntu-24.04-arm
-            features: memory,gemini
+            features: memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
     steps:
