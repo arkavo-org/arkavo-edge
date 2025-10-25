@@ -91,6 +91,9 @@ fn main() {
             config.define("GGML_OPENCL", "ON");
             config.define("GGML_OPENCL_USE_ADRENO_KERNELS", "ON"); // Use optimized Adreno kernels
             config.define("GGML_VULKAN", "ON");
+
+            // Link against OpenCL library
+            println!("cargo:rustc-link-lib=OpenCL");
         } else {
             // Disable OpenCL on non-ARM64 platforms
             config.define("GGML_OPENCL", "OFF");
