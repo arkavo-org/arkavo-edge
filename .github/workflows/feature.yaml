@@ -270,8 +270,8 @@ jobs:
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
           # Arduino UNO Q (QRB2210) with Adreno 702 GPU
-          # Patch: llama.cpp Vulkan backend modified to support Mesa Turnip (no 16-bit storage)
-          # See: docs/uno-q-vulkan-debug.md for details
+          # Dual GPU backends: OpenCL (Qualcomm-optimized) + Vulkan (Mesa Turnip with FP32 fallback patch)
+          # See: docs/uno-q-vulkan-status.md for details
           - os: ubuntu-24.04-arm
             features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
@@ -289,9 +289,10 @@ jobs:
           echo "DEBUG: matrix.features = '${{ matrix.features }}'"
 
           if [ "${{ matrix.device }}" = "uno-q" ]; then
-            echo "Installing Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
+            echo "Installing OpenCL + Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
             sudo apt-get install -y cmake ninja-build clang libclang-dev build-essential git python3 \
-              libvulkan-dev vulkan-tools glslang-tools glslang-dev spirv-tools libshaderc-dev mesa-vulkan-drivers libgomp1
+              libvulkan-dev vulkan-tools glslang-tools glslang-dev spirv-tools libshaderc-dev mesa-vulkan-drivers \
+              ocl-icd-opencl-dev opencl-headers clinfo libgomp1
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
             echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
@@ -357,10 +358,11 @@ jobs:
             echo "Building for Raspberry Pi 5 (native ARM64)"
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build with Vulkan GPU acceleration (Cortex-A53)
-            # Using patched llama.cpp for Mesa Turnip compatibility (FP32 fallback when no 16-bit storage)
-            echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
-            echo "Note: llama.cpp Vulkan backend patched for Mesa Turnip (see docs/uno-q-vulkan-debug.md)"
+            # Arduino UNO Q - Native ARM64 build with OpenCL + Vulkan GPU acceleration (Cortex-A53)
+            # OpenCL: Qualcomm-optimized backend with Adreno-specific kernels
+            # Vulkan: Mesa Turnip driver (patched for FP32 fallback when no 16-bit storage)
+            echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + OpenCL + Vulkan)"
+            echo "Note: llama.cpp with dual GPU backends (OpenCL primary, Vulkan fallback)"
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support (x86_64)
@@ -387,8 +389,9 @@ jobs:
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
-            echo "llama.cpp with Vulkan GPU acceleration (Mesa Turnip compatible)" >> release-package/features.txt
-            echo "Patched for FP32 fallback when 16-bit storage unavailable" >> release-package/features.txt
+            echo "llama.cpp with dual GPU backends:" >> release-package/features.txt
+            echo "  - OpenCL (Qualcomm-optimized with Adreno kernels)" >> release-package/features.txt
+            echo "  - Vulkan (Mesa Turnip driver, FP32 fallback patch)" >> release-package/features.txt
             echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
