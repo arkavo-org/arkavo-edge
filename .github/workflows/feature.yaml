@@ -264,17 +264,14 @@ jobs:
             os: ubuntu-22.04
             features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+          # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
+          - os: ubuntu-22.04-arm
             features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-aarch64-linux-rpi5
-            cross: true
             device: rpi5
-          - target: native-aarch64
-            os: ubuntu-22.04-arm
+          - os: ubuntu-22.04-arm
             features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
-            cross: false
             device: uno-q
     steps:
       - uses: actions/checkout@v4
@@ -284,19 +281,15 @@ jobs:
         run: |
           sudo apt-get update
 
-          # Install ARM64 cross-compilation toolchain if needed
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            # Install ARM64 cross-compilation toolchain for Raspberry Pi 5
-            # Use crossbuild-essential which includes all necessary libraries
-            sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          elif [ "${{ matrix.device }}" = "uno-q" ]; then
+          if [ "${{ matrix.device }}" = "uno-q" ]; then
             # Native ARM64 build for Arduino UNO Q with Vulkan GPU acceleration
-            # Install Vulkan libraries and GLSL compiler for llama.cpp GPU support
             sudo apt-get install -y cmake clang libclang-dev build-essential \
               libvulkan-dev vulkan-tools glslang-tools mesa-vulkan-drivers libgomp1
+          elif [ "${{ matrix.device }}" = "rpi5" ]; then
+            # Native ARM64 build for Raspberry Pi 5
+            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           else
-            # Install both runtime and static OpenMP libraries for static linking
-            # Use gcc-multilib which includes static libgomp.a
+            # x86_64 builds
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
 
@@ -309,13 +302,13 @@ jobs:
       # License: Proprietary (cannot redistribute - users install separately)
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target || '' }}
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-${{ matrix.target }}"
+          prefix-key: "build-${{ matrix.device || matrix.target }}"
 
       - name: Install build tools
         run: |
@@ -332,39 +325,32 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-          # ARM64 cross-compilation toolchain
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support and static OpenMP (x86_64)
-            cargo build --release --target ${{ matrix.target }} -p arkavo
-          elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Raspberry Pi 5 - Full featured with llama.cpp (Cortex-A76 compatible)
-            echo "Building for Raspberry Pi 5 with llama.cpp support"
-            cargo build --release --target ${{ matrix.target }} -p arkavo
+          if [ "${{ matrix.device }}" = "rpi5" ]; then
+            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76)
+            echo "Building for Raspberry Pi 5 (native ARM64)"
+            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Arduino UNO Q - Native ARM64 build with llama.cpp + Vulkan GPU acceleration
-            # Also includes SNPE (dynamically loaded at runtime when SNPE_ROOT is set)
-            # Build natively without --target flag to avoid cross-compilation mode
+            # Arduino UNO Q - Native ARM64 build with Vulkan GPU acceleration (Cortex-A53)
             echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
+          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Full featured build with local LLM support (x86_64)
+            cargo build --release --target ${{ matrix.target }} -p arkavo
           else
-            # Static build for containers with memory and mDNS
+            # Static musl build for containers
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
           fi
 
       - name: Prepare release artifact
         run: |
           mkdir -p release-package
-          # For native ARM64 builds (UNO Q), binary is in target/release, not target/<triple>/release
-          if [ "${{ matrix.device }}" = "uno-q" ]; then
+          # For native ARM64 builds, binary is in target/release; for others, target/<triple>/release
+          if [ -n "${{ matrix.device }}" ]; then
             cp target/release/arkavo release-package/${{ matrix.artifact_name }}
           else
             cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
@@ -372,20 +358,20 @@ jobs:
           chmod +x release-package/${{ matrix.artifact_name }}
 
           # Create feature manifest
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
-          elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Full featured build for Raspberry Pi 5" > release-package/features.txt
-            echo "Includes llama.cpp for local LLM inference (Cortex-A76 optimized)" >> release-package/features.txt
-            echo "Memory management and mDNS discovery support" >> release-package/features.txt
+          if [ "${{ matrix.device }}" = "rpi5" ]; then
+            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64)" > release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
             echo "llama.cpp with Vulkan GPU acceleration for local LLM inference" >> release-package/features.txt
             echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
-            echo "Remote LLM support via Gemini API" >> release-package/features.txt
-            echo "Memory management and mDNS discovery support" >> release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
+          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            echo "Full featured build (x86_64)" > release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           else
-            echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
+            echo "Static build (${{ matrix.target }})" > release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           fi
 
       - name: Upload binary
