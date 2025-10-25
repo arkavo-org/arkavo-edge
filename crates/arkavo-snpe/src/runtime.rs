@@ -109,7 +109,6 @@ pub struct DlcModel {
     pub path: PathBuf,
     pub input_shapes: HashMap<String, TensorShape>,
     pub output_shapes: HashMap<String, TensorShape>,
-    target: AcceleratorTarget,
 }
 
 impl DlcModel {
@@ -133,7 +132,6 @@ impl DlcModel {
             path: path.to_path_buf(),
             input_shapes,
             output_shapes,
-            target,
         })
     }
 

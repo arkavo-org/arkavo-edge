@@ -3,25 +3,23 @@
 use crate::error::{Result, SnpeError};
 use libloading::Library;
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::OnceLock;
 
-static INIT: Once = Once::new();
-static mut SNPE_LIB: Option<Library> = None;
+static SNPE_LIB: OnceLock<Library> = OnceLock::new();
 
 pub fn load_snpe() -> Result<&'static Library> {
-    unsafe {
-        INIT.call_once(|| match find_and_load_library() {
-            Ok(lib) => {
-                log::info!("SNPE library loaded successfully");
-                SNPE_LIB = Some(lib);
-            }
-            Err(e) => {
-                log::warn!("Failed to load SNPE library: {}", e);
-            }
-        });
+    SNPE_LIB.get_or_init(|| match find_and_load_library() {
+        Ok(lib) => {
+            log::info!("SNPE library loaded successfully");
+            lib
+        }
+        Err(e) => {
+            log::warn!("Failed to load SNPE library: {}", e);
+            panic!("SNPE library not available");
+        }
+    });
 
-        SNPE_LIB.as_ref().ok_or_else(|| SnpeError::SdkNotFound)
-    }
+    SNPE_LIB.get().ok_or_else(|| SnpeError::SdkNotFound)
 }
 
 fn find_and_load_library() -> Result<Library> {
