@@ -352,8 +352,9 @@ jobs:
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             # Arduino UNO Q - Native ARM64 build with llama.cpp + Vulkan GPU acceleration
             # Also includes SNPE (dynamically loaded at runtime when SNPE_ROOT is set)
+            # Build natively without --target flag to avoid cross-compilation mode
             echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
-            cargo build --release --target ${{ matrix.target }} -p arkavo --no-default-features --features ${{ matrix.features }}
+            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           else
             # Static build for containers with memory and mDNS
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
@@ -362,7 +363,12 @@ jobs:
       - name: Prepare release artifact
         run: |
           mkdir -p release-package
-          cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
+          # For native ARM64 builds (UNO Q), binary is in target/release, not target/<triple>/release
+          if [ "${{ matrix.device }}" = "uno-q" ]; then
+            cp target/release/arkavo release-package/${{ matrix.artifact_name }}
+          else
+            cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
+          fi
           chmod +x release-package/${{ matrix.artifact_name }}
 
           # Create feature manifest
