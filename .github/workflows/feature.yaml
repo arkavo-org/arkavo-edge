@@ -250,7 +250,7 @@ jobs:
           fi
 
   build-linux:
-    name: Build Linux (${{ matrix.target }})
+    name: Build Linux (${{ matrix.target || matrix.device }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -281,15 +281,22 @@ jobs:
         run: |
           sudo apt-get update
 
+          echo "DEBUG: matrix.device = '${{ matrix.device }}'"
+          echo "DEBUG: matrix.target = '${{ matrix.target }}'"
+          echo "DEBUG: matrix.features = '${{ matrix.features }}'"
+
           if [ "${{ matrix.device }}" = "uno-q" ]; then
-            # Native ARM64 build for Arduino UNO Q with Vulkan GPU acceleration
+            echo "Installing Vulkan dependencies for Arduino UNO Q (Adreno GPU)"
             sudo apt-get install -y cmake clang libclang-dev build-essential \
               libvulkan-dev vulkan-tools glslang-tools mesa-vulkan-drivers libgomp1
+            echo "Verifying Vulkan installation:"
+            dpkg -l | grep vulkan || true
+            which glslc || true
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Native ARM64 build for Raspberry Pi 5 (no Vulkan needed)
+            echo "Installing dependencies for Raspberry Pi 5 (CPU only)"
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           else
-            # x86_64 builds (with or without llama-cpp)
+            echo "Installing dependencies for x86_64 builds"
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
 
