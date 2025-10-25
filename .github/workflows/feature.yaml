@@ -292,7 +292,8 @@ jobs:
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             # Native ARM64 build for Arduino UNO Q with Vulkan GPU acceleration
             # Install Vulkan libraries and GLSL compiler for llama.cpp GPU support
-            sudo apt-get install -y cmake clang libclang-dev build-essential libvulkan-dev glslang-tools libgomp1
+            sudo apt-get install -y cmake clang libclang-dev build-essential \
+              libvulkan-dev vulkan-tools glslang-tools mesa-vulkan-drivers libgomp1
           else
             # Install both runtime and static OpenMP libraries for static linking
             # Use gcc-multilib which includes static libgomp.a
