@@ -85,7 +85,9 @@ fn main() {
             // Enable both OpenCL and Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
             // OpenCL: Actively maintained by Qualcomm, with Adreno-specific optimizations
             // Vulkan: Mesa Turnip driver for Adreno 702 (experimental)
-            eprintln!("Enabling OpenCL + Vulkan GPU acceleration for aarch64-linux (Adreno support)");
+            eprintln!(
+                "Enabling OpenCL + Vulkan GPU acceleration for aarch64-linux (Adreno support)"
+            );
             config.define("GGML_OPENCL", "ON");
             config.define("GGML_OPENCL_USE_ADRENO_KERNELS", "ON"); // Use optimized Adreno kernels
             config.define("GGML_VULKAN", "ON");
