@@ -258,7 +258,7 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-            features: memory,llm-remote,test-harness,gemini
+            features: memory,gemini
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
@@ -266,14 +266,14 @@ jobs:
             artifact_name: arkavo-x86_64-linux-musl
           # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
           - os: ubuntu-24.04-arm
-            features: memory,llm-remote,test-harness,gemini
+            features: memory,gemini
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
           # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
           # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
           # See: docs/uno-q-hardware-acceleration-blockers.md for details
           - os: ubuntu-24.04-arm
-            features: memory,llm-remote,gemini
+            features: memory,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
             device: uno-q
     steps:
@@ -342,7 +342,7 @@ jobs:
             export ARKAVO_TARGET_DEVICE=uno-q
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Full featured build (x86_64, no llama-cpp/web-ui - submodule removed)
+            # Minimal build (x86_64, no llama-cpp/web-ui/mdns - submodule removed)
             cargo build --release --target ${{ matrix.target }} -p arkavo --no-default-features --features ${{ matrix.features }}
           else
             # Static musl build for containers
