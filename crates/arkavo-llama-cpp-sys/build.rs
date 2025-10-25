@@ -81,6 +81,11 @@ fn main() {
             config
                 .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
                 .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
+
+            // Enable Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
+            // UNO Q has Mesa Turnip Vulkan driver for Adreno 702
+            eprintln!("Enabling Vulkan GPU acceleration for aarch64-linux (Adreno support)");
+            config.define("GGML_VULKAN", "ON");
         }
     }
 
@@ -174,6 +179,9 @@ fn main() {
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/12");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
+
+            // Vulkan support for Adreno GPU (UNO Q with Mesa Turnip driver)
+            println!("cargo:rustc-link-lib=vulkan");
         } else {
             // x86_64 library paths
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
