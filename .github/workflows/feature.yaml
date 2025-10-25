@@ -354,8 +354,9 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: |
           if [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76)
-            echo "Building for Raspberry Pi 5 (native ARM64)"
+            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76, CPU-only)
+            echo "Building for Raspberry Pi 5 (native ARM64, CPU-only)"
+            export ARKAVO_TARGET_DEVICE=rpi5
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             # Arduino UNO Q - Native ARM64 build with Vulkan GPU acceleration (Cortex-A53)
@@ -363,6 +364,7 @@ jobs:
             # Includes Oct 25 memory allocation fixes that may resolve device loss issues
             echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
             echo "Note: llama.cpp updated to 5d195f17bc with Vulkan memory allocation fixes"
+            export ARKAVO_TARGET_DEVICE=uno-q
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support (x86_64)
@@ -385,7 +387,8 @@ jobs:
 
           # Create feature manifest
           if [ "${{ matrix.device }}" = "rpi5" ]; then
-            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64)" > release-package/features.txt
+            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
+            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt

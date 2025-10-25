@@ -82,12 +82,24 @@ fn main() {
                 .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
                 .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
 
-            // Enable Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
-            // Mesa Turnip driver provides Vulkan support for Adreno 702
-            // Note: OpenCL not available - Mesa's Rusticl/Clover don't support Adreno,
-            //       and Qualcomm's proprietary OpenCL driver is not installed
-            eprintln!("Enabling Vulkan GPU acceleration for aarch64-linux (Adreno 702 via Turnip)");
-            config.define("GGML_VULKAN", "ON");
+            // Enable Vulkan only for UNO Q (Qualcomm Adreno GPU), not Raspberry Pi
+            // Check ARKAVO_TARGET_DEVICE environment variable set by CI workflow
+            if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
+                if device == "uno-q" {
+                    // Mesa Turnip driver provides Vulkan support for Adreno 702
+                    // Note: OpenCL not available - Mesa's Rusticl/Clover don't support Adreno,
+                    //       and Qualcomm's proprietary OpenCL driver is not installed
+                    eprintln!("Enabling Vulkan GPU acceleration for UNO Q (Adreno 702 via Turnip)");
+                    config.define("GGML_VULKAN", "ON");
+                } else {
+                    eprintln!("Building CPU-only for device: {}", device);
+                }
+            } else {
+                // No device specified - default to CPU-only for portability
+                eprintln!(
+                    "Building CPU-only for aarch64-linux (no ARKAVO_TARGET_DEVICE specified)"
+                );
+            }
         }
     }
 
@@ -182,8 +194,12 @@ fn main() {
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
 
-            // Vulkan support for Adreno GPU (UNO Q with Mesa Turnip driver)
-            println!("cargo:rustc-link-lib=vulkan");
+            // Vulkan support only for UNO Q (Adreno GPU with Mesa Turnip driver)
+            if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
+                if device == "uno-q" {
+                    println!("cargo:rustc-link-lib=vulkan");
+                }
+            }
         } else {
             // x86_64 library paths
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
