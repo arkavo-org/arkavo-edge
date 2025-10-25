@@ -306,10 +306,10 @@ jobs:
           cd shaderc
           ./utils/git-sync-deps
           mkdir build && cd build
-          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON ..
-          ninja glslc
-          sudo install -m 755 glslc/glslc /usr/local/bin/
-          glslc --version
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON ..
+          ninja
+          sudo install -m 755 glslc/glslc /usr/local/bin/glslc
+          /usr/local/bin/glslc --version
           echo "glslc installed successfully"
 
       # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
