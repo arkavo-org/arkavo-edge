@@ -286,10 +286,10 @@ jobs:
             sudo apt-get install -y cmake clang libclang-dev build-essential \
               libvulkan-dev vulkan-tools glslang-tools mesa-vulkan-drivers libgomp1
           elif [ "${{ matrix.device }}" = "rpi5" ]; then
-            # Native ARM64 build for Raspberry Pi 5
+            # Native ARM64 build for Raspberry Pi 5 (no Vulkan needed)
             sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           else
-            # x86_64 builds
+            # x86_64 builds (with or without llama-cpp)
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
 
