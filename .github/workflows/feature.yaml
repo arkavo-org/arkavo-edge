@@ -269,6 +269,9 @@ jobs:
             features: memory,mdns,llm-remote,test-harness,gemini,web-ui
             artifact_name: arkavo-aarch64-linux-rpi5
             device: rpi5
+          # Arduino UNO Q (QRB2210) with Adreno 702 GPU
+          # Patch: llama.cpp Vulkan backend modified to support Mesa Turnip (no 16-bit storage)
+          # See: docs/uno-q-vulkan-debug.md for details
           - os: ubuntu-24.04-arm
             features: llama-cpp,snpe,memory,mdns,gemini
             artifact_name: arkavo-aarch64-linux-uno-q
@@ -355,7 +358,9 @@ jobs:
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             # Arduino UNO Q - Native ARM64 build with Vulkan GPU acceleration (Cortex-A53)
+            # Using patched llama.cpp for Mesa Turnip compatibility (FP32 fallback when no 16-bit storage)
             echo "Building for Arduino UNO Q (Cortex-A53 with Adreno 702 GPU + Vulkan)"
+            echo "Note: llama.cpp Vulkan backend patched for Mesa Turnip (see docs/uno-q-vulkan-debug.md)"
             cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
             # Full featured build with local LLM support (x86_64)
@@ -382,7 +387,8 @@ jobs:
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.device }}" = "uno-q" ]; then
             echo "Arduino UNO Q build (Cortex-A53 with Adreno 702 GPU)" > release-package/features.txt
-            echo "llama.cpp with Vulkan GPU acceleration for local LLM inference" >> release-package/features.txt
+            echo "llama.cpp with Vulkan GPU acceleration (Mesa Turnip compatible)" >> release-package/features.txt
+            echo "Patched for FP32 fallback when 16-bit storage unavailable" >> release-package/features.txt
             echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
             echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
