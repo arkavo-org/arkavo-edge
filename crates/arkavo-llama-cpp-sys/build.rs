@@ -84,8 +84,13 @@ fn main() {
 
             // Enable Vulkan for Qualcomm Adreno GPU (UNO Q, Android boards)
             // UNO Q has Mesa Turnip Vulkan driver for Adreno 702
-            eprintln!("Enabling Vulkan GPU acceleration for aarch64-linux (Adreno support)");
-            config.define("GGML_VULKAN", "ON");
+            // Only enable if GGML_VULKAN env var is set (not during cross-compilation in CI)
+            if std::env::var("GGML_VULKAN").unwrap_or_default() == "ON" {
+                eprintln!("Enabling Vulkan GPU acceleration for aarch64-linux (Adreno support)");
+                config.define("GGML_VULKAN", "ON");
+            } else {
+                eprintln!("Vulkan disabled for aarch64 (set GGML_VULKAN=ON to enable)");
+            }
         }
     }
 
