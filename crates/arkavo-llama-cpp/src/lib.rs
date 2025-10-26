@@ -191,8 +191,6 @@ unsafe impl Send for LlamaContext {}
 #[cfg(not(target_env = "musl"))]
 impl LlamaContext {
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
-        let mut params = unsafe { ffi::llama_context_default_params() };
-
         // Auto-detect CPU cores for optimal thread count
         let num_cores = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -208,51 +206,84 @@ impl LlamaContext {
         let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok()
             || (cfg!(target_arch = "aarch64") && cfg!(feature = "llama-cpp"));
 
-        // Set context size based on device capabilities
-        if is_adreno {
-            // Qualcomm Adreno GPU optimizations: strict batch size limits
-            // Adreno GPUs have hardware limit of batch < 33, use 16 for safety margin
-            params.n_ctx = 2048; // Smaller context window for mobile GPU
-            params.n_batch = 16; // Maximum safe batch size for Adreno (hardware limit ~32)
-            params.n_ubatch = 16; // Match micro-batch to batch size
-        } else if is_low_power {
-            // Raspberry Pi optimizations: reduce context and batch for faster inference
-            params.n_ctx = 2048; // Smaller context window for edge devices
-            params.n_batch = 512; // Reduced batch size for lower memory pressure
-            params.n_ubatch = 256; // Smaller micro-batch
-        } else {
-            // Full-size context for powerful systems
-            params.n_ctx = 32768; // Context window: 32K tokens (full model capacity)
-            params.n_batch = 2048; // Increased batch size for prefill optimization
-            params.n_ubatch = 512; // Micro-batch size (keep reasonable for memory)
-        }
-        params.n_seq_max = 1; // Single sequence
-        params.n_threads = thread_count; // Auto-detected CPU threads
-        params.n_threads_batch = thread_count; // Batch processing threads
+        // Try to create context, catch Vulkan crashes
+        let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
 
-        // Enable GPU offloading for KV cache and operations
-        params.offload_kqv = true; // Offload KV cache to GPU
-        params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO; // Auto-detect Flash Attention
+        // Try GPU if it hasn't failed before
+        if gpu_status != 2 {
+            let mut gpu_params = unsafe { ffi::llama_context_default_params() };
 
-        // Show context configuration if debug is enabled
-        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            let mode = if is_adreno {
-                "Adreno/Vulkan"
+            if is_adreno {
+                gpu_params.n_ctx = 2048;
+                gpu_params.n_batch = 16;
+                gpu_params.n_ubatch = 16;
             } else if is_low_power {
-                "Low-Power/Pi"
+                gpu_params.n_ctx = 2048;
+                gpu_params.n_batch = 512;
+                gpu_params.n_ubatch = 256;
             } else {
-                "Full"
-            };
-            eprintln!(
-                "Context[{}]: cores={}, threads={}, n_ctx={}, n_batch={}, n_ubatch={}, KV offload={}, flash_attn=auto",
-                mode, num_cores, thread_count, params.n_ctx, params.n_batch, params.n_ubatch, params.offload_kqv
-            );
+                gpu_params.n_ctx = 32768;
+                gpu_params.n_batch = 2048;
+                gpu_params.n_ubatch = 512;
+            }
+            gpu_params.n_seq_max = 1;
+            gpu_params.n_threads = thread_count;
+            gpu_params.n_threads_batch = thread_count;
+            gpu_params.offload_kqv = true;
+            gpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO;
+
+            // Try with panic catching (Vulkan may abort)
+            let gpu_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                unsafe { ffi::llama_new_context_with_model(model.ptr, gpu_params) }
+            }));
+
+            match gpu_result {
+                Ok(context) if !context.is_null() => {
+                    GPU_STATUS.store(1, Ordering::Relaxed);
+                    if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+                        eprintln!("✓ GPU context created successfully");
+                    }
+                    return Ok(Self { ptr: context });
+                }
+                Ok(_) => {
+                    GPU_STATUS.store(2, Ordering::Relaxed);
+                    eprintln!("⚠ GPU context creation failed (returned null), falling back to CPU");
+                }
+                Err(_) => {
+                    GPU_STATUS.store(2, Ordering::Relaxed);
+                    eprintln!("⚠ GPU context creation crashed (Vulkan driver error), falling back to CPU");
+                }
+            }
         }
 
-        let context = unsafe { ffi::llama_new_context_with_model(model.ptr, params) };
-        if context.is_null() {
-            Err("Failed to create context".to_string())
+        // CPU fallback
+        let mut cpu_params = unsafe { ffi::llama_context_default_params() };
+
+        if is_adreno || is_low_power {
+            cpu_params.n_ctx = 2048;
+            cpu_params.n_batch = 512;
+            cpu_params.n_ubatch = 256;
         } else {
+            cpu_params.n_ctx = 32768;
+            cpu_params.n_batch = 2048;
+            cpu_params.n_ubatch = 512;
+        }
+        cpu_params.n_seq_max = 1;
+        cpu_params.n_threads = thread_count;
+        cpu_params.n_threads_batch = thread_count;
+        cpu_params.offload_kqv = false; // CPU only
+        cpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED;
+
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!("Creating CPU-only context: n_ctx={}, n_batch={}, threads={}",
+                cpu_params.n_ctx, cpu_params.n_batch, thread_count);
+        }
+
+        let context = unsafe { ffi::llama_new_context_with_model(model.ptr, cpu_params) };
+        if context.is_null() {
+            Err("Failed to create context (CPU attempt failed)".to_string())
+        } else {
+            eprintln!("✓ CPU-only context created successfully");
             Ok(Self { ptr: context })
         }
     }
