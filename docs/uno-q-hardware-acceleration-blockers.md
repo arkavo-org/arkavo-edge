@@ -267,8 +267,10 @@ Mesa Turnip 25.1.0-1qcom1 ✅ (installed)
 
 **CPU-only build**: The arkavo binary for UNO Q is built without Vulkan support to avoid crashes:
 - ✅ Stable operation, no crashes
-- ✅ Works with all GGUF models
-- ⚠️ Slow inference: ~1-2 tokens/sec on Gemma-3-270M (vs 50+ expected with GPU)
+- ✅ Works with all GGUF models (Q4_0, Q4_K_M, Q5_K_M tested)
+- ⚠️ CPU inference: **7-13 tokens/sec** on Gemma-3-270M-Q4 (vs 50+ expected with GPU)
+  - Q4_0: 7.6-13.2 tok/s, TTFT: 231-304ms
+  - Q4_K_M: 9.4 tok/s, TTFT: 389ms
 - Built with:
   - `GGML_VULKAN=OFF` - No GPU acceleration
   - `GGML_CPU_ARM_ARCH=armv8-a+fp+simd` - ARMv8.0/Cortex-A53 compatible
