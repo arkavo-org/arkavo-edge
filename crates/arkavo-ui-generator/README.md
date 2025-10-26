@@ -19,22 +19,41 @@ Vision integration uses llama.cpp's multimodal API (mtmd) with the following com
 
 - **Screenshot Capture**: Platform-specific capture (screencapture on macOS, ImageMagick on Linux)
 - **Image Preprocessing**: Automatic resizing to 448x448 RGB for CLIP vision encoder
-- **Multimodal LLM**: Qwen3-VL-4B-Instruct via llama.cpp with mmproj support
+- **Multimodal LLM**: Qwen2.5-VL (3B/7B/32B/72B) via llama.cpp with mmproj support
 - **UI Verification**: Automated pass/fail validation against requirements
 
 ### Model Setup
 
-Download the vision model and mmproj file:
+Models are automatically downloaded from HuggingFace on first use. No manual download required!
 
-```bash
-# Download Qwen3-VL-4B GGUF model (4-bit quantized)
-wget https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-unsloth-bnb-4bit/resolve/main/Qwen3-VL-4B-Instruct-Q4_K_M.gguf
+```rust
+use arkavo_ui_generator::vision::{Qwen25VLModelLoader, ModelSize};
 
-# Download mmproj projector file (vision encoder)
-wget https://huggingface.co/unsloth/Qwen3-VL-4B-Instruct-unsloth-bnb-4bit/resolve/main/mmproj-model-f16.gguf
+// Automatically downloads and caches the model
+let loader = Qwen25VLModelLoader::new()?;
+let paths = loader.ensure_model(ModelSize::Medium7B).await?;
 ```
 
-Place both files in the same directory (e.g., `~/.arkavo/models/qwen3vl/`).
+Available model sizes:
+- `ModelSize::Small3B` - 3B parameters (faster, less accurate)
+- `ModelSize::Medium7B` - 7B parameters (balanced, recommended)
+- `ModelSize::Large32B` - 32B parameters (slower, most accurate)
+
+Models are cached in `~/.arkavo/models/qwen25vl/` for reuse.
+
+#### Manual Download (Optional)
+
+If you prefer to download manually:
+
+```bash
+# Download Qwen2.5-VL-7B GGUF model (Q8_0 quantization)
+wget https://huggingface.co/Mungert/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q8_0.gguf
+
+# Download mmproj projector file (vision encoder)
+wget https://huggingface.co/Mungert/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-mmproj-f16.gguf
+```
+
+Place both files in `~/.arkavo/models/qwen25vl/`.
 
 ### Usage
 
@@ -80,9 +99,9 @@ use arkavo_llm::LlamaCppProvider;
 
 // Create vision-enabled provider
 let provider = LlamaCppProvider::new_with_mmproj(
-    "qwen3vl".to_string(),
-    "path/to/Qwen3-VL-4B-Instruct-Q4_K_M.gguf".to_string(),
-    "path/to/mmproj-model-f16.gguf".to_string(),
+    "qwen25vl".to_string(),
+    "path/to/Qwen2.5-VL-7B-Instruct-Q8_0.gguf".to_string(),
+    "path/to/Qwen2.5-VL-7B-Instruct-mmproj-f16.gguf".to_string(),
 )?;
 
 // Capture screenshot

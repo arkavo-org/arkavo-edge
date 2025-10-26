@@ -22,6 +22,10 @@ arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
 base64 = { workspace = true }
 
+# Model downloading
+hf-hub = { workspace = true }
+dirs = { workspace = true }
+
 # Template rendering
 regex = { workspace = true }
 uuid = { workspace = true }

@@ -1,3 +1,7 @@
+mod model_loader;
+
+pub use model_loader::{ModelPaths, ModelSize, Qwen25VLModelLoader};
+
 use anyhow::{Context, Result};
 use arkavo_llm::{Message, encode_image_bytes};
 use std::path::Path;
