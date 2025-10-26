@@ -233,8 +233,8 @@ impl LlamaContext {
             gpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_AUTO;
 
             // Try with panic catching (Vulkan may abort)
-            let gpu_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                unsafe { ffi::llama_new_context_with_model(model.ptr, gpu_params) }
+            let gpu_result = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
+                ffi::llama_new_context_with_model(model.ptr, gpu_params)
             }));
 
             match gpu_result {
@@ -251,7 +251,9 @@ impl LlamaContext {
                 }
                 Err(_) => {
                     GPU_STATUS.store(2, Ordering::Relaxed);
-                    eprintln!("⚠ GPU context creation crashed (Vulkan driver error), falling back to CPU");
+                    eprintln!(
+                        "⚠ GPU context creation crashed (Vulkan driver error), falling back to CPU"
+                    );
                 }
             }
         }
@@ -275,8 +277,10 @@ impl LlamaContext {
         cpu_params.flash_attn_type = ffi::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_DISABLED;
 
         if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
-            eprintln!("Creating CPU-only context: n_ctx={}, n_batch={}, threads={}",
-                cpu_params.n_ctx, cpu_params.n_batch, thread_count);
+            eprintln!(
+                "Creating CPU-only context: n_ctx={}, n_batch={}, threads={}",
+                cpu_params.n_ctx, cpu_params.n_batch, thread_count
+            );
         }
 
         let context = unsafe { ffi::llama_new_context_with_model(model.ptr, cpu_params) };

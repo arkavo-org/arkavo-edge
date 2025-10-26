@@ -67,6 +67,16 @@ msm_dpu 5e01000.display-controller: [drm:hangcheck_handler [msm]] *ERROR*
 - Build constraints: Docker doesn't work, native compilation OOMs (2GB RAM)
 - Upstream issue closed as "driver bug" not application bug
 
+**Attempted Workarounds**:
+1. ❌ **Graceful GPU→CPU fallback**: C++ `vk::DeviceLostError` calls `std::terminate()` which aborts the process
+   - Rust's `panic::catch_unwind` cannot catch C++ `std::terminate()`
+   - Environment variable `GGML_VULKAN=0` ignored (checked after initialization)
+   - No way to disable Vulkan at runtime once built with it
+2. ✅ **CPU-only build**: Final solution - disable Vulkan at build time
+   - Binary works but uses CPU inference (slow)
+   - No crashes, stable operation
+   - Performance: ~1-2 tokens/sec on Gemma-3-270M (vs 50+ expected on GPU)
+
 ### Path 2: OpenCL GPU Acceleration (Mesa)
 
 **Status**: ❌ Fundamentally incompatible
@@ -253,10 +263,18 @@ Mesa Turnip 25.1.0-1qcom1 ✅ (installed)
 - `docs/uno-q-opencl-investigation.md` - OpenCL investigation
 - This document - Complete blocker analysis
 
+## Current Solution
+
+**CPU-only build**: The arkavo binary for UNO Q is built without Vulkan support to avoid crashes:
+- ✅ Stable operation, no crashes
+- ✅ Works with all GGUF models
+- ⚠️ Slow inference: ~1-2 tokens/sec on Gemma-3-270M (vs 50+ expected with GPU)
+- Built with: `GGML_VULKAN=OFF` in `crates/arkavo-llama-cpp-sys/build.rs`
+
 ## Recommendations
 
 ### Immediate Term
-1. **CPU-only mode** - Use pure CPU llama.cpp (rejected by user as "worthless")
+1. ✅ **CPU-only mode** - Current working solution (slow but functional)
 2. **Remote inference** - Use Gemini API or other cloud LLMs
 3. **Different hardware** - Raspberry Pi 5, Jetson Orin Nano, or x86 with proper GPU
 
@@ -274,13 +292,13 @@ Mesa Turnip 25.1.0-1qcom1 ✅ (installed)
 
 The Arduino UNO Q has capable hardware (Adreno 702 GPU, Hexagon V55 NPU) but the software stack has fundamental blockers:
 
-- **GPU path**: Mesa Turnip driver bugs (unfixable without upstream patches)
+- **GPU path**: Mesa Turnip driver bugs → C++ abort, cannot be caught
 - **OpenCL path**: Mesa doesn't support Adreno (needs proprietary driver)
 - **NPU path**: Missing device tree configuration (needs kernel rebuild)
 
 All fixes require either kernel/driver modifications or proprietary SDKs, both blocked by build constraints (no Docker, OOM on native builds).
 
-**Hardware acceleration is not viable on Arduino UNO Q at this time.**
+**Hardware acceleration is not viable on Arduino UNO Q at this time. CPU-only mode is the only working solution.**
 
 ---
 
