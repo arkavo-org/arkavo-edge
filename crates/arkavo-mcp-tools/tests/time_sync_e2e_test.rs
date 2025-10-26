@@ -106,12 +106,18 @@ async fn test_concurrent_agent_registration() {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     let agent_count = 100;
-    let max_concurrency = 50;
+    let max_concurrency = 100;
+
+    println!("Starting concurrent agent registration test with {} agents", agent_count);
+    let test_start = Instant::now();
 
     let results = run_concurrent_operations(
         agent_count,
         max_concurrency,
         |i| async move {
+            if i % 10 == 0 {
+                println!("Spawning agent batch starting at {}", i);
+            }
             let agent = AgentSimulator::new(format!("agent-{}", i));
             let start = Instant::now();
             let result = agent.sync_with_server("127.0.0.1:18126").await;
@@ -126,8 +132,15 @@ async fn test_concurrent_agent_registration() {
     )
     .await;
 
+    let test_elapsed = test_start.elapsed().as_secs_f64();
     let successful = results.iter().filter(|r| r.is_ok()).count();
-    println!("Successful syncs: {}/{}", successful, agent_count);
+    println!("Completed in {:.2}s - Successful syncs: {}/{}", test_elapsed, successful, agent_count);
+
+    let latencies: Vec<f64> = results.iter().filter_map(|r| r.as_ref().ok()).copied().collect();
+    if !latencies.is_empty() {
+        let avg = latencies.iter().sum::<f64>() / latencies.len() as f64;
+        println!("Average latency: {:.2}ms", avg);
+    }
 
     assert!(successful >= agent_count * 95 / 100);
 
