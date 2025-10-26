@@ -17,7 +17,11 @@ pub mod state;
 pub mod state_store;
 pub mod syft;
 pub mod test_runner;
+pub mod time_sync;
 pub mod tui;
+
+#[cfg(feature = "ntp-server")]
+pub mod ntp_server;
 
 // Re-export commonly used types
 pub use registry::ToolRegistry;

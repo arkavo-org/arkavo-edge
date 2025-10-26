@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "bytes",
  "cmake",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-code-search"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "bytes",
  "dashmap",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "git2",
  "tempfile",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -653,10 +653,13 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "chrono-tz",
+ "criterion",
  "git2",
  "regex",
  "serde",
  "serde_json",
+ "sntpc",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -665,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -686,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -704,12 +707,13 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-events",
  "arkavo-llm",
  "arkavo-mcp-core",
+ "arkavo-mcp-tools",
  "arkavo-observability",
  "async-trait",
  "chrono",
@@ -746,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -764,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -783,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -803,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "cc",
@@ -818,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -843,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-core"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -859,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.38.0"
+version = "0.38.1"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -1547,6 +1551,28 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "chrono-tz"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93698b29de5e97ad0ae26447b344c482a7284c737d9ddc5f9e52b74a336671bb"
+dependencies = [
+ "chrono",
+ "chrono-tz-build",
+ "phf",
+]
+
+[[package]]
+name = "chrono-tz-build"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c088aee841df9c3041febbb73934cfc39708749bf96dc827e3359cd39ef11b1"
+dependencies = [
+ "parse-zoneinfo",
+ "phf",
+ "phf_codegen",
 ]
 
 [[package]]
@@ -5148,6 +5174,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-zoneinfo"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,6 +5281,44 @@ checksum = "72f27a2cfee9f9039c4d86faa5af122a0ac3851441a34865b8a043b46be0065a"
 dependencies = [
  "pest",
  "sha2",
+]
+
+[[package]]
+name = "phf"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_codegen"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
+dependencies = [
+ "phf_shared",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher",
 ]
 
 [[package]]
@@ -6524,6 +6597,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "siphasher"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+
+[[package]]
 name = "sketches-ddsketch"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6549,6 +6628,15 @@ name = "smawk"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
+
+[[package]]
+name = "sntpc"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d84c42dedf8b01d52b62272684741866938260e74b9e58851f680b2a92854b"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "socket-pktinfo"
