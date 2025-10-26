@@ -17,6 +17,7 @@ pub mod state;
 pub mod state_store;
 pub mod syft;
 pub mod test_runner;
+pub mod time_sync;
 pub mod tui;
 
 // Re-export commonly used types
