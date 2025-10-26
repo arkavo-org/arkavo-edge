@@ -82,17 +82,13 @@ fn main() {
                 .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
                 .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
 
-            // Enable Vulkan only for UNO Q (Qualcomm Adreno GPU), not Raspberry Pi
-            // Check ARKAVO_TARGET_DEVICE environment variable set by CI workflow
-            // Note: Runtime will gracefully fall back to CPU if Vulkan fails
+            // Vulkan disabled for UNO Q - Mesa Turnip driver crashes with ErrorDeviceLost
+            // Investigation: docs/uno-q-hardware-acceleration-blockers.md
+            // C++ exception vk::DeviceLostError calls std::terminate() - cannot be caught
             if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
                 if device == "uno-q" {
-                    // Mesa Turnip driver provides Vulkan support for Adreno 702
-                    // Note: Runtime includes graceful fallback to CPU if GPU fails
-                    //       See docs/uno-q-hardware-acceleration-blockers.md for known driver issues
-                    eprintln!("Enabling Vulkan GPU acceleration for UNO Q (Adreno 702 via Turnip)");
-                    eprintln!("Note: Runtime will fall back to CPU if GPU initialization fails");
-                    config.define("GGML_VULKAN", "ON");
+                    eprintln!("Building CPU-only for UNO Q (Vulkan disabled - driver crashes)");
+                    eprintln!("See: docs/uno-q-hardware-acceleration-blockers.md");
                 } else {
                     eprintln!("Building CPU-only for device: {}", device);
                 }
