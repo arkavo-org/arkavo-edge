@@ -7,6 +7,7 @@ use crate::semgrep::SemgrepTool;
 use crate::server::Tool;
 use crate::syft::SyftTool;
 use crate::test_runner::TestRunnerTool;
+use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -41,6 +42,16 @@ impl ToolRegistry {
         self.register("sbom_syft", Box::new(SyftTool::new()));
         self.register("test_run", Box::new(TestRunnerTool::new()));
         self.register("get_system_health", Box::new(HealthCheckTool::new()));
+
+        let sync_tool = SyncAgentTimeTool::new();
+        let sync_state = sync_tool.last_sync_state();
+
+        self.register("get_agent_time", Box::new(GetAgentTimeTool::new()));
+        self.register("sync_agent_time", Box::new(sync_tool));
+        self.register(
+            "get_time_status",
+            Box::new(GetTimeStatusTool::new(sync_state)),
+        );
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -78,6 +89,7 @@ impl ToolRegistry {
             n if n.starts_with("git") => "Git".to_string(),
             n if n.starts_with("code_") => "Code Analysis".to_string(),
             n if n.starts_with("filesystem") => "File System".to_string(),
+            n if n.contains("time") || n.contains("sync") => "System".to_string(),
             _ => "General".to_string(),
         }
     }
