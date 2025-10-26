@@ -14,8 +14,7 @@ impl Qwen25VLModelLoader {
             .join("models")
             .join("qwen25vl");
 
-        std::fs::create_dir_all(&cache_dir)
-            .context("Failed to create model cache directory")?;
+        std::fs::create_dir_all(&cache_dir).context("Failed to create model cache directory")?;
 
         Ok(Self { cache_dir })
     }
@@ -44,7 +43,10 @@ impl Qwen25VLModelLoader {
             ),
         };
 
-        println!("Downloading Qwen2.5-VL {} model from HuggingFace...", model_size.name());
+        println!(
+            "Downloading Qwen2.5-VL {} model from HuggingFace...",
+            model_size.name()
+        );
         println!("Repository: {}", repo_id);
 
         let repo = api.model(repo_id.to_string());
