@@ -35,6 +35,15 @@ chrono-tz = "0.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[features]
+default = []
+ntp-server = []
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "time_sync"
+harness = false

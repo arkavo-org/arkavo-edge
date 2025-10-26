@@ -327,6 +327,10 @@ impl GetTimeStatusTool {
             sync_tool_state,
         }
     }
+
+    pub fn get_sync_state(&self) -> Arc<Mutex<LastSyncState>> {
+        Arc::clone(&self.sync_tool_state)
+    }
 }
 
 #[async_trait]

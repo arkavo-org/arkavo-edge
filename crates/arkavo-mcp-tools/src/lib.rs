@@ -20,6 +20,9 @@ pub mod test_runner;
 pub mod time_sync;
 pub mod tui;
 
+#[cfg(feature = "ntp-server")]
+pub mod ntp_server;
+
 // Re-export commonly used types
 pub use registry::ToolRegistry;
 pub use server::{Tool, ToolSchema};

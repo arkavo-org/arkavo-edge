@@ -654,6 +654,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "criterion",
  "git2",
  "regex",
  "serde",
