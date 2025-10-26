@@ -27,15 +27,19 @@ async fn main() -> Result<()> {
 
     println!("✓ Model loaded successfully!");
 
-    let test_image = if let Some(img_path) = env::args().nth(1) {
-        println!("Using image: {}", img_path);
-        let image_data = std::fs::read(&img_path)?;
-        let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
-        Some(base64_image)
-    } else {
+    let test_image = env::args()
+        .skip(1)
+        .find(|arg| !arg.starts_with("--"))
+        .and_then(|img_path| {
+            println!("Using image: {}", img_path);
+            let image_data = std::fs::read(&img_path).ok()?;
+            let base64_image = base64::engine::general_purpose::STANDARD.encode(&image_data);
+            Some(base64_image)
+        });
+
+    if test_image.is_none() {
         println!("No image provided - testing text-only mode");
-        None
-    };
+    }
 
     let message = if let Some(img) = test_image {
         Message {
