@@ -192,12 +192,8 @@ fn main() {
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
 
-            // Vulkan support only for UNO Q (Adreno GPU with Mesa Turnip driver)
-            if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
-                if device == "uno-q" {
-                    println!("cargo:rustc-link-lib=vulkan");
-                }
-            }
+            // Vulkan disabled for UNO Q - using CPU-only build
+            // See docs/uno-q-hardware-acceleration-blockers.md
         } else {
             // x86_64 library paths
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
