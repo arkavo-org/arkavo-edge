@@ -121,14 +121,14 @@ impl LlamaCppProvider {
         let prompt_bytes = apply_chat_template(&llama_messages, true)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
 
-        if crate::llamacpp_streaming::is_debug() {
-            if let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes) {
-                eprintln!("Chat template output:\n{prompt_str}");
-                if prompt_str.contains("<|im_start|>") {
-                    eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
-                } else if prompt_str.contains("<start_of_turn>") {
-                    eprintln!("✓ Template is using correct Gemma-3 format");
-                }
+        if crate::llamacpp_streaming::is_debug()
+            && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
+        {
+            eprintln!("Chat template output:\n{prompt_str}");
+            if prompt_str.contains("<|im_start|>") {
+                eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
+            } else if prompt_str.contains("<start_of_turn>") {
+                eprintln!("✓ Template is using correct Gemma-3 format");
             }
         }
 

@@ -197,7 +197,7 @@ pub fn tokenize_with_images(
             ctx.ptr,
             chunks.ptr,
             &text_input,
-            bitmap_ptrs.as_mut_ptr() as *mut *const ffi::mtmd_bitmap,
+            bitmap_ptrs.as_mut_ptr(),
             bitmaps.len(),
         )
     };
@@ -210,8 +210,14 @@ pub fn tokenize_with_images(
     }
 }
 
-pub fn encode_chunk(ctx: &MtmdContext, chunk: *const ffi::mtmd_input_chunk) -> Result<(), String> {
-    let result = unsafe { ffi::mtmd_encode_chunk(ctx.ptr, chunk) };
+/// # Safety
+/// The `chunk` pointer must be valid and point to a properly initialized `mtmd_input_chunk`.
+/// The chunk must have been created by `tokenize_with_images` and must remain valid for the duration of this call.
+pub unsafe fn encode_chunk(
+    ctx: &MtmdContext,
+    chunk: *const ffi::mtmd_input_chunk,
+) -> Result<(), String> {
+    let result = ffi::mtmd_encode_chunk(ctx.ptr, chunk);
     if result == 0 {
         Ok(())
     } else {

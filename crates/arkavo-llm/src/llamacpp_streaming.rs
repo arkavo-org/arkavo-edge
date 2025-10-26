@@ -1,3 +1,5 @@
+#![allow(clippy::redundant_pub_crate)]
+
 use crate::{Error, Message, Result, StreamResponse, decode_image};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::{
@@ -5,9 +7,9 @@ use arkavo_llama_cpp::multimodal::{
     preprocess_image_for_clip, tokenize_with_images,
 };
 use arkavo_llama_cpp::{
-    LlamaContext, LlamaModel, LlamaSampler, batch_free, batch_get_one_with_logits,
-    batch_get_one_with_offset, batch_init_with_tokens, create_sampler_chain, decode_batch,
-    token_to_piece, tokenize_with_model,
+    LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits, batch_get_one_with_offset,
+    batch_init_with_tokens, create_sampler_chain, decode_batch, token_to_piece,
+    tokenize_with_model,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -80,7 +82,7 @@ pub(crate) async fn generate_tokens(
             );
         }
 
-        for i in 0..max_generation {
+        for _ in 0..max_generation {
             validate_logits(&ctx)?;
 
             let token = sampler.sample(&ctx, -1);
@@ -205,7 +207,7 @@ fn send_metrics(
     start_time: Instant,
     first_token_time: Option<Instant>,
     tokens_generated: u32,
-    tx: &UnboundedSender<Result<StreamResponse>>,
+    _tx: &UnboundedSender<Result<StreamResponse>>,
 ) {
     let total_time = start_time.elapsed();
     let ttft = first_token_time.map(|t| t.duration_since(start_time));
@@ -267,7 +269,7 @@ pub(crate) async fn generate_tokens_with_vision(
         let prompt_with_marker = format!("{} {}", marker, first_msg_with_image.content);
 
         if is_debug() {
-            eprintln!("📝 Prompt with marker: {}", prompt_with_marker);
+            eprintln!("📝 Prompt with marker: {prompt_with_marker}");
         }
 
         let chunks = tokenize_with_images(&mtmd_ctx, &prompt_with_marker, &[&bitmap])
@@ -279,12 +281,14 @@ pub(crate) async fn generate_tokens_with_vision(
 
         for i in 0..chunks.size() {
             if let Some(chunk) = chunks.get(i) {
-                encode_chunk(&mtmd_ctx, chunk)
-                    .map_err(|e| Error::Config(format!("Chunk encoding failed: {e}")))?;
+                unsafe {
+                    encode_chunk(&mtmd_ctx, chunk)
+                        .map_err(|e| Error::Config(format!("Chunk encoding failed: {e}")))?;
+                }
 
-                let embeddings_ptr = get_output_embeddings(&mtmd_ctx);
+                let _embeddings_ptr = get_output_embeddings(&mtmd_ctx);
                 if is_debug() {
-                    eprintln!("🎯 Got embeddings for chunk {}", i);
+                    eprintln!("🎯 Got embeddings for chunk {i}");
                 }
             }
         }

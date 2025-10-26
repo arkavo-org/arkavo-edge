@@ -3,7 +3,10 @@ use arkavo_ui_generator::vision::{ModelSize, Qwen25VLModelLoader};
 #[test]
 fn test_model_loader_creation() {
     let result = Qwen25VLModelLoader::new();
-    assert!(result.is_ok(), "Model loader should be created successfully");
+    assert!(
+        result.is_ok(),
+        "Model loader should be created successfully"
+    );
 }
 
 #[test]
