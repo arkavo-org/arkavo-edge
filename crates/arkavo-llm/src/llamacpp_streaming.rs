@@ -15,16 +15,16 @@ use tokio::sync::mpsc::UnboundedSender;
 
 static DEBUG_LLAMACPP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-pub fn set_debug(enabled: bool) {
+pub(crate) fn set_debug(enabled: bool) {
     DEBUG_LLAMACPP.store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
 
-pub fn is_debug() -> bool {
+pub(crate) fn is_debug() -> bool {
     DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Debug, Clone)]
-pub struct StreamingConfig {
+pub(crate) struct StreamingConfig {
     pub temperature: f32,
     pub top_p: f32,
     pub top_k: i32,
@@ -32,7 +32,7 @@ pub struct StreamingConfig {
     pub seed: u32,
 }
 
-pub async fn generate_tokens(
+pub(crate) async fn generate_tokens(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
     config: StreamingConfig,
@@ -237,7 +237,7 @@ fn send_metrics(
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
-pub async fn generate_tokens_with_vision(
+pub(crate) async fn generate_tokens_with_vision(
     model: Arc<LlamaModel>,
     mtmd_ctx: Arc<MtmdContext>,
     messages: Vec<Message>,
