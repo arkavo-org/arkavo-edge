@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/release-llama-cpp-setup
   workflow_dispatch:
 
 jobs:
@@ -107,6 +108,15 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -213,6 +223,15 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -271,6 +290,15 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
         run: brew install cmake
@@ -382,6 +410,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -726,6 +763,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        shell: bash
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
