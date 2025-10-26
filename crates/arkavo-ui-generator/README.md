@@ -13,6 +13,13 @@ AI-driven UI code generation with vision capabilities for Arkavo Edge.
 
 The UI generator includes vision support for screenshot capture and automated UI verification using multimodal language models.
 
+### Supported Models
+
+✅ **Qwen2.5-VL** (3B/7B/32B/72B) - Officially supported by llama.cpp via mtmd API
+❌ **Qwen3-VL** - Not yet supported (see [llama.cpp issue #16207](https://github.com/ggml-org/llama.cpp/issues/16207))
+
+This implementation uses **Qwen2.5-VL**, which is production-ready and officially supported. Qwen3-VL support can be added when upstream llama.cpp support becomes available.
+
 ### Architecture
 
 Vision integration uses llama.cpp's multimodal API (mtmd) with the following components:
