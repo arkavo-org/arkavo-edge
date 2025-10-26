@@ -47,6 +47,8 @@ pub use gemini_adapter::GeminiProvider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 mod llamacpp_provider;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+mod llamacpp_streaming;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub use llamacpp_provider::LlamaCppProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{
