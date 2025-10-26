@@ -1,4 +1,4 @@
-use arkavo_mcp_tools::{time_sync::SyncAgentTimeTool, Tool};
+use arkavo_mcp_tools::{Tool, time_sync::SyncAgentTimeTool};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -163,18 +163,12 @@ pub fn calculate_drift_statistics(offsets_ms: &[f64]) -> (f64, f64, f64) {
 
     let mean = offsets_ms.iter().sum::<f64>() / offsets_ms.len() as f64;
 
-    let variance = offsets_ms
-        .iter()
-        .map(|&x| (x - mean).powi(2))
-        .sum::<f64>()
-        / offsets_ms.len() as f64;
+    let variance =
+        offsets_ms.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / offsets_ms.len() as f64;
 
     let std_dev = variance.sqrt();
 
-    let max_drift = offsets_ms
-        .iter()
-        .map(|&x| x.abs())
-        .fold(0.0f64, f64::max);
+    let max_drift = offsets_ms.iter().map(|&x| x.abs()).fold(0.0f64, f64::max);
 
     (mean, std_dev, max_drift)
 }

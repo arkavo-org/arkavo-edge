@@ -1,10 +1,10 @@
 mod common;
 
 use arkavo_mcp_tools::{
-    time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
     Tool, ToolRegistry,
+    time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool},
 };
-use common::{calculate_drift_statistics, run_concurrent_operations, AgentSimulator};
+use common::{AgentSimulator, calculate_drift_statistics, run_concurrent_operations};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Instant;
@@ -89,7 +89,10 @@ async fn test_multi_agent_time_consistency() {
     assert_eq!(offsets.len(), agent_count);
 
     let (mean, std_dev, max_drift) = calculate_drift_statistics(&offsets);
-    println!("Mean offset: {:.3}ms, Std dev: {:.3}ms, Max drift: {:.3}ms", mean, std_dev, max_drift);
+    println!(
+        "Mean offset: {:.3}ms, Std dev: {:.3}ms, Max drift: {:.3}ms",
+        mean, std_dev, max_drift
+    );
 
     assert!(max_drift < 10.0);
 
@@ -108,35 +111,41 @@ async fn test_concurrent_agent_registration() {
     let agent_count = 100;
     let max_concurrency = 100;
 
-    println!("Starting concurrent agent registration test with {} agents", agent_count);
+    println!(
+        "Starting concurrent agent registration test with {} agents",
+        agent_count
+    );
     let test_start = Instant::now();
 
-    let results = run_concurrent_operations(
-        agent_count,
-        max_concurrency,
-        |i| async move {
-            if i % 10 == 0 {
-                println!("Spawning agent batch starting at {}", i);
-            }
-            let agent = AgentSimulator::new(format!("agent-{}", i));
-            let start = Instant::now();
-            let result = agent.sync_with_server("127.0.0.1:18126").await;
-            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+    let results = run_concurrent_operations(agent_count, max_concurrency, |i| async move {
+        if i % 10 == 0 {
+            println!("Spawning agent batch starting at {}", i);
+        }
+        let agent = AgentSimulator::new(format!("agent-{}", i));
+        let start = Instant::now();
+        let result = agent.sync_with_server("127.0.0.1:18126").await;
+        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
-            if result.is_ok() {
-                Ok(elapsed)
-            } else {
-                Err(format!("Sync failed for agent-{}", i))
-            }
-        },
-    )
+        if result.is_ok() {
+            Ok(elapsed)
+        } else {
+            Err(format!("Sync failed for agent-{}", i))
+        }
+    })
     .await;
 
     let test_elapsed = test_start.elapsed().as_secs_f64();
     let successful = results.iter().filter(|r| r.is_ok()).count();
-    println!("Completed in {:.2}s - Successful syncs: {}/{}", test_elapsed, successful, agent_count);
+    println!(
+        "Completed in {:.2}s - Successful syncs: {}/{}",
+        test_elapsed, successful, agent_count
+    );
 
-    let latencies: Vec<f64> = results.iter().filter_map(|r| r.as_ref().ok()).copied().collect();
+    let latencies: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .copied()
+        .collect();
     if !latencies.is_empty() {
         let avg = latencies.iter().sum::<f64>() / latencies.len() as f64;
         println!("Average latency: {:.2}ms", avg);
@@ -145,8 +154,10 @@ async fn test_concurrent_agent_registration() {
     assert!(successful >= agent_count * 95 / 100);
 
     let stats = server.get_stats().await;
-    println!("Server stats - Requests: {}, Served: {}, Errors: {}",
-        stats.requests_received, stats.requests_served, stats.errors);
+    println!(
+        "Server stats - Requests: {}, Served: {}, Errors: {}",
+        stats.requests_received, stats.requests_served, stats.errors
+    );
 
     server.stop().await;
 }
@@ -288,25 +299,21 @@ async fn test_concurrent_status_queries() {
 
     let query_count = 100;
     let sync_state_ref = status_tool.get_sync_state();
-    let results = run_concurrent_operations(
-        query_count,
-        50,
-        move |_| {
-            let state = Arc::clone(&sync_state_ref);
-            async move {
-                let tool = GetTimeStatusTool::new(state);
-                let start = Instant::now();
-                let result = tool.execute(json!({})).await;
-                let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+    let results = run_concurrent_operations(query_count, 50, move |_| {
+        let state = Arc::clone(&sync_state_ref);
+        async move {
+            let tool = GetTimeStatusTool::new(state);
+            let start = Instant::now();
+            let result = tool.execute(json!({})).await;
+            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
-                if result.is_ok() {
-                    Ok(elapsed)
-                } else {
-                    Err("Status query failed".to_string())
-                }
+            if result.is_ok() {
+                Ok(elapsed)
+            } else {
+                Err("Status query failed".to_string())
             }
-        },
-    )
+        }
+    })
     .await;
 
     let successful = results.iter().filter(|r| r.is_ok()).count();
@@ -330,8 +337,10 @@ async fn test_orchestrator_server_stats() {
     }
 
     let stats = server.get_stats().await;
-    println!("Stats: requests={}, served={}, errors={}",
-        stats.requests_received, stats.requests_served, stats.errors);
+    println!(
+        "Stats: requests={}, served={}, errors={}",
+        stats.requests_received, stats.requests_served, stats.errors
+    );
 
     assert!(stats.requests_received >= 10);
     assert!(stats.requests_served >= 9);

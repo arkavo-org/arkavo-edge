@@ -713,6 +713,7 @@ dependencies = [
  "arkavo-events",
  "arkavo-llm",
  "arkavo-mcp-core",
+ "arkavo-mcp-tools",
  "arkavo-observability",
  "async-trait",
  "chrono",

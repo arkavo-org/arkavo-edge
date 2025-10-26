@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
@@ -74,7 +74,10 @@ impl NtpServer {
                         request_count.fetch_add(1, Ordering::Relaxed);
 
                         if len < NTP_PACKET_SIZE {
-                            warn!("Received malformed NTP packet from {}: size {}", peer_addr, len);
+                            warn!(
+                                "Received malformed NTP packet from {}: size {}",
+                                peer_addr, len
+                            );
                             error_count.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
@@ -82,18 +85,16 @@ impl NtpServer {
                         debug!("Received NTP request from {}", peer_addr);
 
                         match Self::handle_ntp_request(&buf, stratum) {
-                            Ok(response) => {
-                                match socket.send_to(&response, peer_addr).await {
-                                    Ok(_) => {
-                                        served_count.fetch_add(1, Ordering::Relaxed);
-                                        debug!("Sent NTP response to {}", peer_addr);
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to send NTP response to {}: {}", peer_addr, e);
-                                        error_count.fetch_add(1, Ordering::Relaxed);
-                                    }
+                            Ok(response) => match socket.send_to(&response, peer_addr).await {
+                                Ok(_) => {
+                                    served_count.fetch_add(1, Ordering::Relaxed);
+                                    debug!("Sent NTP response to {}", peer_addr);
                                 }
-                            }
+                                Err(e) => {
+                                    error!("Failed to send NTP response to {}: {}", peer_addr, e);
+                                    error_count.fetch_add(1, Ordering::Relaxed);
+                                }
+                            },
                             Err(e) => {
                                 warn!("Failed to generate NTP response for {}: {}", peer_addr, e);
                                 error_count.fetch_add(1, Ordering::Relaxed);

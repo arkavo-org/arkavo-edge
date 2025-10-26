@@ -2,6 +2,7 @@
 #![allow(clippy::significant_drop_in_scrutinee)]
 
 pub mod a2a;
+pub mod a2a_mcp_bridge;
 pub mod agent_config;
 pub mod agent_registry;
 pub mod auth;
@@ -32,6 +33,7 @@ pub mod transport;
 pub mod types;
 pub mod websocket;
 
+pub use a2a_mcp_bridge::{A2aMcpBridge, McpToolRequest, McpToolResponse};
 pub use config::{A2aConfig, A2aConfigBuilder, BufferConfig, ConfigManager};
 pub use discovery::{DiscoveryConfig, DiscoveryMethod, DiscoveryService};
 pub use error::{A2aError, Result};

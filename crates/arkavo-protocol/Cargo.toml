@@ -58,6 +58,7 @@ sqlx = { workspace = true }
 
 # MCP support
 arkavo-mcp-core = { path = "../arkavo-mcp-core" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 # LLM support for chat
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }

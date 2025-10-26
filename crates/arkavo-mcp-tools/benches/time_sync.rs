@@ -1,10 +1,10 @@
 #![allow(clippy::disallowed_methods)]
 
 use arkavo_mcp_tools::{
-    time_sync::{GetAgentTimeTool, SyncAgentTimeTool},
     Tool,
+    time_sync::{GetAgentTimeTool, SyncAgentTimeTool},
 };
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,13 +21,17 @@ fn bench_get_agent_time_formats(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("get_agent_time_formats");
     for format in formats {
-        group.bench_with_input(BenchmarkId::from_parameter(format), &format, |b, &format| {
-            b.to_async(&runtime).iter(|| async {
-                tool.execute(black_box(json!({"format": format})))
-                    .await
-                    .unwrap()
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format),
+            &format,
+            |b, &format| {
+                b.to_async(&runtime).iter(|| async {
+                    tool.execute(black_box(json!({"format": format})))
+                        .await
+                        .unwrap()
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -96,38 +100,34 @@ fn bench_concurrent_agent_sync(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(20));
 
     for &count in &agent_counts {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &count| {
-                b.to_async(&runtime).iter(|| async move {
-                    let semaphore = Arc::new(Semaphore::new(50));
-                    let mut handles = Vec::new();
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            b.to_async(&runtime).iter(|| async move {
+                let semaphore = Arc::new(Semaphore::new(50));
+                let mut handles = Vec::new();
 
-                    for _ in 0..count {
-                        let permit = semaphore.clone().acquire_owned().await.unwrap();
-                        let tool = SyncAgentTimeTool::new();
+                for _ in 0..count {
+                    let permit = semaphore.clone().acquire_owned().await.unwrap();
+                    let tool = SyncAgentTimeTool::new();
 
-                        let handle = tokio::spawn(async move {
-                            let result = tool
-                                .execute(json!({
-                                    "server": "127.0.0.1:19124",
-                                    "protocol": "sntp"
-                                }))
-                                .await;
-                            drop(permit);
-                            result
-                        });
+                    let handle = tokio::spawn(async move {
+                        let result = tool
+                            .execute(json!({
+                                "server": "127.0.0.1:19124",
+                                "protocol": "sntp"
+                            }))
+                            .await;
+                        drop(permit);
+                        result
+                    });
 
-                        handles.push(handle);
-                    }
+                    handles.push(handle);
+                }
 
-                    for handle in handles {
-                        let _ = handle.await;
-                    }
-                });
-            },
-        );
+                for handle in handles {
+                    let _ = handle.await;
+                }
+            });
+        });
     }
     group.finish();
 
@@ -151,37 +151,33 @@ fn bench_orchestrator_throughput(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(30));
 
     for &count in &operation_counts {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &count| {
-                b.to_async(&runtime).iter(|| async move {
-                    let semaphore = Arc::new(Semaphore::new(100));
-                    let mut handles = Vec::new();
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            b.to_async(&runtime).iter(|| async move {
+                let semaphore = Arc::new(Semaphore::new(100));
+                let mut handles = Vec::new();
 
-                    for _ in 0..count {
-                        let permit = semaphore.clone().acquire_owned().await.unwrap();
-                        let tool = SyncAgentTimeTool::new();
+                for _ in 0..count {
+                    let permit = semaphore.clone().acquire_owned().await.unwrap();
+                    let tool = SyncAgentTimeTool::new();
 
-                        let handle = tokio::spawn(async move {
-                            let _ = tool
-                                .execute(json!({
-                                    "server": "127.0.0.1:19125",
-                                    "protocol": "sntp"
-                                }))
-                                .await;
-                            drop(permit);
-                        });
+                    let handle = tokio::spawn(async move {
+                        let _ = tool
+                            .execute(json!({
+                                "server": "127.0.0.1:19125",
+                                "protocol": "sntp"
+                            }))
+                            .await;
+                        drop(permit);
+                    });
 
-                        handles.push(handle);
-                    }
+                    handles.push(handle);
+                }
 
-                    for handle in handles {
-                        let _ = handle.await;
-                    }
-                });
-            },
-        );
+                for handle in handles {
+                    let _ = handle.await;
+                }
+            });
+        });
     }
     group.finish();
 
@@ -202,9 +198,7 @@ fn bench_state_lock_contention(c: &mut Criterion) {
     let sync_state = tool.last_sync_state();
 
     runtime.block_on(async {
-        let _ = tool
-            .execute(json!({"server": "127.0.0.1:19126"}))
-            .await;
+        let _ = tool.execute(json!({"server": "127.0.0.1:19126"})).await;
     });
 
     c.bench_function("state_lock_contention", |b| {

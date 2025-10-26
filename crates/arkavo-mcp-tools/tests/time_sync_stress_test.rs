@@ -1,6 +1,6 @@
 mod common;
 
-use common::{run_concurrent_operations, AgentSimulator, PerformanceMetrics};
+use common::{AgentSimulator, PerformanceMetrics, run_concurrent_operations};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "ntp-server")]
@@ -54,7 +54,10 @@ async fn stress_test_sustained_load() {
     println!("Total sync attempts: {}", total_syncs);
     println!("Successful: {}", successful_syncs);
     println!("Failed: {}", failed_syncs);
-    println!("Success rate: {:.2}%", (successful_syncs as f64 / total_syncs as f64) * 100.0);
+    println!(
+        "Success rate: {:.2}%",
+        (successful_syncs as f64 / total_syncs as f64) * 100.0
+    );
     println!("Server requests: {}", stats.requests_received);
     println!("Server served: {}", stats.requests_served);
     println!("Server errors: {}", stats.errors);
@@ -110,7 +113,10 @@ async fn stress_test_burst_traffic() {
     println!("Total agents: 1000");
     println!("Successful: {}", successful);
     println!("Failed: {}", failed);
-    println!("Throughput: {:.1} agents/sec", 1000.0 / burst_elapsed.as_secs_f64());
+    println!(
+        "Throughput: {:.1} agents/sec",
+        1000.0 / burst_elapsed.as_secs_f64()
+    );
 
     let stats = server.get_stats().await;
     println!("Server requests: {}", stats.requests_received);
@@ -174,7 +180,10 @@ async fn stress_test_agent_churn() {
     println!("Duration: {:.1}s", start_time.elapsed().as_secs_f64());
     println!("Total connections: {}", total_connections);
     println!("Successful syncs: {}", successful_syncs);
-    println!("Success rate: {:.2}%", (successful_syncs as f64 / total_connections as f64) * 100.0);
+    println!(
+        "Success rate: {:.2}%",
+        (successful_syncs as f64 / total_connections as f64) * 100.0
+    );
     println!("Server requests: {}", stats.requests_received);
     println!("Server served: {}", stats.requests_served);
 
@@ -255,7 +264,10 @@ async fn stress_test_rapid_sequential_syncs() {
     println!("\n=== Rapid Sequential Sync Results ===");
     println!("Total duration: {:.3}s", total_elapsed.as_secs_f64());
     println!("Successful syncs: {}/1000", successful);
-    println!("Throughput: {:.1} syncs/sec", 1000.0 / total_elapsed.as_secs_f64());
+    println!(
+        "Throughput: {:.1} syncs/sec",
+        1000.0 / total_elapsed.as_secs_f64()
+    );
 
     assert!(successful >= 990);
 
@@ -295,8 +307,10 @@ async fn stress_test_memory_stability() {
 
         if round % 10 == 0 {
             let stats = server.get_stats().await;
-            println!("Round {}/100: {} successful, server served: {}",
-                round, total_successful, stats.requests_served);
+            println!(
+                "Round {}/100: {} successful, server served: {}",
+                round, total_successful, stats.requests_served
+            );
         }
 
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
