@@ -6,12 +6,27 @@ use anyhow::Result;
 use arkavo_observability::config::SecureConfigProvider;
 use tracing::{info, instrument, warn};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatStreamingMode {
+    /// Stream individual deltas character-by-character (default)
+    Delta,
+    /// Aggregate response and send as single coherent message
+    Aggregated,
+}
+
+impl Default for ChatStreamingMode {
+    fn default() -> Self {
+        Self::Aggregated // Default to aggregated for A2A protocol
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BufferConfig {
     pub chat_delta_buffer_size: usize,
     pub metrics_broadcast_buffer_size: usize,
     pub telemetry_channel_buffer_size: usize,
     pub agui_broadcast_buffer_size: usize,
+    pub chat_streaming_mode: ChatStreamingMode,
 }
 
 impl Default for BufferConfig {
@@ -21,6 +36,7 @@ impl Default for BufferConfig {
             metrics_broadcast_buffer_size: 100,
             telemetry_channel_buffer_size: 1000,
             agui_broadcast_buffer_size: 32,
+            chat_streaming_mode: ChatStreamingMode::default(),
         }
     }
 }
@@ -318,6 +334,11 @@ impl A2aConfigBuilder {
 
     pub fn agui_broadcast_buffer_size(mut self, size: usize) -> Self {
         self.config.buffers.agui_broadcast_buffer_size = size;
+        self
+    }
+
+    pub fn chat_streaming_mode(mut self, mode: ChatStreamingMode) -> Self {
+        self.config.buffers.chat_streaming_mode = mode;
         self
     }
 

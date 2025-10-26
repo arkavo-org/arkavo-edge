@@ -23,6 +23,19 @@ pub struct ModelInfo {
     pub updated_at: DateTime<Utc>,
     pub metadata: Option<HashMap<String, serde_json::Value>>,
     pub pricing: Option<ModelPricing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snpe_metadata: Option<SnpeModelMetadata>,
+}
+
+/// SNPE model-specific metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnpeModelMetadata {
+    pub dlc_path: String,
+    pub runtime_target: String,
+    pub quantization_mode: String,
+    pub input_shapes: Vec<Vec<usize>>,
+    pub output_shapes: Vec<Vec<usize>>,
+    pub accelerator_requirements: Vec<String>,
 }
 
 /// Model pricing information
@@ -348,6 +361,7 @@ pub fn get_default_models() -> Vec<ModelInfo> {
                 effective_date: Utc::now(),
                 currency: "USD".to_string(),
             }),
+            snpe_metadata: None,
         },
         ModelInfo {
             model_id: "devstral:latest".to_string(),
@@ -372,6 +386,7 @@ pub fn get_default_models() -> Vec<ModelInfo> {
                 effective_date: Utc::now(),
                 currency: "USD".to_string(),
             }),
+            snpe_metadata: None,
         },
         ModelInfo {
             model_id: "qwen3:0.6b".to_string(),
@@ -400,6 +415,7 @@ pub fn get_default_models() -> Vec<ModelInfo> {
                 effective_date: Utc::now(),
                 currency: "USD".to_string(),
             }),
+            snpe_metadata: None,
         },
     ]
 }

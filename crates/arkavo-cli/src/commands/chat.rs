@@ -1654,6 +1654,13 @@ fn list_files(path: &str) -> Option<String> {
     }
 }
 
+pub async fn initialize_llm_for_ui(
+    model_name: &str,
+) -> Result<LlmClient, Box<dyn std::error::Error>> {
+    // Simplified version for UI command - uses default params
+    initialize_llm_client(false, model_name, 0.7, 0.9, 40, 4096, 42).await
+}
+
 async fn initialize_llm_client(
     print_mode: bool,
     model_name: &str,

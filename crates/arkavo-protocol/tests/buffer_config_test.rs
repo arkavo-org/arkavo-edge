@@ -38,6 +38,7 @@ mod tests {
             metrics_broadcast_buffer_size: 10_000,
             telemetry_channel_buffer_size: 5_000,
             agui_broadcast_buffer_size: 100,
+            chat_streaming_mode: Default::default(),
         };
 
         assert!(config.validate().is_ok());

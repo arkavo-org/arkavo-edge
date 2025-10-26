@@ -1,6 +1,5 @@
 use arkavo_browser::{BrowserTool, LiveInjector};
 use arkavo_ui_generator::incremental::IncrementalUiBuilder;
-use std::time::Duration;
 use tokio::time::sleep;
 
 #[tokio::main]

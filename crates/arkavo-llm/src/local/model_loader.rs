@@ -17,6 +17,8 @@ pub enum Model {
     QuantizedGemma3(quantized_gemma3::ModelWeights),
     QuantizedLlama(quantized_llama::ModelWeights),
     QuantizedPhi(quantized_phi::ModelWeights),
+    #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "snpe"))]
+    Snpe(super::snpe_model::SnpeModel),
 }
 
 pub struct ModelLoader {

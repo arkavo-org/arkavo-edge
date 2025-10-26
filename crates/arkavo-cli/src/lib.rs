@@ -19,9 +19,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match args[0].as_str() {
         "agent" => commands::agent::execute(&args[1..]),
         "chat" => commands::chat::execute(&args[1..]),
+        "task" => commands::task::execute(&args[1..]),
+        "ui" => commands::ui::execute(&args[1..]),
+        // Hidden commands (still accessible, just not in main help)
         "terminal" => commands::terminal::execute(&args[1..]),
-        "plan" => commands::plan::execute(&args[1..]),
-        "apply" => commands::apply::execute(&args[1..]),
         #[cfg(all(target_os = "macos", feature = "test-harness"))]
         "test" => commands::test::execute(&args[1..]),
         #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
@@ -29,10 +30,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Test command is not available on this platform");
             Err("Test command requires macOS with test-harness feature (uses iOS simulator)".into())
         }
-        "ui" => commands::ui::execute(&args[1..]),
-        "vault" => commands::vault::execute(&args[1..]),
+        // Hidden commands with async runtime
         "model" => {
-            // Check if we're already in a runtime context
             let run_async = async {
                 use clap::Parser;
 
@@ -118,35 +117,20 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_usage() {
-    println!("Arkavo Edge - Developer-centric agentic CLI tool for AI-agent development");
+    println!("Arkavo Edge");
     println!();
     println!("USAGE:");
-    println!("    arkavo              Run default agent (auto-generates config if needed)");
-    println!("    arkavo <COMMAND>    Run specific command");
+    println!("    arkavo [COMMAND] [OPTIONS]");
     println!();
     println!("COMMANDS:");
-    println!("    agent     Configure and run AI agents (default when no command given)");
-    println!("    chat      Simple conversational chat interface");
-    println!("              Options: --prompt <text>, --image <path>, --max-tokens <n>");
-    println!("                       --model <name|path> (e.g., tinyllama, gemma-2b, phi-2)");
-    println!("                       --model <repo/model> (e.g., TheBloke/phi-2-GGUF)");
-    println!("                       --model <path.gguf> (direct path to GGUF file)");
-    println!("                       --repo-context {{auto|on|off}} (default: auto)");
-    println!("              Use /new in chat to start fresh session");
-    println!("              Use /context {{auto|on|off}} to toggle context in REPL");
-    println!("    terminal  Launch Terminal UI with streaming chat interface");
-    println!("              Options: --model <name> (gemma-3-270m or gemma-2-2b)");
-    println!("    plan      Generate a change plan before code edits");
-    println!("    apply     Execute plan and commit changes");
-    println!("    test      Run intelligent tests (use --help for modes)");
-    println!("    ui        Launch web UI for agent orchestration");
-    println!("    vault     Import/export notes to Edge Vault");
-    println!("    model     Manage local LLM models (list, download, switch, add)");
-    println!("    dataflow  Manage dataflow pipelines (export/import blueprints)");
-    println!("    serve     Run as MCP server for AI tools integration");
-    println!("    help      Print this help message");
+    println!("    chat        Conversational chat");
+    println!("    task        Plan and apply code changes");
+    println!("    ui          Launch web UI");
+    println!("    serve       Run as MCP server");
+    println!();
+    println!("Run 'arkavo <command> --help' for detailed options");
     println!();
     println!("OPTIONS:");
-    println!("    -h, --help       Print help information");
-    println!("    -v, --version    Print version information");
+    println!("    -h, --help       Show help");
+    println!("    -v, --version    Show version");
 }

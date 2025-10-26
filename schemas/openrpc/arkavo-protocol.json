@@ -29,6 +29,165 @@
         "title": "AgentDiscoverFilter",
         "type": "object"
       },
+      "Attachment": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Attachment for messages",
+        "properties": {
+          "content": {
+            "description": "Base64-encoded content or URL",
+            "type": "string"
+          },
+          "filename": {
+            "description": "Optional filename",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_url": {
+            "default": false,
+            "description": "Whether content is a URL (true) or base64 data (false)",
+            "type": "boolean"
+          },
+          "mime_type": {
+            "description": "MIME type of the attachment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "mime_type"
+        ],
+        "title": "Attachment",
+        "type": "object"
+      },
+      "ChatCapabilities": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Capabilities of the chat session",
+        "properties": {
+          "max_context_length": {
+            "description": "Maximum context length",
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "supported_message_types": {
+            "description": "Supported message types",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "supports_attachments": {
+            "default": false,
+            "description": "Whether file attachments are supported",
+            "type": "boolean"
+          },
+          "supports_tools": {
+            "default": false,
+            "description": "Whether tool calls are supported",
+            "type": "boolean"
+          }
+        },
+        "title": "ChatCapabilities",
+        "type": "object"
+      },
+      "ChatOpenRequest": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Request to open a new chat session",
+        "properties": {
+          "context": {
+            "description": "Optional initial context for the conversation"
+          },
+          "metadata": {
+            "description": "Optional metadata about the chat session"
+          },
+          "token": {
+            "description": "Optional JWT token for authentication",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "ChatOpenRequest",
+        "type": "object"
+      },
+      "ChatSession": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "ChatCapabilities": {
+            "description": "Capabilities of the chat session",
+            "properties": {
+              "max_context_length": {
+                "description": "Maximum context length",
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "supported_message_types": {
+                "description": "Supported message types",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "supports_attachments": {
+                "default": false,
+                "description": "Whether file attachments are supported",
+                "type": "boolean"
+              },
+              "supports_tools": {
+                "default": false,
+                "description": "Whether tool calls are supported",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "description": "Response from opening a chat session",
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ChatCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent capabilities for this session"
+          },
+          "created_at": {
+            "description": "Timestamp when session was created",
+            "format": "date-time",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Unique session ID for this chat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "session_id"
+        ],
+        "title": "ChatSession",
+        "type": "object"
+      },
       "DiscoveredAgent": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Information about a discovered agent",
@@ -169,6 +328,356 @@
         ],
         "title": "Message",
         "type": "object"
+      },
+      "MessageDelta": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "MessageDeltaContent": {
+            "description": "Content of a message delta",
+            "oneOf": [
+              {
+                "description": "Text content delta",
+                "properties": {
+                  "text": {
+                    "description": "The text to append",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "text"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Tool call delta with streaming support",
+                "properties": {
+                  "args_json_fragment": {
+                    "description": "JSON fragment of arguments being streamed",
+                    "type": "string"
+                  },
+                  "done": {
+                    "description": "Whether this completes the tool call",
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "description": "Tool name (only sent on first delta)",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tool_call_id": {
+                    "description": "Tool call ID",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "toolCall"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "args_json_fragment",
+                  "done",
+                  "tool_call_id",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Stream ended",
+                "properties": {
+                  "reason": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/StreamEndReason"
+                      }
+                    ],
+                    "description": "Reason for ending"
+                  },
+                  "type": {
+                    "enum": [
+                      "streamEnd"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Error occurred",
+                "properties": {
+                  "code": {
+                    "description": "Error code",
+                    "type": "string"
+                  },
+                  "message": {
+                    "description": "Error message",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "error"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "type"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "StreamEndReason": {
+            "description": "Reason for stream ending",
+            "oneOf": [
+              {
+                "description": "Completed normally",
+                "enum": [
+                  "complete"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Reached max tokens",
+                "enum": [
+                  "max_tokens"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "User requested abort",
+                "enum": [
+                  "user_abort"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Error occurred",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Session closed",
+                "enum": [
+                  "session_closed"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Message delta for streaming responses",
+        "properties": {
+          "delta": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/MessageDeltaContent"
+              }
+            ],
+            "description": "The delta content"
+          },
+          "message_id": {
+            "description": "The message ID this delta belongs to",
+            "type": "string"
+          },
+          "sequence": {
+            "description": "Sequence number for ordering",
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Session ID this delta belongs to",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "Timestamp of the delta",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delta",
+          "message_id",
+          "sequence",
+          "session_id",
+          "timestamp"
+        ],
+        "title": "MessageDelta",
+        "type": "object"
+      },
+      "MessageDeltaContent": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "StreamEndReason": {
+            "description": "Reason for stream ending",
+            "oneOf": [
+              {
+                "description": "Completed normally",
+                "enum": [
+                  "complete"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Reached max tokens",
+                "enum": [
+                  "max_tokens"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "User requested abort",
+                "enum": [
+                  "user_abort"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Error occurred",
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "description": "Session closed",
+                "enum": [
+                  "session_closed"
+                ],
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "description": "Content of a message delta",
+        "oneOf": [
+          {
+            "description": "Text content delta",
+            "properties": {
+              "text": {
+                "description": "The text to append",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Tool call delta with streaming support",
+            "properties": {
+              "args_json_fragment": {
+                "description": "JSON fragment of arguments being streamed",
+                "type": "string"
+              },
+              "done": {
+                "description": "Whether this completes the tool call",
+                "type": "boolean"
+              },
+              "name": {
+                "description": "Tool name (only sent on first delta)",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tool_call_id": {
+                "description": "Tool call ID",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "toolCall"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "args_json_fragment",
+              "done",
+              "tool_call_id",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Stream ended",
+            "properties": {
+              "reason": {
+                "allOf": [
+                  {
+                    "$ref": "#/definitions/StreamEndReason"
+                  }
+                ],
+                "description": "Reason for ending"
+              },
+              "type": {
+                "enum": [
+                  "streamEnd"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Error occurred",
+            "properties": {
+              "code": {
+                "description": "Error code",
+                "type": "string"
+              },
+              "message": {
+                "description": "Error message",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "type"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "MessageDeltaContent"
       },
       "MessagePart": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -587,6 +1096,48 @@
         ],
         "title": "MessageSendResponse",
         "type": "object"
+      },
+      "StreamEndReason": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Reason for stream ending",
+        "oneOf": [
+          {
+            "description": "Completed normally",
+            "enum": [
+              "complete"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Reached max tokens",
+            "enum": [
+              "max_tokens"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "User requested abort",
+            "enum": [
+              "user_abort"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Error occurred",
+            "enum": [
+              "error"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Session closed",
+            "enum": [
+              "session_closed"
+            ],
+            "type": "string"
+          }
+        ],
+        "title": "StreamEndReason"
       },
       "TaskCancelRequest": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1218,6 +1769,66 @@
           }
         ],
         "title": "TaskStatus"
+      },
+      "UserMessage": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "Attachment": {
+            "description": "Attachment for messages",
+            "properties": {
+              "content": {
+                "description": "Base64-encoded content or URL",
+                "type": "string"
+              },
+              "filename": {
+                "description": "Optional filename",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "is_url": {
+                "default": false,
+                "description": "Whether content is a URL (true) or base64 data (false)",
+                "type": "boolean"
+              },
+              "mime_type": {
+                "description": "MIME type of the attachment",
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "mime_type"
+            ],
+            "type": "object"
+          }
+        },
+        "description": "User message to send within a chat session",
+        "properties": {
+          "attachments": {
+            "description": "Optional attachments",
+            "items": {
+              "$ref": "#/definitions/Attachment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "content": {
+            "description": "The user's message text",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Optional message metadata"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "UserMessage",
+        "type": "object"
       }
     }
   },
@@ -1233,9 +1844,24 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.24.0"
+    "version": "0.37.0"
   },
   "methods": [
+    {
+      "description": "Returns OpenRPC schema document",
+      "errors": null,
+      "examples": null,
+      "name": "rpc.discover",
+      "params": [],
+      "result": {
+        "description": "OpenRPC schema document",
+        "name": "schema",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "summary": "OpenRPC discovery"
+    },
     {
       "description": "Request a task from another agent",
       "errors": [
@@ -2362,6 +2988,286 @@
         }
       },
       "summary": "Cancel task"
+    },
+    {
+      "description": "Open a new chat session with the agent",
+      "errors": [
+        {
+          "code": -32004,
+          "data": null,
+          "message": "Authentication failed"
+        },
+        {
+          "code": -32003,
+          "data": null,
+          "message": "Rate limit exceeded"
+        }
+      ],
+      "examples": [
+        {
+          "description": null,
+          "name": "Open new chat session",
+          "params": [
+            {
+              "name": "request",
+              "value": {
+                "context": {
+                  "user_id": "user123"
+                },
+                "metadata": {
+                  "source": "mobile_app"
+                }
+              }
+            }
+          ],
+          "result": {
+            "capabilities": {
+              "supports_attachments": false,
+              "supports_tools": true
+            },
+            "created_at": "2025-01-16T10:00:00Z",
+            "session_id": "sess_abc123"
+          }
+        }
+      ],
+      "name": "chat_open",
+      "params": [
+        {
+          "description": "Chat open request with optional context and metadata",
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "description": "Request to open a new chat session",
+            "properties": {
+              "context": {
+                "description": "Optional initial context for the conversation"
+              },
+              "metadata": {
+                "description": "Optional metadata about the chat session"
+              },
+              "token": {
+                "description": "Optional JWT token for authentication",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "title": "ChatOpenRequest",
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "Chat session with session ID and capabilities",
+        "name": "session",
+        "schema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "definitions": {
+            "ChatCapabilities": {
+              "description": "Capabilities of the chat session",
+              "properties": {
+                "max_context_length": {
+                  "description": "Maximum context length",
+                  "format": "uint32",
+                  "minimum": 0.0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "supported_message_types": {
+                  "description": "Supported message types",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                },
+                "supports_attachments": {
+                  "default": false,
+                  "description": "Whether file attachments are supported",
+                  "type": "boolean"
+                },
+                "supports_tools": {
+                  "default": false,
+                  "description": "Whether tool calls are supported",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "description": "Response from opening a chat session",
+          "properties": {
+            "capabilities": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ChatCapabilities"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent capabilities for this session"
+            },
+            "created_at": {
+              "description": "Timestamp when session was created",
+              "format": "date-time",
+              "type": "string"
+            },
+            "session_id": {
+              "description": "Unique session ID for this chat",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created_at",
+            "session_id"
+          ],
+          "title": "ChatSession",
+          "type": "object"
+        }
+      },
+      "summary": "Open chat session"
+    },
+    {
+      "description": "Send a message within an existing chat session",
+      "errors": [
+        {
+          "code": -32001,
+          "data": null,
+          "message": "Session not found"
+        },
+        {
+          "code": -32002,
+          "data": null,
+          "message": "Buffer full"
+        },
+        {
+          "code": -32003,
+          "data": null,
+          "message": "Rate limit exceeded"
+        }
+      ],
+      "examples": null,
+      "name": "chat_send",
+      "params": [
+        {
+          "description": "The session ID from chat_open",
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "User message with content and optional attachments",
+          "name": "message",
+          "required": true,
+          "schema": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "definitions": {
+              "Attachment": {
+                "description": "Attachment for messages",
+                "properties": {
+                  "content": {
+                    "description": "Base64-encoded content or URL",
+                    "type": "string"
+                  },
+                  "filename": {
+                    "description": "Optional filename",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "is_url": {
+                    "default": false,
+                    "description": "Whether content is a URL (true) or base64 data (false)",
+                    "type": "boolean"
+                  },
+                  "mime_type": {
+                    "description": "MIME type of the attachment",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "mime_type"
+                ],
+                "type": "object"
+              }
+            },
+            "description": "User message to send within a chat session",
+            "properties": {
+              "attachments": {
+                "description": "Optional attachments",
+                "items": {
+                  "$ref": "#/definitions/Attachment"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "content": {
+                "description": "The user's message text",
+                "type": "string"
+              },
+              "metadata": {
+                "description": "Optional message metadata"
+              }
+            },
+            "required": [
+              "content"
+            ],
+            "title": "UserMessage",
+            "type": "object"
+          }
+        }
+      ],
+      "result": {
+        "description": "Empty result on success",
+        "name": "result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "Send chat message"
+    },
+    {
+      "description": "Close an existing chat session",
+      "errors": [
+        {
+          "code": -32001,
+          "data": null,
+          "message": "Session not found"
+        }
+      ],
+      "examples": null,
+      "name": "chat_close",
+      "params": [
+        {
+          "description": "The session ID to close",
+          "name": "session_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "description": "Empty result on success",
+        "name": "result",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "summary": "Close chat session"
     }
   ],
   "openrpc": "1.2.6",

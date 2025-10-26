@@ -4,18 +4,26 @@ Instant, secure orchestration for AI agents—launch, mesh, and monitor in real 
 
 ## Quick Start
 
-### Install via Homebrew (macOS/Linux)
+### Install on macOS
+
+Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases), open the .pkg file, and follow the installation wizard.
+
+**For advanced users:** Install via Homebrew
 ```bash
 brew tap arkavo-org/homebrew-arkavo
 brew install arkavo
 ```
 
-### Install on Windows
-Download the latest Windows binary from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and add it to your PATH:
-```powershell
-# Download and extract arkavo.exe to a directory in your PATH
-# For example, to C:\Program Files\arkavo\
+### Install on Linux
+```bash
+brew tap arkavo-org/homebrew-arkavo
+brew install arkavo
 ```
+
+**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup with gemma-3 270M model.
+
+### Install on Windows
+Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and run the .exe file.
 
 ### Launch
 ```bash

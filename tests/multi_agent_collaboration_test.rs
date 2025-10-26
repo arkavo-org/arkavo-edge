@@ -1,10 +1,9 @@
-use arkavo_protocol::{
-    AgentBroadcast, AgentQueryRequest, AgentQueryResponse, BroadcastType,
-    A2aServer, A2aTransport, WebSocketTransport,
-};
 use arkavo_memory::{AgentConversation, MemoryStorage};
+use arkavo_protocol::{
+    A2aServer, A2aTransport, AgentBroadcast, AgentQueryRequest,
+    AgentQueryResponse, BroadcastType, WebSocketTransport,
+};
 use chrono::Utc;
-use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;

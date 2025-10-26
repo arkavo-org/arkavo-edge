@@ -1,7 +1,7 @@
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
 use arkavo_protocol::transport::{A2aRequest, A2aResponse};
+use libfuzzer_sys::fuzz_target;
 use serde_json;
 
 fuzz_target!(|data: &[u8]| {

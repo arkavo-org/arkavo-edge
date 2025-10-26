@@ -8,7 +8,9 @@ repository.workspace = true
 description = "AG-UI protocol implementation and web gateway for Arkavo Edge"
 
 [features]
-default = ["mdns", "llama-cpp"]
+default = ["mdns", "llama-cpp", "web-ui"]
+web-ui = []  # Current warp-based web UI (default)
+cef-ui = ["dep:arkavo-cef"]  # CEF-based native UI (macOS .pkg only)
 mdns = ["dep:mdns-sd"]
 llama-cpp = ["arkavo-router/llama-cpp"]
 # Windows compatible features (no C++ dependencies)
@@ -23,8 +25,6 @@ futures = { workspace = true }
 
 # Web server and WebSocket
 axum = { workspace = true, features = ["ws"] }
-tower = { workspace = true }
-tower-http = { workspace = true, features = ["fs", "cors"] }
 reqwest = { workspace = true }
 
 # Protocol dependencies
@@ -52,7 +52,9 @@ regex = { workspace = true }
 
 # mDNS discovery
 mdns-sd = { workspace = true, optional = true }
-bincode = { workspace = true }
+
+# CEF renderer (optional)
+arkavo-cef = { path = "../arkavo-cef", optional = true }
 
 [dev-dependencies]
 uuid = { workspace = true }

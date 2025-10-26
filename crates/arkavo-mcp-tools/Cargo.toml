@@ -20,22 +20,30 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util"] }
 chrono = { workspace = true }
 regex = { workspace = true }
-glob = { workspace = true }
-walkdir = { workspace = true }
-ignore = { workspace = true }
-syntect = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # For GitHub tools
-reqwest = { workspace = true, features = ["json"] }
 base64 = { workspace = true }
 
 # For Git tools
 git2 = { workspace = true }
 
+# For time synchronization
+sntpc = "0.6"
+chrono-tz = "0.9"
+
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[features]
+default = []
+ntp-server = []
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "time_sync"
+harness = false

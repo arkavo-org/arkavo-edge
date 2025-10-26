@@ -42,7 +42,6 @@ struct AppState {
     dataflow_handler: Arc<DataflowHandler>,
     telemetry_rx: Arc<RwLock<mpsc::Receiver<TelemetryEvent>>>,
     debug_handler: Option<Arc<DebugHandler>>,
-    blank_mode: bool,
 }
 
 pub struct AgUiGateway {
@@ -55,7 +54,6 @@ pub struct AgUiGateway {
     dataflow_handler: Arc<DataflowHandler>,
     budget_handler: Arc<RwLock<BudgetHandler>>,
     debug_handler: Option<Arc<DebugHandler>>,
-    blank_mode: bool,
     initial_prompt: Option<String>,
 }
 
@@ -72,13 +70,8 @@ impl AgUiGateway {
             dataflow_handler: Arc::new(DataflowHandler::new()),
             budget_handler: Arc::new(RwLock::new(BudgetHandler::new())),
             debug_handler: None,
-            blank_mode: false,
             initial_prompt: None,
         }
-    }
-
-    pub fn set_blank_mode(&mut self, blank: bool) {
-        self.blank_mode = blank;
     }
 
     pub fn set_initial_prompt(&mut self, prompt: String) {
@@ -313,7 +306,6 @@ impl AgUiGateway {
             dataflow_handler: self.dataflow_handler.clone(),
             telemetry_rx: Arc::new(RwLock::new(telemetry_rx)),
             debug_handler: self.debug_handler.clone(),
-            blank_mode: self.blank_mode,
         };
 
         // Build axum router
@@ -345,12 +337,8 @@ impl AgUiGateway {
     }
 }
 
-async fn index_handler(State(state): State<AppState>) -> Html<&'static str> {
-    if state.blank_mode {
-        Html(include_str!("../static/shell.html"))
-    } else {
-        Html(include_str!("../static/dashboard.html"))
-    }
+async fn index_handler() -> Html<&'static str> {
+    Html(include_str!("../static/shell.html"))
 }
 
 async fn static_js_handler() -> Response {

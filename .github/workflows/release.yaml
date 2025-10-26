@@ -2,11 +2,13 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     name: Create Release
     runs-on: ubuntu-22.04
     outputs:
@@ -68,17 +70,19 @@ jobs:
             ### Binaries
 
             #### Linux
-            - **Full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
-            - **Static/slim** (musl, memory + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
-            - **Debian package** (full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
-            
+            - **x86_64 full featured** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz
+            - **x86_64 static/slim** (musl, memory + mDNS): arkavo-${{ steps.version.outputs.version }}-x86_64-linux-musl.tar.gz
+            - **ARM64/Raspberry Pi 5** (glibc, local LLM + remote LLM + mDNS): arkavo-${{ steps.version.outputs.version }}-aarch64-linux.tar.gz
+            - **Debian package** (x86_64, full featured): arkavo_${{ steps.version.outputs.version }}_amd64.deb
+
             #### macOS
-            - **ARM64** (full featured): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
-            
+            - **ARM64 CLI** (web browser UI): arkavo-${{ steps.version.outputs.version }}-aarch64-apple-darwin.tar.gz
+            - **ARM64 .pkg** (native CEF window): Coming soon - full-featured with native UI
+
             #### Windows
             - **x86_64** (memory + remote LLM): arkavo-${{ steps.version.outputs.version }}-x86_64-windows.zip
-            
-            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support. Windows builds include memory and remote LLM support (iOS testing capabilities are not available on Windows).
+
+            Choose the musl build for containers/Alpine Linux with remote LLM support. Choose the glibc build for desktop Linux with both local and remote LLM support. ARM64 build is optimized for Raspberry Pi 5 (16GB) - see [deployment guide](https://github.com/arkavo-org/arkavo-edge/blob/main/docs/raspberry-pi-deployment.md). Windows builds include memory and remote LLM support (iOS testing capabilities are not available on Windows).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -103,6 +107,15 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -199,6 +212,74 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-linux-arm64:
+    needs: release
+    name: Build Linux (ARM64)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu
+          profile: minimal
+          override: true
+
+      - name: Install ARM64 cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Build
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Prepare binary
+        run: |
+          cd target/aarch64-unknown-linux-gnu/release
+          aarch64-linux-gnu-strip arkavo
+          # Check binary size
+          SIZE=$(stat --format=%s arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
+          tar -czf arkavo-${{ needs.release.outputs.version }}-aarch64-linux.tar.gz arkavo
+          shasum -a 256 arkavo-${{ needs.release.outputs.version }}-aarch64-linux.tar.gz > arkavo-${{ needs.release.outputs.version }}-aarch64-linux.tar.gz.sha256
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          files: |
+            target/aarch64-unknown-linux-gnu/release/arkavo-${{ needs.release.outputs.version }}-aarch64-linux.tar.gz
+            target/aarch64-unknown-linux-gnu/release/arkavo-${{ needs.release.outputs.version }}-aarch64-linux.tar.gz.sha256
+          fail_on_unmatched_files: false
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-macos-arm64:
     needs: release
     name: Build macOS (ARM64)
@@ -208,6 +289,15 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Install CMake
         run: brew install cmake
@@ -240,6 +330,8 @@ jobs:
         with:
           command: build
           args: --release --target aarch64-apple-darwin
+          # Note: This builds with default features (web-ui) for Homebrew/CLI distribution
+          # For .pkg distribution with native CEF renderer, use: --features cef-ui
 
       - name: Strip binary
         run: |
@@ -309,6 +401,358 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-macos-pkg:
+    needs: release
+    name: Build macOS .pkg Installer
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v1-${{ runner.os }}"
+          prefix-key: "build-pkg"
+
+      - name: Import signing certificates
+        env:
+          MACOS_CERT_APP: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERT_APP_PWD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CERT_INST: ${{ secrets.MACOS_CERT_INSTALLER }}
+          MACOS_CERT_INST_PWD: ${{ secrets.MACOS_CERT_INSTALLER_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_APP" ] && [ -z "$MACOS_CERT_INST" ]; then
+            echo "⚠️ No certificates configured - builds will be unsigned"
+            exit 1
+          fi
+
+          echo "Creating and configuring keychain..."
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          # Import Developer ID Application certificate
+          if [ -n "$MACOS_CERT_APP" ]; then
+            echo "Importing Application certificate..."
+            echo "$MACOS_CERT_APP" | base64 --decode > /tmp/cert-app.p12
+            security import /tmp/cert-app.p12 -k build.keychain -P "$MACOS_CERT_APP_PWD" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm /tmp/cert-app.p12
+          fi
+
+          # Import Developer ID Installer certificate
+          if [ -n "$MACOS_CERT_INST" ]; then
+            echo "Importing Installer certificate..."
+            echo "$MACOS_CERT_INST" | base64 --decode > /tmp/cert-installer.p12
+            security import /tmp/cert-installer.p12 -k build.keychain -P "$MACOS_CERT_INST_PWD" -T /usr/bin/codesign -T /usr/bin/productsign
+            rm /tmp/cert-installer.p12
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          echo "✅ Certificates imported successfully"
+          echo "Available identities:"
+          security find-identity -v build.keychain
+
+      - name: Cache CEF framework
+        id: cache-cef
+        uses: actions/cache@v4
+        with:
+          path: vendor/cef
+          key: cef-${{ runner.os }}-${{ hashFiles('scripts/setup-cef.sh') }}
+          restore-keys: |
+            cef-${{ runner.os }}-
+
+      - name: Download and build CEF
+        if: steps.cache-cef.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading CEF (~100MB)..."
+          ./scripts/setup-cef.sh
+          echo "✅ CEF setup complete"
+
+      - name: Verify CEF cache
+        if: steps.cache-cef.outputs.cache-hit == 'true'
+        run: |
+          echo "✅ CEF loaded from cache"
+          ls -lh vendor/cef/ || echo "CEF cache verification failed"
+
+      - name: Build ARM64 binary with CEF
+        run: cargo build --release --target aarch64-apple-darwin --features cef-ui
+
+      - name: Check binary size
+        run: |
+          SIZE=$(stat -f%z target/aarch64-apple-darwin/release/arkavo)
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Binary size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 60 ]; then
+            echo "ERROR: Binary size (${SIZE_MB}MB) exceeds 60MB limit"
+            exit 1
+          fi
+
+      - name: Create app bundle
+        run: |
+          mkdir -p Arkavo.app/Contents/MacOS
+          mkdir -p Arkavo.app/Contents/Resources
+          mkdir -p Arkavo.app/Contents/Frameworks
+
+          # Copy the binary as arkavo (main executable)
+          # It auto-detects app bundle context and launches UI
+          cp target/aarch64-apple-darwin/release/arkavo Arkavo.app/Contents/MacOS/arkavo
+
+          cp packaging/macos/Info.plist Arkavo.app/Contents/Info.plist
+
+          # Copy CEF framework (~100MB)
+          if [ -d "vendor/cef/Release/Chromium Embedded Framework.framework" ]; then
+            cp -R "vendor/cef/Release/Chromium Embedded Framework.framework" Arkavo.app/Contents/Frameworks/
+            echo "✅ CEF framework included in bundle"
+          else
+            echo "⚠️ CEF framework not found - .pkg will not include CEF support"
+          fi
+
+          # Find and copy the CEF renderer binary
+          echo "Looking for CEF renderer binary..."
+          RENDERER_PATH=$(find target/aarch64-apple-darwin/release/build -name "arkavo-cef-renderer" -path "*/out/bin/arkavo-cef-renderer.app/Contents/MacOS/arkavo-cef-renderer" | head -1)
+          if [ -n "$RENDERER_PATH" ] && [ -f "$RENDERER_PATH" ]; then
+            echo "Found CEF renderer at: $RENDERER_PATH"
+            cp "$RENDERER_PATH" Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            chmod +x Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+            echo "✅ CEF renderer included in bundle"
+          else
+            echo "⚠️ CEF renderer not found - UI may not work"
+            echo "Searched in: target/aarch64-apple-darwin/release/build"
+            find target/aarch64-apple-darwin/release/build -name "arkavo-cef*" -type d | head -5
+          fi
+
+          # Update version in Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.release.outputs.version }}" Arkavo.app/Contents/Info.plist
+
+          # Make executable
+          chmod +x Arkavo.app/Contents/MacOS/arkavo
+
+      - name: Codesign app
+        run: |
+          # Check if certificates are available
+          CERT_APP=$(security find-identity -v -p codesigning build.keychain 2>/dev/null | grep "Developer ID Application" | head -1 | awk -F'"' '{print $2}')
+
+          if [ -z "$CERT_APP" ]; then
+            echo "ERROR: Developer ID Application certificate not found"
+            exit 1
+          fi
+
+          echo "Signing app with hardened runtime using: $CERT_APP"
+
+          # Sign the CEF framework first (it's already signed by Chromium, need to re-sign)
+          if [ -d "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
+            echo "Re-signing CEF framework..."
+            # List the actual structure for debugging
+            ls -la "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework/" || true
+
+            # Find and sign the actual framework binary (may be directly in the framework or in subdirectories)
+            # Sign from innermost to outermost
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f \( -name "*.dylib" -o -name "*.so" \) -print0 | while IFS= read -r -d '' f; do
+              echo "Signing: $f"
+              codesign --force --options runtime --timestamp \
+                --keychain build.keychain \
+                --sign "$CERT_APP" \
+                "$f" 2>&1 || true
+            done
+
+            # Sign any helper executables
+            find "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework" -type f -perm +111 ! -name "*.dylib" ! -name "*.so" -print0 | while IFS= read -r -d '' f; do
+              if file "$f" | grep -q "Mach-O"; then
+                echo "Signing executable: $f"
+                codesign --force --options runtime --timestamp \
+                  --keychain build.keychain \
+                  --sign "$CERT_APP" \
+                  "$f" 2>&1 || true
+              fi
+            done
+
+            # Sign the framework bundle itself with deep to catch anything we missed
+            echo "Signing CEF framework bundle..."
+            codesign --force --deep --options runtime --timestamp \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              "Arkavo.app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          fi
+
+          # Sign the CEF renderer binary if it exists
+          if [ -f "Arkavo.app/Contents/MacOS/arkavo-cef-renderer" ]; then
+            echo "Signing CEF renderer..."
+            codesign --force --options runtime --timestamp \
+              --entitlements packaging/macos/entitlements.plist \
+              --keychain build.keychain \
+              --sign "$CERT_APP" \
+              Arkavo.app/Contents/MacOS/arkavo-cef-renderer
+          fi
+
+          # Sign the main binary with entitlements
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
+            Arkavo.app/Contents/MacOS/arkavo
+
+          # Sign the app bundle itself  (without --deep)
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --keychain build.keychain \
+            --sign "$CERT_APP" \
+            Arkavo.app
+
+          codesign --verify --strict --verbose=4 Arkavo.app
+          echo "✅ App signed successfully"
+
+      - name: Build component pkg
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          mkdir -p pkgroot/Applications
+          cp -R Arkavo.app pkgroot/Applications/
+
+          pkgbuild \
+            --root pkgroot \
+            --identifier com.arkavo.edge \
+            --version "$VERSION" \
+            --install-location / \
+            arkavo-$VERSION.component.pkg
+
+      - name: Sign installer
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+
+          # Check if installer certificate is available
+          CERT_INSTALLER=$(security find-identity -v build.keychain 2>/dev/null | grep "Developer ID Installer" | head -1 | awk -F'"' '{print $2}')
+
+          if [ -z "$CERT_INSTALLER" ]; then
+            echo "ERROR: Developer ID Installer certificate not found"
+            exit 1
+          fi
+
+          echo "Signing installer with: $CERT_INSTALLER"
+          productsign \
+            --keychain build.keychain \
+            --sign "$CERT_INSTALLER" \
+            arkavo-$VERSION.component.pkg \
+            arkavo-$VERSION-macos-arm64.pkg
+
+          rm arkavo-$VERSION.component.pkg
+          echo "✅ Installer signed successfully"
+
+      - name: Submit to notary service (wait)
+        id: notarize
+        shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
+        run: |
+          set -euo pipefail
+          OUT_JSON="notary-submit.json"
+          xcrun notarytool submit "arkavo-${VERSION}-macos-arm64.pkg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait \
+            --output-format json | tee "$OUT_JSON"
+
+          STATUS=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['status'])")
+          ID=$(python3 -c "import json; print(json.load(open('$OUT_JSON'))['id'])")
+
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "submission_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Submission status: $STATUS  id: $ID"
+
+          # Exit with error if not Accepted
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $STATUS"
+            exit 1
+          fi
+
+      - name: Fetch notary log (always)
+        if: ${{ always() }}
+        id: fetchlog
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM_ID: M8GS7ZT95Y
+        run: |
+          set +e  # Don't exit on error
+          ID="${{ steps.notarize.outputs.submission_id || '' }}"
+
+          if [[ -z "$ID" ]]; then
+            echo "No submission id captured; try history fallback…"
+            HISTORY_JSON=$(xcrun notarytool history --apple-id "$APPLE_ID" \
+                 --password "$APPLE_APP_PASSWORD" --team-id "$TEAM_ID" \
+                 --output-format json 2>/dev/null || echo "{}")
+            ID=$(echo "$HISTORY_JSON" | python3 -c "import json,sys; h=json.load(sys.stdin).get('history',[]); print(h[0]['id'] if h else '')" 2>/dev/null || echo "")
+          fi
+
+          if [[ -z "$ID" ]]; then
+            echo "Still no submission id; cannot fetch log." | tee notary.log
+            exit 0
+          fi
+
+          echo "Fetching notary log for $ID…"
+          xcrun notarytool log "$ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            notary.json 2>&1 || echo "Failed to fetch log" > notary.json
+
+          # Create readable log
+          if [ -f notary.json ]; then
+            python3 -c "import json,sys; j=json.load(open('notary.json')); print(json.dumps(j.get('issues') or j.get('log') or j, indent=2))" > notary.log 2>&1 || cp notary.json notary.log
+          else
+            echo "No log file generated" > notary.log
+          fi
+
+      - name: Upload notary logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-logs
+          path: |
+            notary.json
+            notary.log
+
+      - name: Staple (only on Accepted)
+        if: ${{ steps.notarize.outputs.status == 'Accepted' }}
+        run: |
+          xcrun stapler staple "arkavo-${{ needs.release.outputs.version }}-macos-arm64.pkg"
+          echo "✅ Pkg notarized and stapled successfully"
+
+      - name: Generate checksum
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          shasum -a 256 arkavo-$VERSION-macos-arm64.pkg > arkavo-$VERSION-macos-arm64.pkg.sha256
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          files: |
+            arkavo-${{ needs.release.outputs.version }}-macos-arm64.pkg
+            arkavo-${{ needs.release.outputs.version }}-macos-arm64.pkg.sha256
+          fail_on_unmatched_files: false
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-windows-x86_64:
     needs: release
     name: Build Windows x86_64
@@ -318,6 +762,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        shell: bash
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

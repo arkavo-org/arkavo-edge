@@ -26,9 +26,32 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
+
+    // Determine build type based on profile
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let build_type = if profile == "release" {
+        "Release" // Full optimizations, no debug info
+    } else {
+        "MinSizeRel" // Optimize for size in debug builds, much faster to compile
+    };
+
     config
         .define("BUILD_SHARED_LIBS", "OFF")
-        .define("CMAKE_BUILD_TYPE", "RelWithDebInfo"); // Optimized with debug info
+        .define("CMAKE_BUILD_TYPE", build_type);
+
+    // Enable parallel compilation (skip -j for Windows/MSBuild)
+    if !target.contains("windows") {
+        if let Ok(num_jobs) = env::var("NUM_JOBS") {
+            config.build_arg(format!("-j{}", num_jobs));
+        } else {
+            // Use number of CPUs
+            let num_cpus = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            config.build_arg(format!("-j{}", num_cpus));
+        }
+    }
+    // MSBuild handles parallelism automatically with /m flag (set by cmake internally)
 
     // Platform-specific GPU acceleration
     if cfg!(target_os = "macos") {
@@ -55,36 +78,86 @@ fn main() {
             .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON") // Required for static linking
             .define("GGML_STATIC", "ON") // Build static libraries
             .define("GGML_OPENMP", "ON"); // Enable OpenMP but link statically
+
+        // ARM64-specific optimizations for Raspberry Pi and similar systems
+        if target.contains("aarch64") || target.contains("arm64") {
+            config.define("GGML_NATIVE", "OFF"); // Disable native CPU feature detection for portability
+
+            // Device-specific CPU architecture targets
+            if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
+                if device == "uno-q" {
+                    // UNO Q has Cortex-A53 (ARMv8.0) - use conservative architecture
+                    config.define("GGML_CPU_ARM_ARCH", "armv8-a+fp+simd");
+                    eprintln!("Building CPU-only for UNO Q (ARMv8.0/Cortex-A53, Vulkan disabled)");
+                    eprintln!("See: docs/uno-q-hardware-acceleration-blockers.md");
+                } else {
+                    // Other devices: use ARMv8.2 baseline
+                    config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
+                    eprintln!("Building CPU-only for device: {}", device);
+                }
+            } else {
+                // No device specified - use ARMv8.2 baseline for portability
+                config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
+                eprintln!(
+                    "Building CPU-only for aarch64-linux (no ARKAVO_TARGET_DEVICE specified)"
+                );
+            }
+        }
     }
 
     // Common settings for all platforms
     config
-        .define("GGML_OPENCL", "OFF")
+        .define("GGML_OPENCL", "OFF") // Mesa OpenCL doesn't support Adreno GPUs
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
         .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
-        .define("LLAMA_BUILD_MTMD", "ON"); // Enable multimodal support
+        .define("LLAMA_BUILD_MTMD", "ON") // Enable multimodal support
+        .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
+        .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples
+        .define("LLAMA_BUILD_SERVER", "OFF"); // Don't build server
+
+    // Use ccache if available for faster rebuilds
+    if let Ok(ccache) = which::which("ccache") {
+        config
+            .define("CMAKE_C_COMPILER_LAUNCHER", ccache.to_str().unwrap())
+            .define("CMAKE_CXX_COMPILER_LAUNCHER", ccache.to_str().unwrap());
+        eprintln!("Using ccache for faster C++ compilation");
+    }
 
     let dst = config.build();
 
     let lib_dir = dst.join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    println!("cargo:rustc-link-lib=static=llama");
-    println!("cargo:rustc-link-lib=static=ggml");
 
-    // Link multimodal library if it exists
-    if lib_dir.join("libmtmd.a").exists() || lib_dir.join("mtmd.lib").exists() {
-        println!("cargo:rustc-link-lib=static=mtmd");
-    }
-
-    // Only link libraries that actually exist
-    if lib_dir.join("libggml-base.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-base");
-    }
-    if lib_dir.join("libggml-cpu.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-cpu");
-    }
-    if lib_dir.join("libggml-blas.a").exists() {
-        println!("cargo:rustc-link-lib=static=ggml-blas");
+    // Dynamically discover and link all static libraries built by CMake
+    // This handles both Unix (.a) and Windows (.lib) naming conventions
+    if cfg!(target_os = "windows") {
+        // Windows: look for *.lib files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.ends_with(".lib") && !fname.ends_with(".dll.lib") {
+                    let libname = fname.trim_end_matches(".lib");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
+    } else {
+        // Unix: look for lib*.a files
+        for entry in std::fs::read_dir(&lib_dir)
+            .unwrap_or_else(|_| panic!("Failed to read lib directory: {}", lib_dir.display()))
+        {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|f| f.to_str()) {
+                if fname.starts_with("lib") && fname.ends_with(".a") {
+                    let libname = fname.trim_start_matches("lib").trim_end_matches(".a");
+                    println!("cargo:rustc-link-lib=static={}", libname);
+                }
+            }
+        }
     }
 
     // Platform-specific linking
@@ -97,8 +170,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Accelerate");
         println!("cargo:rustc-link-lib=framework=Foundation");
     } else if cfg!(target_os = "windows") {
-        // Windows specific libraries
-        println!("cargo:rustc-link-lib=dylib=c++");
+        // Windows MSVC uses automatic C++ runtime linking via /MD or /MT flag
+        // CMake handles this automatically based on CMAKE_MSVC_RUNTIME_LIBRARY
+        // No explicit cargo:rustc-link-lib needed for C++ runtime
     } else {
         // Linux specific libraries
         println!("cargo:rustc-link-lib=stdc++");
@@ -106,11 +180,34 @@ fn main() {
         println!("cargo:rustc-link-lib=m"); // math library
 
         // Static linking of OpenMP for zero-config deployment
-        // Try multiple possible GCC library paths
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
-        println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
-        println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
+        let target = env::var("TARGET").unwrap_or_default();
+        if target.contains("aarch64") || target.contains("arm64") {
+            // ARM64 library paths for cross-compilation and native builds
+            // Try multiple GCC versions (Ubuntu 22.04 typically has GCC 11-12)
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/10");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/aarch64-linux-gnu/9");
+            println!("cargo:rustc-link-search=native=/usr/lib/aarch64-linux-gnu");
+            println!("cargo:rustc-link-search=native=/usr/aarch64-linux-gnu/lib");
+            // Also check cross-compilation sysroot
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
+
+            // Vulkan disabled for UNO Q - using CPU-only build
+            // See docs/uno-q-hardware-acceleration-blockers.md
+        } else {
+            // x86_64 library paths
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/12");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/11");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/10");
+            println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/9");
+            println!("cargo:rustc-link-search=native=/usr/lib/x86_64-linux-gnu");
+        }
         println!("cargo:rustc-link-lib=static=gomp"); // Static OpenMP
     }
 
@@ -120,6 +217,7 @@ fn main() {
     }
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings_path = out_path.join("bindings.rs");
     let header = out_path.join("include").join("llama.h");
     let mtmd_header = out_path.join("include").join("mtmd.h");
 
@@ -131,34 +229,50 @@ fn main() {
         );
     }
 
-    // Create a wrapper header that includes both llama.h and mtmd.h
-    let wrapper_header = out_path.join("wrapper.h");
-    let mut wrapper_content = format!("#include \"{}\"\n", header.display());
-    if mtmd_header.exists() {
-        wrapper_content.push_str(&format!("#include \"{}\"\n", mtmd_header.display()));
+    // Only regenerate bindings if they don't exist or header changed
+    let should_regenerate = !bindings_path.exists() || {
+        let header_mtime = std::fs::metadata(&header).and_then(|m| m.modified()).ok();
+        let bindings_mtime = std::fs::metadata(&bindings_path)
+            .and_then(|m| m.modified())
+            .ok();
+
+        match (header_mtime, bindings_mtime) {
+            (Some(h), Some(b)) => h > b,
+            _ => true,
+        }
+    };
+
+    if should_regenerate {
+        eprintln!("Generating Rust bindings for llama.cpp");
+
+        // Create a wrapper header that includes both llama.h and mtmd.h
+        let wrapper_header = out_path.join("wrapper.h");
+        let mut wrapper_content = format!("#include \"{}\"\n", header.display());
+        if mtmd_header.exists() {
+            wrapper_content.push_str(&format!("#include \"{}\"\n", mtmd_header.display()));
+        }
+        std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");
+
+        let bindings = bindgen::Builder::default()
+            .header(wrapper_header.to_str().unwrap())
+            .clang_arg(format!("-I{}", out_path.join("include").display()))
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+            .allowlist_function("llama_.*")
+            .allowlist_function("ggml_.*")
+            .allowlist_function("mtmd_.*")
+            .allowlist_function("clip_.*")
+            .allowlist_type("llama_.*")
+            .allowlist_type("ggml_.*")
+            .allowlist_type("mtmd_.*")
+            .allowlist_type("clip_.*")
+            .allowlist_var("LLAMA_.*")
+            .allowlist_var("GGML_.*")
+            .allowlist_var("MTMD_.*")
+            .generate()
+            .expect("Unable to generate bindings");
+
+        bindings
+            .write_to_file(&bindings_path)
+            .expect("Couldn't write bindings!");
     }
-    std::fs::write(&wrapper_header, wrapper_content).expect("Failed to write wrapper header");
-
-    let bindings = bindgen::Builder::default()
-        .header(wrapper_header.to_str().unwrap())
-        .clang_arg(format!("-I{}", out_path.join("include").display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .allowlist_function("llama_.*")
-        .allowlist_function("ggml_.*")
-        .allowlist_function("mtmd_.*")
-        .allowlist_function("clip_.*")
-        .allowlist_type("llama_.*")
-        .allowlist_type("ggml_.*")
-        .allowlist_type("mtmd_.*")
-        .allowlist_type("clip_.*")
-        .allowlist_var("LLAMA_.*")
-        .allowlist_var("GGML_.*")
-        .allowlist_var("MTMD_.*")
-        .generate()
-        .expect("Unable to generate bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("Couldn't write bindings!");
 }
