@@ -78,15 +78,33 @@ fn main() {
 
         // ARM64-specific optimizations for Raspberry Pi and similar systems
         if target.contains("aarch64") || target.contains("arm64") {
-            config
-                .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
-                .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
+            config.define("GGML_NATIVE", "OFF"); // Disable native CPU feature detection for portability
+
+            // Device-specific CPU architecture targets
+            if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
+                if device == "uno-q" {
+                    // UNO Q has Cortex-A53 (ARMv8.0) - use conservative architecture
+                    config.define("GGML_CPU_ARM_ARCH", "armv8-a+fp+simd");
+                    eprintln!("Building CPU-only for UNO Q (ARMv8.0/Cortex-A53, Vulkan disabled)");
+                    eprintln!("See: docs/uno-q-hardware-acceleration-blockers.md");
+                } else {
+                    // Other devices: use ARMv8.2 baseline
+                    config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
+                    eprintln!("Building CPU-only for device: {}", device);
+                }
+            } else {
+                // No device specified - use ARMv8.2 baseline for portability
+                config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
+                eprintln!(
+                    "Building CPU-only for aarch64-linux (no ARKAVO_TARGET_DEVICE specified)"
+                );
+            }
         }
     }
 
     // Common settings for all platforms
     config
-        .define("GGML_OPENCL", "OFF")
+        .define("GGML_OPENCL", "OFF") // Mesa OpenCL doesn't support Adreno GPUs
         .define("GGML_ASSERTS", "OFF") // Disable asserts for performance
         .define("LLAMA_CURL", "OFF") // Disable CURL requirement (not needed for local inference)
         .define("LLAMA_BUILD_TESTS", "OFF") // Don't build tests
@@ -174,6 +192,9 @@ fn main() {
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/12");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/11");
             println!("cargo:rustc-link-search=native=/usr/lib/gcc-cross/aarch64-linux-gnu/10");
+
+            // Vulkan disabled for UNO Q - using CPU-only build
+            // See docs/uno-q-hardware-acceleration-blockers.md
         } else {
             // x86_64 library paths
             println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
