@@ -78,22 +78,23 @@ fn main() {
 
         // ARM64-specific optimizations for Raspberry Pi and similar systems
         if target.contains("aarch64") || target.contains("arm64") {
-            config
-                .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection for portability
-                .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Baseline ARMv8.2 with FP16 support
+            config.define("GGML_NATIVE", "OFF"); // Disable native CPU feature detection for portability
 
-            // Vulkan disabled for UNO Q - Mesa Turnip driver crashes with ErrorDeviceLost
-            // Investigation: docs/uno-q-hardware-acceleration-blockers.md
-            // C++ exception vk::DeviceLostError calls std::terminate() - cannot be caught
+            // Device-specific CPU architecture targets
             if let Ok(device) = env::var("ARKAVO_TARGET_DEVICE") {
                 if device == "uno-q" {
-                    eprintln!("Building CPU-only for UNO Q (Vulkan disabled - driver crashes)");
+                    // UNO Q has Cortex-A53 (ARMv8.0) - use conservative architecture
+                    config.define("GGML_CPU_ARM_ARCH", "armv8-a+fp+simd");
+                    eprintln!("Building CPU-only for UNO Q (ARMv8.0/Cortex-A53, Vulkan disabled)");
                     eprintln!("See: docs/uno-q-hardware-acceleration-blockers.md");
                 } else {
+                    // Other devices: use ARMv8.2 baseline
+                    config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
                     eprintln!("Building CPU-only for device: {}", device);
                 }
             } else {
-                // No device specified - default to CPU-only for portability
+                // No device specified - use ARMv8.2 baseline for portability
+                config.define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16");
                 eprintln!(
                     "Building CPU-only for aarch64-linux (no ARKAVO_TARGET_DEVICE specified)"
                 );
