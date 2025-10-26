@@ -29,6 +29,9 @@ pub enum Error {
 
     #[error("Model error: {0}")]
     Model(String),
+
+    #[error("Inference error: {0}")]
+    Inference(String),
 }
 
 #[cfg(feature = "llm-local")]

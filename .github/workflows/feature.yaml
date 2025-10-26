@@ -250,49 +250,79 @@ jobs:
           fi
 
   build-linux:
-    name: Build Linux (${{ matrix.target }})
-    runs-on: ubuntu-22.04
+    name: Build Linux (${{ matrix.target || matrix.device }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
             features: default
             artifact_name: arkavo-x86_64-linux
           - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
             features: memory,mdns
             artifact_name: arkavo-x86_64-linux-musl
-          - target: aarch64-unknown-linux-gnu
-            features: default
-            artifact_name: arkavo-aarch64-linux
-            cross: true
+          # ARM64 native builds (Raspberry Pi 5 and Arduino UNO Q)
+          - os: ubuntu-24.04-arm
+            features: memory,mdns,llm-remote,test-harness,gemini,web-ui
+            artifact_name: arkavo-aarch64-linux-rpi5
+            device: rpi5
+          # Arduino UNO Q (QRB2210) - Hardware acceleration blocked
+          # Investigation: All paths blocked (Vulkan/OpenCL/Hexagon NPU)
+          # See: docs/uno-q-hardware-acceleration-blockers.md for details
+          - os: ubuntu-24.04-arm
+            features: llama-cpp,snpe,memory,mdns,gemini
+            artifact_name: arkavo-aarch64-linux-uno-q
+            device: uno-q
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update
 
-          # Install ARM64 cross-compilation toolchain if needed
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            # Install ARM64 cross-compilation toolchain
-            # Use crossbuild-essential which includes all necessary libraries
-            sudo apt-get install -y cmake clang libclang-dev crossbuild-essential-arm64 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "DEBUG: matrix.device = '${{ matrix.device }}'"
+          echo "DEBUG: matrix.target = '${{ matrix.target }}'"
+          echo "DEBUG: matrix.features = '${{ matrix.feature }}'"
+
+          if [ "${{ matrix.device }}" = "uno-q" ]; then
+            echo "Installing dependencies for Arduino UNO Q (llama.cpp CPU-only)"
+            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
+          elif [ "${{ matrix.device }}" = "rpi5" ]; then
+            echo "Installing dependencies for Raspberry Pi 5 (llama.cpp with CPU backend)"
+            sudo apt-get install -y cmake clang libclang-dev build-essential libgomp1
           else
-            # Install both runtime and static OpenMP libraries for static linking
-            # Use gcc-multilib which includes static libgomp.a
+            echo "Installing dependencies for x86_64 builds"
             sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
           fi
+
+      # SNPE SDK is dynamically loaded at runtime (no build-time dependency)
+      # The Qualcomm Neural Processing SDK enables hardware-accelerated inference
+      # on Arduino UNO Q (QRB2210) with GPU/DSP support.
+      #
+      # Runtime detection: Binary searches /opt/snpe, $SNPE_ROOT, $LD_LIBRARY_PATH
+      # Download SDK from: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk
+      # License: Proprietary (cannot redistribute - users install separately)
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target || '' }}
       - name: Setup sccache for C++ caching
         uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
-          prefix-key: "build-${{ matrix.target }}"
+          prefix-key: "build-${{ matrix.device || matrix.target }}"
 
       - name: Install build tools
         run: |
@@ -309,38 +339,60 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CXXFLAGS_x86_64_unknown_linux_musl: "-static"
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
-          # ARM64 cross-compilation toolchain
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # For glibc build, ensure static linking of OpenMP
           RUSTFLAGS: "-C link-args=-static-libgcc -C link-args=-static-libstdc++"
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: sccache
         run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            # Full featured build with local LLM support and static OpenMP
+          if [ "${{ matrix.device }}" = "rpi5" ]; then
+            # Raspberry Pi 5 - Native ARM64 build (Cortex-A76, CPU-only)
+            echo "Building for Raspberry Pi 5 (native ARM64, CPU-only)"
+            export ARKAVO_TARGET_DEVICE=rpi5
+            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
+          elif [ "${{ matrix.device }}" = "uno-q" ]; then
+            # Arduino UNO Q - Native ARM64 build (Cortex-A53 with llama.cpp)
+            # Note: Hardware acceleration blocked (Vulkan/OpenCL/Hexagon NPU)
+            # See docs/uno-q-hardware-acceleration-blockers.md for investigation details
+            echo "Building for Arduino UNO Q (Cortex-A53 with llama.cpp CPU backend)"
+            export ARKAVO_TARGET_DEVICE=uno-q
+            cargo build --release -p arkavo --no-default-features --features ${{ matrix.features }}
+          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Full featured build with local LLM support (x86_64)
             cargo build --release --target ${{ matrix.target }} -p arkavo
           else
-            # Static build for containers with memory and mDNS
+            # Static musl build for containers
             cargo build --release --target ${{ matrix.target }} --no-default-features --features ${{ matrix.features }} -p arkavo
           fi
 
       - name: Prepare release artifact
         run: |
           mkdir -p release-package
-          cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
+          # For native ARM64 builds, binary is in target/release; for others, target/<triple>/release
+          if [ -n "${{ matrix.device }}" ]; then
+            cp target/release/arkavo release-package/${{ matrix.artifact_name }}
+          else
+            cp target/${{ matrix.target }}/release/arkavo release-package/${{ matrix.artifact_name }}
+          fi
           chmod +x release-package/${{ matrix.artifact_name }}
 
           # Create feature manifest
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ] || [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            echo "Full featured build with local LLM, memory, and mDNS support (pure Rust)" > release-package/features.txt
-            if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-              echo "Optimized for Raspberry Pi 5 and ARM64 systems" >> release-package/features.txt
-            fi
+          if [ "${{ matrix.device }}" = "rpi5" ]; then
+            echo "Raspberry Pi 5 build (Cortex-A76, native ARM64, CPU-only)" > release-package/features.txt
+            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
+          elif [ "${{ matrix.device }}" = "uno-q" ]; then
+            echo "Arduino UNO Q build (Cortex-A53, CPU-only)" > release-package/features.txt
+            echo "llama.cpp with CPU backend (no GPU acceleration)" >> release-package/features.txt
+            echo "Note: Vulkan/OpenCL/Hexagon NPU acceleration unavailable" >> release-package/features.txt
+            echo "See: docs/uno-q-hardware-acceleration-blockers.md" >> release-package/features.txt
+            echo "SNPE runtime support for vision models (dynamic loading)" >> release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
+          elif [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            echo "Full featured build (x86_64)" > release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           else
-            echo "Static build with memory and mDNS support (pure Rust)" > release-package/features.txt
+            echo "Static build (${{ matrix.target }})" > release-package/features.txt
+            echo "Features: ${{ matrix.features }}" >> release-package/features.txt
           fi
 
       - name: Upload binary
@@ -358,6 +410,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -458,6 +518,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Setup vendor/llama.cpp
+        shell: bash
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
 
       # Install C++ build tools for future llama.cpp support
       # Note: Currently building with windows-default (no C++ deps), but this
