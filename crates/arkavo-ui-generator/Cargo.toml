@@ -16,15 +16,22 @@ anyhow = { workspace = true }
 
 # Arkavo dependencies
 arkavo-router = { path = "../arkavo-router", default-features = false, features = ["gemini", "llm-remote"] }
-arkavo-llm = { path = "../arkavo-llm", default-features = false }
+arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["llama-cpp"] }
+arkavo-events = { path = "../arkavo-events" }
 arkavo-gemini = { path = "../arkavo-gemini" }
 arkavo-observability = { path = "../arkavo-observability" }
+base64 = { workspace = true }
+
+# Model downloading
+hf-hub = { workspace = true }
+dirs = { workspace = true }
 
 # Template rendering
 regex = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 arkavo-browser = { path = "../arkavo-browser" }

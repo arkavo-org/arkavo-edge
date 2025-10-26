@@ -5,6 +5,7 @@ pub mod prompt;
 pub mod renderer;
 pub mod streaming;
 pub mod templates;
+pub mod vision;
 
 use anyhow::Result;
 use arkavo_router::{Router, RoutingDecision};

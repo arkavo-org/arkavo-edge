@@ -11,6 +11,10 @@ mod stubs {
 #[cfg(target_env = "musl")]
 pub use stubs::*;
 
+// Multimodal support module
+#[cfg(not(target_env = "musl"))]
+pub mod multimodal;
+
 // Real implementation for non-musl targets
 #[cfg(not(target_env = "musl"))]
 pub use arkavo_llama_cpp_sys as ffi;
@@ -202,9 +206,8 @@ impl LlamaContext {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or_else(|_| num_cores <= 4);
 
-        // Detect Qualcomm Adreno GPU (via GGML_VK_MAX_BATCH env var or ARM64+Vulkan build)
-        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok()
-            || (cfg!(target_arch = "aarch64") && cfg!(feature = "llama-cpp"));
+        // Detect Qualcomm Adreno GPU (via GGML_VK_MAX_BATCH env var or ARM64 architecture)
+        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok() || cfg!(target_arch = "aarch64");
 
         // Try to create context, catch Vulkan crashes
         let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
