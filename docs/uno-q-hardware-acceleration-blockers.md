@@ -269,7 +269,10 @@ Mesa Turnip 25.1.0-1qcom1 ✅ (installed)
 - ✅ Stable operation, no crashes
 - ✅ Works with all GGUF models
 - ⚠️ Slow inference: ~1-2 tokens/sec on Gemma-3-270M (vs 50+ expected with GPU)
-- Built with: `GGML_VULKAN=OFF` in `crates/arkavo-llama-cpp-sys/build.rs`
+- Built with:
+  - `GGML_VULKAN=OFF` - No GPU acceleration
+  - `GGML_CPU_ARM_ARCH=armv8-a+fp+simd` - ARMv8.0/Cortex-A53 compatible
+  - Configured in `crates/arkavo-llama-cpp-sys/build.rs`
 
 ## Recommendations
 
