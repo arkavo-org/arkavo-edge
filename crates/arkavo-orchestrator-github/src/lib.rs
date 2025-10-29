@@ -8,6 +8,7 @@
 
 pub mod agent_assignment;
 pub mod cognitive_engine;
+pub mod config;
 pub mod error;
 pub mod github_auth;
 pub mod github_operations;
@@ -19,6 +20,7 @@ pub mod webhook;
 
 pub use agent_assignment::{AgentAssigner, AgentAssignment};
 pub use cognitive_engine::{CognitiveEngine, ExecutionPlan, ExecutionResult};
+pub use config::OrchestratorConfig;
 pub use error::{Error, Result};
 pub use github_auth::GitHubApp;
 pub use github_operations::{GitHubOperations, IssueUpdate};

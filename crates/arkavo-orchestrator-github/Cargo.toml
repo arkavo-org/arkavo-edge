@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-github-orchestrator"
+name = "arkavo-orchestrator-github"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -27,7 +27,7 @@ tower.workspace = true
 jsonwebtoken.workspace = true
 
 # Workspace crates
-arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-protocol = { path = "../arkavo-protocol", features = ["metrics"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }

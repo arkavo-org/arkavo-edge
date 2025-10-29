@@ -485,36 +485,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arkavo-github-orchestrator"
-version = "0.38.2"
-dependencies = [
- "anyhow",
- "arkavo-budget",
- "arkavo-events",
- "arkavo-memory",
- "arkavo-observability",
- "arkavo-protocol",
- "async-trait",
- "axum",
- "bytes",
- "chrono",
- "hex",
- "hmac",
- "jsonwebtoken",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tower 0.5.2",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "arkavo-kimi"
 version = "0.38.2"
 dependencies = [
@@ -723,6 +693,36 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "arkavo-orchestrator-github"
+version = "0.38.2"
+dependencies = [
+ "anyhow",
+ "arkavo-budget",
+ "arkavo-events",
+ "arkavo-memory",
+ "arkavo-observability",
+ "arkavo-protocol",
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "hex",
+ "hmac",
+ "jsonwebtoken",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tower 0.5.2",
+ "tower-http",
+ "tracing",
  "uuid",
 ]
 
