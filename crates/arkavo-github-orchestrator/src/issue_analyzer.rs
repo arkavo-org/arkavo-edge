@@ -246,7 +246,7 @@ impl IssueAnalyzer {
 
         for (tech, keywords) in &tech_keywords {
             if keywords.iter().any(|kw| text.contains(kw)) {
-                technologies.insert(tech.to_string());
+                technologies.insert((*tech).to_string());
             }
         }
 

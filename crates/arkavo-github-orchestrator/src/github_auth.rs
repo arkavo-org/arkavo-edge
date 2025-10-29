@@ -79,7 +79,8 @@ impl GitHubApp {
             .map_err(|e| Error::Other(anyhow::anyhow!("Failed to generate JWT: {e}")))
     }
 
-    pub async fn get_installations(&self) -> Result<Vec<Installation>> {
+    #[allow(dead_code)]
+    async fn get_installations(&self) -> Result<Vec<Installation>> {
         let jwt = self.generate_jwt()?;
 
         debug!("Fetching GitHub App installations");

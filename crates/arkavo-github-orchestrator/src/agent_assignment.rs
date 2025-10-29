@@ -95,10 +95,10 @@ impl AgentAssigner {
         let mut unique_agents = std::collections::HashSet::new();
 
         for capability in required_capabilities {
-            if let Some(agent_id) = self.registry.find_best_agent(capability).await {
-                if unique_agents.insert(agent_id.clone()) {
-                    team.push(agent_id);
-                }
+            if let Some(agent_id) = self.registry.find_best_agent(capability).await
+                && unique_agents.insert(agent_id.clone())
+            {
+                team.push(agent_id);
             }
         }
 
