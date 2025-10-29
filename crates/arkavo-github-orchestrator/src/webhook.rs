@@ -62,7 +62,7 @@ impl WebhookServer {
         Ok(())
     }
 
-    async fn process_event(&self, event: GitHubEvent) -> Result<()> {
+    fn process_event(&self, event: GitHubEvent) -> Result<()> {
         info!(
             event_type = event.event_type(),
             "Received GitHub webhook event"
@@ -140,7 +140,7 @@ async fn handle_webhook(
         }
     };
 
-    if let Err(e) = server.process_event(event).await {
+    if let Err(e) = server.process_event(event) {
         error!("Failed to process event: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event").into_response();
     }

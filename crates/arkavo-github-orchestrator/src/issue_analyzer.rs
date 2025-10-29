@@ -69,7 +69,10 @@ impl IssueAnalyzer {
         let title_lower = issue.title.to_lowercase();
         let body_lower = issue.body.as_deref().unwrap_or("").to_lowercase();
 
-        if labels.iter().any(|l| l.contains("bug") || l.contains("fix")) {
+        if labels
+            .iter()
+            .any(|l| l.contains("bug") || l.contains("fix"))
+        {
             return IssueType::Bug;
         }
 
@@ -80,11 +83,10 @@ impl IssueAnalyzer {
             return IssueType::Security;
         }
 
-        if labels.iter().any(|l| {
-            l.contains("documentation")
-                || l.contains("docs")
-                || l.contains("readme")
-        }) {
+        if labels
+            .iter()
+            .any(|l| l.contains("documentation") || l.contains("docs") || l.contains("readme"))
+        {
             return IssueType::Documentation;
         }
 
@@ -95,29 +97,27 @@ impl IssueAnalyzer {
             return IssueType::Question;
         }
 
-        if labels.iter().any(|l| {
-            l.contains("performance")
-                || l.contains("optimization")
-                || l.contains("speed")
-        }) {
+        if labels
+            .iter()
+            .any(|l| l.contains("performance") || l.contains("optimization") || l.contains("speed"))
+        {
             return IssueType::Performance;
         }
 
-        if labels.iter().any(|l| l.contains("test") || l.contains("ci")) {
+        if labels
+            .iter()
+            .any(|l| l.contains("test") || l.contains("ci"))
+        {
             return IssueType::Testing;
         }
 
         if labels.iter().any(|l| {
-            l.contains("enhancement")
-                || l.contains("feature")
-                || l.contains("improvement")
+            l.contains("enhancement") || l.contains("feature") || l.contains("improvement")
         }) {
             return IssueType::Feature;
         }
 
-        if title_lower.contains("bug")
-            || title_lower.contains("fix")
-            || body_lower.contains("bug")
+        if title_lower.contains("bug") || title_lower.contains("fix") || body_lower.contains("bug")
         {
             return IssueType::Bug;
         }
@@ -153,19 +153,17 @@ impl IssueAnalyzer {
 
         let labels: Vec<&str> = issue.labels.iter().map(|l| l.name.as_str()).collect();
 
-        if labels.iter().any(|l| {
-            l.contains("good first issue")
-                || l.contains("trivial")
-                || l.contains("typo")
-        }) {
+        if labels
+            .iter()
+            .any(|l| l.contains("good first issue") || l.contains("trivial") || l.contains("typo"))
+        {
             return Complexity::Trivial;
         }
 
-        if labels.iter().any(|l| {
-            l.contains("complex")
-                || l.contains("architecture")
-                || l.contains("breaking")
-        }) {
+        if labels
+            .iter()
+            .any(|l| l.contains("complex") || l.contains("architecture") || l.contains("breaking"))
+        {
             complexity_score += 4;
         }
 
@@ -291,11 +289,7 @@ mod tests {
     use super::*;
     use crate::types::{Label, User};
 
-    fn create_test_issue(
-        title: &str,
-        body: &str,
-        labels: Vec<&str>,
-    ) -> Issue {
+    fn create_test_issue(title: &str, body: &str, labels: Vec<&str>) -> Issue {
         Issue {
             id: 1,
             number: 1,

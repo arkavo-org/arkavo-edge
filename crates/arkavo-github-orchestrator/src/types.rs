@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "action", rename_all = "lowercase")]
 pub enum GitHubEvent {
     #[serde(rename = "issues")]
-    Issues(IssueEvent),
+    Issues(Box<IssueEvent>),
     #[serde(rename = "pull_request")]
-    PullRequest(PullRequestEvent),
+    PullRequest(Box<PullRequestEvent>),
     #[serde(rename = "ping")]
     Ping(PingEvent),
 }
