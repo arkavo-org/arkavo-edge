@@ -1,0 +1,68 @@
+name: SNPE Model Conversion
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_url:
+        description: 'URL to ONNX model (direct download link)'
+        required: true
+        default: 'https://example.com/model.onnx'
+      model_name:
+        description: 'Output DLC filename (without extension)'
+        required: true
+        default: 'model'
+
+jobs:
+  convert-to-dlc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download ONNX model
+        run: |
+          echo "Downloading ONNX model from ${{ github.event.inputs.model_url }}"
+          wget -O /tmp/model.onnx "${{ github.event.inputs.model_url }}"
+          ls -lh /tmp/model.onnx
+
+      - name: Install SNPE SDK
+        run: |
+          # Note: This requires SNPE SDK to be stored as repository secret or downloaded
+          # For now, we'll document the manual process
+          echo "SNPE SDK installation step"
+          echo "TODO: Download SNPE SDK from Qualcomm Developer Network"
+          echo "See: https://developer.qualcomm.com/software/qualcomm-neural-processing-sdk"
+
+      - name: Convert ONNX to DLC
+        run: |
+          export SNPE_ROOT=$PWD/vendor/qairt/2.39.0.250926
+          export PYTHONPATH=$SNPE_ROOT/lib/python
+          export PATH=$SNPE_ROOT/bin/x86_64-linux-clang:$PATH
+
+          python3 $SNPE_ROOT/bin/x86_64-linux-clang/snpe-onnx-to-dlc \
+            -i /tmp/model.onnx \
+            -o /tmp/${{ github.event.inputs.model_name }}.dlc
+
+          # Verify DLC
+          $SNPE_ROOT/bin/x86_64-linux-clang/snpe-dlc-info \
+            -i /tmp/${{ github.event.inputs.model_name }}.dlc
+
+      - name: Upload DLC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.model_name }}-dlc
+          path: /tmp/${{ github.event.inputs.model_name }}.dlc
+          retention-days: 30
+
+      - name: Create Release (if on main branch)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: snpe-${{ github.event.inputs.model_name }}-${{ github.run_number }}
+          name: SNPE DLC - ${{ github.event.inputs.model_name }}
+          files: /tmp/${{ github.event.inputs.model_name }}.dlc
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

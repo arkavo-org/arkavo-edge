@@ -36,6 +36,7 @@ members = [
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
+    "crates/arkavo-github-orchestrator",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
