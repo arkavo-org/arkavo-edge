@@ -1,9 +1,11 @@
 use crate::error::{Error, Result};
 use crate::types::GitHubEvent;
+use arkavo_observability::metrics::MetricsCollector;
+use arkavo_protocol::rate_limit::{IpRateLimiter, RateLimitConfig};
 use axum::{
     Router,
     body::Bytes,
-    extract::{Request, State},
+    extract::{ConnectInfo, Request, State},
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -11,7 +13,9 @@ use axum::{
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
@@ -22,12 +26,25 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct WebhookServer {
     secret: String,
     event_tx: mpsc::UnboundedSender<GitHubEvent>,
+    metrics: Arc<MetricsCollector>,
+    rate_limiter: Arc<IpRateLimiter>,
 }
 
 impl WebhookServer {
-    pub fn new(secret: String) -> (Self, mpsc::UnboundedReceiver<GitHubEvent>) {
+    pub fn new(secret: String, rate_limit_config: RateLimitConfig) -> (Self, mpsc::UnboundedReceiver<GitHubEvent>) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        (Self { secret, event_tx }, event_rx)
+        let metrics = Arc::new(MetricsCollector::new());
+        let rate_limiter = Arc::new(IpRateLimiter::new(rate_limit_config));
+
+        (
+            Self {
+                secret,
+                event_tx,
+                metrics,
+                rate_limiter,
+            },
+            event_rx,
+        )
     }
 
     pub fn router(self) -> Router {
@@ -36,6 +53,10 @@ impl WebhookServer {
         Router::new()
             .route("/webhook", post(handle_webhook))
             .route("/health", axum::routing::get(health_check))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_middleware,
+            ))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 verify_signature,
@@ -75,6 +96,27 @@ impl WebhookServer {
 
         Ok(())
     }
+}
+
+async fn rate_limit_middleware(
+    State(server): State<Arc<WebhookServer>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+
+    if path == "/health" {
+        return next.run(request).await;
+    }
+
+    if let Err(e) = server.rate_limiter.check_rate_limit(addr.ip()) {
+        warn!(ip = %addr.ip(), error = %e, "Rate limit exceeded");
+        server.metrics.record_error("rate_limit");
+        return (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded").into_response();
+    }
+
+    next.run(request).await
 }
 
 async fn verify_signature(
@@ -126,25 +168,38 @@ async fn handle_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    let start = Instant::now();
+    let body_size = body.len();
+
     let event_type = headers
         .get("X-GitHub-Event")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("unknown");
 
-    info!(event_type, "Processing webhook");
+    info!(event_type, body_size, "Processing webhook");
+
+    server.metrics.record_message_sent(body_size);
 
     let event: GitHubEvent = match serde_json::from_slice(&body) {
         Ok(e) => e,
         Err(e) => {
             error!("Failed to parse webhook event: {e}");
+            server.metrics.record_error("parse_error");
             return (StatusCode::BAD_REQUEST, "Invalid event format").into_response();
         }
     };
 
     if let Err(e) = server.process_event(event) {
         error!("Failed to process event: {e}");
+        server.metrics.record_error("processing_error");
+        let elapsed = start.elapsed().as_millis() as u64;
+        server.metrics.record_response_time(elapsed);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to process event").into_response();
     }
+
+    let elapsed = start.elapsed().as_millis() as u64;
+    server.metrics.record_response_time(elapsed);
+    info!(elapsed_ms = elapsed, "Webhook processed successfully");
 
     (StatusCode::OK, "Event received").into_response()
 }
@@ -160,7 +215,8 @@ mod tests {
     #[test]
     fn test_signature_verification() {
         let secret = "test-secret";
-        let (server, _rx) = WebhookServer::new(secret.to_string());
+        let config = RateLimitConfig::default();
+        let (server, _rx) = WebhookServer::new(secret.to_string(), config);
 
         let payload = b"test payload";
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
@@ -173,7 +229,8 @@ mod tests {
 
     #[test]
     fn test_invalid_signature() {
-        let (server, _rx) = WebhookServer::new("test-secret".to_string());
+        let config = RateLimitConfig::default();
+        let (server, _rx) = WebhookServer::new("test-secret".to_string(), config);
 
         let payload = b"test payload";
         let signature = "sha256=invalid";
