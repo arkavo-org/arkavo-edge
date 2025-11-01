@@ -4,6 +4,9 @@ use crate::{
 };
 use arkavo_device_identity::AgentIdentity;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
+
 pub struct FallbackAttestor {
     identity: AgentIdentity,
     platform_code: String,
@@ -89,6 +92,15 @@ pub fn create_attestor(
     identity: AgentIdentity,
     platform_code: String,
 ) -> Box<dyn PlatformAttestor> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(se_attestor) =
+            macos::SecureEnclaveAttestor::new(identity.clone(), platform_code.clone())
+        {
+            return Box::new(se_attestor);
+        }
+    }
+
     #[cfg(feature = "tpm")]
     {
         if let Ok(tpm_attestor) =
@@ -142,12 +154,24 @@ mod tests {
     }
 
     #[test]
-    fn test_create_attestor_returns_fallback() {
+    fn test_create_attestor_selects_best_backend() {
         let identity = AgentIdentity::new("0.38.2".to_string());
         let platform_code = detect_platform_code();
         let attestor = create_attestor(identity, platform_code);
 
         let caps = attestor.get_capabilities();
-        assert_eq!(caps.attestation_type, AttestationType::SoftwareFingerprint);
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(matches!(
+                caps.attestation_type,
+                AttestationType::SecureEnclave | AttestationType::SoftwareFingerprint
+            ));
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(caps.attestation_type, AttestationType::SoftwareFingerprint);
+        }
     }
 }

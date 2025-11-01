@@ -81,8 +81,20 @@ let evidence = attestor.collect_evidence()?;
 | Type | Hardware-Backed | Freshness | Use Case |
 |------|----------------|-----------|----------|
 | TPM Quote | ✅ | ✅ | Enterprise Linux/Windows |
-| Secure Enclave | ✅ | ✅ | macOS/iOS |
+| Secure Enclave | ✅ | ✅ | macOS/iOS (implemented) |
 | Software Fingerprint | ❌ | ❌ | Development, unsupported platforms |
+
+### macOS Secure Enclave
+
+**Implementation Status**: ✅ Complete
+
+The macOS backend uses `ioreg` to collect platform evidence:
+- Checks for AppleKeyStore/AppleSEPManager presence
+- Collects IOPlatformUUID, IOPlatformSerialNumber, model
+- Includes timestamp for freshness
+- Detects jailbreak and debug mode
+
+**Limitations**: Currently uses `ioreg` output rather than true Secure Enclave cryptographic attestation. Future enhancement will use Security framework for signing with Secure Enclave keys.
 
 ## Design Principles
 
