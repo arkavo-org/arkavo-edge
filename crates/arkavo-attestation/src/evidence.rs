@@ -57,8 +57,8 @@ pub fn detect_security_state() -> SecurityState {
 fn is_macos_jailbroken() -> bool {
     std::path::Path::new("/Applications/Cydia.app").exists()
         || std::path::Path::new("/Library/MobileSubstrate").exists()
-        || std::path::Path::new("/bin/bash").exists()
-        || std::path::Path::new("/usr/sbin/sshd").exists()
+        || std::path::Path::new("/private/var/lib/apt").exists()
+        || std::path::Path::new("/private/var/stash").exists()
 }
 
 #[cfg(target_os = "macos")]

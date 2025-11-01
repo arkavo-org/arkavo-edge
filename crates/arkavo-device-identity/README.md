@@ -30,16 +30,31 @@ let bytes: &[u8; 16] = device_id.as_bytes();
 
 ## Platform Support
 
-- ✅ macOS (ARM64/x86_64)
+- ✅ macOS (ARM64/x86_64) - File-based (NPE agent mode)
 - ✅ Linux (x86_64/ARM64) - File-based or keyring
 - ✅ Windows (x86_64) - File-based
 - ✅ Raspberry Pi 5 (ARM64 Linux)
 - ✅ Arduino UNO R4 WiFi - Planned (embedded storage)
 
-## Security
+## NPE (Non-Person Entity) Agent Mode
 
-Device IDs are stored securely using platform-specific mechanisms:
+**Zero Configuration Required** - arkavo-edge is designed for device-bound NPE agents that run autonomously without human interaction.
 
-- **macOS**: Stored in Keychain with service "arkavo-edge"
-- **Linux**: Stored in `~/.local/share/arkavo/device_id` (hex-encoded) with file permissions 0600
-- **Optional keyring**: Enable `linux-keyring` feature for Secret Service API integration
+### Storage Locations
+
+Device IDs are stored in platform-specific agent data locations:
+
+- **macOS**: `~/Library/Application Support/arkavo/device_id` (file-based, no user prompts)
+- **Linux**: `~/.local/share/arkavo/device_id` (hex-encoded, file permissions 0600)
+- **Windows**: `%LOCALAPPDATA%\arkavo\device_id` (planned)
+
+### Why Not Keychain on macOS?
+
+Keychain requires user interaction (password prompts) which breaks autonomous agent operation. File-based storage in `Application Support` is:
+- ✅ Standard macOS location for agent/daemon data
+- ✅ Non-interactive (no user prompts)
+- ✅ Protected by filesystem permissions
+- ✅ Survives app updates
+- ✅ Works with launchd agents
+
+Keychain code remains available for future interactive use cases (optional feature flag).

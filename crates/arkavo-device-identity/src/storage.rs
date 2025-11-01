@@ -5,11 +5,71 @@ const DEVICE_ID_KEY: &str = "com.arkavo.edge.device_id";
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
-    use security_framework::passwords::{
-        delete_generic_password, get_generic_password, set_generic_password,
-    };
+    use std::fs;
+    use std::path::PathBuf;
 
-    pub fn get() -> Result<Option<DeviceId>> {
+    fn use_file_storage() -> bool {
+        true
+    }
+
+    fn get_storage_path() -> Result<PathBuf> {
+        let mut path = dirs::home_dir().ok_or_else(|| {
+            DeviceIdentityError::Storage("Could not determine home directory".to_string())
+        })?;
+        path.push("Library");
+        path.push("Application Support");
+        path.push("arkavo");
+        fs::create_dir_all(&path).map_err(|e| {
+            DeviceIdentityError::Storage(format!("Failed to create directory: {}", e))
+        })?;
+        path.push("device_id");
+        Ok(path)
+    }
+
+    fn get_file_based() -> Result<Option<DeviceId>> {
+        let path = get_storage_path()?;
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let hex_string = fs::read_to_string(&path)
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to read file: {}", e)))?;
+
+        let bytes = hex::decode(hex_string.trim())
+            .map_err(|e| DeviceIdentityError::InvalidFormat(format!("Invalid hex: {}", e)))?;
+
+        if bytes.len() != 16 {
+            return Err(DeviceIdentityError::InvalidFormat(format!(
+                "Expected 16 bytes, got {}",
+                bytes.len()
+            )));
+        }
+
+        let mut array = [0u8; 16];
+        array.copy_from_slice(&bytes);
+        Ok(Some(DeviceId::from_bytes(array)))
+    }
+
+    fn store_file_based(device_id: DeviceId) -> Result<()> {
+        let path = get_storage_path()?;
+        let hex_string = hex::encode(device_id.as_bytes());
+        fs::write(&path, hex_string)
+            .map_err(|e| DeviceIdentityError::Storage(format!("Failed to write file: {}", e)))
+    }
+
+    fn delete_file_based() -> Result<()> {
+        let path = get_storage_path()?;
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| {
+                DeviceIdentityError::Storage(format!("Failed to delete file: {}", e))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn get_keychain() -> Result<Option<DeviceId>> {
+        use security_framework::passwords::get_generic_password;
+
         match get_generic_password("arkavo-edge", DEVICE_ID_KEY) {
             Ok(bytes) => {
                 if bytes.len() != 16 {
@@ -34,16 +94,44 @@ mod platform {
         }
     }
 
-    pub fn store(device_id: DeviceId) -> Result<()> {
+    fn store_keychain(device_id: DeviceId) -> Result<()> {
+        use security_framework::passwords::set_generic_password;
+
         set_generic_password("arkavo-edge", DEVICE_ID_KEY, device_id.as_bytes())
             .map_err(|e| DeviceIdentityError::Storage(e.to_string()))
     }
 
-    pub fn delete() -> Result<()> {
+    fn delete_keychain() -> Result<()> {
+        use security_framework::passwords::delete_generic_password;
+
         match delete_generic_password("arkavo-edge", DEVICE_ID_KEY) {
             Ok(()) => Ok(()),
             Err(err) if err.to_string().contains("not found") => Ok(()),
             Err(err) => Err(DeviceIdentityError::Storage(err.to_string())),
+        }
+    }
+
+    pub fn get() -> Result<Option<DeviceId>> {
+        if use_file_storage() {
+            get_file_based()
+        } else {
+            get_keychain()
+        }
+    }
+
+    pub fn store(device_id: DeviceId) -> Result<()> {
+        if use_file_storage() {
+            store_file_based(device_id)
+        } else {
+            store_keychain(device_id)
+        }
+    }
+
+    pub fn delete() -> Result<()> {
+        if use_file_storage() {
+            delete_file_based()
+        } else {
+            delete_keychain()
         }
     }
 }
