@@ -66,7 +66,7 @@ Implement a secure configuration distribution system with three core components:
 └─────────────────────────────────────────┬───────────────────────┘
                                           │
                                           │ Secure Distribution
-                                          │ (mTLS + JWT)
+                                          │ (Public/Private Key + JWT)
                                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                           AGENT                                  │
@@ -248,11 +248,19 @@ impl ConfigBundleDecryptor {
 
 #### 3. Agent Authentication & Authorization
 
+**Public/Private Key Authentication:**
+
+Each agent is provisioned with a unique key pair during registration:
+- **Private Key**: Stored securely on the agent, used to sign requests
+- **Public Key**: Registered with the orchestrator, used to verify agent identity
+
 ```rust
 pub struct AgentIdentity {
     pub agent_id: String,
     pub attributes: HashMap<String, String>,
     pub jwt_token: String,
+    pub private_key: PrivateKey,  // Agent's private key for signing
+    pub public_key: PublicKey,    // Agent's public key (registered with orchestrator)
 }
 
 impl AgentIdentity {
@@ -270,6 +278,21 @@ impl AgentIdentity {
         encode(&Header::default(), &claims, &ENCODING_KEY)
     }
     
+    /// Sign a request with agent's private key
+    pub fn sign_request(&self, request_data: &[u8]) -> Result<Signature> {
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+        
+        let key_pair = EcdsaKeyPair::from_pkcs8(
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+            self.private_key.as_bytes(),
+        )?;
+        
+        let rng = ring::rand::SystemRandom::new();
+        let signature = key_pair.sign(&rng, request_data)?;
+        
+        Ok(Signature::from_bytes(signature.as_ref()))
+    }
+    
     /// Verify agent has required attributes for bundle
     pub fn has_required_attributes(
         &self,
@@ -278,6 +301,36 @@ impl AgentIdentity {
         required.iter().all(|attr| {
             self.attributes.contains_key(attr)
         })
+    }
+}
+
+/// Orchestrator verifies agent requests using public key
+pub struct AgentVerifier {
+    registered_agents: HashMap<String, PublicKey>,
+}
+
+impl AgentVerifier {
+    /// Verify request signature using agent's public key
+    pub fn verify_request(
+        &self,
+        agent_id: &str,
+        request_data: &[u8],
+        signature: &Signature,
+    ) -> Result<bool> {
+        use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
+        
+        let public_key = self.registered_agents
+            .get(agent_id)
+            .ok_or_else(|| Error::UnknownAgent)?;
+        
+        let public_key = UnparsedPublicKey::new(
+            &ECDSA_P256_SHA256_ASN1,
+            public_key.as_bytes(),
+        );
+        
+        public_key.verify(request_data, signature.as_bytes())
+            .map(|_| true)
+            .or(Ok(false))
     }
 }
 ```
@@ -289,28 +342,31 @@ impl AgentIdentity {
 ```rust
 #[rpc(server)]
 pub trait ConfigDistribution {
-    /// Request configuration bundle for agent
+    /// Request configuration bundle for agent (with signature verification)
     #[method(name = "config.request")]
     async fn request_config(
         &self,
         agent_id: String,
         agent_jwt: String,
+        request_signature: String,  // Request signed with agent's private key
     ) -> RpcResult<EncryptedBundle>;
     
-    /// Acknowledge configuration receipt
+    /// Acknowledge configuration receipt (with signature verification)
     #[method(name = "config.acknowledge")]
     async fn acknowledge_config(
         &self,
         bundle_id: Uuid,
         agent_id: String,
+        signature: String,  // Acknowledgment signed with agent's private key
     ) -> RpcResult<()>;
     
-    /// Report configuration application status
+    /// Report configuration application status (with signature verification)
     #[method(name = "config.status")]
     async fn report_status(
         &self,
         bundle_id: Uuid,
         status: ConfigStatus,
+        signature: String,  // Status report signed with agent's private key
     ) -> RpcResult<()>;
 }
 ```
@@ -326,16 +382,31 @@ pub struct ConfigClient {
 
 impl ConfigClient {
     pub async fn fetch_configuration(&self) -> Result<ConfigurationBundle> {
-        // Request encrypted bundle from orchestrator
-        let encrypted = self.request_bundle().await?;
+        // Create request data
+        let request_data = format!(
+            "{}:{}:{}",
+            self.agent_identity.agent_id,
+            self.agent_identity.jwt_token,
+            Utc::now().timestamp()
+        );
+        
+        // Sign request with agent's private key
+        let signature = self.agent_identity.sign_request(request_data.as_bytes())?;
+        
+        // Request encrypted bundle from orchestrator (with signature)
+        let encrypted = self.request_bundle(&signature).await?;
         
         // Decrypt using OpenTDF
         let bundle = self.decryptor
             .decrypt_bundle(&encrypted)
             .await?;
         
-        // Acknowledge receipt
-        self.acknowledge_bundle(&bundle.bundle_id).await?;
+        // Sign acknowledgment
+        let ack_data = format!("{}:{}", bundle.bundle_id, Utc::now().timestamp());
+        let ack_signature = self.agent_identity.sign_request(ack_data.as_bytes())?;
+        
+        // Acknowledge receipt (with signature)
+        self.acknowledge_bundle(&bundle.bundle_id, &ack_signature).await?;
         
         // Apply configuration
         self.apply_configuration(&bundle).await?;
@@ -350,7 +421,7 @@ impl ConfigClient {
 1. **End-to-End Encryption**: All configuration data encrypted with OpenTDF before transmission
 2. **Attribute-Based Access Control (ABAC)**: Fine-grained policies based on agent attributes
 3. **Key Management**: Centralized KAS (Key Access Service) using arkavo-rs implementation
-4. **Mutual TLS**: Secure transport layer between orchestrator and agents
+4. **Public/Private Key Authentication**: Agent identity verification using asymmetric cryptography
 5. **JWT Authentication**: Agent identity verification with signed tokens
 6. **Audit Logging**: Complete trail of configuration access and modifications
 7. **Policy Enforcement**: Dynamic access control with revocation capabilities
@@ -797,7 +868,7 @@ arkavo agent run \
 - [ ] **OpenTDF Encryption**: All bundles are encrypted using OpenTDF with attribute-based policies
 - [ ] **KAS Integration**: Arkavo-rs KAS implementation handles key management and policy enforcement
 - [ ] **Agent Authentication**: Agents authenticate using JWT tokens with embedded attributes
-- [ ] **Secure Distribution**: Bundles distributed over mTLS with mutual authentication
+- [ ] **Secure Distribution**: Bundles distributed with public/private key authentication
 - [ ] **Decryption Authorization**: Agents can only decrypt bundles if they possess required attributes
 - [ ] **Configuration Application**: Agents successfully apply decrypted configuration (settings, secrets, entitlements)
 - [ ] **Audit Logging**: All configuration access attempts logged with policy decisions
@@ -805,7 +876,7 @@ arkavo agent run \
 ### Security Requirements
 
 - [ ] **Encryption at Rest**: Configuration bundles stored encrypted in orchestrator database
-- [ ] **Encryption in Transit**: All network communication uses TLS 1.3+
+- [ ] **Encryption in Transit**: All bundles signed with private keys and verified with public keys
 - [ ] **Key Rotation**: Support for rotating encryption keys and secrets
 - [ ] **Access Revocation**: Ability to revoke agent access to configurations dynamically
 - [ ] **Attribute Validation**: KAS validates agent attributes before granting decryption keys
@@ -858,7 +929,7 @@ arkavo agent run \
 
 1. **Credential Theft**: Encrypted secrets prevent theft in transit or at rest
 2. **Unauthorized Access**: ABAC policies prevent agents from accessing configurations they shouldn't
-3. **Man-in-the-Middle**: mTLS prevents interception and tampering
+3. **Man-in-the-Middle**: Public/private key signatures prevent interception and tampering
 4. **Privilege Escalation**: Entitlements limit what agents can do even with valid configuration
 5. **Insider Threats**: Audit logs provide accountability and detection
 6. **Key Compromise**: Key rotation and revocation limit blast radius
@@ -873,8 +944,8 @@ arkavo agent run \
 
 - **Algorithm**: AES-256-GCM for symmetric encryption
 - **Key Exchange**: ECDH with P-256 curve
-- **Signatures**: ECDSA with P-256 curve
-- **TLS**: TLS 1.3 with strong cipher suites only
+- **Signatures**: ECDSA with P-256 curve for request signing and verification
+- **Transport**: HTTPS with certificate pinning for additional security
 - **JWT**: RS256 (RSA with SHA-256) for token signing
 
 ### Key Management
@@ -1037,7 +1108,7 @@ arkavo agent run \
 |------|--------|-------------|------------|
 | KAS compromise exposes all secrets | Critical | Very Low | Multi-layer encryption, HSM integration |
 | Policy misconfiguration grants excessive access | High | Medium | Policy validation, dry-run mode, auditing |
-| JWT token theft | High | Low | Short expiration, token rotation, mTLS |
+| JWT token theft | High | Low | Short expiration, token rotation, signed requests |
 | Side-channel attacks on decryption | Medium | Very Low | Constant-time operations, secure memory |
 
 ### Operational Risks
@@ -1155,7 +1226,7 @@ arkavo agent run \
 - **OpenTDF**: Open Trusted Data Format - open standard for encrypting data with policy enforcement
 - **TDF**: Trusted Data Format - encrypted data container with embedded access policies
 - **JWT**: JSON Web Token - compact token format for securely transmitting information
-- **mTLS**: Mutual TLS - TLS with client certificate authentication
+- **Public/Private Key Authentication**: Asymmetric cryptography for agent identity verification and request signing
 - **ECDH**: Elliptic Curve Diffie-Hellman - key exchange protocol
 - **ECDSA**: Elliptic Curve Digital Signature Algorithm - digital signature algorithm
 
