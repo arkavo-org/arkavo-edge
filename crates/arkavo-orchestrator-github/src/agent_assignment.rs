@@ -10,6 +10,8 @@ use tracing::{debug, info, warn};
 pub struct AgentAssignment {
     pub issue_number: u64,
     pub repository: String,
+    pub issue_title: String,
+    pub issue_body: String,
     pub assigned_agent_id: Option<String>,
     pub routing_decision: RoutingDecision,
     pub assignment_rationale: String,
@@ -43,6 +45,8 @@ impl AgentAssigner {
             return Ok(AgentAssignment {
                 issue_number: event.issue.number,
                 repository: event.repository.full_name.clone(),
+                issue_title: event.issue.title.clone(),
+                issue_body: event.issue.body.clone().unwrap_or_default(),
                 assigned_agent_id: None,
                 routing_decision: decision,
                 assignment_rationale: "No specific capabilities required - will use default agent"
@@ -81,6 +85,8 @@ impl AgentAssigner {
         Ok(AgentAssignment {
             issue_number: event.issue.number,
             repository: event.repository.full_name.clone(),
+            issue_title: event.issue.title.clone(),
+            issue_body: event.issue.body.clone().unwrap_or_default(),
             assigned_agent_id,
             routing_decision: decision,
             assignment_rationale,

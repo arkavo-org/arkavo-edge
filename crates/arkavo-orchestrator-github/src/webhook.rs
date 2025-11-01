@@ -31,7 +31,10 @@ pub struct WebhookServer {
 }
 
 impl WebhookServer {
-    pub fn new(secret: String, rate_limit_config: RateLimitConfig) -> (Self, mpsc::UnboundedReceiver<GitHubEvent>) {
+    pub fn new(
+        secret: String,
+        rate_limit_config: RateLimitConfig,
+    ) -> (Self, mpsc::UnboundedReceiver<GitHubEvent>) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let metrics = Arc::new(MetricsCollector::new());
         let rate_limiter = Arc::new(IpRateLimiter::new(rate_limit_config));

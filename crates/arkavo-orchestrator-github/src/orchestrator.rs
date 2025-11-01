@@ -12,6 +12,7 @@ use arkavo_protocol::{
     task_executor::TaskExecutor,
     types::{Message, MessagePart, TaskStatus},
 };
+use arkavo_router::Router;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,7 +31,7 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub fn new(
+    pub async fn new(
         task_executor: Arc<TaskExecutor>,
         agent_registry: Arc<AgentRegistry>,
         mcp_client: Arc<McpClient>,
@@ -38,24 +39,32 @@ impl Orchestrator {
         event_writer: Arc<EventWriter>,
         github_ops: Arc<GitHubOperations>,
         session_id: String,
-    ) -> Self {
+    ) -> Result<Self> {
         let agent_assigner = Arc::new(AgentAssigner::new(agent_registry));
+
+        let router = Arc::new(
+            Router::new()
+                .await
+                .map_err(|e| Error::Other(anyhow::anyhow!("Failed to initialize router: {e}")))?,
+        );
+
         let cognitive_engine = Arc::new(CognitiveEngine::new(
             mcp_client,
             budget_tracker,
             event_writer,
             Arc::clone(&github_ops),
+            router,
             session_id,
         ));
 
-        Self {
+        Ok(Self {
             task_executor,
             agent_assigner,
             cognitive_engine,
             github_ops,
             issue_to_task: Arc::new(RwLock::new(HashMap::new())),
             task_retry_counts: Arc::new(RwLock::new(HashMap::new())),
-        }
+        })
     }
 
     pub async fn initialize(&self) -> Result<()> {

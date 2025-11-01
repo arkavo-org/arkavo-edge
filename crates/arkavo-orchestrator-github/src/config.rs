@@ -44,9 +44,7 @@ impl OrchestratorConfig {
         let rate_limit_burst_size = env::var("ARKAVO_RATE_LIMIT_BURST")
             .unwrap_or_else(|_| "200".to_string())
             .parse()
-            .map_err(|e| {
-                Error::Other(anyhow::anyhow!("Invalid ARKAVO_RATE_LIMIT_BURST: {e}"))
-            })?;
+            .map_err(|e| Error::Other(anyhow::anyhow!("Invalid ARKAVO_RATE_LIMIT_BURST: {e}")))?;
 
         let metrics_port = env::var("ARKAVO_METRICS_PORT")
             .unwrap_or_else(|_| "9090".to_string())
@@ -62,9 +60,7 @@ impl OrchestratorConfig {
             .unwrap_or_else(|_| "10485760".to_string())
             .parse()
             .map_err(|e| {
-                Error::Other(anyhow::anyhow!(
-                    "Invalid ARKAVO_MAX_REQUEST_BODY_SIZE: {e}"
-                ))
+                Error::Other(anyhow::anyhow!("Invalid ARKAVO_MAX_REQUEST_BODY_SIZE: {e}"))
             })?;
 
         Ok(Self {
@@ -109,11 +105,7 @@ impl OrchestratorConfig {
         validator.max_length = Some(20);
 
         provider
-            .set_config(
-                "ARKAVO_GITHUB_APP_ID",
-                github_app_id.as_str(),
-                validator,
-            )
+            .set_config("ARKAVO_GITHUB_APP_ID", github_app_id.as_str(), validator)
             .map_err(|e| Error::Other(anyhow::anyhow!("Config validation failed: {e}")))?;
 
         let mut validator = ConfigValidator::sensitive();
@@ -142,7 +134,11 @@ impl OrchestratorConfig {
 
     pub fn get_masked_private_key(&self) -> String {
         if self.github_app_private_key.len() > 20 {
-            format!("{}...{}", &self.github_app_private_key[..10], &self.github_app_private_key[self.github_app_private_key.len()-10..])
+            format!(
+                "{}...{}",
+                &self.github_app_private_key[..10],
+                &self.github_app_private_key[self.github_app_private_key.len() - 10..]
+            )
         } else {
             "***".to_string()
         }
@@ -188,7 +184,8 @@ mod tests {
     #[test]
     fn test_masked_private_key() {
         let mut config = OrchestratorConfig::default();
-        config.github_app_private_key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...END-----".to_string();
+        config.github_app_private_key =
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...END-----".to_string();
         let masked = config.get_masked_private_key();
         assert!(masked.contains("-----BEGIN"));
         assert!(masked.contains("..."));
