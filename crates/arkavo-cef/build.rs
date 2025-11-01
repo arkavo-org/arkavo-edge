@@ -24,28 +24,40 @@ fn main() {
             .join("../../vendor/cef")
     });
 
+    // Check if CEF exists and has the required framework binary
+    let framework_binary = cef_root.join("Release/Chromium Embedded Framework.framework/Chromium Embedded Framework");
+
     if !cef_root.exists() {
-        eprintln!(
-            "\n============================================================================="
-        );
-        eprintln!(
-            "CEF not found at {}",
+        panic!(
+            "\n=============================================================================\n\
+             CEF not found at {}\n\
+             \n\
+             To download and setup CEF, run:\n\
+             ./scripts/setup-cef.sh\n\
+             \n\
+             Or download manually from:\n\
+             https://cef-builds.spotifycdn.com/index.html\n\
+             =============================================================================\n",
             cef_root
                 .canonicalize()
                 .unwrap_or_else(|_| cef_root.clone())
                 .display()
         );
-        eprintln!("\nTo download and setup CEF, run:");
-        eprintln!("    ./scripts/setup-cef.sh");
-        eprintln!("\nOr download manually from:");
-        eprintln!("    https://cef-builds.spotifycdn.com/index.html");
-        eprintln!(
-            "=============================================================================\n"
-        );
+    }
 
-        // Don't fail the build - allow compilation without CEF
-        println!("cargo:warning=CEF not found - skipping CEF bridge build");
-        return;
+    if !framework_binary.exists() {
+        panic!(
+            "\n=============================================================================\n\
+             CEF framework binary not found at:\n\
+             {}\n\
+             \n\
+             The CEF distribution appears incomplete.\n\
+             \n\
+             To download and setup CEF, run:\n\
+             ./scripts/setup-cef.sh\n\
+             =============================================================================\n",
+            framework_binary.display()
+        );
     }
 
     // Check if CEF DLL wrapper is built
