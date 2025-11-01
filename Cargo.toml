@@ -39,6 +39,9 @@ members = [
     "crates/arkavo-orchestrator",
     "crates/arkavo-github",
     "crates/arkavo-cef",
+    "crates/arkavo-device-identity",
+    "crates/arkavo-attestation",
+    "crates/arkavo-dpop",
     ".cargo/xtask",
 ]
 default-members = [
@@ -79,6 +82,9 @@ default-members = [
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
     "crates/arkavo-orchestrator",
+    "crates/arkavo-device-identity",
+    "crates/arkavo-attestation",
+    "crates/arkavo-dpop",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]

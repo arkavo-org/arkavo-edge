@@ -1,0 +1,30 @@
+[package]
+name = "arkavo-device-identity"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Device-bound identity management for arkavo-edge"
+
+[dependencies]
+uuid = { version = "1.11", features = ["v4", "serde"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", optional = true }
+hex = "0.4"
+dirs = "5.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Security_Credentials"], optional = true }
+
+[features]
+default = []
+linux-keyring = ["dep:keyring"]
+windows-credential = ["dep:windows"]
+
+[dev-dependencies]
+tempfile = "3.14"

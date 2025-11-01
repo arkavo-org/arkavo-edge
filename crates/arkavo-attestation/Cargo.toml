@@ -1,0 +1,21 @@
+[package]
+name = "arkavo-attestation"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Platform attestation for arkavo-edge"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+arkavo-device-identity = { path = "../arkavo-device-identity" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# DeviceCheck/App Attest via Swift interop (to be implemented)
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tss-esapi = { version = "7.5", optional = true }
+
+[features]
+default = []
+tpm = ["dep:tss-esapi"]
