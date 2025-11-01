@@ -48,6 +48,26 @@ fn main() {
         return;
     }
 
+    // Check if CEF framework binary exists (required for linking)
+    let framework_binary = cef_root.join("Release/Chromium Embedded Framework.framework/Chromium Embedded Framework");
+    if !framework_binary.exists() {
+        eprintln!(
+            "\n============================================================================="
+        );
+        eprintln!("CEF framework binary not found at:");
+        eprintln!("    {}", framework_binary.display());
+        eprintln!("\nThe CEF distribution appears incomplete.");
+        eprintln!("To fix this, run:");
+        eprintln!("    ./scripts/setup-cef.sh");
+        eprintln!("\nOr download a complete CEF distribution from:");
+        eprintln!("    https://cef-builds.spotifycdn.com/index.html");
+        eprintln!(
+            "=============================================================================\n"
+        );
+        println!("cargo:warning=CEF framework binary not found - skipping CEF bridge build");
+        return;
+    }
+
     // Check if CEF DLL wrapper is built
     let wrapper_lib = cef_root.join("build_wrapper/libcef_dll_wrapper/libcef_dll_wrapper.a");
     if !wrapper_lib.exists() {
