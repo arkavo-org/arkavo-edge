@@ -8,6 +8,7 @@ pub mod agent_registry;
 pub mod auth;
 pub mod chat_session;
 pub mod config;
+pub mod config_transport;
 pub mod discovery;
 pub mod error;
 pub mod file_transfer;
