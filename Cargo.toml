@@ -38,6 +38,7 @@ members = [
     "crates/arkavo-snpe",
     "crates/arkavo-config-bundle",
     "crates/arkavo-config-encryption",
+    "crates/arkavo-config-transport",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
