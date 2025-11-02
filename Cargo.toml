@@ -46,6 +46,8 @@ members = [
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
     "crates/arkavo-mesh-tools",
+    "crates/arkavo-config-bundle",
+    "crates/arkavo-config-encryption",
     ".cargo/xtask",
 ]
 default-members = [
