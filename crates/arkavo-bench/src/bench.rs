@@ -145,10 +145,11 @@ impl SweBenchTool {
 
         match self.workspace.execute(test_params).await {
             Ok(result) => {
-                if let Some(output) = result.get("result").and_then(|r| r.as_str()) {
-                    if output.contains("passed") && !output.contains("failed") {
-                        metrics.set_resolved(true);
-                    }
+                if let Some(output) = result.get("result").and_then(|r| r.as_str())
+                    && output.contains("passed")
+                    && !output.contains("failed")
+                {
+                    metrics.set_resolved(true);
                 }
             }
             Err(e) => {

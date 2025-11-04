@@ -105,14 +105,14 @@ impl NodeBridge {
         ];
 
         // Check Homebrew prefix dynamically
-        if let Ok(output) = std::process::Command::new("brew").arg("--prefix").output() {
-            if output.status.success() {
-                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                possible_paths.push(PathBuf::from(format!(
-                    "{}/share/arkavo/claude-code-bridge.js",
-                    prefix
-                )));
-            }
+        if let Ok(output) = std::process::Command::new("brew").arg("--prefix").output()
+            && output.status.success()
+        {
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            possible_paths.push(PathBuf::from(format!(
+                "{}/share/arkavo/claude-code-bridge.js",
+                prefix
+            )));
         }
 
         // Check standard system locations via PATH
