@@ -6,7 +6,7 @@ use chromiumoxide::cdp::browser_protocol::network::EventRequestWillBeSent;
 use chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled;
 use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct BrowserTool {
     schema: ToolSchema,
@@ -211,7 +211,7 @@ impl BrowserTool {
             _ => {
                 return Err(BrowserError::InvalidParams(format!(
                     "Unknown action: {action}"
-                )))
+                )));
             }
         };
 

@@ -1,11 +1,15 @@
 [package]
 name = "arkavo-workspace"
-version = "0.32.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Workspace and project management utilities for Arkavo Edge"
+repository.workspace = true
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
-async-trait = "0.1"
-serde_json = "1.0"
-thiserror = "2.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util", "process"] }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

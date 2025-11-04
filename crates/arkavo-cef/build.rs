@@ -25,7 +25,8 @@ fn main() {
     });
 
     // Check if CEF exists and has the required framework binary
-    let framework_binary = cef_root.join("Release/Chromium Embedded Framework.framework/Chromium Embedded Framework");
+    let framework_binary =
+        cef_root.join("Release/Chromium Embedded Framework.framework/Chromium Embedded Framework");
 
     if !cef_root.exists() {
         panic!(
