@@ -1,5 +1,8 @@
 use crate::browser::BrowserTool;
 use crate::github_checks::GitHubChecksTool;
+use crate::github_org_knowledge::{
+    GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
+};
 use crate::github_review::GitHubReviewTool;
 use crate::health_check::HealthCheckTool;
 use crate::osv::OsvTool;
@@ -51,6 +54,18 @@ impl ToolRegistry {
         self.register(
             "get_time_status",
             Box::new(GetTimeStatusTool::new(sync_state)),
+        );
+
+        // GitHub Org Knowledge tools
+        self.register("github_org_repos", Box::new(GitHubOrgReposTool::new()));
+        self.register(
+            "github_related_issues",
+            Box::new(GitHubRelatedIssuesTool::new()),
+        );
+        self.register("github_ci_status", Box::new(GitHubCiStatusTool::new()));
+        self.register(
+            "github_org_overview",
+            Box::new(GitHubOrgOverviewTool::new()),
         );
     }
 
