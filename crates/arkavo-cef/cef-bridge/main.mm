@@ -251,6 +251,24 @@ int main(int argc, char* argv[]) {
 
     [window makeKeyAndOrderFront:nil];
 
+    // Create Edit menu with copy/paste support
+    NSMenu* mainMenu = [[NSMenu alloc] init];
+
+    // Edit menu
+    NSMenuItem* editMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* editMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+
+    [editMenu addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
+    [editMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
+    [editMenu addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+    [editMenu addItem:[NSMenuItem separatorItem]];
+    [editMenu addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+
+    [editMenuItem setSubmenu:editMenu];
+    [mainMenu addItem:editMenuItem];
+
+    [NSApp setMainMenu:mainMenu];
+
     NSView* contentView = [window contentView];
     CefRect rect(0, 0, 1024, 768);
     window_info.SetAsChild(contentView, rect);
