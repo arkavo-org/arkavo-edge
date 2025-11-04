@@ -1,5 +1,5 @@
 [package]
-name = "arkavo-orchestrator-github"
+name = "arkavo-orchestrator"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

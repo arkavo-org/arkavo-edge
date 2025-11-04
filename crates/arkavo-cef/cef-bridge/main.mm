@@ -239,7 +239,7 @@ int main(int argc, char* argv[]) {
                                                    NSWindowStyleMaskResizable)
                                          backing:NSBackingStoreBuffered
                                          defer:NO];
-    [window setTitle:@"Arkavo UI Generator"];
+    [window setTitle:@"Arkavo Edge"];
 
     // Enable the close button to quit the app
     [window setReleasedWhenClosed:NO];
@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
     CefRect rect(0, 0, 1024, 768);
     window_info.SetAsChild(contentView, rect);
 #else
-    window_info.SetAsPopup(nullptr, "Arkavo UI Generator");
+    window_info.SetAsPopup(nullptr, "Arkavo Edge");
 #endif
 
     std::string url = "data:text/html,<html><head><style>"
@@ -271,7 +271,7 @@ int main(int argc, char* argv[]) {
         "</style></head><body>"
         "<div id='content'>"
         "<div class='welcome'>"
-        "<h1>Arkavo UI Generator</h1>"
+        "<h1>Arkavo Edge</h1>"
         "<p>CEF Renderer Ready</p>"
         "<p style='opacity:0.7;'>Enter your prompt below to generate UI</p>"
         "</div>"
