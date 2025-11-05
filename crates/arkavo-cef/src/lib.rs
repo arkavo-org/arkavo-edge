@@ -1,11 +1,15 @@
+pub mod command_tracker;
 pub mod dom_commands;
 pub mod error;
+pub mod health_reporter;
 pub mod process;
 pub mod protocol;
 pub mod uds;
 
+pub use command_tracker::{CommandHealthReport, CommandHealthSnapshot, CommandTracker};
 pub use dom_commands::{DOMCommandBuilder, DOMOp};
 pub use error::{CefError, Result};
+pub use health_reporter::CefHealthReporter;
 pub use process::CefProcess;
 pub use protocol::{DOMError, DOMEvent};
 
@@ -13,12 +17,14 @@ pub use protocol::{DOMError, DOMEvent};
 pub use uds::{ReceivedMessage, UdsTransport};
 
 use std::path::Path;
+use std::sync::Arc;
 use tokio::time::Duration;
 use tracing::info;
 
 pub struct CefRenderer {
     process: CefProcess,
     commands: Option<DOMCommandBuilder>,
+    tracker: Arc<CommandTracker>,
 }
 
 impl CefRenderer {
@@ -33,14 +39,20 @@ impl CefRenderer {
         process.wait_for_socket(Duration::from_secs(10)).await?;
 
         let transport = UdsTransport::connect(&socket_path).await?;
-        let commands = DOMCommandBuilder::new(transport);
+        let tracker = Arc::new(CommandTracker::new());
+        let commands = DOMCommandBuilder::with_tracker(transport, tracker.clone());
 
         info!("CEF renderer initialized successfully");
 
         Ok(Self {
             process,
             commands: Some(commands),
+            tracker,
         })
+    }
+
+    pub fn tracker(&self) -> Arc<CommandTracker> {
+        self.tracker.clone()
     }
 
     /// Returns a mutable reference to the DOM command builder.

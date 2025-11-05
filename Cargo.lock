@@ -271,9 +271,13 @@ dependencies = [
 name = "arkavo-cef"
 version = "0.38.3"
 dependencies = [
+ "arkavo-observability",
+ "async-trait",
  "bytes",
+ "chrono",
  "cmake",
  "nix 0.29.0",
+ "serde",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
