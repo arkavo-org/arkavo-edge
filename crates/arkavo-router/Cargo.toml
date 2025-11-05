@@ -24,6 +24,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
 arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 [features]
 default = ["llama-cpp", "gemini"]

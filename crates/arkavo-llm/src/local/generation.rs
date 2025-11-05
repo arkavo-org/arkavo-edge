@@ -1,5 +1,5 @@
 #[cfg(feature = "llm-local")]
-use super::model_loader::{Model, ModelLoader};
+use super::model_loader::Model;
 #[cfg(feature = "llm-local")]
 use crate::{Error, Result};
 #[cfg(feature = "llm-local")]
@@ -12,6 +12,7 @@ use tokenizers::Tokenizer;
 use tokio::sync::Mutex;
 
 #[cfg(feature = "llm-local")]
+#[allow(clippy::significant_drop_tightening)]
 pub async fn generate_tokens(
     inner: Arc<Mutex<super::provider::Inner>>,
     model_name: &str,
@@ -33,7 +34,9 @@ pub async fn generate_tokens(
 
     let device = {
         let guard = inner.lock().await;
-        guard.model_loader.device().clone()
+        let device = guard.model_loader.device().clone();
+        drop(guard);
+        device
     };
 
     let prompt_len = ids.len();
@@ -160,7 +163,9 @@ pub async fn generate_tokens(
     let tokens_generated = ids.len() - start_len;
     let device_name = {
         let guard = inner.lock().await;
-        format!("{:?}", guard.model_loader.device())
+        let name = format!("{:?}", guard.model_loader.device());
+        drop(guard);
+        name
     };
 
     tracing::info!(

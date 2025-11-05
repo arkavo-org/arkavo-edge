@@ -23,6 +23,7 @@ pub use chat::ChatRequest;
 pub use client::LlmClient;
 pub use error::{Error, Result};
 pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file};
+pub use mcp_converter::McpConverter;
 pub use message::{Message, Role};
 pub use provider::{Provider, ProviderResponse};
 pub use stream::StreamResponse;
@@ -49,11 +50,11 @@ mod gemini_adapter;
 #[cfg(feature = "gemini")]
 pub use gemini_adapter::GeminiProvider;
 
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 mod llamacpp_provider;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 mod llamacpp_streaming;
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 pub use llamacpp_provider::LlamaCppProvider;
 pub use stream_adapter::LlmClientAdapter;
 pub use stream_model::{

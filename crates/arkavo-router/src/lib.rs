@@ -22,6 +22,8 @@ pub use orchestrator::{
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use selector::ModelSelector;
 
+use arkavo_llm::{Message, Provider, ProviderResponse};
+use arkavo_mcp_tools::ToolRegistry;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -146,6 +148,83 @@ impl Router {
         });
 
         llms
+    }
+
+    /// Route a request with MCP tool support
+    pub async fn route_with_tools(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<ProviderResponse> {
+        let decision = self.route(task_description).await?;
+
+        let tools_json = tool_registry.map(|registry| {
+            let tool_infos = registry.list_tools();
+            arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
+        });
+
+        let provider = self.instantiate_provider(&decision.recommended_model)?;
+
+        provider
+            .complete_with_tools(messages, tools_json, None)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("Provider error: {e}")))
+    }
+
+    fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+        match model {
+            #[cfg(feature = "gemini")]
+            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+                let provider = arkavo_llm::GeminiProvider::new().map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalGemma270M => {
+                let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH")
+                    .unwrap_or_else(|_| "models/gemma-3-270m-it.gguf".to_string());
+                let provider =
+                    arkavo_llm::LlamaCppProvider::new("gemma-3-270m-it".to_string(), model_path)
+                        .map_err(|e| {
+                            Error::ModelExecution(format!(
+                                "Failed to create LlamaCpp provider: {e}"
+                            ))
+                        })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalGemma4B => {
+                let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH")
+                    .unwrap_or_else(|_| "models/gemma-3-4b-it.gguf".to_string());
+                let provider =
+                    arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
+                        .map_err(|e| {
+                            Error::ModelExecution(format!(
+                                "Failed to create LlamaCpp provider: {e}"
+                            ))
+                        })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalGemma12B => {
+                let model_path = std::env::var("ARKAVO_GEMMA_12B_PATH")
+                    .unwrap_or_else(|_| "models/gemma-3-12b-it.gguf".to_string());
+                let provider =
+                    arkavo_llm::LlamaCppProvider::new("gemma-3-12b-it".to_string(), model_path)
+                        .map_err(|e| {
+                            Error::ModelExecution(format!(
+                                "Failed to create LlamaCpp provider: {e}"
+                            ))
+                        })?;
+                Ok(Box::new(provider))
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::ModelExecution(format!(
+                "Model {model:?} not available (feature not enabled)"
+            ))),
+        }
     }
 }
 

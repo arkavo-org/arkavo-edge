@@ -822,6 +822,7 @@ dependencies = [
  "arkavo-context",
  "arkavo-gemini",
  "arkavo-llm",
+ "arkavo-mcp-tools",
  "arkavo-observability",
  "async-trait",
  "chrono",

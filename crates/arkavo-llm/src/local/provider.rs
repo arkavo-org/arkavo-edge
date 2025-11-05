@@ -1,4 +1,4 @@
-use crate::tool_parser::{ParsedToolCall, ToolParser};
+use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -6,9 +6,6 @@ use tokio_stream::Stream;
 
 #[cfg(feature = "llm-local")]
 use super::model_loader::{Model, ModelLoader};
-
-#[cfg(feature = "llm-local")]
-use candle_core::Tensor;
 
 #[cfg(feature = "llm-local")]
 use std::sync::Arc;
@@ -178,7 +175,7 @@ impl Provider for LocalProvider {
             );
 
             // First, get tokenizer and encode the prompt (clone tokenizer for safety)
-            let (mut ids, eos_token_ids, tokenizer, _is_gemma) = {
+            let (ids, eos_token_ids, tokenizer, _is_gemma) = {
                 tracing::debug!("[LocalProvider::complete] Acquiring model lock...");
                 let guard = self.inner.lock().await;
                 tracing::debug!("[LocalProvider::complete] Model lock acquired");
@@ -275,7 +272,7 @@ impl Provider for LocalProvider {
                 &self.model_name,
                 ids,
                 eos_token_ids,
-                tokenizer,
+                (*tokenizer).clone(),
                 max_tokens,
             )
             .await
@@ -431,13 +428,14 @@ impl Provider for LocalProvider {
                     .as_array()
                     .ok_or_else(|| Error::Provider("Tools must be an array".into()))?;
 
-                let tool_infos: Vec<arkavo_mcp_tools::ToolInfo> = tools_array
+                let tool_infos: Vec<arkavo_mcp_tools::registry::ToolInfo> = tools_array
                     .iter()
                     .filter_map(|t| {
-                        Some(arkavo_mcp_tools::ToolInfo {
+                        Some(arkavo_mcp_tools::registry::ToolInfo {
                             name: t.get("name")?.as_str()?.to_string(),
                             description: t.get("description")?.as_str()?.to_string(),
                             schema: t.get("input_schema")?.clone(),
+                            category: "general".to_string(),
                         })
                     })
                     .collect();

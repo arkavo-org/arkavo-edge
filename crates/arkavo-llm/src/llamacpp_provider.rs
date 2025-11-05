@@ -1,4 +1,4 @@
-use crate::tool_parser::{ParsedToolCall, ToolParser};
+use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::MtmdContext;
@@ -283,13 +283,14 @@ impl Provider for LlamaCppProvider {
                 .as_array()
                 .ok_or_else(|| Error::Provider("Tools must be an array".into()))?;
 
-            let tool_infos: Vec<arkavo_mcp_tools::ToolInfo> = tools_array
+            let tool_infos: Vec<arkavo_mcp_tools::registry::ToolInfo> = tools_array
                 .iter()
                 .filter_map(|t| {
-                    Some(arkavo_mcp_tools::ToolInfo {
+                    Some(arkavo_mcp_tools::registry::ToolInfo {
                         name: t.get("name")?.as_str()?.to_string(),
                         description: t.get("description")?.as_str()?.to_string(),
                         schema: t.get("input_schema")?.clone(),
+                        category: "general".to_string(),
                     })
                 })
                 .collect();
