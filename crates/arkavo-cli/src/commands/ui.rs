@@ -100,12 +100,45 @@ async fn use_cef_renderer(
 
     // Event loop - poll for prompt submissions and errors
     let mut loop_count = 0;
+    let mut last_health_check = std::time::Instant::now();
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         loop_count += 1;
 
         if loop_count % 50 == 0 {
             eprintln!("[HEARTBEAT] Event loop iteration {loop_count}");
+        }
+
+        // Check for stuck commands every 30 seconds
+        if last_health_check.elapsed().as_secs() >= 30 {
+            use arkavo_observability::health_reporter::HealthRegistry;
+
+            let registry = HealthRegistry::global();
+            let reports = registry.check_all().await;
+
+            eprintln!("[HEARTBEAT] Health check: {} components", reports.len());
+            for report in &reports {
+                if report.component == "cef" {
+                    eprintln!("[HEARTBEAT]   CEF: {} - {}",
+                        format!("{:?}", report.status), report.message);
+
+                    // Check if degraded (stuck commands)
+                    if format!("{:?}", report.status) == "Degraded" {
+                        eprintln!("[WARNING] CEF has stuck commands!");
+                        // Show warning in UI
+                        let warning_html = format!(
+                            r#"<div style="position:fixed;top:10px;right:10px;background:#ff9;border:2px solid #f80;padding:12px;border-radius:6px;z-index:9999;">
+                            <strong>⚠️ Warning:</strong> {}</div>"#,
+                            report.message.replace('&', "&amp;")
+                                .replace('<', "&lt;")
+                                .replace('>', "&gt;")
+                        );
+                        let _ = cef_renderer.update_element("body", &warning_html).await;
+                    }
+                }
+            }
+
+            last_health_check = std::time::Instant::now();
         }
 
         if !cef_renderer.is_running() {
