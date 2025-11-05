@@ -537,6 +537,7 @@ dependencies = [
  "arkavo-gemini",
  "arkavo-kimi",
  "arkavo-llama-cpp",
+ "arkavo-mcp-tools",
  "arkavo-qwen",
  "arkavo-snpe",
  "async-trait",
