@@ -1,5 +1,6 @@
 use arkavo_mcp_tools::registry::ToolInfo;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use std::fmt::Write as _;
 
 /// Tool definition in provider-agnostic format
 /// Can be serialized to any provider's specific format
@@ -34,11 +35,13 @@ impl McpConverter {
 
         let function_declarations: Vec<Value> = tools
             .iter()
-            .map(|tool| json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.schema,
-            }))
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.schema,
+                })
+            })
             .collect();
 
         json!([{
@@ -50,11 +53,13 @@ impl McpConverter {
     pub fn to_anthropic_format(tools: &[ToolInfo]) -> Value {
         let tool_defs: Vec<Value> = tools
             .iter()
-            .map(|tool| json!({
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.schema,
-            }))
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.schema,
+                })
+            })
             .collect();
 
         json!(tool_defs)
@@ -64,11 +69,13 @@ impl McpConverter {
     pub fn to_openai_format(tools: &[ToolInfo]) -> Value {
         let functions: Vec<Value> = tools
             .iter()
-            .map(|tool| json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.schema,
-            }))
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.schema,
+                })
+            })
             .collect();
 
         json!(functions)
@@ -83,16 +90,25 @@ impl McpConverter {
         let mut xml = String::from("\n\nYou have access to these tools:\n<tools>\n");
 
         for tool in tools {
-            xml.push_str(&format!("  <tool name=\"{}\">\n", tool.name));
-            xml.push_str(&format!("    <description>{}</description>\n",
-                Self::escape_xml(&tool.description)));
-            xml.push_str(&format!("    <category>{}</category>\n",
-                Self::escape_xml(&tool.category)));
+            let _ = writeln!(xml, "  <tool name=\"{}\">", tool.name);
+            let _ = writeln!(
+                xml,
+                "    <description>{}</description>",
+                Self::escape_xml(&tool.description)
+            );
+            let _ = writeln!(
+                xml,
+                "    <category>{}</category>",
+                Self::escape_xml(&tool.category)
+            );
 
-            let params_str = serde_json::to_string_pretty(&tool.schema)
-                .unwrap_or_else(|_| "{}".to_string());
-            xml.push_str(&format!("    <parameters>{}</parameters>\n",
-                Self::escape_xml(&params_str)));
+            let params_str =
+                serde_json::to_string_pretty(&tool.schema).unwrap_or_else(|_| "{}".to_string());
+            let _ = writeln!(
+                xml,
+                "    <parameters>{}</parameters>",
+                Self::escape_xml(&params_str)
+            );
             xml.push_str("  </tool>\n");
         }
 
@@ -126,10 +142,13 @@ impl McpConverter {
             .collect();
 
         let mut prompt = String::from("\n\nAvailable tools:\n");
-        prompt.push_str(&serde_json::to_string_pretty(&tools_json)
-            .unwrap_or_else(|_| "[]".to_string()));
+        prompt.push_str(
+            &serde_json::to_string_pretty(&tools_json).unwrap_or_else(|_| "[]".to_string()),
+        );
         prompt.push_str("\n\nTo call a tool, respond with JSON in this format:\n");
-        prompt.push_str("{\"tool_call\": {\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}}\n\n");
+        prompt.push_str(
+            "{\"tool_call\": {\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}}\n\n",
+        );
         prompt.push_str("After receiving tool results, continue the conversation naturally.\n");
 
         prompt
@@ -239,9 +258,24 @@ mod tests {
         let tools: Vec<ToolInfo> = vec![];
 
         assert!(McpConverter::to_provider_tools(&tools).is_empty());
-        assert!(McpConverter::to_gemini_format(&tools).as_array().unwrap().is_empty());
-        assert!(McpConverter::to_anthropic_format(&tools).as_array().unwrap().is_empty());
-        assert!(McpConverter::to_openai_format(&tools).as_array().unwrap().is_empty());
+        assert!(
+            McpConverter::to_gemini_format(&tools)
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            McpConverter::to_anthropic_format(&tools)
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            McpConverter::to_openai_format(&tools)
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(McpConverter::to_xml_prompt(&tools).is_empty());
         assert!(McpConverter::to_json_prompt(&tools).is_empty());
     }
