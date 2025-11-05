@@ -24,8 +24,10 @@ pub use client::LlmClient;
 pub use error::{Error, Result};
 pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file};
 pub use message::{Message, Role};
-pub use provider::Provider;
+pub use provider::{Provider, ProviderResponse};
 pub use stream::StreamResponse;
+pub use tool_executor::{ToolExecutionError, ToolExecutionResult, ToolExecutor};
+pub use tool_parser::{ParsedToolCall, ToolParseError, ToolParser};
 
 #[cfg(feature = "kimi")]
 mod kimi_adapter;
