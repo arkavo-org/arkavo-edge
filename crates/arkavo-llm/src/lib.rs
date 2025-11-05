@@ -16,6 +16,7 @@ pub mod providers;
 pub mod stream;
 pub mod stream_adapter;
 pub mod stream_model;
+pub mod tool_executor;
 pub mod tool_parser;
 
 pub use chat::ChatRequest;
