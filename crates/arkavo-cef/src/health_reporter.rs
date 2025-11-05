@@ -55,6 +55,7 @@ impl HealthReporter for CefHealthReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arkavo_observability::health_reporter::HealthStatus;
 
     #[tokio::test]
     async fn test_health_reporter_no_commands() {

@@ -661,12 +661,20 @@ Q: \"Recent commits?\" → A: @git_status
                 mcp_client.as_ref(),
             ))?;
         } else {
-            runtime.block_on(process_message(
-                &client,
-                &messages,
-                mcp_client.as_ref(),
-                &conversation_manager,
-            ))?;
+            // Use router-based tool calling on supported platforms
+            #[cfg(all(unix, feature = "test-harness"))]
+            {
+                runtime.block_on(process_message_with_tools(&messages))?;
+            }
+            #[cfg(not(all(unix, feature = "test-harness")))]
+            {
+                runtime.block_on(process_message(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                    &conversation_manager,
+                ))?;
+            }
         }
         return Ok(());
     }
@@ -955,13 +963,24 @@ Q: \"Recent commits?\" → A: @git_status
             messages.push(msg);
         }
 
-        // Process with LLM
-        match runtime.block_on(process_message(
-            &client,
-            &messages,
-            mcp_client.as_ref(),
-            &conversation_manager,
-        )) {
+        // Process with LLM using router-based tool calling
+        let result = {
+            #[cfg(all(unix, feature = "test-harness"))]
+            {
+                runtime.block_on(process_message_with_tools(&messages))
+            }
+            #[cfg(not(all(unix, feature = "test-harness")))]
+            {
+                runtime.block_on(process_message(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                    &conversation_manager,
+                ))
+            }
+        };
+
+        match result {
             Ok(response) => {
                 let assistant_msg = Message::assistant(&response);
                 runtime.block_on(conversation_manager.add_message(&assistant_msg))?;
@@ -983,6 +1002,42 @@ Q: \"Recent commits?\" → A: @git_status
     Ok(())
 }
 
+/// Process message with native tool calling via Router
+#[cfg(all(unix, feature = "test-harness"))]
+async fn process_message_with_tools(
+    messages: &[Message],
+) -> Result<String, Box<dyn std::error::Error>> {
+    use crate::tool_integration::process_with_tools_interactive;
+
+    // Derive task description from the last user message
+    let task_description = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, arkavo_llm::Role::User))
+        .map(|m| m.content.as_str())
+        .unwrap_or("Process user request");
+
+    print!("Assistant: ");
+    io::stdout().flush()?;
+
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    progress.set_message("Routing to LLM...");
+
+    let response = process_with_tools_interactive(task_description, messages.to_vec()).await?;
+
+    progress.finish_and_clear();
+    println!("{response}");
+    println!();
+
+    Ok(response)
+}
+
+#[allow(dead_code)]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],

@@ -8,6 +8,7 @@ pub mod mcp_spawner;
 #[cfg(all(unix, feature = "test-harness"))]
 pub mod memory_integration;
 pub mod prompt_loader;
+pub mod tool_integration;
 
 #[allow(clippy::disallowed_methods)]
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {

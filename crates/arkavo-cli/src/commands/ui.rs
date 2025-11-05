@@ -98,7 +98,6 @@ async fn use_cef_renderer(
     // Event loop - poll for prompt submissions and errors
     let mut loop_count = 0;
     let mut last_health_check = std::time::Instant::now();
-    let mut processing_prompt = false;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         loop_count += 1;
@@ -164,7 +163,7 @@ async fn use_cef_renderer(
                     // Log error with health registry
                     use arkavo_observability::health_reporter::HealthRegistry;
                     let registry = HealthRegistry::global();
-                    let reports = registry.check_all().await;
+                    let _reports = registry.check_all().await;
                     eprintln!("[ERROR TELEMETRY] CEF JavaScript exception captured:");
                     eprintln!("  Selector: {}", event.selector);
                     eprintln!("  Target: {}", event.target_id);
@@ -186,23 +185,12 @@ async fn use_cef_renderer(
                     let _ = cef_renderer.update_element("body", &error_display).await;
                 }
                 "submit" if !event.value.trim().is_empty() => {
-                    if processing_prompt {
-                        eprintln!("[DEBUG] Ignoring prompt - already processing one");
-                    } else {
-                        eprintln!("[DEBUG] Processing submit event (async)");
-                        processing_prompt = true;
-                        match handle_prompt_async(&mut cef_renderer, &event.value).await {
-                            Ok(_) => {
-                                eprintln!("[DEBUG] Prompt processing completed");
-                                processing_prompt = false;
-                            }
-                            Err(e) => {
-                                eprintln!("[ERROR] Prompt processing failed: {}", e);
-                                processing_prompt = false;
-                                return Err(e);
-                            }
-                        }
+                    eprintln!("[DEBUG] Processing submit event (async)");
+                    if let Err(e) = handle_prompt_async(&mut cef_renderer, &event.value).await {
+                        eprintln!("[ERROR] Prompt processing failed: {}", e);
+                        return Err(e);
                     }
+                    eprintln!("[DEBUG] Prompt processing completed");
                 }
                 _ => {
                     eprintln!("[DEBUG] Unhandled event type: {}", event.event_type);
@@ -254,11 +242,13 @@ async fn handle_prompt_async(
         Router::new_offline().await?
     };
 
-    let routing_decision = router.route(&enhanced_prompt).await?;
-
-    let client = create_client_from_routing(&routing_decision).await?;
-
     let messages = vec![Message::user(&enhanced_prompt)];
+
+    // Use router with tools for native tool calling
+    #[cfg(all(unix, feature = "test-harness"))]
+    let use_tools = true;
+    #[cfg(not(all(unix, feature = "test-harness")))]
+    let use_tools = false;
 
     // Show "thinking" indicator in UI
     let thinking_html = format!(
@@ -276,42 +266,60 @@ async fn handle_prompt_async(
     );
     renderer.render(&thinking_html, "", "").await?;
 
-    let stream_result = client.stream(messages).await;
-    let mut stream = match stream_result {
-        Ok(s) => s,
-        Err(e) => {
-            let error_msg = e.to_string();
-            if error_msg.contains("Connection refused") || error_msg.contains("connect") {
-                let error_html = format!(
-                    r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-                        <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                            <strong style="color: #667eea;">You:</strong> {prompt}
-                        </div>
-                        <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
-                            <strong style="color: #c33;">Connection Error</strong><br>
-                            <span>Cannot connect to Ollama. Please start Ollama:</span><br>
-                            <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">brew services start ollama</code>
-                        </div>
-                    </div>"#
-                );
-                renderer.render(&error_html, "", "").await?;
-            }
-            return Err(e.into());
-        }
-    };
+    // Route the request to determine which model to use
+    let routing_decision = router.route(&enhanced_prompt).await?;
 
-    let mut response_text = String::new();
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(chunk) => {
-                response_text.push_str(&chunk.content);
-            }
+    let response_text = if use_tools {
+        // Use router with native tool calling
+        #[cfg(all(unix, feature = "test-harness"))]
+        {
+            use crate::tool_integration::complete_with_tools;
+            complete_with_tools(&enhanced_prompt, messages).await?
+        }
+        #[cfg(not(all(unix, feature = "test-harness")))]
+        String::new()
+    } else {
+        // Fallback to direct streaming
+        let client = create_client_from_routing(&routing_decision).await?;
+
+        let stream_result = client.stream(messages).await;
+        let mut stream = match stream_result {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("[ERROR] Stream error: {e}");
+                let error_msg = e.to_string();
+                if error_msg.contains("Connection refused") || error_msg.contains("connect") {
+                    let error_html = format!(
+                        r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                                <strong style="color: #667eea;">You:</strong> {prompt}
+                            </div>
+                            <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
+                                <strong style="color: #c33;">Connection Error</strong><br>
+                                <span>Cannot connect to Ollama. Please start Ollama:</span><br>
+                                <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">brew services start ollama</code>
+                            </div>
+                        </div>"#
+                    );
+                    renderer.render(&error_html, "", "").await?;
+                }
                 return Err(e.into());
             }
+        };
+
+        let mut response_text = String::new();
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    response_text.push_str(&chunk.content);
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Stream error: {e}");
+                    return Err(e.into());
+                }
+            }
         }
-    }
+        response_text
+    };
 
     // Detect if response is HTML (contains <html> or multiple HTML tags)
     let is_html = response_text.contains("<html")
