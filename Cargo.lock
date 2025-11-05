@@ -323,6 +323,7 @@ dependencies = [
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
  "arkavo-memory",
+ "arkavo-observability",
  "arkavo-protocol",
  "arkavo-repo",
  "arkavo-router",
