@@ -117,9 +117,15 @@ impl AsyncTransport {
                 );
 
                 let mut pending_map = pending.lock().await;
-                eprintln!("[AsyncTransport] Pending commands: {:?}", pending_map.keys().collect::<Vec<_>>());
+                eprintln!(
+                    "[AsyncTransport] Pending commands: {:?}",
+                    pending_map.keys().collect::<Vec<_>>()
+                );
                 if let Some(tx) = pending_map.remove(&feedback.id) {
-                    eprintln!("[AsyncTransport] Sending feedback to command {}", feedback.id);
+                    eprintln!(
+                        "[AsyncTransport] Sending feedback to command {}",
+                        feedback.id
+                    );
                     match tx.send(feedback) {
                         Ok(_) => eprintln!("[AsyncTransport] Feedback sent successfully"),
                         Err(_) => eprintln!("[AsyncTransport] ERROR: Feedback receiver dropped!"),
@@ -174,7 +180,11 @@ impl AsyncTransport {
         // Send command
         {
             let mut write = self.write_half.lock().await;
-            eprintln!("[AsyncTransport] Sending command id={}, framed_size={} bytes", id, framed.len());
+            eprintln!(
+                "[AsyncTransport] Sending command id={}, framed_size={} bytes",
+                id,
+                framed.len()
+            );
             write
                 .write_all(&framed)
                 .await

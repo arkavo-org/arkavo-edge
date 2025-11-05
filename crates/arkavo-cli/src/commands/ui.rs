@@ -177,7 +177,11 @@ async fn use_cef_renderer(
                         <strong style="color:#c33;">⚠️ JavaScript Error</strong><br>
                         <span style="font-size:12px;color:#666;">{}</span>
                         </div>"#,
-                        event.value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+                        event
+                            .value
+                            .replace('&', "&amp;")
+                            .replace('<', "&lt;")
+                            .replace('>', "&gt;")
                     );
                     let _ = cef_renderer.update_element("body", &error_display).await;
                 }

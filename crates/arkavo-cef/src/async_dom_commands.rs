@@ -108,16 +108,13 @@ impl AsyncDOMCommandBuilder {
             .await?;
         println!("[DEBUG] Command sent, waiting for feedback (non-blocking, 10s timeout)");
 
-        let feedback = tokio::time::timeout(
-            tokio::time::Duration::from_secs(10),
-            feedback_rx
-        )
-        .await
-        .map_err(|_| {
-            eprintln!("[ERROR] Timeout waiting for feedback on command {}", id);
-            CefError::Timeout
-        })?
-        .map_err(|_| CefError::DomCommandFailed("Feedback channel closed".to_string()))?;
+        let feedback = tokio::time::timeout(tokio::time::Duration::from_secs(10), feedback_rx)
+            .await
+            .map_err(|_| {
+                eprintln!("[ERROR] Timeout waiting for feedback on command {}", id);
+                CefError::Timeout
+            })?
+            .map_err(|_| CefError::DomCommandFailed("Feedback channel closed".to_string()))?;
         println!(
             "[DEBUG] Received feedback: status={}, message='{}'",
             feedback.status, feedback.message

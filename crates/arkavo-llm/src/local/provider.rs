@@ -1,5 +1,7 @@
-use crate::{Error, Message, Provider, Result, StreamResponse};
+use crate::tool_parser::{ParsedToolCall, ToolParser};
+use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio_stream::Stream;
 
 #[cfg(feature = "llm-local")]
@@ -577,5 +579,89 @@ impl Provider for LocalProvider {
 
     fn name(&self) -> &str {
         &self.model_name
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        #[cfg(not(feature = "llm-local"))]
+        {
+            return Err(Error::Config(
+                "Local provider requires 'llm-local' feature to be enabled".to_string(),
+            ));
+        }
+
+        #[cfg(feature = "llm-local")]
+        {
+            use crate::mcp_converter::McpConverter;
+
+            let system_prompt = if let Some(tools_value) = tools.as_ref() {
+                let tools_array = tools_value
+                    .as_array()
+                    .ok_or_else(|| Error::Provider("Tools must be an array".into()))?;
+
+                let tool_infos: Vec<arkavo_mcp_tools::ToolInfo> = tools_array
+                    .iter()
+                    .filter_map(|t| {
+                        Some(arkavo_mcp_tools::ToolInfo {
+                            name: t.get("name")?.as_str()?.to_string(),
+                            description: t.get("description")?.as_str()?.to_string(),
+                            schema: t.get("input_schema")?.clone(),
+                        })
+                    })
+                    .collect();
+
+                McpConverter::to_xml_prompt(&tool_infos)
+            } else {
+                String::new()
+            };
+
+            let mut modified_messages = messages.clone();
+            if !system_prompt.is_empty() {
+                if let Some(first) = modified_messages.first_mut() {
+                    if first.role == Role::System {
+                        first.content = format!("{}\n\n{}", system_prompt, first.content);
+                    } else {
+                        modified_messages.insert(
+                            0,
+                            Message {
+                                role: Role::System,
+                                content: system_prompt,
+                                images: None,
+                            },
+                        );
+                    }
+                } else {
+                    modified_messages.push(Message {
+                        role: Role::System,
+                        content: system_prompt,
+                        images: None,
+                    });
+                }
+            }
+
+            let content = self
+                .complete_with_options(modified_messages, max_tokens)
+                .await?;
+
+            let tool_calls = if tools.is_some() {
+                ToolParser::parse_xml(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            Ok(ProviderResponse {
+                content,
+                tool_calls,
+                finish_reason: None,
+            })
+        }
     }
 }

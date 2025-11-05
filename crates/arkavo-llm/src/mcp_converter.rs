@@ -1,5 +1,5 @@
 use arkavo_mcp_tools::registry::ToolInfo;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 
 /// Tool definition in provider-agnostic format

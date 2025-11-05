@@ -70,10 +70,7 @@ impl ToolExecutor {
     }
 
     /// Execute multiple tool calls in sequence
-    pub async fn execute_batch(
-        &self,
-        tool_calls: &[ParsedToolCall],
-    ) -> Vec<ToolExecutionResult> {
+    pub async fn execute_batch(&self, tool_calls: &[ParsedToolCall]) -> Vec<ToolExecutionResult> {
         let mut results = Vec::new();
         for call in tool_calls {
             match self.execute(call).await {

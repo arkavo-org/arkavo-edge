@@ -3,8 +3,8 @@
 use crate::tool_parser::ParsedToolCall;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use arkavo_deepseek::{
-    ChatMessage, DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider, MessageContent,
-    Tool, ToolFunction,
+    ChatMessage, DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider, MessageContent, Tool,
+    ToolFunction,
 };
 use async_trait::async_trait;
 use serde_json::Value;
