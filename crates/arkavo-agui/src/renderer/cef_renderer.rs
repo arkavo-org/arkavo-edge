@@ -19,6 +19,19 @@ impl CefRendererImpl {
 
         let mut renderer = CefRenderer::new(renderer_path).await?;
 
+        // Register CEF health reporter with global registry
+        {
+            use arkavo_cef::CefHealthReporter;
+            use arkavo_observability::health_reporter::HealthRegistry;
+
+            let tracker = renderer.tracker();
+            let cef_reporter = Arc::new(CefHealthReporter::new(tracker));
+            let registry = HealthRegistry::global();
+            registry.register(cef_reporter).await;
+
+            info!("CEF health reporter registered");
+        }
+
         // Wait for V8 context to initialize
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 

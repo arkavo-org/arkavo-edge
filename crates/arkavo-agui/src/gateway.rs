@@ -193,6 +193,28 @@ impl AgUiGateway {
             println!("AG-UI: Health monitor started (30s interval, model selection via router)");
         }
 
+        // Start command health collector with LLM-based timeout analysis
+        {
+            use crate::command_health_collector::CommandHealthCollector;
+            use crate::timeout_handler::TimeoutHandler;
+
+            let (command_health_tx, command_health_rx) = mpsc::channel(100);
+
+            // Start collector that batches health data every 30 seconds
+            let collector = CommandHealthCollector::new(30);
+            let _collector_task = collector.start(command_health_tx).await?;
+
+            // Start timeout analyzer that uses local LLM to decide timeouts
+            let timeout_handler = TimeoutHandler::new().await?;
+            let _timeout_task = timeout_handler
+                .start(command_health_rx, health_alert_tx.clone())
+                .await;
+
+            println!(
+                "AG-UI: Command health collector started (30s batching, LLM-based timeout analysis)"
+            );
+        }
+
         // Broadcast health alerts to all connected WebSocket clients
         let connections_for_health = self.connections.clone();
         tokio::spawn(async move {
