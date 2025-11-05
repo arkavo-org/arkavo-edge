@@ -28,38 +28,36 @@ fn main() {
     let framework_binary =
         cef_root.join("Release/Chromium Embedded Framework.framework/Chromium Embedded Framework");
 
-    if !cef_root.exists() {
-        panic!(
-            "\n=============================================================================\n\
-             CEF not found at {}\n\
-             \n\
-             To download and setup CEF, run:\n\
-             ./scripts/setup-cef.sh\n\
-             \n\
-             Or download manually from:\n\
-             https://cef-builds.spotifycdn.com/index.html\n\
-             =============================================================================\n",
-            cef_root
-                .canonicalize()
-                .unwrap_or_else(|_| cef_root.clone())
-                .display()
-        );
-    }
+    assert!(
+        cef_root.exists(),
+        "\n=============================================================================\n\
+         CEF not found at {}\n\
+         \n\
+         To download and setup CEF, run:\n\
+         ./scripts/setup-cef.sh\n\
+         \n\
+         Or download manually from:\n\
+         https://cef-builds.spotifycdn.com/index.html\n\
+         =============================================================================\n",
+        cef_root
+            .canonicalize()
+            .unwrap_or_else(|_| cef_root.clone())
+            .display()
+    );
 
-    if !framework_binary.exists() {
-        panic!(
-            "\n=============================================================================\n\
-             CEF framework binary not found at:\n\
-             {}\n\
-             \n\
-             The CEF distribution appears incomplete.\n\
-             \n\
-             To download and setup CEF, run:\n\
-             ./scripts/setup-cef.sh\n\
-             =============================================================================\n",
-            framework_binary.display()
-        );
-    }
+    assert!(
+        framework_binary.exists(),
+        "\n=============================================================================\n\
+         CEF framework binary not found at:\n\
+         {}\n\
+         \n\
+         The CEF distribution appears incomplete.\n\
+         \n\
+         To download and setup CEF, run:\n\
+         ./scripts/setup-cef.sh\n\
+         =============================================================================\n",
+        framework_binary.display()
+    );
 
     // Check if CEF DLL wrapper is built
     let wrapper_lib = cef_root.join("build_wrapper/libcef_dll_wrapper/libcef_dll_wrapper.a");

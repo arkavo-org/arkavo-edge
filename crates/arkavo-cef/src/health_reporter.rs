@@ -36,7 +36,7 @@ impl HealthReporter for CefHealthReporter {
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            HealthReport::degraded("cef", format!("Stuck commands: {}", details))
+            HealthReport::degraded("cef", format!("Stuck commands: {details}"))
         } else if !snapshot.commands.is_empty() {
             HealthReport::healthy(
                 "cef",
@@ -47,7 +47,7 @@ impl HealthReporter for CefHealthReporter {
         }
     }
 
-    fn component_name(&self) -> &str {
+    fn component_name(&self) -> &'static str {
         "cef"
     }
 }

@@ -4,7 +4,7 @@ use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthBatch {
@@ -135,7 +135,9 @@ impl CommandHealthCollector {
 
             if info_parts.len() >= 5 && info_parts[0] == "Command" {
                 let id = info_parts[1].parse::<u32>().ok()?;
-                let operation = info_parts[2].trim_matches(|c| c == '(' || c == ')').to_string();
+                let operation = info_parts[2]
+                    .trim_matches(|c| c == '(' || c == ')')
+                    .to_string();
                 let duration_ms = info_parts[4].trim_end_matches("ms").parse::<u64>().ok()?;
                 let selector = info_parts
                     .get(6)?

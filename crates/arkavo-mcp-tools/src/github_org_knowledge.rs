@@ -68,8 +68,7 @@ impl Tool for GitHubOrgReposTool {
             )));
         }
 
-        let repos: Value =
-            serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
+        let repos: Value = serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
 
         Ok(json!({
             "org": org,
@@ -157,8 +156,7 @@ impl Tool for GitHubRelatedIssuesTool {
             )));
         }
 
-        let issue_data: Value =
-            serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
+        let issue_data: Value = serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
 
         let mut related_issues = Vec::new();
         let issue_pattern = regex::Regex::new(r"#(\d+)").unwrap();
@@ -297,8 +295,7 @@ impl Tool for GitHubCiStatusTool {
                 )));
             }
 
-            let checks: Value =
-                serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
+            let checks: Value = serde_json::from_slice(&output.stdout).map_err(ToolError::Json)?;
 
             return Ok(json!({
                 "type": "pr_checks",
@@ -434,8 +431,7 @@ impl Tool for GitHubOrgOverviewTool {
                     ])
                     .output()
                     && issues_output.status.success()
-                    && let Ok(issues) =
-                        serde_json::from_slice::<Vec<Value>>(&issues_output.stdout)
+                    && let Ok(issues) = serde_json::from_slice::<Vec<Value>>(&issues_output.stdout)
                 {
                     total_issues += issues.len();
                 }

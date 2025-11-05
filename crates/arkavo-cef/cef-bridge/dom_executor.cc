@@ -5,6 +5,7 @@
 #include <sstream>
 #include <regex>
 #include <algorithm>
+#include <iomanip>
 
 DOMExecutor* DOMExecutor::GetInstance() {
     static DOMExecutor instance;
@@ -135,14 +136,28 @@ void DOMExecutor::ProcessCommand(const DOMCommand& cmd) {
 
 std::string DOMExecutor::EscapeJavaScript(const std::string& str) {
     std::ostringstream escaped;
-    for (char c : str) {
+    for (unsigned char c : str) {
         switch (c) {
             case '"':  escaped << "\\\""; break;
+            case '\'': escaped << "\\'"; break;
             case '\\': escaped << "\\\\"; break;
             case '\n': escaped << "\\n"; break;
             case '\r': escaped << "\\r"; break;
             case '\t': escaped << "\\t"; break;
-            default:   escaped << c; break;
+            case '\b': escaped << "\\b"; break;
+            case '\f': escaped << "\\f"; break;
+            case '`':  escaped << "\\`"; break;
+            case '<':  escaped << "\\x3C"; break;
+            case '>':  escaped << "\\x3E"; break;
+            case '&':  escaped << "\\x26"; break;
+            case '/':  escaped << "\\/"; break;
+            default:
+                if (c < 0x20 || c >= 0x7F) {
+                    escaped << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+                } else {
+                    escaped << c;
+                }
+                break;
         }
     }
     return escaped.str();
@@ -226,6 +241,16 @@ void DOMExecutor::ExecuteReplaceInnerHTML(uint32_t id, const std::string& select
        << "    el.innerHTML = \"" << escaped_html << "\"; "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'ReplaceInnerHTML failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] ReplaceInnerHTML error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";
@@ -293,6 +318,16 @@ void DOMExecutor::ExecuteSetAttribute(uint32_t id, const std::string& selector,
        << "    el.setAttribute(\"" << escaped_attr << "\", \"" << escaped_value << "\"); "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'SetAttribute failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] SetAttribute error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";
@@ -332,6 +367,16 @@ void DOMExecutor::ExecuteSetStyle(uint32_t id, const std::string& selector,
        << "    el.style[\"" << escaped_property << "\"] = \"" << escaped_value << "\"; "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'SetStyle failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] SetStyle error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";
@@ -369,6 +414,16 @@ void DOMExecutor::ExecuteSetTextContent(uint32_t id, const std::string& selector
        << "    el.textContent = \"" << escaped_text << "\"; "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'SetTextContent failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] SetTextContent error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";
@@ -400,6 +455,16 @@ void DOMExecutor::ExecuteRemoveNode(uint32_t id, const std::string& selector) {
        << "    el.parentNode.removeChild(el); "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'RemoveNode failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] RemoveNode error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";
@@ -440,6 +505,16 @@ void DOMExecutor::ExecuteAddEventListener(uint32_t id, const std::string& select
        << "    }); "
        << "    return 'OK'; "
        << "  } catch(e) { "
+       << "    if (typeof window.ArkavoEventBridge === 'function') { "
+       << "      window.ArkavoEventBridge({"
+       << "        event_type: 'js_error', "
+       << "        selector: '" << escaped_selector << "', "
+       << "        target_id: 'dom_executor', "
+       << "        value: 'AddEventListener failed', "
+       << "        data: JSON.stringify({error: e.message, stack: e.stack, command_id: " << id << "})"
+       << "      });"
+       << "    }"
+       << "    console.error('[CEF DOM] AddEventListener error:', e); "
        << "    throw e; "
        << "  } "
        << "})();";

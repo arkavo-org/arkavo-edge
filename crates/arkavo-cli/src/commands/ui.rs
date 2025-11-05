@@ -76,11 +76,10 @@ async fn use_cef_renderer(
     initial_prompt: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_agui::UiRenderer;
-    use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
-    use arkavo_cef::DOMError;
+    use arkavo_agui::renderer::async_cef_renderer::AsyncCefRendererImpl;
 
-    println!("Creating CEF renderer...");
-    let mut cef_renderer = CefRendererImpl::new().await?;
+    println!("Creating Async CEF renderer (non-blocking)...");
+    let mut cef_renderer = AsyncCefRendererImpl::new().await?;
 
     println!("CEF window opened with prompt bar!");
 
@@ -89,11 +88,9 @@ async fn use_cef_renderer(
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     println!("[DEBUG] Page should be loaded now");
 
-    let mut error_buffer: Vec<DOMError> = Vec::new();
-
     if let Some(prompt) = initial_prompt {
         println!("Processing initial prompt: {prompt}");
-        handle_prompt(&mut cef_renderer, &prompt, &mut error_buffer).await?;
+        handle_prompt_async(&mut cef_renderer, &prompt).await?;
     }
 
     println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
@@ -101,6 +98,7 @@ async fn use_cef_renderer(
     // Event loop - poll for prompt submissions and errors
     let mut loop_count = 0;
     let mut last_health_check = std::time::Instant::now();
+    let mut processing_prompt = false;
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         loop_count += 1;
@@ -119,8 +117,11 @@ async fn use_cef_renderer(
             eprintln!("[HEARTBEAT] Health check: {} components", reports.len());
             for report in &reports {
                 if report.component == "cef" {
-                    eprintln!("[HEARTBEAT]   CEF: {} - {}",
-                        format!("{:?}", report.status), report.message);
+                    eprintln!(
+                        "[HEARTBEAT]   CEF: {} - {}",
+                        format!("{:?}", report.status),
+                        report.message
+                    );
 
                     // Check if degraded (stuck commands)
                     if format!("{:?}", report.status) == "Degraded" {
@@ -129,7 +130,9 @@ async fn use_cef_renderer(
                         let warning_html = format!(
                             r#"<div style="position:fixed;top:10px;right:10px;background:#ff9;border:2px solid #f80;padding:12px;border-radius:6px;z-index:9999;">
                             <strong>⚠️ Warning:</strong> {}</div>"#,
-                            report.message.replace('&', "&amp;")
+                            report
+                                .message
+                                .replace('&', "&amp;")
                                 .replace('<', "&lt;")
                                 .replace('>', "&gt;")
                         );
@@ -146,86 +149,61 @@ async fn use_cef_renderer(
             break;
         }
 
-        // Poll for errors from CEF
-        if let Ok(Some(error)) = cef_renderer.try_recv_error().await {
-            // Check for shutdown signal from CEF
-            if error.error_type == "shutdown" {
-                eprintln!("[DEBUG] Received shutdown signal from CEF");
-                break;
-            }
-
-            // Buffer error for LLM feedback
-            error_buffer.push(error.clone());
-
-            // Show error in UI
-            let error_html = format!(
-                r#"
-                <div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-                    <div style="background: #fee; border-left: 4px solid #f44; padding: 16px; border-radius: 4px;">
-                        <strong style="color: #c33;">Error: {}</strong><br>
-                        <span style="color: #666;">{}</span><br>
-                        <small style="color: #999;">{}:{}</small>
-                    </div>
-                </div>
-                "#,
-                error.error_type,
-                error
-                    .message
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;"),
-                error
-                    .source
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;"),
-                error.line
+        // Poll for events from CEF (non-blocking)
+        if let Some(event) = cef_renderer.try_recv_event() {
+            eprintln!(
+                "[DEBUG] Event received (async): type={}, value={}",
+                event.event_type, event.value
             );
-            let _ = cef_renderer.render(&error_html, "", "").await;
-        }
 
-        // Poll for all messages (events, feedback, errors)
-        // We must drain all message types, not just events
-        use arkavo_cef::ReceivedMessage;
-        let mut connection_closed = false;
-        loop {
-            match cef_renderer.try_recv_message().await {
-                Ok(Some(ReceivedMessage::Event(event))) => {
-                    eprintln!(
-                        "[DEBUG] Event received: type={}, value={}",
-                        event.event_type, event.value
+            match event.event_type.as_str() {
+                "js_error" => {
+                    eprintln!("[CEF JS ERROR] {}", event.value);
+                    eprintln!("[CEF JS ERROR] Data: {}", event.data);
+
+                    // Log error with health registry
+                    use arkavo_observability::health_reporter::HealthRegistry;
+                    let registry = HealthRegistry::global();
+                    let reports = registry.check_all().await;
+                    eprintln!("[ERROR TELEMETRY] CEF JavaScript exception captured:");
+                    eprintln!("  Selector: {}", event.selector);
+                    eprintln!("  Target: {}", event.target_id);
+                    eprintln!("  Error: {}", event.value);
+                    eprintln!("  Context: {}", event.data);
+
+                    // Show error in UI
+                    let error_display = format!(
+                        r#"<div style="position:fixed;top:10px;right:10px;background:#fee;border:2px solid #f44;padding:12px;border-radius:6px;z-index:9999;max-width:400px;">
+                        <strong style="color:#c33;">⚠️ JavaScript Error</strong><br>
+                        <span style="font-size:12px;color:#666;">{}</span>
+                        </div>"#,
+                        event.value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
                     );
-                    if event.event_type == "submit" && !event.value.trim().is_empty() {
-                        eprintln!("[DEBUG] Processing submit event");
-                        handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
-                    }
+                    let _ = cef_renderer.update_element("body", &error_display).await;
                 }
-                Ok(Some(ReceivedMessage::Feedback(_))) => {
-                    // Ignore feedback messages (already handled by command sender)
-                }
-                Ok(Some(ReceivedMessage::Error(error))) => {
-                    // Handle error messages
-                    error_buffer.push(error);
-                }
-                Ok(None) => {
-                    // No more messages available
-                    break;
-                }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("Connection closed") {
-                        eprintln!("[DEBUG] CEF connection closed, shutting down");
-                        connection_closed = true;
+                "submit" if !event.value.trim().is_empty() => {
+                    if processing_prompt {
+                        eprintln!("[DEBUG] Ignoring prompt - already processing one");
                     } else {
-                        eprintln!("[ERROR] Failed to receive message: {e}");
+                        eprintln!("[DEBUG] Processing submit event (async)");
+                        processing_prompt = true;
+                        match handle_prompt_async(&mut cef_renderer, &event.value).await {
+                            Ok(_) => {
+                                eprintln!("[DEBUG] Prompt processing completed");
+                                processing_prompt = false;
+                            }
+                            Err(e) => {
+                                eprintln!("[ERROR] Prompt processing failed: {}", e);
+                                processing_prompt = false;
+                                return Err(e);
+                            }
+                        }
                     }
-                    break;
+                }
+                _ => {
+                    eprintln!("[DEBUG] Unhandled event type: {}", event.event_type);
                 }
             }
-        }
-
-        if connection_closed {
-            break;
         }
     }
 
@@ -253,31 +231,15 @@ async fn use_cef_renderer(
 }
 
 #[cfg(feature = "cef-ui")]
-async fn handle_prompt(
+async fn handle_prompt_async(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
-    error_buffer: &mut Vec<arkavo_cef::DOMError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_llm::Message;
     use arkavo_router::Router;
     use tokio_stream::StreamExt;
 
-    // Build enhanced prompt with error feedback if errors exist
-    let enhanced_prompt = if !error_buffer.is_empty() {
-        let error_summary = error_buffer
-            .iter()
-            .map(|e| e.format_for_llm())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        format!(
-            "Previous UI rendering had the following errors:\n\n{error_summary}\n\n\
-             Please help fix these errors and regenerate the content.\n\n\
-             User request: {prompt}"
-        )
-    } else {
-        prompt.to_string()
-    };
+    let enhanced_prompt = prompt.to_string();
 
     // Check for API key availability to determine if we should use cloud models
     let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
@@ -386,17 +348,10 @@ async fn handle_prompt(
     );
     eprintln!("[DEBUG] First 200 chars: {}", &html[..html.len().min(200)]);
 
-    match renderer.render(&html, "", "").await {
-        Ok(_) => {
-            // Clear error buffer after successful render
-            error_buffer.clear();
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("[ERROR] renderer.render() failed: {e}");
-            Err(e.into())
-        }
-    }
+    renderer.render(&html, "", "").await.map_err(|e| {
+        eprintln!("[ERROR] renderer.render() failed (async): {e}");
+        e.into()
+    })
 }
 
 #[cfg(feature = "cef-ui")]
