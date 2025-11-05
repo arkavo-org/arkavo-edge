@@ -52,10 +52,25 @@ impl CommandHealthCollector {
 
                 let batch = self.collect_batch().await;
 
+                println!(
+                    "[HEARTBEAT] CommandHealthCollector: {} commands in batch",
+                    batch.commands.len()
+                );
+
                 if !batch.commands.is_empty() {
+                    println!(
+                        "[HEARTBEAT] Stuck commands detected: {:?}",
+                        batch
+                            .commands
+                            .iter()
+                            .map(|c| format!("id={} {}ms", c.id, c.duration_ms))
+                            .collect::<Vec<_>>()
+                    );
                     if let Err(e) = llm_tx.send(batch).await {
                         eprintln!("Failed to send health batch: {e}");
                     }
+                } else {
+                    println!("[HEARTBEAT] No stuck commands");
                 }
             }
         });
@@ -69,11 +84,33 @@ impl CommandHealthCollector {
         let registry = HealthRegistry::global();
         let reports = registry.check_all().await;
 
+        println!(
+            "[HEARTBEAT] Health reports from registry: {} total",
+            reports.len()
+        );
+        for report in &reports {
+            println!(
+                "[HEARTBEAT]   - {}: {} ({})",
+                report.component,
+                report.message,
+                format!("{:?}", report.status)
+            );
+        }
+
         let commands: Vec<CommandHealthData> = reports
             .iter()
             .filter_map(|report| {
                 if report.component == "cef" {
-                    Self::parse_cef_health(&report.message, &report.component)
+                    let parsed = Self::parse_cef_health(&report.message, &report.component);
+                    if parsed.is_some() {
+                        println!("[HEARTBEAT] Parsed CEF health data: {:?}", parsed);
+                    } else {
+                        println!(
+                            "[HEARTBEAT] Failed to parse CEF message: '{}'",
+                            report.message
+                        );
+                    }
+                    parsed
                 } else {
                     None
                 }
