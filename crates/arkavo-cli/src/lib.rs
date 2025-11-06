@@ -5,7 +5,7 @@ pub mod log;
 pub mod mcp_client;
 pub mod mcp_integration;
 pub mod mcp_spawner;
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 pub mod memory_integration;
 pub mod prompt_loader;
 pub mod tool_integration;
@@ -24,12 +24,12 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         "ui" => commands::ui::execute(&args[1..]),
         // Hidden commands (still accessible, just not in main help)
         "terminal" => commands::terminal::execute(&args[1..]),
-        #[cfg(all(target_os = "macos", feature = "test-harness"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
         "test" => commands::test::execute(&args[1..]),
-        #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
         "test" => {
             eprintln!("Test command is not available on this platform");
-            Err("Test command requires macOS with test-harness feature (uses iOS simulator)".into())
+            Err("Test command requires macOS with mcp-tools feature (uses iOS simulator)".into())
         }
         // Hidden commands with async runtime
         "model" => {
@@ -90,16 +90,16 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        #[cfg(all(target_os = "macos", feature = "test-harness"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
         "serve" | "mcp" => {
             // Always create a new runtime for the MCP server
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { commands::mcp::run().await })
         }
-        #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
         "serve" | "mcp" => {
             eprintln!("MCP server is not available on this platform");
-            Err("MCP server requires macOS with test-harness feature (uses iOS simulator)".into())
+            Err("MCP server requires macOS with mcp-tools feature (uses iOS simulator)".into())
         }
         "help" => {
             print_usage();

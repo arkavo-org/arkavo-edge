@@ -26,8 +26,8 @@ fn get_or_create_runtime() -> &'static Runtime {
 }
 
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
-    // Try in-process MCP first on macOS with test-harness feature
-    #[cfg(all(target_os = "macos", feature = "test-harness"))]
+    // Try in-process MCP first on macOS with mcp-tools feature
+    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
     {
         let result = McpConnection::new_in_process();
         match result {

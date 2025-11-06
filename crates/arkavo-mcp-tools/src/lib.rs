@@ -25,7 +25,7 @@ pub mod tui;
 pub mod ntp_server;
 
 // Re-export commonly used types
-pub use registry::ToolRegistry;
+pub use registry::{McpClient, McpTool, ToolRegistry};
 pub use server::{Tool, ToolSchema};
 
 // Re-export error types

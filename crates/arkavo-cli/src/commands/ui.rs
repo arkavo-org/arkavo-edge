@@ -245,9 +245,9 @@ async fn handle_prompt_async(
     let messages = vec![Message::user(&enhanced_prompt)];
 
     // Use router with tools for native tool calling
-    #[cfg(all(unix, feature = "test-harness"))]
+    #[cfg(all(unix, feature = "mcp-tools"))]
     let use_tools = true;
-    #[cfg(not(all(unix, feature = "test-harness")))]
+    #[cfg(not(all(unix, feature = "mcp-tools")))]
     let use_tools = false;
 
     // Show "thinking" indicator in UI
@@ -271,12 +271,13 @@ async fn handle_prompt_async(
 
     let response_text = if use_tools {
         // Use router with native tool calling
-        #[cfg(all(unix, feature = "test-harness"))]
+        #[cfg(all(unix, feature = "mcp-tools"))]
         {
             use crate::tool_integration::complete_with_tools;
-            complete_with_tools(&enhanced_prompt, messages).await?
+            // TODO: Initialize MCP connection for UI command
+            complete_with_tools(&enhanced_prompt, messages, None).await?
         }
-        #[cfg(not(all(unix, feature = "test-harness")))]
+        #[cfg(not(all(unix, feature = "mcp-tools")))]
         String::new()
     } else {
         // Fallback to direct streaming

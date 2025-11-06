@@ -164,10 +164,10 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
     }
 }
 
-// Runtime MCP initialization - checks if test-harness feature is available
+// Runtime MCP initialization - checks if mcp-tools feature is available
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     // Try platform-specific MCP first
-    #[cfg(all(target_os = "macos", feature = "test-harness"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
     {
         // Try in-process MCP first on macOS, which includes iOS simulator tools
         let result = McpConnection::new_in_process();
@@ -185,7 +185,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     }
 
     // Try cross-platform tools on Unix systems
-    #[cfg(all(unix, feature = "test-harness"))]
+    #[cfg(all(unix, feature = "mcp-tools"))]
     {
         let result = McpConnection::new_cross_platform();
         match result {
@@ -214,7 +214,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
             if !print_mode {
                 eprintln!("ℹ MCP tools not available - using LLM-only mode");
                 eprintln!(
-                    "  To enable git/filesystem tools, rebuild with: cargo build --features test-harness"
+                    "  To enable git/filesystem tools, rebuild with: cargo build --features mcp-tools"
                 );
             }
             None
@@ -662,11 +662,11 @@ Q: \"Recent commits?\" → A: @git_status
             ))?;
         } else {
             // Use router-based tool calling on supported platforms
-            #[cfg(all(unix, feature = "test-harness"))]
+            #[cfg(all(unix, feature = "mcp-tools"))]
             {
-                runtime.block_on(process_message_with_tools(&messages))?;
+                runtime.block_on(process_message_with_tools(&messages, mcp_client.as_ref()))?;
             }
-            #[cfg(not(all(unix, feature = "test-harness")))]
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
             {
                 runtime.block_on(process_message(
                     &client,
@@ -965,11 +965,11 @@ Q: \"Recent commits?\" → A: @git_status
 
         // Process with LLM using router-based tool calling
         let result = {
-            #[cfg(all(unix, feature = "test-harness"))]
+            #[cfg(all(unix, feature = "mcp-tools"))]
             {
-                runtime.block_on(process_message_with_tools(&messages))
+                runtime.block_on(process_message_with_tools(&messages, mcp_client.as_ref()))
             }
-            #[cfg(not(all(unix, feature = "test-harness")))]
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
             {
                 runtime.block_on(process_message(
                     &client,
@@ -1003,11 +1003,13 @@ Q: \"Recent commits?\" → A: @git_status
 }
 
 /// Process message with native tool calling via Router
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 async fn process_message_with_tools(
     messages: &[Message],
+    mcp_client: Option<&McpConnection>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     use crate::tool_integration::process_with_tools_interactive;
+    use std::sync::Arc;
 
     // Derive task description from the last user message
     let task_description = messages
@@ -1028,7 +1030,11 @@ async fn process_message_with_tools(
     );
     progress.set_message("Routing to LLM...");
 
-    let response = process_with_tools_interactive(task_description, messages.to_vec()).await?;
+    // Convert McpConnection to Arc<dyn McpClient> if present
+    let mcp_arc = mcp_client.map(|c| Arc::new(c.clone()) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+    let response =
+        process_with_tools_interactive(task_description, messages.to_vec(), mcp_arc).await?;
 
     progress.finish_and_clear();
     println!("{response}");
@@ -1369,7 +1375,7 @@ fn get_current_directory() -> String {
     }
 }
 
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 #[allow(dead_code)]
 fn handle_command(
     input: &str,
@@ -1515,8 +1521,8 @@ fn handle_command(
 #[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
-// Stub implementations when test-harness is not available
-#[cfg(not(all(unix, feature = "test-harness")))]
+// Stub implementations when mcp-tools is not available
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 #[allow(dead_code)]
 fn handle_command(
     _input: &str,
@@ -1526,7 +1532,7 @@ fn handle_command(
     None
 }
 
-#[cfg(not(all(unix, feature = "test-harness")))]
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 #[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,
@@ -1557,7 +1563,7 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 #[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,

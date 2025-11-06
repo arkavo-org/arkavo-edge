@@ -11,8 +11,51 @@ use crate::server::Tool;
 use crate::syft::SyftTool;
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
+use arkavo_mcp::ToolSchema;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// MCP Tool definition to avoid circular dependency with arkavo-protocol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Option<Value>,
+}
+
+/// Trait for MCP connection abstraction to avoid circular dependency
+pub trait McpClient: Send + Sync {
+    fn list_tools(&self) -> Result<Vec<McpTool>, Box<dyn std::error::Error>>;
+    fn call_tool(
+        &self,
+        tool_name: &str,
+        args: Value,
+        llm_origin: &str,
+    ) -> Result<Value, Box<dyn std::error::Error>>;
+}
+
+/// Wrapper that adapts an MCP tool to the Tool trait
+struct McpToolWrapper {
+    mcp_client: Arc<dyn McpClient>,
+    tool_schema: ToolSchema,
+    tool_name: String,
+}
+
+#[async_trait]
+impl Tool for McpToolWrapper {
+    async fn execute(&self, params: Value) -> crate::Result<Value> {
+        self.mcp_client
+            .call_tool(&self.tool_name, params, "arkavo-router")
+            .map_err(|e| crate::ToolError::Mcp(e.to_string()))
+    }
+
+    fn schema(&self) -> &ToolSchema {
+        &self.tool_schema
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
@@ -34,6 +77,53 @@ impl ToolRegistry {
 
         registry.register_all();
         registry
+    }
+
+    /// Create a ToolRegistry from an MCP connection
+    /// This dynamically discovers tools from the MCP server
+    pub fn from_mcp_connection(
+        mcp_client: Arc<dyn McpClient>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut registry = Self {
+            tools: HashMap::new(),
+        };
+
+        let mcp_tools = mcp_client.list_tools()?;
+
+        for mcp_tool in mcp_tools {
+            let tool_schema = ToolSchema {
+                name: mcp_tool.name.clone(),
+                description: mcp_tool.description.clone(),
+                parameters: mcp_tool
+                    .input_schema
+                    .unwrap_or_else(|| serde_json::json!({})),
+            };
+
+            let wrapper = McpToolWrapper {
+                mcp_client: Arc::clone(&mcp_client),
+                tool_schema,
+                tool_name: mcp_tool.name.clone(),
+            };
+
+            registry.register(&mcp_tool.name, Box::new(wrapper));
+        }
+
+        Ok(registry)
+    }
+
+    /// Create a ToolRegistry from MCP if available, otherwise use default hardcoded tools
+    pub fn from_mcp_or_default(mcp_client: Option<Arc<dyn McpClient>>) -> Self {
+        if let Some(client) = mcp_client {
+            Self::from_mcp_connection(client).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to load MCP tools, falling back to defaults: {}",
+                    e
+                );
+                Self::new()
+            })
+        } else {
+            Self::new()
+        }
     }
 
     fn register_all(&mut self) {
