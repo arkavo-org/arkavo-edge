@@ -744,6 +744,7 @@ dependencies = [
  "arkavo-mcp-core",
  "arkavo-mcp-tools",
  "arkavo-observability",
+ "arkavo-router",
  "async-trait",
  "chrono",
  "clap",
