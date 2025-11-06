@@ -28,6 +28,12 @@ pub enum Error {
 
     #[error("Model execution failed: {0}")]
     ModelExecution(String),
+
+    #[error("Response validation failed: {0}")]
+    Validation(#[from] crate::validator::ValidationError),
+
+    #[error("Max retries exceeded after {attempts} attempts")]
+    MaxRetriesExceeded { attempts: u8 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

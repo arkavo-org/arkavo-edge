@@ -90,10 +90,8 @@ impl CommandHealthCollector {
         );
         for report in &reports {
             println!(
-                "[HEARTBEAT]   - {}: {} ({})",
-                report.component,
-                report.message,
-                format!("{:?}", report.status)
+                "[HEARTBEAT]   - {}: {} ({:?})",
+                report.component, report.message, report.status
             );
         }
 

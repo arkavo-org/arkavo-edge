@@ -37,11 +37,11 @@ impl TimeoutHandler {
         let analyses = self.analyzer.analyze_batch(batch).await?;
 
         for analysis in analyses {
-            if analysis.should_timeout {
-                if let Some(msg) = analysis.user_message {
-                    self.send_notification(msg, &analysis.severity, event_tx)
-                        .await;
-                }
+            if analysis.should_timeout
+                && let Some(msg) = analysis.user_message
+            {
+                self.send_notification(msg, &analysis.severity, event_tx)
+                    .await;
             }
         }
 

@@ -102,11 +102,123 @@ cargo test -p arkavo-agui
 cargo test -p arkavo-ui-generator  # Unit tests
 ```
 
+## MCP Tool Integration (TODO)
+
+### Current Status: Not Integrated
+
+The CEF UI currently **does not use Router's MCP tool integration** or quality gate validation.
+
+**Current Flow** (`gateway.rs` lines 962-967):
+```rust
+let router = Arc::new(Router::new().await?);
+let planner = UiPlanner::new(router);
+let plan = planner.plan(&cleaned_text).await?;  // ❌ No tools!
+```
+
+**Issues:**
+- LLM doesn't receive MCP tool definitions
+- Cannot call tools like `filesystem__list_directory`, `github_org_repos`, etc.
+- No quality validation (hallucinated tools, refusals)
+- No automatic model escalation on poor responses
+
+### How to Add MCP Tools
+
+**Step 1: Initialize ToolRegistry in Gateway** (`gateway.rs` ~line 960):
+```rust
+use arkavo_mcp_tools::ToolRegistry;
+
+// In handle_event() for SubmitPrompt
+let tool_registry = if let Some(mcp_client) = &self.mcp_client {
+    ToolRegistry::from_mcp_connection(mcp_client.clone())?
+} else {
+    ToolRegistry::new()  // Use default hardcoded tools
+};
+```
+
+**Step 2: Update Planner to Accept Tools** (`planner.rs`):
+```rust
+// Add new method to UiPlanner
+pub async fn plan_with_tools(
+    &self,
+    prompt: &str,
+    tool_registry: Option<&ToolRegistry>,
+) -> Result<String> {
+    let messages = vec![Message {
+        role: Role::User,
+        content: self.build_planning_prompt(prompt),
+        images: None,
+    }];
+
+    // Use Router's quality gate instead of direct provider call
+    let response = self.router.route_with_quality_gate(
+        prompt,
+        messages,
+        tool_registry,
+        3,  // Max retries
+    ).await?;
+
+    Ok(response.content)
+}
+```
+
+**Step 3: Update Gateway to Use New Method**:
+```rust
+// Replace planner.plan() with planner.plan_with_tools()
+let plan = planner.plan_with_tools(&cleaned_text, Some(&tool_registry)).await?;
+```
+
+**Step 4: Add Tool Execution Loop**:
+```rust
+// After getting response with tool_calls
+if !response.tool_calls.is_empty() {
+    for tool_call in &response.tool_calls {
+        if let Some(tool) = tool_registry.get(&tool_call.tool_name) {
+            let result = tool.execute(tool_call.arguments.clone()).await?;
+            // Feed result back to LLM for refinement
+        }
+    }
+}
+```
+
+### Integration Points
+
+| Location | File | Lines | Change Required |
+|----------|------|-------|-----------------|
+| **SubmitPrompt Handler** | `gateway.rs` | 962-967 | Add ToolRegistry, call `plan_with_tools()` |
+| **ApplyPart Handler** | `gateway.rs` | 1109-1117 | Add ToolRegistry to streaming generator |
+| **Planner** | `../arkavo-ui-generator/src/planner.rs` | 41-62 | Add `plan_with_tools()` method |
+| **Streaming** | `../arkavo-ui-generator/src/streaming.rs` | 68-180 | Add `generate_part_with_tools()` method |
+
+### Benefits After Integration
+
+✅ **Access to MCP tools** - UI generator can call filesystem, GitHub, browser tools
+✅ **Quality validation** - Prevents hallucinated tools and bad responses
+✅ **Auto-escalation** - Automatically retries with better models if needed
+✅ **Better UX** - Tool execution feedback shown in UI
+✅ **Cost optimization** - Tries local models first, escalates to cloud only if needed
+
+### Example: Using Tools in UI Generation
+
+```bash
+# After integration, this will work:
+arkavo ui --prompt "Show me the repository structure and generate a file browser UI"
+
+# The LLM will:
+# 1. Call filesystem__list_directory tool to get actual file list
+# 2. Generate UI based on real data (not hallucinated)
+# 3. If response quality is poor, automatically retry with better model
+```
+
+### See Also
+
+- `crates/arkavo-router/README.md` - Router quality gate documentation
+- `crates/arkavo-ui-generator/README.md` - Planner/streaming implementation details
+
 ## Dependencies
 
 - `arkavo-ui-generator`: UI planning and code generation
 - `arkavo-gemini`: Gemini API client
-- `arkavo-router`: LLM routing
+- `arkavo-router`: LLM routing (includes quality gate for tool validation)
 - `arkavo-events`: Event system
-- `arkavo-mcp-tools`: MCP tool registry
+- `arkavo-mcp-tools`: MCP tool registry (not currently integrated)
 - `warp`: HTTP and WebSocket server

@@ -70,7 +70,7 @@ pub async fn process_with_tools(
         }
 
         let response: ProviderResponse = router
-            .route_with_tools(task_description, messages.clone(), Some(&tool_registry))
+            .route_with_quality_gate(task_description, messages.clone(), Some(&tool_registry), 3)
             .await?;
 
         if response.tool_calls.is_empty() {
@@ -82,7 +82,7 @@ pub async fn process_with_tools(
         }
 
         if config.show_tool_execution {
-            println!("\n=== Tool Execution (Iteration {}) ===", iteration);
+            println!("\n=== Tool Execution (Iteration {iteration}) ===");
             println!("LLM wants to call {} tool(s)", response.tool_calls.len());
         }
 
@@ -92,7 +92,7 @@ pub async fn process_with_tools(
             if config.show_tool_execution {
                 println!("\nExecuting tool: {}", tool_call.tool_name);
                 if let Ok(args_pretty) = serde_json::to_string_pretty(&tool_call.arguments) {
-                    println!("Arguments:\n{}", args_pretty);
+                    println!("Arguments:\n{args_pretty}");
                 }
             }
 
@@ -108,7 +108,7 @@ pub async fn process_with_tools(
                     }
                 );
                 if let Ok(result_pretty) = serde_json::to_string_pretty(&result.result) {
-                    println!("{}", result_pretty);
+                    println!("{result_pretty}");
                 }
             }
 
@@ -129,20 +129,19 @@ pub async fn process_with_tools(
 
 #[cfg(all(unix, feature = "mcp-tools"))]
 fn format_tool_results(results: &[ToolExecutionResult]) -> String {
+    use std::fmt::Write;
+
     let mut formatted = String::from("Tool execution results:\n\n");
 
     for result in results {
-        formatted.push_str(&format!("Tool: {}\n", result.tool_name));
+        let _ = writeln!(formatted, "Tool: {}", result.tool_name);
         if result.success {
-            formatted.push_str(&format!(
-                "Result: {}\n",
-                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string())
-            ));
+            let result_json =
+                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
+            let _ = writeln!(formatted, "Result: {result_json}");
         } else {
-            formatted.push_str(&format!(
-                "Error: {}\n",
-                result.error.as_deref().unwrap_or("Unknown error")
-            ));
+            let error_msg = result.error.as_deref().unwrap_or("Unknown error");
+            let _ = writeln!(formatted, "Error: {error_msg}");
         }
         formatted.push('\n');
     }

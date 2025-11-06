@@ -962,6 +962,10 @@ async fn handle_event(
             use arkavo_router::Router;
             use arkavo_ui_generator::planner::UiPlanner;
 
+            eprintln!("\n⚠️  WARNING: UI planner bypasses Router quality gate");
+            eprintln!("⚠️  NO MCP tools available, NO quality validation");
+            eprintln!("⚠️  See crates/arkavo-agui/README.md for integration\n");
+
             let router = Arc::new(Router::new().await?);
             let planner = UiPlanner::new(router);
             let plan = planner.plan(&cleaned_text).await?;
@@ -1108,6 +1112,10 @@ async fn handle_event(
 
             use arkavo_router::Router;
             use arkavo_ui_generator::streaming::StreamingGenerator;
+
+            eprintln!("\n⚠️  WARNING: Streaming generator bypasses Router quality gate");
+            eprintln!("⚠️  NO MCP tools, NO quality validation");
+            eprintln!("⚠️  See crates/arkavo-agui/README.md for integration\n");
 
             let router = Arc::new(Router::new().await?);
             let generator = StreamingGenerator::new(router)?;

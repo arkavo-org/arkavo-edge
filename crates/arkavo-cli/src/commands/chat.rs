@@ -655,11 +655,22 @@ Q: \"Recent commits?\" → A: @git_status
         }
 
         if print_mode {
-            runtime.block_on(process_message_print(
-                &client,
-                &messages,
-                mcp_client.as_ref(),
-            ))?;
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            {
+                runtime.block_on(process_message_print_with_router(
+                    &messages,
+                    mcp_client.as_ref(),
+                ))?;
+            }
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            {
+                eprintln!("⚠️  WARNING: MCP tools not available on this platform");
+                runtime.block_on(process_message_print(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                ))?;
+            }
         } else {
             // Use router-based tool calling on supported platforms
             #[cfg(all(unix, feature = "mcp-tools"))]
@@ -1170,6 +1181,43 @@ async fn process_message(
     Ok(full_response)
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
+async fn process_message_print_with_router(
+    messages: &[Message],
+    mcp_client: Option<&McpConnection>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use crate::tool_integration::{ToolIntegrationConfig, process_with_tools};
+    use std::sync::Arc;
+
+    let task_description = messages
+        .last()
+        .map(|m| m.content.as_str())
+        .unwrap_or("User query");
+
+    let mcp_arc = mcp_client.map(|c| Arc::new(c.clone()) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+    let config = ToolIntegrationConfig {
+        max_tool_iterations: 3,
+        show_tool_execution: true,
+    };
+
+    let result =
+        process_with_tools(task_description, messages.to_vec(), Some(config), mcp_arc).await?;
+
+    println!("{}", result.final_response);
+
+    if !result.tool_executions.is_empty() {
+        eprintln!(
+            "\n✓ Executed {} tool(s) across {} iteration(s)",
+            result.tool_executions.len(),
+            result.total_iterations
+        );
+    }
+
+    Ok(result.final_response)
+}
+
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
