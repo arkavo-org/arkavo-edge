@@ -37,8 +37,30 @@ pub struct ResponseJudge {
 impl ResponseJudge {
     #[cfg(feature = "llama-cpp")]
     pub fn new_gemma_4b() -> crate::Result<Self> {
-        let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH")
-            .unwrap_or_else(|_| "models/gemma-3-4b-it.gguf".to_string());
+        let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH").unwrap_or_else(|_| {
+            // Try common locations for Gemma 4B GGUF model
+            let hf_path = std::env::var("HF_HOME")
+                .or_else(|_| std::env::var("HOME").map(|h| format!("{h}/.cache/huggingface")))
+                .unwrap_or_else(|_| "~/.cache/huggingface".to_string());
+
+            // Check multiple possible locations
+            let candidates = vec![
+                format!("{hf_path}/hub/models--unsloth--gemma-3-4b-it-GGUF/snapshots/*/gemma-3-4b-it-Q4_K_M.gguf"),
+                "models/gemma-3-4b-it.gguf".to_string(),
+                "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF/snapshots/*/gemma-3-4b-it-Q4_K_M.gguf".to_string(),
+            ];
+
+            // Return first existing path or default
+            for candidate in candidates {
+                if let Ok(entries) = glob::glob(&candidate)
+                    && let Some(Ok(path)) = entries.into_iter().next()
+                {
+                    return path.to_string_lossy().to_string();
+                }
+            }
+
+            "models/gemma-3-4b-it.gguf".to_string()
+        });
 
         let provider = arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
             .map_err(|e| {

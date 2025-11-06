@@ -229,33 +229,41 @@ impl Router {
 
                 #[cfg(feature = "llama-cpp")]
                 {
-                    let judge = judge::ResponseJudge::new_gemma_4b()?;
-                    let judgment = judge
-                        .evaluate(task_description, &response, &tool_infos)
-                        .await?;
+                    // Try to create judge, but gracefully degrade if model unavailable
+                    match judge::ResponseJudge::new_gemma_4b() {
+                        Ok(judge) => {
+                            let judgment = judge
+                                .evaluate(task_description, &response, &tool_infos)
+                                .await?;
 
-                    if !judgment.passed {
-                        tracing::warn!(
-                            "Judge rejected response on attempt {}/{}: {:?} - {}",
-                            attempt + 1,
-                            max_retries,
-                            judgment.issue_type,
-                            judgment.reason.as_deref().unwrap_or("No reason provided")
-                        );
+                            if !judgment.passed {
+                                tracing::warn!(
+                                    "Judge rejected response on attempt {}/{}: {:?} - {}",
+                                    attempt + 1,
+                                    max_retries,
+                                    judgment.issue_type,
+                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                );
 
-                        if attempt + 1 < max_retries {
-                            current_decision.recommended_model =
-                                self.upgrade_model(&current_decision.recommended_model);
-                            tracing::info!(
-                                "Upgrading to {:?} after judge rejection",
-                                current_decision.recommended_model
-                            );
-                            continue;
+                                if attempt + 1 < max_retries {
+                                    current_decision.recommended_model =
+                                        self.upgrade_model(&current_decision.recommended_model);
+                                    tracing::info!(
+                                        "Upgrading to {:?} after judge rejection",
+                                        current_decision.recommended_model
+                                    );
+                                    continue;
+                                }
+                                return Err(Error::ModelExecution(format!(
+                                    "Max retries exceeded. Judge rejected: {:?}",
+                                    judgment.issue_type
+                                )));
+                            }
                         }
-                        return Err(Error::ModelExecution(format!(
-                            "Max retries exceeded. Judge rejected: {:?}",
-                            judgment.issue_type
-                        )));
+                        Err(e) => {
+                            // Judge unavailable, skip LLM-based validation
+                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
+                        }
                     }
                 }
             }
@@ -353,33 +361,41 @@ impl Router {
 
                 #[cfg(feature = "llama-cpp")]
                 {
-                    let judge = judge::ResponseJudge::new_gemma_4b()?;
-                    let judgment = judge
-                        .evaluate(task_description, &synthetic_response, &tool_infos)
-                        .await?;
+                    // Try to create judge, but gracefully degrade if model unavailable
+                    match judge::ResponseJudge::new_gemma_4b() {
+                        Ok(judge) => {
+                            let judgment = judge
+                                .evaluate(task_description, &synthetic_response, &tool_infos)
+                                .await?;
 
-                    if !judgment.passed {
-                        tracing::warn!(
-                            "Judge rejected streamed response on attempt {}/{}: {:?} - {}",
-                            attempt + 1,
-                            max_retries,
-                            judgment.issue_type,
-                            judgment.reason.as_deref().unwrap_or("No reason provided")
-                        );
+                            if !judgment.passed {
+                                tracing::warn!(
+                                    "Judge rejected streamed response on attempt {}/{}: {:?} - {}",
+                                    attempt + 1,
+                                    max_retries,
+                                    judgment.issue_type,
+                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                );
 
-                        if attempt + 1 < max_retries {
-                            current_decision.recommended_model =
-                                self.upgrade_model(&current_decision.recommended_model);
-                            tracing::info!(
-                                "Upgrading to {:?} after judge rejection",
-                                current_decision.recommended_model
-                            );
-                            continue;
+                                if attempt + 1 < max_retries {
+                                    current_decision.recommended_model =
+                                        self.upgrade_model(&current_decision.recommended_model);
+                                    tracing::info!(
+                                        "Upgrading to {:?} after judge rejection",
+                                        current_decision.recommended_model
+                                    );
+                                    continue;
+                                }
+                                return Err(Error::ModelExecution(format!(
+                                    "Max retries exceeded. Judge rejected: {:?}",
+                                    judgment.issue_type
+                                )));
+                            }
                         }
-                        return Err(Error::ModelExecution(format!(
-                            "Max retries exceeded. Judge rejected: {:?}",
-                            judgment.issue_type
-                        )));
+                        Err(e) => {
+                            // Judge unavailable, skip LLM-based validation
+                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
+                        }
                     }
                 }
             }

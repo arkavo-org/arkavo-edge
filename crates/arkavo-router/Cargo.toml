@@ -19,6 +19,7 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 hf-hub = { workspace = true }
+glob = { workspace = true }
 
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }
