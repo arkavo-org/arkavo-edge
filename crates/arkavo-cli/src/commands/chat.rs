@@ -521,6 +521,25 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
+    // Debug: Show MCP tools being passed to LLM
+    if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() {
+        eprintln!("\n=== MCP TOOLS DEBUG ===");
+        if let Some(ref client) = mcp_client {
+            match client.list_tools() {
+                Ok(tools) => {
+                    eprintln!("Tools registered: {}", tools.len());
+                    for tool in &tools {
+                        eprintln!("  - {} : {}", tool.name, tool.description);
+                    }
+                }
+                Err(e) => eprintln!("Error listing tools: {e}"),
+            }
+        } else {
+            eprintln!("No MCP client initialized");
+        }
+        eprintln!("======================\n");
+    }
+
     // Initialize prompt override directory if needed
     let _ = crate::prompt_loader::init_prompt_override_dir();
 
@@ -541,6 +560,13 @@ Q: \"Recent commits?\" → A: @git_status
         // For 270M models or when MCP not available, use no system prompt
         String::new()
     };
+
+    // Debug: Show system prompt being sent
+    if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() && !base_system_prompt.is_empty() {
+        eprintln!("\n=== SYSTEM PROMPT ===");
+        eprintln!("{base_system_prompt}");
+        eprintln!("=====================\n");
+    }
 
     // Determine whether to inject repo context
     let should_inject_context = if let (true, Some(ref p)) = (print_mode, prompt.as_ref()) {
