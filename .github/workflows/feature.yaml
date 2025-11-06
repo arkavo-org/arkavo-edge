@@ -1030,6 +1030,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Setup vendor/llama.cpp
+        run: |
+          echo "Cloning llama.cpp for local inference support"
+          git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
+          cd vendor/llama.cpp
+          # Checkout the version we tested with (Oct 25, 2025)
+          git checkout 5d195f17bc
+          echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
           sudo apt-get update

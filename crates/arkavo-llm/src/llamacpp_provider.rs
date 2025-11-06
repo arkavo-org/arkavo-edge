@@ -1,16 +1,19 @@
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
-#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::multimodal::MtmdContext;
+#[cfg(feature = "llama-cpp")]
 use arkavo_llama_cpp::{
     LlamaModel, apply_chat_template, ffi, init_llama_logging, test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
+#[cfg(feature = "llama-cpp")]
 use std::ffi::CString;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
+#[cfg(feature = "llama-cpp")]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 use crate::mcp_converter::McpConverter;
 
@@ -37,14 +40,20 @@ impl Default for SamplingConfig {
     }
 }
 
+#[cfg(feature = "llama-cpp")]
 pub struct LlamaCppProvider {
     model: Arc<LlamaModel>,
     name: String,
     config: SamplingConfig,
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     mtmd_ctx: Option<Arc<MtmdContext>>,
 }
 
+#[cfg(not(feature = "llama-cpp"))]
+pub struct LlamaCppProvider {
+    name: String,
+}
+
+#[cfg(feature = "llama-cpp")]
 impl LlamaCppProvider {
     pub fn new(model_name: String, model_path: String) -> Result<Self> {
         Self::new_with_config(model_name, model_path, None, SamplingConfig::default())
@@ -82,7 +91,6 @@ impl LlamaCppProvider {
         let model = LlamaModel::from_file(&model_path)
             .map_err(|e| Error::Config(format!("Failed to load model: {e}")))?;
 
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         let mtmd_ctx = if let Some(mmproj) = mmproj_path {
             let ctx = MtmdContext::from_file(&mmproj, &model)
                 .map_err(|e| Error::Config(format!("Failed to load mmproj: {e}")))?;
@@ -100,21 +108,51 @@ impl LlamaCppProvider {
             model: Arc::new(model),
             name: model_name,
             config,
-            #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
             mtmd_ctx,
         })
     }
+}
 
+#[cfg(not(feature = "llama-cpp"))]
+impl LlamaCppProvider {
+    pub fn new(_model_name: String, _model_path: String) -> Result<Self> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    pub fn new_with_mmproj(
+        _model_name: String,
+        _model_path: String,
+        _mmproj_path: String,
+    ) -> Result<Self> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    pub fn new_with_config(
+        _model_name: String,
+        _model_path: String,
+        _mmproj_path: Option<String>,
+        _config: SamplingConfig,
+    ) -> Result<Self> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+}
+
+#[cfg(feature = "llama-cpp")]
+impl LlamaCppProvider {
     fn generate_streaming(
         &self,
         messages: Vec<Message>,
     ) -> Result<UnboundedReceiverStream<Result<StreamResponse>>> {
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         let has_images = messages
             .iter()
             .any(|m| m.images.is_some() && !m.images.as_ref().unwrap().is_empty());
 
-        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         if has_images && self.mtmd_ctx.is_some() {
             return self.generate_streaming_with_vision(messages);
         }
@@ -152,7 +190,6 @@ impl LlamaCppProvider {
         Ok(UnboundedReceiverStream::new(rx))
     }
 
-    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     fn generate_streaming_with_vision(
         &self,
         messages: Vec<Message>,
@@ -215,6 +252,7 @@ impl LlamaCppProvider {
     }
 }
 
+#[cfg(feature = "llama-cpp")]
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete_with_options(
@@ -230,7 +268,6 @@ impl Provider for LlamaCppProvider {
                 model: self.model.clone(),
                 name: self.name.clone(),
                 config,
-                #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
                 mtmd_ctx: self.mtmd_ctx.clone(),
             };
             &custom_provider
@@ -339,5 +376,47 @@ impl Provider for LlamaCppProvider {
             tool_calls,
             finish_reason: None,
         })
+    }
+}
+
+#[cfg(not(feature = "llama-cpp"))]
+#[async_trait]
+impl Provider for LlamaCppProvider {
+    async fn complete_with_options(
+        &self,
+        _messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    async fn stream(
+        &self,
+        _messages: Vec<Message>,
+    ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn supports_tools(&self) -> bool {
+        false
+    }
+
+    async fn complete_with_tools(
+        &self,
+        _messages: Vec<Message>,
+        _tools: Option<Value>,
+        _max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        Err(Error::Config(
+            "llama-cpp feature not enabled - rebuild with --features llama-cpp".to_string(),
+        ))
     }
 }

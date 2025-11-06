@@ -285,8 +285,8 @@ mod tests {
         assert!(data.is_none());
     }
 
-    #[test]
-    fn test_parse_timeout_analysis() {
+    #[tokio::test]
+    async fn test_parse_timeout_analysis() {
         let json_response = r#"{"should_timeout": true, "user_message": "Command stuck", "severity": "warning", "reasoning": "Over 30s"}"#;
         let analyzer = TimeoutAnalyzer {
             router: Arc::new(Router::new().await.unwrap()),
