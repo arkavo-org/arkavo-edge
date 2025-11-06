@@ -186,6 +186,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut messages_clone = messages;
 
     // Spawn LLM processing task
+    // Note: Terminal UI uses direct streaming for real-time UX
+    // Router quality gate integration deferred until async validation available
     let llm_handle = runtime.spawn(async move {
         if SHOW_DEBUG.load(Ordering::Relaxed) {
             eprintln!("[LLM Task] Started, waiting for messages...");

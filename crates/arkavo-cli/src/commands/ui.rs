@@ -229,9 +229,22 @@ async fn handle_prompt_async(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_llm::Message;
     use arkavo_router::Router;
+    use std::sync::Arc;
     use tokio_stream::StreamExt;
 
     let enhanced_prompt = prompt.to_string();
+
+    // Initialize MCP connection for tool calling
+    #[cfg(all(unix, feature = "mcp-tools"))]
+    let mcp_client = {
+        use crate::mcp_integration::McpConnection;
+        let mcp_result = McpConnection::new_in_process()
+            .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+        mcp_result
+            .ok()
+            .map(|mcp| Arc::new(mcp) as Arc<dyn arkavo_mcp_tools::McpClient>)
+    };
 
     // Check for API key availability to determine if we should use cloud models
     let gemini_available = std::env::var("GEMINI_API_KEY").is_ok();
@@ -274,8 +287,7 @@ async fn handle_prompt_async(
         #[cfg(all(unix, feature = "mcp-tools"))]
         {
             use crate::tool_integration::complete_with_tools;
-            // TODO: Initialize MCP connection for UI command
-            complete_with_tools(&enhanced_prompt, messages, None).await?
+            complete_with_tools(&enhanced_prompt, messages, mcp_client).await?
         }
         #[cfg(not(all(unix, feature = "mcp-tools")))]
         String::new()
