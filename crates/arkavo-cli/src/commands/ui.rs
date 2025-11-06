@@ -241,7 +241,8 @@ async fn handle_prompt_async(
         // Use async version for macOS (avoids nested runtime panic)
         // Use cross-platform version for other Unix systems
         #[cfg(target_os = "macos")]
-        let mcp_result = McpConnection::new_in_process_async().await
+        let mcp_result = McpConnection::new_in_process_async()
+            .await
             .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
         #[cfg(not(target_os = "macos"))]

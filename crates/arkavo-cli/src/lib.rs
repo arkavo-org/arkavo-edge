@@ -17,11 +17,10 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        use tracing_subscriber::{fmt, EnvFilter};
+        use tracing_subscriber::{EnvFilter, fmt};
         fmt()
             .with_env_filter(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new("warn")),
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
             )
             .with_target(false)
             .with_thread_ids(false)
