@@ -238,7 +238,14 @@ async fn handle_prompt_async(
     #[cfg(all(unix, feature = "mcp-tools"))]
     let mcp_client = {
         use crate::mcp_integration::McpConnection;
-        let mcp_result = McpConnection::new_in_process()
+        // Use async version for macOS (avoids nested runtime panic)
+        // Use cross-platform version for other Unix systems
+        #[cfg(target_os = "macos")]
+        let mcp_result = McpConnection::new_in_process_async().await
+            .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+        #[cfg(not(target_os = "macos"))]
+        let mcp_result = McpConnection::new_cross_platform()
             .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
         mcp_result
