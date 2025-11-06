@@ -12,6 +12,24 @@ pub mod tool_integration;
 
 #[allow(clippy::disallowed_methods)]
 pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber for Router quality gate logging
+    // Respects RUST_LOG environment variable (e.g., RUST_LOG=debug)
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        use tracing_subscriber::{fmt, EnvFilter};
+        fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn")),
+            )
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false)
+            .with_line_number(false)
+            .init();
+    });
+
     if args.is_empty() {
         // No command provided, default to agent run
         return commands::agent::execute(&["run".to_string()]);
