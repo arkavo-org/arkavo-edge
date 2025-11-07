@@ -191,7 +191,18 @@ impl Router {
         for attempt in 0..max_retries {
             let tools_json = tool_registry.map(|registry| {
                 let tool_infos = registry.list_tools();
-                arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
+                // Use the correct format based on the model provider
+                match current_decision.recommended_model {
+                    decision::ModelChoice::GeminiFlash | decision::ModelChoice::GeminiPro => {
+                        arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
+                    }
+                    decision::ModelChoice::LocalGemma270M
+                    | decision::ModelChoice::LocalGemma4B
+                    | decision::ModelChoice::LocalGemma12B => {
+                        // Local models use Anthropic format (or could use XML)
+                        arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
+                    }
+                }
             });
 
             let provider = self.instantiate_provider(&current_decision.recommended_model)?;
