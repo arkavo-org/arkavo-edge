@@ -63,6 +63,9 @@ arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 # LLM support for chat
 arkavo-llm = { path = "../arkavo-llm", default-features = false, features = ["kimi"] }
 
+# Router for intelligent model selection
+arkavo-router = { path = "../arkavo-router" }
+
 # Observability
 arkavo-observability = { path = "../arkavo-observability" }
 

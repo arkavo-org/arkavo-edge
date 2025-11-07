@@ -5,7 +5,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-#[cfg(all(target_os = "macos", feature = "test-harness"))]
+#[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 #[test]
 fn test_mcp_server_starts_without_panic() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_arkavo"))
@@ -57,7 +57,7 @@ fn test_mcp_server_starts_without_panic() {
     }
 }
 
-#[cfg(all(target_os = "macos", feature = "test-harness"))]
+#[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 #[test]
 fn test_mcp_server_responds_to_initialize() {
     use std::io::{BufRead, BufReader};

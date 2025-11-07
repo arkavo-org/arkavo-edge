@@ -7,7 +7,9 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=node/claude-code-bridge.js");
 
     // Always compile the capability, but it will be disabled at runtime if dependencies are missing
-    println!("cargo:warning=Claude Code capability compiled. Runtime dependencies will be checked when enabled.");
+    println!(
+        "cargo:warning=Claude Code capability compiled. Runtime dependencies will be checked when enabled."
+    );
 
     Ok(())
 }

@@ -57,6 +57,7 @@ fn main() {
     if cfg!(target_os = "macos") {
         config
             .define("GGML_METAL", "ON") // Enable Metal for GPU on macOS
+            .define("GGML_METAL_EMBED_LIBRARY", "ON") // Embed Metal shaders for GPU acceleration
             .define("GGML_ACCELERATE", "ON") // use Apple Accelerate
             .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection to ensure compatibility
             .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Use baseline ARM arch without i8mm

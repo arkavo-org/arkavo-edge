@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-bench"
-version = "0.33.1"
+version = "0.38.3"
 dependencies = [
  "arkavo-mcp",
  "arkavo-workspace",
@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.33.1"
+version = "0.38.3"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -269,11 +269,15 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
+ "arkavo-observability",
+ "async-trait",
  "bytes",
+ "chrono",
  "cmake",
  "nix 0.29.0",
+ "serde",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -282,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-claude-code"
-version = "0.1.0"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-authorization",
@@ -303,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -319,6 +323,7 @@ dependencies = [
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
  "arkavo-memory",
+ "arkavo-observability",
  "arkavo-protocol",
  "arkavo-repo",
  "arkavo-router",
@@ -327,7 +332,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
- "dirs 5.0.1",
+ "dirs",
  "futures",
  "hf-hub",
  "indicatif",
@@ -341,13 +346,14 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.20.1",
+ "tokio-tungstenite",
+ "tracing-subscriber",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-code-search"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -367,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.1.0"
+version = "0.38.3"
 dependencies = [
  "arkavo-llm",
  "serde",
@@ -377,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -408,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -425,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -444,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "bincode",
  "chrono",
@@ -457,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "bytes",
  "dashmap",
@@ -468,7 +474,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -477,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "git2",
  "tempfile",
@@ -486,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -524,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -532,6 +538,7 @@ dependencies = [
  "arkavo-gemini",
  "arkavo-kimi",
  "arkavo-llama-cpp",
+ "arkavo-mcp-tools",
  "arkavo-qwen",
  "arkavo-snpe",
  "async-trait",
@@ -543,7 +550,7 @@ dependencies = [
  "candle-transformers",
  "cfg-if",
  "chrono",
- "dirs 5.0.1",
+ "dirs",
  "futures",
  "hf-hub",
  "indicatif",
@@ -558,7 +565,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.17",
- "tokenizers",
+ "tokenizers 0.22.1",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -570,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -579,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -589,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -618,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -635,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -659,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -680,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -697,8 +704,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-orchestrator"
+version = "0.38.3"
+dependencies = [
+ "anyhow",
+ "arkavo-budget",
+ "arkavo-events",
+ "arkavo-llm",
+ "arkavo-memory",
+ "arkavo-observability",
+ "arkavo-protocol",
+ "arkavo-router",
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "hex",
+ "hmac",
+ "jsonwebtoken",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tower 0.5.2",
+ "tower-http",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "arkavo-protocol"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -706,6 +745,7 @@ dependencies = [
  "arkavo-mcp-core",
  "arkavo-mcp-tools",
  "arkavo-observability",
+ "arkavo-router",
  "async-trait",
  "chrono",
  "clap",
@@ -731,7 +771,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
  "urlencoding",
@@ -741,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -759,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -778,27 +818,31 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
  "arkavo-gemini",
  "arkavo-llm",
+ "arkavo-mcp-tools",
  "arkavo-observability",
  "async-trait",
  "chrono",
+ "futures",
+ "glob",
  "hf-hub",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "cc",
@@ -813,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -838,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-core"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -854,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.38.2"
+version = "0.38.3"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -867,7 +911,7 @@ dependencies = [
  "base64 0.22.1",
  "chromiumoxide",
  "chrono",
- "dirs 5.0.1",
+ "dirs",
  "futures",
  "hf-hub",
  "regex",
@@ -880,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-workspace"
-version = "0.32.0"
+version = "0.38.3"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -1030,7 +1074,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "hyper",
@@ -1049,7 +1093,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite 0.24.0",
+ "tokio-tungstenite",
  "tower 0.5.2",
  "tower-layer",
  "tower-service",
@@ -1065,7 +1109,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "mime",
@@ -2082,15 +2126,6 @@ dependencies = [
 
 [[package]]
 name = "dirs"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
-dependencies = [
- "dirs-sys 0.4.1",
-]
-
-[[package]]
-name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
@@ -2371,7 +2406,7 @@ dependencies = [
  "ort-sys",
  "rayon",
  "serde_json",
- "tokenizers",
+ "tokenizers 0.21.4",
 ]
 
 [[package]]
@@ -3050,7 +3085,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "gloo-utils",
- "http 1.3.1",
+ "http",
  "js-sys",
  "pin-project",
  "serde",
@@ -3117,7 +3152,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.3.1",
+ "http",
  "indexmap 2.12.0",
  "slab",
  "tokio",
@@ -3227,9 +3262,9 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
 dependencies = [
- "dirs 6.0.0",
+ "dirs",
  "futures",
- "http 1.3.1",
+ "http",
  "indicatif",
  "libc",
  "log",
@@ -3308,17 +3343,6 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
-dependencies = [
- "bytes",
- "fnv",
- "itoa",
-]
-
-[[package]]
-name = "http"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4a85d31aea989eead29a3aaf9e1115a180df8282431156e533de47660892565"
@@ -3335,7 +3359,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
 dependencies = [
  "bytes",
- "http 1.3.1",
+ "http",
 ]
 
 [[package]]
@@ -3346,7 +3370,7 @@ checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.3.1",
+ "http",
  "http-body",
  "pin-project-lite",
 ]
@@ -3374,7 +3398,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2",
- "http 1.3.1",
+ "http",
  "http-body",
  "httparse",
  "httpdate",
@@ -3392,7 +3416,7 @@ version = "0.27.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
 dependencies = [
- "http 1.3.1",
+ "http",
  "hyper",
  "hyper-util",
  "log",
@@ -3445,7 +3469,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "hyper",
  "ipnet",
@@ -3949,7 +3973,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-net",
- "http 1.3.1",
+ "http",
  "jsonrpsee-core",
  "pin-project",
  "rustls",
@@ -3974,7 +3998,7 @@ dependencies = [
  "bytes",
  "futures-timer",
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "jsonrpsee-types",
@@ -4036,7 +4060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21429bcdda37dcf2d43b68621b994adede0e28061f816b038b0f18c70c143d51"
 dependencies = [
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "hyper",
@@ -4062,7 +4086,7 @@ version = "0.24.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0f05e0028e55b15dbd2107163b3c744cd3bb4474f193f95d9708acbf5677e44"
 dependencies = [
- "http 1.3.1",
+ "http",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -4085,7 +4109,7 @@ version = "0.24.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78fc744f17e7926d57f478cf9ca6e1ee5d8332bf0514860b1a3cdf1742e614cc"
 dependencies = [
- "http 1.3.1",
+ "http",
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
  "jsonrpsee-types",
@@ -5983,7 +6007,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "hyper",
@@ -6650,7 +6674,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures",
- "http 1.3.1",
+ "http",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -7269,13 +7293,45 @@ dependencies = [
  "dary_heap",
  "derive_builder",
  "esaxx-rs",
- "fancy-regex 0.14.0",
  "getrandom 0.3.4",
  "itertools 0.14.0",
  "log",
  "macro_rules_attribute",
  "monostate",
  "onig",
+ "paste",
+ "rand 0.9.2",
+ "rayon",
+ "rayon-cond",
+ "regex",
+ "regex-syntax",
+ "serde",
+ "serde_json",
+ "spm_precompiled",
+ "thiserror 2.0.17",
+ "unicode-normalization-alignments",
+ "unicode-segmentation",
+ "unicode_categories",
+]
+
+[[package]]
+name = "tokenizers"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6475a27088c98ea96d00b39a9ddfb63780d1ad4cceb6f48374349a96ab2b7842"
+dependencies = [
+ "ahash",
+ "aho-corasick",
+ "compact_str 0.9.0",
+ "dary_heap",
+ "derive_builder",
+ "esaxx-rs",
+ "fancy-regex 0.14.0",
+ "getrandom 0.3.4",
+ "itertools 0.14.0",
+ "log",
+ "macro_rules_attribute",
+ "monostate",
  "paste",
  "rand 0.9.2",
  "rayon",
@@ -7349,18 +7405,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "212d5dcb2a1ce06d81107c3d0ffa3121fe974b73f068c8282cb1c32328113b6c"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.20.1",
 ]
 
 [[package]]
@@ -7476,7 +7520,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "h2",
- "http 1.3.1",
+ "http",
  "http-body",
  "http-body-util",
  "hyper",
@@ -7539,7 +7583,7 @@ dependencies = [
  "bitflags 2.10.0",
  "bytes",
  "futures-util",
- "http 1.3.1",
+ "http",
  "http-body",
  "iri-string",
  "pin-project-lite",
@@ -7699,25 +7743,6 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstenite"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e3dac10fd62eaf6617d3a904ae222845979aec67c615d1c842b4002c7666fb9"
-dependencies = [
- "byteorder",
- "bytes",
- "data-encoding",
- "http 0.2.12",
- "httparse",
- "log",
- "rand 0.8.5",
- "sha1",
- "thiserror 1.0.69",
- "url",
- "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e2ce1e47ed2994fd43b04c8f618008d4cabdd5ee34027cf14f9d918edd9c8"
@@ -7725,7 +7750,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http 1.3.1",
+ "http",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -7743,7 +7768,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http 1.3.1",
+ "http",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -8729,7 +8754,7 @@ dependencies = [
  "base64 0.22.1",
  "deadpool",
  "futures",
- "http 1.3.1",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",

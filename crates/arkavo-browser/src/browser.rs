@@ -6,7 +6,7 @@ use chromiumoxide::cdp::browser_protocol::network::EventRequestWillBeSent;
 use chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled;
 use chromiumoxide::page::ScreenshotParams;
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct BrowserTool {
     schema: ToolSchema,
@@ -78,13 +78,13 @@ impl BrowserTool {
             config = config.no_sandbox().disable_default_args();
         }
 
-        if let Some(viewport) = params.get("viewport") {
-            if let (Some(width), Some(height)) = (
+        if let Some(viewport) = params.get("viewport")
+            && let (Some(width), Some(height)) = (
                 viewport.get("width").and_then(|v| v.as_u64()),
                 viewport.get("height").and_then(|v| v.as_u64()),
-            ) {
-                config = config.window_size(width as u32, height as u32);
-            }
+            )
+        {
+            config = config.window_size(width as u32, height as u32);
         }
 
         let (browser, mut handler) = Browser::launch(
@@ -156,14 +156,10 @@ impl BrowserTool {
                 format!("Evaluation result: {result:?}")
             }
 
-            "content" => {
-                let content = page
-                    .content()
-                    .await
-                    .map_err(|e| BrowserError::Playwright(format!("Failed to get content: {e}")))?;
-
-                content
-            }
+            "content" => page
+                .content()
+                .await
+                .map_err(|e| BrowserError::Playwright(format!("Failed to get content: {e}")))?,
 
             "console" => {
                 let mut console_messages = Vec::new();
@@ -211,7 +207,7 @@ impl BrowserTool {
             _ => {
                 return Err(BrowserError::InvalidParams(format!(
                     "Unknown action: {action}"
-                )))
+                )));
             }
         };
 

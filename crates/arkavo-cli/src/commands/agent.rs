@@ -666,9 +666,9 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
     // Register built-in MCP tools first
     {
         use crate::builtin_mcp::BuiltinMcpConnection;
-        #[cfg(all(target_os = "macos", feature = "test-harness"))]
+        #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
         let builtin_connection = BuiltinMcpConnection::new_with_test_tools().await;
-        #[cfg(not(all(target_os = "macos", feature = "test-harness")))]
+        #[cfg(not(all(target_os = "macos", feature = "mcp-tools")))]
         let builtin_connection = BuiltinMcpConnection::new_with_test_tools();
         mcp_registry
             .register("arkavo".to_string(), Box::new(builtin_connection))

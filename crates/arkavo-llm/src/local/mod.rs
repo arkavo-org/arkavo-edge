@@ -26,6 +26,9 @@ pub mod streaming;
 #[cfg(feature = "llm-local")]
 pub mod sampling;
 
+#[cfg(feature = "llm-local")]
+pub mod generation;
+
 #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "snpe"))]
 pub mod snpe_model;
 

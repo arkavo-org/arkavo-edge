@@ -8,6 +8,8 @@ Instead of using CEF as "a browser running JS", arkavo-cef treats it as a **Blin
 
 ## Architecture
 
+### High-Level Overview
+
 ```text
 ┌───────────────────────────────┐
 │      Rust AI Agent            │
@@ -26,6 +28,57 @@ Instead of using CEF as "a browser running JS", arkavo-cef treats it as a **Blin
 │  - GPU compositor              │
 └───────────────────────────────┘
 ```
+
+### Async Communication Architecture
+
+The crate uses a fully async, non-blocking architecture to prevent deadlocks and enable high-performance concurrent operations:
+
+```text
+┌─────────────────┐         ┌──────────────────┐
+│   Event Loop    │◄────────│  Event Channel   │
+│  (Main Thread)  │         │   (unbounded)    │
+└────────┬────────┘         └────────▲─────────┘
+         │                           │
+         │ send_command()            │
+         ▼                           │
+┌─────────────────┐         ┌───────┴──────────┐
+│ AsyncTransport  │         │ Background Task  │
+│   (Write Half)  │         │  (Read Half)     │
+└────────┬────────┘         └───────▲──────────┘
+         │                           │
+         │                           │
+         └───────────┬───────────────┘
+                     │
+            ┌────────▼────────┐
+            │  Unix Socket    │
+            │   (to CEF C++)  │
+            └─────────────────┘
+```
+
+**Key Components:**
+
+1. **Background Reader Task**: Continuously reads from Unix socket in a dedicated tokio task
+2. **Message Router**: Routes incoming messages via channels:
+   - Feedback messages → oneshot channels (keyed by command ID)
+   - Event messages → unbounded channel to event loop
+3. **Non-blocking Commands**: DOM commands register for feedback, send command, return receiver
+4. **Event Loop**: Polls for events without blocking on socket I/O
+
+**Benefits:**
+
+- ✅ **No Deadlocks**: Event loop never blocks waiting for socket reads
+- ✅ **Concurrent Commands**: Multiple DOM commands can be in-flight simultaneously
+- ✅ **Backpressure**: Channel-based routing prevents buffer overflows
+- ✅ **Performance**: Sub-millisecond latency maintained under load
+
+### Implementation Details
+
+The crate provides both sync and async renderers:
+
+- **`CefRenderer`**: Original blocking implementation (legacy)
+- **`AsyncCefRenderer`**: New fully async implementation (recommended)
+
+Use `AsyncCefRenderer` for new code to benefit from the non-blocking architecture.
 
 ## Features
 
@@ -83,13 +136,16 @@ If you prefer to set up CEF manually:
 
 ## Usage
 
+### Async Renderer (Recommended)
+
 ```rust
-use arkavo_cef::{CefRenderer, Result};
+use arkavo_cef::{AsyncCefRenderer, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut renderer = CefRenderer::new("/path/to/arkavo-cef-renderer").await?;
+    let mut renderer = AsyncCefRenderer::new("/path/to/arkavo-cef-renderer").await?;
 
+    // Commands are fully async and non-blocking
     renderer.commands()
         .replace_inner_html("#content", "<div>Hello, World!</div>")
         .await?;
@@ -100,6 +156,29 @@ async fn main() -> Result<()> {
 
     renderer.commands()
         .add_event_listener("#button", "click")
+        .await?;
+
+    // Poll for events (non-blocking)
+    while let Some(event) = renderer.try_recv_event().await {
+        println!("Event: {:?}", event);
+    }
+
+    renderer.shutdown()?;
+    Ok(())
+}
+```
+
+### Sync Renderer (Legacy)
+
+```rust
+use arkavo_cef::{CefRenderer, Result};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let mut renderer = CefRenderer::new("/path/to/arkavo-cef-renderer").await?;
+
+    renderer.commands()
+        .replace_inner_html("#content", "<div>Hello, World!</div>")
         .await?;
 
     renderer.shutdown()?;

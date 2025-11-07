@@ -164,10 +164,10 @@ fn compress_repo_context(full_content: &str, max_tokens: usize) -> String {
     }
 }
 
-// Runtime MCP initialization - checks if test-harness feature is available
+// Runtime MCP initialization - checks if mcp-tools feature is available
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     // Try platform-specific MCP first
-    #[cfg(all(target_os = "macos", feature = "test-harness"))]
+    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
     {
         // Try in-process MCP first on macOS, which includes iOS simulator tools
         let result = McpConnection::new_in_process();
@@ -185,7 +185,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
     }
 
     // Try cross-platform tools on Unix systems
-    #[cfg(all(unix, feature = "test-harness"))]
+    #[cfg(all(unix, feature = "mcp-tools"))]
     {
         let result = McpConnection::new_cross_platform();
         match result {
@@ -214,7 +214,7 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
             if !print_mode {
                 eprintln!("ℹ MCP tools not available - using LLM-only mode");
                 eprintln!(
-                    "  To enable git/filesystem tools, rebuild with: cargo build --features test-harness"
+                    "  To enable git/filesystem tools, rebuild with: cargo build --features mcp-tools"
                 );
             }
             None
@@ -521,6 +521,25 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .to_string()
     };
 
+    // Debug: Show MCP tools being passed to LLM
+    if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() {
+        eprintln!("\n=== MCP TOOLS DEBUG ===");
+        if let Some(ref client) = mcp_client {
+            match client.list_tools() {
+                Ok(tools) => {
+                    eprintln!("Tools registered: {}", tools.len());
+                    for tool in &tools {
+                        eprintln!("  - {} : {}", tool.name, tool.description);
+                    }
+                }
+                Err(e) => eprintln!("Error listing tools: {e}"),
+            }
+        } else {
+            eprintln!("No MCP client initialized");
+        }
+        eprintln!("======================\n");
+    }
+
     // Initialize prompt override directory if needed
     let _ = crate::prompt_loader::init_prompt_override_dir();
 
@@ -541,6 +560,13 @@ Q: \"Recent commits?\" → A: @git_status
         // For 270M models or when MCP not available, use no system prompt
         String::new()
     };
+
+    // Debug: Show system prompt being sent
+    if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() && !base_system_prompt.is_empty() {
+        eprintln!("\n=== SYSTEM PROMPT ===");
+        eprintln!("{base_system_prompt}");
+        eprintln!("=====================\n");
+    }
 
     // Determine whether to inject repo context
     let should_inject_context = if let (true, Some(ref p)) = (print_mode, prompt.as_ref()) {
@@ -655,18 +681,37 @@ Q: \"Recent commits?\" → A: @git_status
         }
 
         if print_mode {
-            runtime.block_on(process_message_print(
-                &client,
-                &messages,
-                mcp_client.as_ref(),
-            ))?;
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            {
+                runtime.block_on(process_message_print_with_router(
+                    &messages,
+                    mcp_client.as_ref(),
+                ))?;
+            }
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            {
+                eprintln!("⚠️  WARNING: MCP tools not available on this platform");
+                runtime.block_on(process_message_print(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                ))?;
+            }
         } else {
-            runtime.block_on(process_message(
-                &client,
-                &messages,
-                mcp_client.as_ref(),
-                &conversation_manager,
-            ))?;
+            // Use router-based tool calling on supported platforms
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            {
+                runtime.block_on(process_message_with_tools(&messages, mcp_client.as_ref()))?;
+            }
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            {
+                runtime.block_on(process_message(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                    &conversation_manager,
+                ))?;
+            }
         }
         return Ok(());
     }
@@ -955,13 +1000,24 @@ Q: \"Recent commits?\" → A: @git_status
             messages.push(msg);
         }
 
-        // Process with LLM
-        match runtime.block_on(process_message(
-            &client,
-            &messages,
-            mcp_client.as_ref(),
-            &conversation_manager,
-        )) {
+        // Process with LLM using router-based tool calling
+        let result = {
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            {
+                runtime.block_on(process_message_with_tools(&messages, mcp_client.as_ref()))
+            }
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            {
+                runtime.block_on(process_message(
+                    &client,
+                    &messages,
+                    mcp_client.as_ref(),
+                    &conversation_manager,
+                ))
+            }
+        };
+
+        match result {
             Ok(response) => {
                 let assistant_msg = Message::assistant(&response);
                 runtime.block_on(conversation_manager.add_message(&assistant_msg))?;
@@ -983,6 +1039,48 @@ Q: \"Recent commits?\" → A: @git_status
     Ok(())
 }
 
+/// Process message with native tool calling via Router
+#[cfg(all(unix, feature = "mcp-tools"))]
+async fn process_message_with_tools(
+    messages: &[Message],
+    mcp_client: Option<&McpConnection>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use crate::tool_integration::process_with_tools_interactive;
+    use std::sync::Arc;
+
+    // Derive task description from the last user message
+    let task_description = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, arkavo_llm::Role::User))
+        .map(|m| m.content.as_str())
+        .unwrap_or("Process user request");
+
+    print!("Assistant: ");
+    io::stdout().flush()?;
+
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    progress.set_message("Routing to LLM...");
+
+    // Convert McpConnection to Arc<dyn McpClient> if present
+    let mcp_arc = mcp_client.map(|c| Arc::new(c.clone()) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+    let response =
+        process_with_tools_interactive(task_description, messages.to_vec(), mcp_arc).await?;
+
+    progress.finish_and_clear();
+    println!("{response}");
+    println!();
+
+    Ok(response)
+}
+
+#[allow(dead_code)]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
@@ -1109,6 +1207,43 @@ async fn process_message(
     Ok(full_response)
 }
 
+#[cfg(all(unix, feature = "mcp-tools"))]
+async fn process_message_print_with_router(
+    messages: &[Message],
+    mcp_client: Option<&McpConnection>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use crate::tool_integration::{ToolIntegrationConfig, process_with_tools};
+    use std::sync::Arc;
+
+    let task_description = messages
+        .last()
+        .map(|m| m.content.as_str())
+        .unwrap_or("User query");
+
+    let mcp_arc = mcp_client.map(|c| Arc::new(c.clone()) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+    let config = ToolIntegrationConfig {
+        max_tool_iterations: 3,
+        show_tool_execution: true,
+    };
+
+    let result =
+        process_with_tools(task_description, messages.to_vec(), Some(config), mcp_arc).await?;
+
+    println!("{}", result.final_response);
+
+    if !result.tool_executions.is_empty() {
+        eprintln!(
+            "\n✓ Executed {} tool(s) across {} iteration(s)",
+            result.tool_executions.len(),
+            result.total_iterations
+        );
+    }
+
+    Ok(result.final_response)
+}
+
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 async fn process_message_print(
     client: &LlmClient,
     messages: &[Message],
@@ -1314,7 +1449,7 @@ fn get_current_directory() -> String {
     }
 }
 
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 #[allow(dead_code)]
 fn handle_command(
     input: &str,
@@ -1460,8 +1595,8 @@ fn handle_command(
 #[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
-// Stub implementations when test-harness is not available
-#[cfg(not(all(unix, feature = "test-harness")))]
+// Stub implementations when mcp-tools is not available
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 #[allow(dead_code)]
 fn handle_command(
     _input: &str,
@@ -1471,7 +1606,7 @@ fn handle_command(
     None
 }
 
-#[cfg(not(all(unix, feature = "test-harness")))]
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 #[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,
@@ -1502,7 +1637,7 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
-#[cfg(all(unix, feature = "test-harness"))]
+#[cfg(all(unix, feature = "mcp-tools"))]
 #[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,

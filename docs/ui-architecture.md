@@ -634,7 +634,7 @@ crates/arkavo-ui-core/
 **arkavo-cli/Cargo.toml**:
 ```toml
 [features]
-default = ["memory", "mdns", "test-harness", "llm-remote", "llama-cpp", "web-ui"]
+default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "web-ui"]
 cef-ui = ["arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
 llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp"]

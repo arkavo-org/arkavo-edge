@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 use crate::event_mapper::EventMapper;
@@ -105,14 +105,14 @@ impl NodeBridge {
         ];
 
         // Check Homebrew prefix dynamically
-        if let Ok(output) = std::process::Command::new("brew").arg("--prefix").output() {
-            if output.status.success() {
-                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                possible_paths.push(PathBuf::from(format!(
-                    "{}/share/arkavo/claude-code-bridge.js",
-                    prefix
-                )));
-            }
+        if let Ok(output) = std::process::Command::new("brew").arg("--prefix").output()
+            && output.status.success()
+        {
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            possible_paths.push(PathBuf::from(format!(
+                "{}/share/arkavo/claude-code-bridge.js",
+                prefix
+            )));
         }
 
         // Check standard system locations via PATH

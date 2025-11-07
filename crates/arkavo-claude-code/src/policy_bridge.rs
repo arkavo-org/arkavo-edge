@@ -65,11 +65,11 @@ impl PolicyBridge {
         }
 
         // Check file path permissions if applicable
-        if let Some(path) = tool_request["path"].as_str() {
-            if !self.check_path_permission(path)? {
-                warn!("Path access denied by policy: {}", path);
-                return Ok(false);
-            }
+        if let Some(path) = tool_request["path"].as_str()
+            && !self.check_path_permission(path)?
+        {
+            warn!("Path access denied by policy: {}", path);
+            return Ok(false);
         }
 
         // Check with authorization service if available
@@ -222,17 +222,17 @@ impl PolicyBridge {
         let mut redacted = params.clone();
 
         // Redact file contents
-        if let Some(content) = redacted.get_mut("content") {
-            if content.is_string() {
-                *content = Value::String("[REDACTED]".to_string());
-            }
+        if let Some(content) = redacted.get_mut("content")
+            && content.is_string()
+        {
+            *content = Value::String("[REDACTED]".to_string());
         }
 
         // Redact command outputs
-        if let Some(output) = redacted.get_mut("output") {
-            if output.is_string() {
-                *output = Value::String("[REDACTED]".to_string());
-            }
+        if let Some(output) = redacted.get_mut("output")
+            && output.is_string()
+        {
+            *output = Value::String("[REDACTED]".to_string());
         }
 
         redacted

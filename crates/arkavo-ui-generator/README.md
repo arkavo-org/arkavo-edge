@@ -334,9 +334,148 @@ When adding vision features:
 - Document model compatibility and performance
 - Use platform-specific compilation flags where needed
 
+## MCP Tool Integration (TODO)
+
+### Current Status: Not Integrated
+
+The UI generator's `UiPlanner` and `StreamingGenerator` currently **do not use Router's MCP tool integration**.
+
+**Current Flow** (`planner.rs` lines 41-62):
+```rust
+// Current: Direct provider call without tools
+async fn try_llm_plan(&self, prompt: &str) -> Result<String> {
+    let provider = self.router.get_planning_provider()
+        .ok_or_else(|| Error::Config("Gemini not available".to_string()))?;
+
+    let response = provider.complete(messages).await?;  // ❌ No tools!
+    Ok(response)
+}
+```
+
+**Issues:**
+- Cannot access MCP tools (filesystem, GitHub, browser, etc.)
+- No quality validation (hallucinated tools, refusals)
+- No automatic model escalation on poor responses
+
+### How to Add Tool Support
+
+**Step 1: Add `plan_with_tools()` Method** (`planner.rs`):
+```rust
+use arkavo_mcp_tools::ToolRegistry;
+use arkavo_llm::{Message, Role, ProviderResponse};
+
+pub async fn plan_with_tools(
+    &self,
+    prompt: &str,
+    tool_registry: Option<&ToolRegistry>,
+) -> Result<String> {
+    let messages = vec![Message {
+        role: Role::User,
+        content: self.build_planning_prompt(prompt),
+        images: None,
+    }];
+
+    // Use Router's quality gate for validation + escalation
+    let response: ProviderResponse = self.router.route_with_quality_gate(
+        prompt,
+        messages,
+        tool_registry,
+        3,  // Max retries with model escalation
+    ).await.map_err(|e| Error::Router(e))?;
+
+    // Handle tool calls if LLM requested them
+    if !response.tool_calls.is_empty() && tool_registry.is_some() {
+        let registry = tool_registry.unwrap();
+        for tool_call in &response.tool_calls {
+            if let Some(tool) = registry.get(&tool_call.tool_name) {
+                let result = tool.execute(tool_call.arguments.clone()).await
+                    .map_err(|e| Error::ToolExecution(e.to_string()))?;
+                // Feed result back to LLM for plan refinement
+            }
+        }
+    }
+
+    Ok(response.content)
+}
+```
+
+**Step 2: Add `generate_part_with_tools()` Method** (`streaming.rs`):
+```rust
+pub async fn generate_part_with_tools(
+    &self,
+    part_spec: &str,
+    tool_registry: Option<&ToolRegistry>,
+) -> Result<BoxStream<'static, Result<String>>> {
+    let messages = vec![Message {
+        role: Role::User,
+        content: format!("{}\n\nGenerate: {}", SYSTEM_PROMPT, part_spec),
+        images: None,
+    }];
+
+    // Use route_with_quality_gate for validation
+    let response = self.router.route_with_quality_gate(
+        part_spec,
+        messages,
+        tool_registry,
+        2,  // Fewer retries for streaming (faster)
+    ).await.map_err(|e| Error::Router(e))?;
+
+    // Stream the response content
+    Ok(Box::pin(futures::stream::once(async move {
+        Ok(response.content)
+    })))
+}
+```
+
+**Step 3: Update Gateway Integration** (caller code):
+```rust
+// In arkavo-agui/src/gateway.rs
+let tool_registry = ToolRegistry::new();
+
+// Use new methods
+let plan = planner.plan_with_tools(&prompt, Some(&tool_registry)).await?;
+let stream = generator.generate_part_with_tools(&part, Some(&tool_registry)).await?;
+```
+
+### Benefits After Integration
+
+✅ **Access to MCP tools** - Can call filesystem, GitHub, browser tools during planning/generation
+✅ **Quality validation** - Fast validation (<1ms) catches hallucinated tools instantly
+✅ **LLM judge** - Gemma 4B evaluates responses for refusals, off-topic content (~500ms)
+✅ **Auto-escalation** - Automatically retries with better models (270M→4B→12B→Flash→Pro)
+✅ **Better UX** - Tool execution feedback improves plan quality
+✅ **Cost optimization** - Tries local models first, escalates only when needed
+
+### Example: UI Generation with Tools
+
+```bash
+# After integration, this will work:
+arkavo ui --prompt "Show me the repository structure and generate a file browser UI"
+
+# The planner will:
+# 1. Call filesystem__list_directory tool to get actual file list
+# 2. Generate plan based on real data (not hallucinated files)
+# 3. If response quality is poor, automatically retry with better model
+# 4. Stream validated HTML/CSS/JS to browser
+```
+
+### Integration Points
+
+| Component | File | Lines | Change Required |
+|-----------|------|-------|-----------------|
+| **Planner** | `planner.rs` | 41-62 | Add `plan_with_tools()` method |
+| **Streaming** | `streaming.rs` | 68-180 | Add `generate_part_with_tools()` method |
+| **Gateway** | `../arkavo-agui/src/gateway.rs` | 962-967 | Call new methods with ToolRegistry |
+
+### See Also
+
+- `crates/arkavo-router/README.md` - Router quality gate documentation and integration guide
+- `crates/arkavo-agui/README.md` - Gateway integration instructions
+
 ## Resources
 
 - [Qwen3-VL Model Card](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct)
 - [llama.cpp Multimodal API](https://github.com/ggerganov/llama.cpp/tree/master/tools/mtmd)
 - [CLIP Vision Encoder](https://github.com/openai/CLIP)
 - [Integration Tests](tests/README.md)
+- [arkavo-router Quality Gate](../arkavo-router/README.md#quality-gate-for-mcp-tool-calling)

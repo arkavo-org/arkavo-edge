@@ -36,13 +36,55 @@ members = [
     "crates/arkavo-ui-generator",
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
+    "crates/arkavo-orchestrator",
+    "crates/arkavo-cef",
+    ".cargo/xtask",
+]
+default-members = [
+    "crates/arkavo",
+    "crates/arkavo-cli",
+    "crates/arkavo-terminal",
+    "crates/arkavo-repo",
+    "crates/arkavo-git",
+    "crates/arkavo-protocol",
+    "crates/arkavo-authorization",
+    "crates/arkavo-mcp-macos",
+    "crates/arkavo-llm",
+    "crates/arkavo-kimi",
+    "crates/arkavo-deepseek",
+    "crates/arkavo-qwen",
+    "crates/arkavo-gemini",
+    "crates/arkavo-memory",
+    "crates/arkavo-mcp",
+    "crates/arkavo-mcp-core",
+    "crates/arkavo-mcp-runtime",
+    "crates/arkavo-mcp-tools",
+    "crates/arkavo-dataflow",
+    "crates/arkavo-claude-code",
+    "crates/arkavo-agui",
+    "crates/arkavo-observability",
+    "crates/arkavo-budget",
+    "crates/arkavo-router",
+    "crates/arkavo-context",
+    "crates/arkavo-events",
+    "crates/arkavo-debugger",
+    "crates/arkavo-llama-cpp-sys",
+    "crates/arkavo-llama-cpp",
+    "crates/arkavo-code-search",
+    "crates/arkavo-browser",
+    "crates/arkavo-workspace",
+    "crates/arkavo-bench",
+    "crates/arkavo-ui-generator",
+    "crates/arkavo-ui-core",
+    "crates/arkavo-snpe",
+    "crates/arkavo-orchestrator",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.38.2"
+version = "0.38.3"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Arkavo Edge Contributors"]
@@ -73,6 +115,10 @@ reqwest = { version = "0.12.20", default-features = false, features = ["rustls-t
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
+itertools = "0.14.0"
+rustix = "1.1.2"
+fancy-regex = "0.16.2"
+compact_str = "0.9.0"
 
 # Common utilities
 log = "0.4"
@@ -85,7 +131,7 @@ bytemuck = "1.20"
 cfg-if = "1.0"
 notify = "7.0"
 sha2 = "0.10"
-dirs = "5.0"
+dirs = "6.0"
 toml = "0.8"
 rand = "0.8"
 bincode = "1.3"
@@ -131,7 +177,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 mdns-sd = "0.14"
 
 # LLM and ML
-tokenizers = { version = "0.21.2", default-features = false, features = ["fancy-regex"] }
+tokenizers = { version = "0.22.1", default-features = false, features = ["fancy-regex"] }
 hf-hub = { version = "0.4.3", default-features = false, features = ["tokio", "rustls-tls"] }
 candle-core = { version = "0.9.1", default-features = false }
 candle-nn = { version = "0.9.1", default-features = false }

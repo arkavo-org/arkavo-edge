@@ -217,7 +217,8 @@ pub unsafe fn encode_chunk(
     ctx: &MtmdContext,
     chunk: *const ffi::mtmd_input_chunk,
 ) -> Result<(), String> {
-    let result = ffi::mtmd_encode_chunk(ctx.ptr, chunk);
+    // SAFETY: Caller must ensure chunk was created by tokenize_with_images and remains valid
+    let result = unsafe { ffi::mtmd_encode_chunk(ctx.ptr, chunk) };
     if result == 0 {
         Ok(())
     } else {

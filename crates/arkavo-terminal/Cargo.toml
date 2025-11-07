@@ -45,8 +45,5 @@ tempfile = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 arkavo-mcp-macos = { path = "../arkavo-mcp-macos" }
 
-[[bin]]
-name = "tui-benchmark"
-path = "src/bin/benchmark.rs"
 [lints]
 workspace = true
