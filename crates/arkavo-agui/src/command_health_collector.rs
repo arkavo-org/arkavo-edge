@@ -166,6 +166,13 @@ impl TimeoutAnalyzer {
         })
     }
 
+    #[cfg(test)]
+    pub async fn new_offline() -> Result<Self> {
+        Ok(Self {
+            router: Arc::new(Router::new_offline().await?),
+        })
+    }
+
     pub async fn analyze_batch(&self, batch: HealthBatch) -> Result<Vec<TimeoutAnalysis>> {
         let mut analyses = Vec::new();
 

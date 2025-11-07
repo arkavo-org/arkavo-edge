@@ -196,12 +196,7 @@ impl Router {
                     decision::ModelChoice::GeminiFlash | decision::ModelChoice::GeminiPro => {
                         arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
                     }
-                    decision::ModelChoice::LocalGemma270M
-                    | decision::ModelChoice::LocalGemma4B
-                    | decision::ModelChoice::LocalGemma12B => {
-                        // Local models use Anthropic format (or could use XML)
-                        arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
-                    }
+                    _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
                 }
             });
 

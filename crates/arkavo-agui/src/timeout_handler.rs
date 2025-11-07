@@ -15,6 +15,13 @@ impl TimeoutHandler {
         })
     }
 
+    #[cfg(test)]
+    pub async fn new_offline() -> Result<Self> {
+        Ok(Self {
+            analyzer: Arc::new(TimeoutAnalyzer::new_offline().await?),
+        })
+    }
+
     pub async fn start(
         self,
         mut batch_rx: mpsc::Receiver<HealthBatch>,
@@ -80,7 +87,7 @@ mod tests {
         let (event_tx, mut event_rx) = mpsc::channel(10);
         let (batch_tx, batch_rx) = mpsc::channel(10);
 
-        let handler = TimeoutHandler::new().await.unwrap();
+        let handler = TimeoutHandler::new_offline().await.unwrap();
         let _handle = handler.start(batch_rx, event_tx).await;
 
         let batch = HealthBatch {

@@ -91,12 +91,25 @@ impl ToolRegistry {
         let mcp_tools = mcp_client.list_tools()?;
 
         for mcp_tool in mcp_tools {
+            // Extract parameters from input_schema
+            // MCP protocol may return the full schema with name/description/parameters
+            // or just the parameters schema directly
+            let parameters = if let Some(input_schema) = mcp_tool.input_schema {
+                // Check if it has a "parameters" field (full tool definition)
+                if let Some(params) = input_schema.get("parameters") {
+                    params.clone()
+                } else {
+                    // Already just the parameters schema
+                    input_schema
+                }
+            } else {
+                serde_json::json!({})
+            };
+
             let tool_schema = ToolSchema {
                 name: mcp_tool.name.clone(),
                 description: mcp_tool.description.clone(),
-                parameters: mcp_tool
-                    .input_schema
-                    .unwrap_or_else(|| serde_json::json!({})),
+                parameters,
             };
 
             let wrapper = McpToolWrapper {

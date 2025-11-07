@@ -36,10 +36,13 @@ impl McpConverter {
         let function_declarations: Vec<Value> = tools
             .iter()
             .map(|tool| {
+                // Convert schema to Gemini-compatible format (replace const with enum)
+                let gemini_schema = Self::make_gemini_compatible(&tool.schema);
+
                 json!({
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": tool.schema,
+                    "parameters": gemini_schema,
                 })
             })
             .collect();
@@ -47,6 +50,30 @@ impl McpConverter {
         json!([{
             "functionDeclarations": function_declarations
         }])
+    }
+
+    /// Make JSON Schema compatible with Gemini API
+    /// Gemini doesn't support "const", so convert to "enum" with single value
+    fn make_gemini_compatible(schema: &Value) -> Value {
+        match schema {
+            Value::Object(map) => {
+                let mut new_map = serde_json::Map::new();
+                for (key, value) in map {
+                    if key == "const" {
+                        // Replace const with enum containing single value
+                        new_map.insert("enum".to_string(), json!([value]));
+                    } else {
+                        // Recursively process nested values
+                        new_map.insert(key.clone(), Self::make_gemini_compatible(value));
+                    }
+                }
+                Value::Object(new_map)
+            }
+            Value::Array(arr) => {
+                Value::Array(arr.iter().map(Self::make_gemini_compatible).collect())
+            }
+            _ => schema.clone(),
+        }
     }
 
     /// Convert to DeepSeek/Anthropic JSON format (runtime, no feature gate)
