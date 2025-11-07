@@ -13,9 +13,10 @@ const TOKEN_EXPIRY_BUFFER: i64 = 300; // 5 minutes
 #[derive(Clone)]
 pub struct GitHubApp {
     app_id: u64,
-    private_key: EncodingKey,
+    private_key: Option<EncodingKey>,
     client: Client,
     installation_token: Arc<RwLock<Option<InstallationToken>>>,
+    personal_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,13 +60,32 @@ impl GitHubApp {
 
         Ok(Self {
             app_id,
-            private_key,
+            private_key: Some(private_key),
             client,
             installation_token: Arc::new(RwLock::new(None)),
+            personal_token: None,
+        })
+    }
+
+    pub fn new_from_token(token: String) -> Result<Self> {
+        let client = Client::builder()
+            .user_agent("arkavo-edge")
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
+
+        Ok(Self {
+            app_id: 0,
+            private_key: None,
+            client,
+            installation_token: Arc::new(RwLock::new(None)),
+            personal_token: Some(token),
         })
     }
 
     fn generate_jwt(&self) -> Result<String> {
+        let private_key = self.private_key.as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("GitHub App private key not available")))?;
+
         let now = Utc::now().timestamp();
         let claims = Claims {
             iat: now,
@@ -75,7 +95,7 @@ impl GitHubApp {
 
         let header = Header::new(Algorithm::RS256);
 
-        encode(&header, &claims, &self.private_key)
+        encode(&header, &claims, private_key)
             .map_err(|e| Error::Other(anyhow::anyhow!("Failed to generate JWT: {e}")))
     }
 
@@ -172,6 +192,23 @@ impl GitHubApp {
             .iter()
             .find(|inst| inst.account.login.eq_ignore_ascii_case(owner))
             .map(|inst| inst.id))
+    }
+
+    pub async fn get_token(&self, owner: &str, repo: &str) -> Result<String> {
+        if let Some(token) = &self.personal_token {
+            return Ok(token.clone());
+        }
+
+        let installation_id = self
+            .find_installation_by_owner(owner)
+            .await?
+            .ok_or_else(|| {
+                Error::Other(anyhow::anyhow!(
+                    "No GitHub App installation found for owner: {owner}/{repo}"
+                ))
+            })?;
+
+        self.get_installation_token(installation_id).await
     }
 }
 

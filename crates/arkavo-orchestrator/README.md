@@ -31,7 +31,9 @@ This crate provides the foundation for automated GitHub issue management through
 
 ### CLI Command
 
-Start the orchestrator server from the command line:
+#### Webhook Server (requires public IP/domain)
+
+Start the orchestrator webhook server:
 
 ```bash
 # Using environment variables
@@ -46,7 +48,39 @@ arkavo orchestrator start --port 3000 \
   --webhook-secret "your-secret" \
   --app-id "123456" \
   --private-key "$(cat private-key.pem)"
+```
 
+#### Polling Mode (no infrastructure required)
+
+Poll GitHub for new issues using your personal access token:
+
+```bash
+# Poll repository every 5 minutes (default: 300 seconds)
+export GITHUB_TOKEN="ghp_your_personal_access_token"
+arkavo orchestrator poll --repo owner/repo
+
+# Custom polling interval (in seconds)
+arkavo orchestrator poll --repo owner/repo --interval 60
+
+# Run once and exit
+arkavo orchestrator poll --repo owner/repo --once
+
+# Filter by labels
+arkavo orchestrator poll --repo owner/repo --labels "bug,help-wanted"
+```
+
+#### Manual Processing
+
+Process a specific issue:
+
+```bash
+export GITHUB_TOKEN="ghp_your_personal_access_token"
+arkavo orchestrator process --repo owner/repo --issue 123
+```
+
+#### Configuration & Status
+
+```bash
 # Check configuration
 arkavo orchestrator config
 

@@ -31,11 +31,10 @@ pub struct IssueUpdate {
 pub struct GitHubOperations {
     github_app: Arc<GitHubApp>,
     client: Client,
-    installation_id: u64,
 }
 
 impl GitHubOperations {
-    pub fn new(github_app: Arc<GitHubApp>, installation_id: u64) -> Self {
+    pub fn new(github_app: Arc<GitHubApp>) -> Self {
         let client = Client::builder()
             .user_agent("arkavo-edge")
             .timeout(std::time::Duration::from_secs(30))
@@ -45,14 +44,11 @@ impl GitHubOperations {
         Self {
             github_app,
             client,
-            installation_id,
         }
     }
 
-    async fn get_token(&self) -> Result<String> {
-        self.github_app
-            .get_installation_token(self.installation_id)
-            .await
+    async fn get_token(&self, owner: &str, repo: &str) -> Result<String> {
+        self.github_app.get_token(owner, repo).await
     }
 
     pub async fn post_comment(
@@ -62,7 +58,7 @@ impl GitHubOperations {
         issue_number: u64,
         body: &str,
     ) -> Result<()> {
-        let token = self.get_token().await?;
+        let token = self.get_token(owner, repo).await?;
 
         info!(owner, repo, issue_number, "Posting comment to GitHub issue");
 
@@ -101,7 +97,7 @@ impl GitHubOperations {
         issue_number: u64,
         labels: Vec<String>,
     ) -> Result<()> {
-        let token = self.get_token().await?;
+        let token = self.get_token(owner, repo).await?;
 
         info!(
             owner,
@@ -142,7 +138,7 @@ impl GitHubOperations {
         issue_number: u64,
         label: &str,
     ) -> Result<()> {
-        let token = self.get_token().await?;
+        let token = self.get_token(owner, repo).await?;
 
         info!(
             owner,
@@ -180,7 +176,7 @@ impl GitHubOperations {
         issue_number: u64,
         update: IssueUpdate,
     ) -> Result<()> {
-        let token = self.get_token().await?;
+        let token = self.get_token(owner, repo).await?;
 
         info!(owner, repo, issue_number, "Updating GitHub issue");
 

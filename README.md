@@ -127,10 +127,18 @@ Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
 
 ### GitHub Issue Orchestration
 
-Arkavo Edge can automatically handle GitHub issues through AI agents:
+Arkavo Edge can automatically handle GitHub issues through AI agents.
 
+**Polling Mode** (recommended - no infrastructure required):
 ```bash
-# Start the orchestrator server
+# Poll for new issues using GitHub personal access token
+export GITHUB_TOKEN="ghp_your_token"
+arkavo orchestrator poll --repo owner/repo --interval 300
+```
+
+**Webhook Server** (for teams with public infrastructure):
+```bash
+# Start webhook server
 export ARKAVO_GITHUB_WEBHOOK_SECRET="your-webhook-secret"
 export ARKAVO_GITHUB_APP_ID="123456"
 export ARKAVO_GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)"
@@ -138,8 +146,14 @@ export ARKAVO_GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)"
 arkavo orchestrator start --port 3000
 ```
 
+**Manual Processing** (for testing):
+```bash
+export GITHUB_TOKEN="ghp_your_token"
+arkavo orchestrator process --repo owner/repo --issue 123
+```
+
 Features:
-- **Webhook Server**: Secure HMAC-SHA256 verification for GitHub events
+- **Multiple Modes**: Polling (95% of users), webhook server, or manual trigger
 - **Intelligent Routing**: 4 execution strategies (AutoExecute, PlanFirst, OrchestratorConsultation, HumanApprovalRequired)
 - **Issue Analysis**: Automatic classification (Bug, Feature, Docs) with complexity assessment
 - **Agent Assignment**: Capability-based agent selection with load balancing
