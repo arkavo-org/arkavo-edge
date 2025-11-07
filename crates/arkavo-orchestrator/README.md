@@ -29,7 +29,32 @@ This crate provides the foundation for automated GitHub issue management through
 
 ## Usage
 
-### Creating a Webhook Server
+### CLI Command
+
+Start the orchestrator server from the command line:
+
+```bash
+# Using environment variables
+export ARKAVO_GITHUB_WEBHOOK_SECRET="your-webhook-secret"
+export ARKAVO_GITHUB_APP_ID="123456"
+export ARKAVO_GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)"
+
+arkavo orchestrator start
+
+# Or pass arguments directly
+arkavo orchestrator start --port 3000 \
+  --webhook-secret "your-secret" \
+  --app-id "123456" \
+  --private-key "$(cat private-key.pem)"
+
+# Check configuration
+arkavo orchestrator config
+
+# View status
+arkavo orchestrator status
+```
+
+### Creating a Webhook Server (Programmatically)
 
 ```rust
 use arkavo_github_orchestrator::WebhookServer;
@@ -115,10 +140,21 @@ This crate integrates with:
 - **arkavo-budget**: Token budget tracking
 - **arkavo-events**: Event correlation and tracking
 
-## Next Steps
+## Status
 
-Phase 2 will add:
-- Issue decision router (adaptive execution strategy)
-- Agent assignment workflow
-- GitHub assignment MCP tools
-- Progress reporting system
+**Phase 1-2: Complete** ✅
+- ✅ Webhook server with HMAC-SHA256 verification
+- ✅ GitHub App authentication with JWT
+- ✅ Issue analysis and classification
+- ✅ Intelligent routing (4 execution strategies)
+- ✅ Agent assignment and registry
+- ✅ Cognitive engine with task execution
+- ✅ Progress tracking and status updates
+- ✅ Event tracking and metrics
+- ✅ CLI command interface
+
+**Phase 3-4: In Progress** 🚧
+- Multi-agent task coordination
+- Result aggregation across agents
+- End-to-end integration testing
+- Production deployment guides

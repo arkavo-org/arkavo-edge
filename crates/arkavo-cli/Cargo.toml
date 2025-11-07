@@ -46,6 +46,9 @@ arkavo-router = { path = "../arkavo-router" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
+arkavo-orchestrator = { path = "../arkavo-orchestrator" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-events = { path = "../arkavo-events" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
