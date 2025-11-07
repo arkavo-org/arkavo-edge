@@ -1,18 +1,18 @@
-use crate::{ffi, LlamaModel};
+use crate::{LlamaModel, ffi};
 use std::ffi::CString;
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct MtmdContext {
     pub(crate) ptr: *mut ffi::mtmd_context,
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for MtmdContext {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Sync for MtmdContext {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl MtmdContext {
     pub fn from_file(mmproj_path: &str, text_model: &LlamaModel) -> Result<Self, String> {
         let c_path =
@@ -52,7 +52,7 @@ impl MtmdContext {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for MtmdContext {
     fn drop(&mut self) {
         unsafe {
@@ -61,15 +61,15 @@ impl Drop for MtmdContext {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct MtmdBitmap {
     pub(crate) ptr: *mut ffi::mtmd_bitmap,
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for MtmdBitmap {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl MtmdBitmap {
     pub fn from_rgb(width: u32, height: u32, rgb_data: &[u8]) -> Result<Self, String> {
         if rgb_data.len() != (width * height * 3) as usize {
@@ -119,7 +119,7 @@ impl MtmdBitmap {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for MtmdBitmap {
     fn drop(&mut self) {
         unsafe {
@@ -128,15 +128,15 @@ impl Drop for MtmdBitmap {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct MtmdInputChunks {
     pub(crate) ptr: *mut ffi::mtmd_input_chunks,
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for MtmdInputChunks {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl MtmdInputChunks {
     pub fn new() -> Self {
         let ptr = unsafe { ffi::mtmd_input_chunks_init() };
@@ -156,14 +156,14 @@ impl MtmdInputChunks {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Default for MtmdInputChunks {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for MtmdInputChunks {
     fn drop(&mut self) {
         unsafe {

@@ -1,44 +1,44 @@
-// For musl targets, provide stub implementations since llama.cpp doesn't work well with musl
-#[cfg(target_env = "musl")]
+// Stub implementations when llama-cpp feature is disabled
+#[cfg(not(feature = "llama-cpp"))]
 mod stubs {
     pub fn init_llama_logging() {}
     pub fn set_debug_logging(_enabled: bool) {}
     pub fn test_minimal_init() -> Result<(), String> {
-        Err("llama.cpp is not supported on musl targets".to_string())
+        Err("llama-cpp feature is not enabled".to_string())
     }
 }
 
-#[cfg(target_env = "musl")]
+#[cfg(not(feature = "llama-cpp"))]
 pub use stubs::*;
 
 // Multimodal support module
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub mod multimodal;
 
 // Real implementation for non-musl targets
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub use arkavo_llama_cpp_sys as ffi;
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 use std::ffi::CString;
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 use std::os::raw::{c_char, c_void};
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 use std::panic;
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 // Global flag to control llama.cpp logging
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 
 // Global flag to track if GPU has failed (avoid retrying)
 // 0 = not tried, 1 = GPU works, 2 = GPU failed (use CPU)
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 static GPU_STATUS: AtomicU32 = AtomicU32::new(0);
 
 // Custom log callback that filters based on log level and our debug flag
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 extern "C" fn llama_log_callback_filtered(
     level: ffi::ggml_log_level,
     text: *const c_char,
@@ -77,7 +77,7 @@ extern "C" fn llama_log_callback_filtered(
 }
 
 /// Initialize llama.cpp logging
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn init_llama_logging() {
     // Logging disabled by default, can be enabled with set_debug_logging
     LLAMA_LOGGING_ENABLED.store(false, Ordering::Relaxed);
@@ -89,23 +89,23 @@ pub fn init_llama_logging() {
 }
 
 /// Enable or disable debug logging for llama.cpp
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn set_debug_logging(enabled: bool) {
     LLAMA_LOGGING_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct LlamaModel {
     pub(crate) ptr: *mut ffi::llama_model,
 }
 
 // SAFETY: llama.cpp's model objects are thread-safe for read operations
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for LlamaModel {}
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Sync for LlamaModel {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl LlamaModel {
     pub fn from_file(path: &str) -> Result<Self, String> {
         // Initialize backend if not already done
@@ -174,7 +174,7 @@ impl LlamaModel {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for LlamaModel {
     fn drop(&mut self) {
         unsafe {
@@ -183,16 +183,16 @@ impl Drop for LlamaModel {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct LlamaContext {
     pub(crate) ptr: *mut ffi::llama_context,
 }
 
 // SAFETY: llama.cpp contexts need to be protected by mutex for thread safety
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for LlamaContext {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl LlamaContext {
     pub fn new(model: &LlamaModel) -> Result<Self, String> {
         // Auto-detect CPU cores for optimal thread count
@@ -315,7 +315,7 @@ impl LlamaContext {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for LlamaContext {
     fn drop(&mut self) {
         unsafe {
@@ -324,7 +324,7 @@ impl Drop for LlamaContext {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
@@ -356,7 +356,7 @@ pub fn apply_chat_template(
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn tokenize_with_model(
     vocab: *const ffi::llama_vocab,
@@ -384,7 +384,7 @@ pub fn tokenize_with_model(
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn detokenize(
     vocab: *const ffi::llama_vocab,
@@ -414,7 +414,7 @@ pub fn detokenize(
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn token_to_piece(
     vocab: *const ffi::llama_vocab,
@@ -442,7 +442,7 @@ pub fn token_to_piece(
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn batch_get_one(tokens: &[ffi::llama_token]) -> ffi::llama_batch {
     unsafe {
         ffi::llama_batch_get_one(
@@ -452,7 +452,7 @@ pub fn batch_get_one(tokens: &[ffi::llama_token]) -> ffi::llama_batch {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn batch_get_one_with_logits(
     tokens: &[ffi::llama_token],
     request_logits_on_last: bool,
@@ -474,7 +474,7 @@ pub fn batch_get_one_with_logits(
     batch
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn batch_get_one_with_offset(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -507,7 +507,7 @@ pub fn batch_get_one_with_offset(
 }
 
 /// Proper "llama way" batch creation with guaranteed allocation
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn batch_init_with_tokens(
     tokens: &[ffi::llama_token],
     pos_offset: i32,
@@ -544,14 +544,14 @@ pub fn batch_init_with_tokens(
 }
 
 /// Free a batch created with batch_init_with_tokens
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn batch_free(batch: &mut ffi::llama_batch) {
     unsafe {
         ffi::llama_batch_free(*batch);
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), String> {
     let result = unsafe { ffi::llama_decode(ctx.ptr, batch) };
     if result != 0 {
@@ -561,17 +561,17 @@ pub fn decode_batch(ctx: &LlamaContext, batch: ffi::llama_batch) -> Result<(), S
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn get_logits_ith(ctx: &LlamaContext, i: i32) -> *mut f32 {
     unsafe { ffi::llama_get_logits_ith(ctx.ptr, i) }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub struct LlamaSampler {
     ptr: *mut ffi::llama_sampler,
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl LlamaSampler {
     pub fn new_chain(no_perf: bool) -> Result<Self, String> {
         let chain_params = ffi::llama_sampler_chain_params { no_perf };
@@ -620,10 +620,10 @@ impl LlamaSampler {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 unsafe impl Send for LlamaSampler {}
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 impl Drop for LlamaSampler {
     fn drop(&mut self) {
         unsafe {
@@ -632,7 +632,7 @@ impl Drop for LlamaSampler {
     }
 }
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn create_sampler_chain(
     temp: f32,
     top_p: f32,
@@ -682,7 +682,7 @@ pub fn create_sampler_chain(
 }
 
 /// Minimal FFI test harness to verify llama.cpp initialization
-#[cfg(not(target_env = "musl"))]
+#[cfg(feature = "llama-cpp")]
 pub fn test_minimal_init() -> Result<(), String> {
     // Test model params creation without backend init/cleanup
     let mut _model_params = unsafe { ffi::llama_model_default_params() };
