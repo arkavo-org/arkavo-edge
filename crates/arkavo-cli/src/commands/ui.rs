@@ -234,6 +234,119 @@ async fn handle_prompt_async(
 
     let enhanced_prompt = prompt.to_string();
 
+    // Check for special commands before processing with LLM
+    let lower_prompt = prompt.trim().to_lowercase();
+    if matches!(
+        lower_prompt.as_str(),
+        "list tools" | "show tools" | "what tools" | "available tools"
+    ) {
+        // Initialize MCP to get tool list
+        #[cfg(all(unix, feature = "mcp-tools"))]
+        {
+            use crate::mcp_integration::McpConnection;
+            #[cfg(target_os = "macos")]
+            let mcp_result = McpConnection::new_in_process_async()
+                .await
+                .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+            #[cfg(not(target_os = "macos"))]
+            let mcp_result = McpConnection::new_cross_platform()
+                .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+            if let Ok(mcp) = mcp_result {
+                match mcp.list_tools() {
+                    Ok(tools) if !tools.is_empty() => {
+                        let tools_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({} total)</h3>
+                                    <div style="display:grid;gap:12px;">
+                                        {}
+                                    </div>
+                                </div>
+                            </div>"#,
+                            tools.len(),
+                            tools
+                                .iter()
+                                .map(|t| format!(
+                                    r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
+                                        <strong style="color:#333;">{}</strong><br>
+                                        <span style="color:#666;font-size:14px;">{}</span>
+                                    </div>"#,
+                                    t.name
+                                        .replace('&', "&amp;")
+                                        .replace('<', "&lt;")
+                                        .replace('>', "&gt;"),
+                                    t.description
+                                        .replace('&', "&amp;")
+                                        .replace('<', "&lt;")
+                                        .replace('>', "&gt;")
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("")
+                        );
+                        renderer.render(&tools_html, "", "").await?;
+                        return Ok(());
+                    }
+                    Ok(_) => {
+                        let no_tools_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: #fef3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #f0ad4e;">
+                                    <strong style="color:#8a6d3b;">⚠ No tools available</strong><br>
+                                    <span style="color:#856404;">MCP connection established but no tools are registered.</span>
+                                </div>
+                            </div>"#
+                        );
+                        renderer.render(&no_tools_html, "", "").await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        let error_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
+                                    <strong style="color:#c33;">⚠ Error listing tools</strong><br>
+                                    <span style="color:#666;font-size:14px;">{}</span>
+                                </div>
+                            </div>"#,
+                            e.to_string()
+                                .replace('&', "&amp;")
+                                .replace('<', "&lt;")
+                                .replace('>', "&gt;")
+                        );
+                        renderer.render(&error_html, "", "").await?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(all(unix, feature = "mcp-tools")))]
+        {
+            let no_mcp_html = format!(
+                r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                        <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                    </div>
+                    <div style="background: #fef3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #f0ad4e;">
+                        <strong style="color:#8a6d3b;">⚠ MCP tools not available</strong><br>
+                        <span style="color:#856404;">Build with --features mcp-tools on Unix platforms to enable tool support.</span>
+                    </div>
+                </div>"#
+            );
+            renderer.render(&no_mcp_html, "", "").await?;
+            return Ok(());
+        }
+    }
+
     // Initialize MCP connection for tool calling
     #[cfg(all(unix, feature = "mcp-tools"))]
     let mcp_client = {
@@ -249,9 +362,30 @@ async fn handle_prompt_async(
         let mcp_result = McpConnection::new_cross_platform()
             .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
 
-        mcp_result
+        let client = mcp_result
             .ok()
-            .map(|mcp| Arc::new(mcp) as Arc<dyn arkavo_mcp_tools::McpClient>)
+            .map(|mcp| Arc::new(mcp) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+        // Debug: Show MCP tools being passed
+        if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() {
+            eprintln!("\n=== MCP TOOLS DEBUG (UI) ===");
+            if let Some(ref mcp) = client {
+                match mcp.list_tools() {
+                    Ok(tools) => {
+                        eprintln!("Tools registered: {}", tools.len());
+                        for tool in &tools {
+                            eprintln!("  - {} : {}", tool.name, tool.description);
+                        }
+                    }
+                    Err(e) => eprintln!("Error listing tools: {e}"),
+                }
+            } else {
+                eprintln!("No MCP client initialized");
+            }
+            eprintln!("============================\n");
+        }
+
+        client
     };
 
     // Check for API key availability to determine if we should use cloud models
