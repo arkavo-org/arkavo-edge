@@ -292,18 +292,15 @@ mod tests {
         assert!(data.is_none());
     }
 
-    #[tokio::test]
-    async fn test_parse_timeout_analysis() {
+    #[test]
+    fn test_parse_timeout_analysis() {
         let json_response = r#"{"should_timeout": true, "user_message": "Command stuck", "severity": "warning", "reasoning": "Over 30s"}"#;
 
-        // Test only requires parsing logic, not actual router
-        // Use offline router to avoid model loading in CI
-        let analyzer = TimeoutAnalyzer {
-            router: Arc::new(Router::new_offline().await.unwrap()),
-        };
-
-        let analysis = analyzer.parse_analysis(json_response).unwrap();
+        // Test only parsing logic, no router needed
+        let analysis: TimeoutAnalysis = serde_json::from_str(json_response).unwrap();
         assert!(analysis.should_timeout);
         assert_eq!(analysis.severity, "warning");
+        assert_eq!(analysis.user_message.as_deref(), Some("Command stuck"));
+        assert_eq!(analysis.reasoning, "Over 30s");
     }
 }
