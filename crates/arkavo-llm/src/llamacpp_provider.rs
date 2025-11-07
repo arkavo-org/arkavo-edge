@@ -1,19 +1,19 @@
 use crate::tool_parser::ToolParser;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::multimodal::MtmdContext;
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     LlamaModel, apply_chat_template, ffi, init_llama_logging, test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::ffi::CString;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
 use crate::mcp_converter::McpConverter;
 
@@ -40,7 +40,7 @@ impl Default for SamplingConfig {
     }
 }
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct LlamaCppProvider {
     model: Arc<LlamaModel>,
     name: String,
@@ -48,12 +48,12 @@ pub struct LlamaCppProvider {
     mtmd_ctx: Option<Arc<MtmdContext>>,
 }
 
-#[cfg(not(feature = "llama-cpp"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 pub struct LlamaCppProvider {
     name: String,
 }
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl LlamaCppProvider {
     pub fn new(model_name: String, model_path: String) -> Result<Self> {
         Self::new_with_config(model_name, model_path, None, SamplingConfig::default())
@@ -113,7 +113,7 @@ impl LlamaCppProvider {
     }
 }
 
-#[cfg(not(feature = "llama-cpp"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 impl LlamaCppProvider {
     pub fn new(_model_name: String, _model_path: String) -> Result<Self> {
         Err(Error::Config(
@@ -143,7 +143,7 @@ impl LlamaCppProvider {
     }
 }
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl LlamaCppProvider {
     fn generate_streaming(
         &self,
@@ -252,7 +252,7 @@ impl LlamaCppProvider {
     }
 }
 
-#[cfg(feature = "llama-cpp")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete_with_options(
@@ -379,7 +379,7 @@ impl Provider for LlamaCppProvider {
     }
 }
 
-#[cfg(not(feature = "llama-cpp"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 #[async_trait]
 impl Provider for LlamaCppProvider {
     async fn complete_with_options(
