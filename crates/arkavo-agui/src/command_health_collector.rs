@@ -288,8 +288,11 @@ mod tests {
     #[tokio::test]
     async fn test_parse_timeout_analysis() {
         let json_response = r#"{"should_timeout": true, "user_message": "Command stuck", "severity": "warning", "reasoning": "Over 30s"}"#;
+
+        // Test only requires parsing logic, not actual router
+        // Use offline router to avoid model loading in CI
         let analyzer = TimeoutAnalyzer {
-            router: Arc::new(Router::new().await.unwrap()),
+            router: Arc::new(Router::new_offline().await.unwrap()),
         };
 
         let analysis = analyzer.parse_analysis(json_response).unwrap();
