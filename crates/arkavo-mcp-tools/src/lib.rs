@@ -6,6 +6,7 @@ pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod github_checks;
+pub mod github_org_knowledge;
 pub mod github_review;
 pub mod health_check;
 pub mod mcp_connection;
@@ -24,7 +25,7 @@ pub mod tui;
 pub mod ntp_server;
 
 // Re-export commonly used types
-pub use registry::ToolRegistry;
+pub use registry::{McpClient, McpTool, ToolInfo, ToolRegistry};
 pub use server::{Tool, ToolSchema};
 
 // Re-export error types

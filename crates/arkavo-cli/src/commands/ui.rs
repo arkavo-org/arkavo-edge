@@ -76,11 +76,10 @@ async fn use_cef_renderer(
     initial_prompt: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_agui::UiRenderer;
-    use arkavo_agui::renderer::cef_renderer::CefRendererImpl;
-    use arkavo_cef::DOMError;
+    use arkavo_agui::renderer::async_cef_renderer::AsyncCefRendererImpl;
 
-    println!("Creating CEF renderer...");
-    let mut cef_renderer = CefRendererImpl::new().await?;
+    println!("Creating Async CEF renderer (non-blocking)...");
+    let mut cef_renderer = AsyncCefRendererImpl::new().await?;
 
     println!("CEF window opened with prompt bar!");
 
@@ -89,17 +88,16 @@ async fn use_cef_renderer(
     tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
     println!("[DEBUG] Page should be loaded now");
 
-    let mut error_buffer: Vec<DOMError> = Vec::new();
-
     if let Some(prompt) = initial_prompt {
         println!("Processing initial prompt: {prompt}");
-        handle_prompt(&mut cef_renderer, &prompt, &mut error_buffer).await?;
+        handle_prompt_async(&mut cef_renderer, &prompt).await?;
     }
 
     println!("CEF renderer is running. Enter prompts in the UI or press Ctrl+C to exit.");
 
     // Event loop - poll for prompt submissions and errors
     let mut loop_count = 0;
+    let mut last_health_check = std::time::Instant::now();
     loop {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         loop_count += 1;
@@ -108,91 +106,96 @@ async fn use_cef_renderer(
             eprintln!("[HEARTBEAT] Event loop iteration {loop_count}");
         }
 
+        // Check for stuck commands every 30 seconds
+        if last_health_check.elapsed().as_secs() >= 30 {
+            use arkavo_observability::health_reporter::HealthRegistry;
+
+            let registry = HealthRegistry::global();
+            let reports = registry.check_all().await;
+
+            eprintln!("[HEARTBEAT] Health check: {} components", reports.len());
+            for report in &reports {
+                if report.component == "cef" {
+                    eprintln!(
+                        "[HEARTBEAT]   CEF: {} - {}",
+                        format!("{:?}", report.status),
+                        report.message
+                    );
+
+                    // Check if degraded (stuck commands)
+                    if format!("{:?}", report.status) == "Degraded" {
+                        eprintln!("[WARNING] CEF has stuck commands!");
+                        // Show warning in UI
+                        let warning_html = format!(
+                            r#"<div style="position:fixed;top:10px;right:10px;background:#ff9;border:2px solid #f80;padding:12px;border-radius:6px;z-index:9999;">
+                            <strong>⚠️ Warning:</strong> {}</div>"#,
+                            report
+                                .message
+                                .replace('&', "&amp;")
+                                .replace('<', "&lt;")
+                                .replace('>', "&gt;")
+                        );
+                        let _ = cef_renderer.update_element("body", &warning_html).await;
+                    }
+                }
+            }
+
+            last_health_check = std::time::Instant::now();
+        }
+
         if !cef_renderer.is_running() {
             eprintln!("[DEBUG] CEF renderer is no longer running, breaking event loop");
             break;
         }
 
-        // Poll for errors from CEF
-        if let Ok(Some(error)) = cef_renderer.try_recv_error().await {
-            // Check for shutdown signal from CEF
-            if error.error_type == "shutdown" {
-                eprintln!("[DEBUG] Received shutdown signal from CEF");
-                break;
-            }
-
-            // Buffer error for LLM feedback
-            error_buffer.push(error.clone());
-
-            // Show error in UI
-            let error_html = format!(
-                r#"
-                <div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-                    <div style="background: #fee; border-left: 4px solid #f44; padding: 16px; border-radius: 4px;">
-                        <strong style="color: #c33;">Error: {}</strong><br>
-                        <span style="color: #666;">{}</span><br>
-                        <small style="color: #999;">{}:{}</small>
-                    </div>
-                </div>
-                "#,
-                error.error_type,
-                error
-                    .message
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;"),
-                error
-                    .source
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;"),
-                error.line
+        // Poll for events from CEF (non-blocking)
+        if let Some(event) = cef_renderer.try_recv_event() {
+            eprintln!(
+                "[DEBUG] Event received (async): type={}, value={}",
+                event.event_type, event.value
             );
-            let _ = cef_renderer.render(&error_html, "", "").await;
-        }
 
-        // Poll for all messages (events, feedback, errors)
-        // We must drain all message types, not just events
-        use arkavo_cef::ReceivedMessage;
-        let mut connection_closed = false;
-        loop {
-            match cef_renderer.try_recv_message().await {
-                Ok(Some(ReceivedMessage::Event(event))) => {
-                    eprintln!(
-                        "[DEBUG] Event received: type={}, value={}",
-                        event.event_type, event.value
+            match event.event_type.as_str() {
+                "js_error" => {
+                    eprintln!("[CEF JS ERROR] {}", event.value);
+                    eprintln!("[CEF JS ERROR] Data: {}", event.data);
+
+                    // Log error with health registry
+                    use arkavo_observability::health_reporter::HealthRegistry;
+                    let registry = HealthRegistry::global();
+                    let _reports = registry.check_all().await;
+                    eprintln!("[ERROR TELEMETRY] CEF JavaScript exception captured:");
+                    eprintln!("  Selector: {}", event.selector);
+                    eprintln!("  Target: {}", event.target_id);
+                    eprintln!("  Error: {}", event.value);
+                    eprintln!("  Context: {}", event.data);
+
+                    // Show error in UI
+                    let error_display = format!(
+                        r#"<div style="position:fixed;top:10px;right:10px;background:#fee;border:2px solid #f44;padding:12px;border-radius:6px;z-index:9999;max-width:400px;">
+                        <strong style="color:#c33;">⚠️ JavaScript Error</strong><br>
+                        <span style="font-size:12px;color:#666;">{}</span>
+                        </div>"#,
+                        event
+                            .value
+                            .replace('&', "&amp;")
+                            .replace('<', "&lt;")
+                            .replace('>', "&gt;")
                     );
-                    if event.event_type == "submit" && !event.value.trim().is_empty() {
-                        eprintln!("[DEBUG] Processing submit event");
-                        handle_prompt(&mut cef_renderer, &event.value, &mut error_buffer).await?;
+                    let _ = cef_renderer.update_element("body", &error_display).await;
+                }
+                "submit" if !event.value.trim().is_empty() => {
+                    eprintln!("[DEBUG] Processing submit event (async)");
+                    if let Err(e) = handle_prompt_async(&mut cef_renderer, &event.value).await {
+                        eprintln!("[ERROR] Prompt processing failed: {}", e);
+                        return Err(e);
                     }
+                    eprintln!("[DEBUG] Prompt processing completed");
                 }
-                Ok(Some(ReceivedMessage::Feedback(_))) => {
-                    // Ignore feedback messages (already handled by command sender)
-                }
-                Ok(Some(ReceivedMessage::Error(error))) => {
-                    // Handle error messages
-                    error_buffer.push(error);
-                }
-                Ok(None) => {
-                    // No more messages available
-                    break;
-                }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    if error_msg.contains("Connection closed") {
-                        eprintln!("[DEBUG] CEF connection closed, shutting down");
-                        connection_closed = true;
-                    } else {
-                        eprintln!("[ERROR] Failed to receive message: {e}");
-                    }
-                    break;
+                _ => {
+                    eprintln!("[DEBUG] Unhandled event type: {}", event.event_type);
                 }
             }
-        }
-
-        if connection_closed {
-            break;
         }
     }
 
@@ -220,30 +223,169 @@ async fn use_cef_renderer(
 }
 
 #[cfg(feature = "cef-ui")]
-async fn handle_prompt(
+async fn handle_prompt_async(
     renderer: &mut dyn arkavo_agui::UiRenderer,
     prompt: &str,
-    error_buffer: &mut Vec<arkavo_cef::DOMError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use arkavo_llm::Message;
     use arkavo_router::Router;
+    use std::sync::Arc;
     use tokio_stream::StreamExt;
 
-    // Build enhanced prompt with error feedback if errors exist
-    let enhanced_prompt = if !error_buffer.is_empty() {
-        let error_summary = error_buffer
-            .iter()
-            .map(|e| e.format_for_llm())
-            .collect::<Vec<_>>()
-            .join("\n");
+    let enhanced_prompt = prompt.to_string();
 
-        format!(
-            "Previous UI rendering had the following errors:\n\n{error_summary}\n\n\
-             Please help fix these errors and regenerate the content.\n\n\
-             User request: {prompt}"
-        )
-    } else {
-        prompt.to_string()
+    // Check for special commands before processing with LLM
+    let lower_prompt = prompt.trim().to_lowercase();
+    if matches!(
+        lower_prompt.as_str(),
+        "list tools" | "show tools" | "what tools" | "available tools"
+    ) {
+        // Initialize MCP to get tool list
+        #[cfg(all(unix, feature = "mcp-tools"))]
+        {
+            use crate::mcp_integration::McpConnection;
+            #[cfg(target_os = "macos")]
+            let mcp_result = McpConnection::new_in_process_async()
+                .await
+                .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+            #[cfg(not(target_os = "macos"))]
+            let mcp_result = McpConnection::new_cross_platform()
+                .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+            if let Ok(mcp) = mcp_result {
+                match mcp.list_tools() {
+                    Ok(tools) if !tools.is_empty() => {
+                        let tools_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                                    <h3 style="margin-top:0;color:#667eea;">Available Tools ({} total)</h3>
+                                    <div style="display:grid;gap:12px;">
+                                        {}
+                                    </div>
+                                </div>
+                            </div>"#,
+                            tools.len(),
+                            tools
+                                .iter()
+                                .map(|t| format!(
+                                    r#"<div style="border-left:3px solid #667eea;padding-left:12px;">
+                                        <strong style="color:#333;">{}</strong><br>
+                                        <span style="color:#666;font-size:14px;">{}</span>
+                                    </div>"#,
+                                    t.name
+                                        .replace('&', "&amp;")
+                                        .replace('<', "&lt;")
+                                        .replace('>', "&gt;"),
+                                    t.description
+                                        .replace('&', "&amp;")
+                                        .replace('<', "&lt;")
+                                        .replace('>', "&gt;")
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("")
+                        );
+                        renderer.render(&tools_html, "", "").await?;
+                        return Ok(());
+                    }
+                    Ok(_) => {
+                        let no_tools_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: #fef3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #f0ad4e;">
+                                    <strong style="color:#8a6d3b;">⚠ No tools available</strong><br>
+                                    <span style="color:#856404;">MCP connection established but no tools are registered.</span>
+                                </div>
+                            </div>"#
+                        );
+                        renderer.render(&no_tools_html, "", "").await?;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        let error_html = format!(
+                            r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                                <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                                    <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                                </div>
+                                <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
+                                    <strong style="color:#c33;">⚠ Error listing tools</strong><br>
+                                    <span style="color:#666;font-size:14px;">{}</span>
+                                </div>
+                            </div>"#,
+                            e.to_string()
+                                .replace('&', "&amp;")
+                                .replace('<', "&lt;")
+                                .replace('>', "&gt;")
+                        );
+                        renderer.render(&error_html, "", "").await?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(all(unix, feature = "mcp-tools")))]
+        {
+            let no_mcp_html = format!(
+                r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                    <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; color: #333;">
+                        <strong style="color: #667eea;">You:</strong> <span style="color: #333;">{prompt}</span>
+                    </div>
+                    <div style="background: #fef3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #f0ad4e;">
+                        <strong style="color:#8a6d3b;">⚠ MCP tools not available</strong><br>
+                        <span style="color:#856404;">Build with --features mcp-tools on Unix platforms to enable tool support.</span>
+                    </div>
+                </div>"#
+            );
+            renderer.render(&no_mcp_html, "", "").await?;
+            return Ok(());
+        }
+    }
+
+    // Initialize MCP connection for tool calling
+    #[cfg(all(unix, feature = "mcp-tools"))]
+    let mcp_client = {
+        use crate::mcp_integration::McpConnection;
+        // Use async version for macOS (avoids nested runtime panic)
+        // Use cross-platform version for other Unix systems
+        #[cfg(target_os = "macos")]
+        let mcp_result = McpConnection::new_in_process_async()
+            .await
+            .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+        #[cfg(not(target_os = "macos"))]
+        let mcp_result = McpConnection::new_cross_platform()
+            .or_else(|_| McpConnection::new_external(std::env::var("MCP_URL").ok()));
+
+        let client = mcp_result
+            .ok()
+            .map(|mcp| Arc::new(mcp) as Arc<dyn arkavo_mcp_tools::McpClient>);
+
+        // Debug: Show MCP tools being passed
+        if std::env::var("ARKAVO_DEBUG_CHAT").is_ok() {
+            eprintln!("\n=== MCP TOOLS DEBUG (UI) ===");
+            if let Some(ref mcp) = client {
+                match mcp.list_tools() {
+                    Ok(tools) => {
+                        eprintln!("Tools registered: {}", tools.len());
+                        for tool in &tools {
+                            eprintln!("  - {} : {}", tool.name, tool.description);
+                        }
+                    }
+                    Err(e) => eprintln!("Error listing tools: {e}"),
+                }
+            } else {
+                eprintln!("No MCP client initialized");
+            }
+            eprintln!("============================\n");
+        }
+
+        client
     };
 
     // Check for API key availability to determine if we should use cloud models
@@ -255,11 +397,13 @@ async fn handle_prompt(
         Router::new_offline().await?
     };
 
-    let routing_decision = router.route(&enhanced_prompt).await?;
-
-    let client = create_client_from_routing(&routing_decision).await?;
-
     let messages = vec![Message::user(&enhanced_prompt)];
+
+    // Use router with tools for native tool calling
+    #[cfg(all(unix, feature = "mcp-tools"))]
+    let use_tools = true;
+    #[cfg(not(all(unix, feature = "mcp-tools")))]
+    let use_tools = false;
 
     // Show "thinking" indicator in UI
     let thinking_html = format!(
@@ -277,42 +421,60 @@ async fn handle_prompt(
     );
     renderer.render(&thinking_html, "", "").await?;
 
-    let stream_result = client.stream(messages).await;
-    let mut stream = match stream_result {
-        Ok(s) => s,
-        Err(e) => {
-            let error_msg = e.to_string();
-            if error_msg.contains("Connection refused") || error_msg.contains("connect") {
-                let error_html = format!(
-                    r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
-                        <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-                            <strong style="color: #667eea;">You:</strong> {prompt}
-                        </div>
-                        <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
-                            <strong style="color: #c33;">Connection Error</strong><br>
-                            <span>Cannot connect to Ollama. Please start Ollama:</span><br>
-                            <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">brew services start ollama</code>
-                        </div>
-                    </div>"#
-                );
-                renderer.render(&error_html, "", "").await?;
-            }
-            return Err(e.into());
-        }
-    };
+    // Route the request to determine which model to use
+    let routing_decision = router.route(&enhanced_prompt).await?;
 
-    let mut response_text = String::new();
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(chunk) => {
-                response_text.push_str(&chunk.content);
-            }
+    let response_text = if use_tools {
+        // Use router with native tool calling
+        #[cfg(all(unix, feature = "mcp-tools"))]
+        {
+            use crate::tool_integration::complete_with_tools;
+            complete_with_tools(&enhanced_prompt, messages, mcp_client).await?
+        }
+        #[cfg(not(all(unix, feature = "mcp-tools")))]
+        String::new()
+    } else {
+        // Fallback to direct streaming
+        let client = create_client_from_routing(&routing_decision).await?;
+
+        let stream_result = client.stream(messages).await;
+        let mut stream = match stream_result {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("[ERROR] Stream error: {e}");
+                let error_msg = e.to_string();
+                if error_msg.contains("Connection refused") || error_msg.contains("connect") {
+                    let error_html = format!(
+                        r#"<div style="padding: 40px; font-family: system-ui, -apple-system, sans-serif;">
+                            <div style="background: #f5f5f5; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+                                <strong style="color: #667eea;">You:</strong> {prompt}
+                            </div>
+                            <div style="background: #fee; padding: 20px; border-radius: 8px; border-left: 4px solid #f44;">
+                                <strong style="color: #c33;">Connection Error</strong><br>
+                                <span>Cannot connect to Ollama. Please start Ollama:</span><br>
+                                <code style="background: #f5f5f5; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 8px;">brew services start ollama</code>
+                            </div>
+                        </div>"#
+                    );
+                    renderer.render(&error_html, "", "").await?;
+                }
                 return Err(e.into());
             }
+        };
+
+        let mut response_text = String::new();
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    response_text.push_str(&chunk.content);
+                }
+                Err(e) => {
+                    eprintln!("[ERROR] Stream error: {e}");
+                    return Err(e.into());
+                }
+            }
         }
-    }
+        response_text
+    };
 
     // Detect if response is HTML (contains <html> or multiple HTML tags)
     let is_html = response_text.contains("<html")
@@ -353,17 +515,10 @@ async fn handle_prompt(
     );
     eprintln!("[DEBUG] First 200 chars: {}", &html[..html.len().min(200)]);
 
-    match renderer.render(&html, "", "").await {
-        Ok(_) => {
-            // Clear error buffer after successful render
-            error_buffer.clear();
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("[ERROR] renderer.render() failed: {e}");
-            Err(e.into())
-        }
-    }
+    renderer.render(&html, "", "").await.map_err(|e| {
+        eprintln!("[ERROR] renderer.render() failed (async): {e}");
+        e.into()
+    })
 }
 
 #[cfg(feature = "cef-ui")]

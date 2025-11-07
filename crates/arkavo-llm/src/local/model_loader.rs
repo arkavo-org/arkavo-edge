@@ -129,7 +129,7 @@ impl ModelLoader {
             .get("general.architecture")
             .and_then(|v| {
                 if let gguf_file::Value::String(s) = v {
-                    Some(s.to_string())
+                    Some(s.clone())
                 } else {
                     None
                 }
@@ -678,7 +678,7 @@ impl ModelLoader {
         // Check if we're already in a tokio runtime
         let result = if tokio::runtime::Handle::try_current().is_ok() {
             // We're in an async context, spawn a new thread to avoid nested runtime
-            let base_repo_id = base_repo_id.to_string();
+            let base_repo_id = base_repo_id.clone();
             let model_path = self.model_path.clone();
             let tokenizer_type = spec.tokenizer_type.clone();
 

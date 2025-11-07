@@ -2,6 +2,7 @@ pub mod agent_connection;
 pub mod api_keys;
 pub mod budget_handler;
 pub mod coding_agent_bridge;
+pub mod command_health_collector;
 pub mod cost_handler;
 pub mod dataflow_handler;
 pub mod debug_handler;
@@ -14,11 +15,16 @@ pub mod mdns_impl;
 pub mod renderer;
 pub mod roi_metrics;
 pub mod streaming;
+pub mod timeout_handler;
 pub mod types;
 pub mod ui_handler;
 
 pub use coding_agent_bridge::CodingAgentBridge;
+pub use command_health_collector::{
+    CommandHealthCollector, CommandHealthData, HealthBatch, TimeoutAnalysis, TimeoutAnalyzer,
+};
 pub use gateway::AgUiGateway;
 pub use renderer::{RendererType, UiRenderer, create_renderer, default_renderer_type};
+pub use timeout_handler::TimeoutHandler;
 pub use types::*;
 pub use ui_handler::UiHandler;

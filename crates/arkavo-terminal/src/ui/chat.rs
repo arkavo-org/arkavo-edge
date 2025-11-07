@@ -157,7 +157,7 @@ impl ChatView {
                 // Simple word wrapping
                 let wrapped = textwrap::wrap(line, width as usize - 4);
                 for wrapped_line in wrapped {
-                    lines.push(Line::from(Span::raw(wrapped_line.to_string())));
+                    lines.push(Line::from(Span::raw(wrapped_line.clone())));
                 }
             }
         }

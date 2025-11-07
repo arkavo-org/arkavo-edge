@@ -1,12 +1,11 @@
-use crate::{Error, Message, Provider, Result, StreamResponse};
+use crate::tool_parser::ToolParser;
+use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio_stream::Stream;
 
 #[cfg(feature = "llm-local")]
 use super::model_loader::{Model, ModelLoader};
-
-#[cfg(feature = "llm-local")]
-use candle_core::Tensor;
 
 #[cfg(feature = "llm-local")]
 use std::sync::Arc;
@@ -18,8 +17,8 @@ use tokio::sync::Mutex;
 use super::worker::WorkerHandle;
 
 #[cfg(feature = "llm-local")]
-struct Inner {
-    model_loader: ModelLoader,
+pub struct Inner {
+    pub model_loader: ModelLoader,
     #[allow(dead_code)]
     worker_handle: Option<WorkerHandle>,
     _seed: u64,
@@ -176,7 +175,7 @@ impl Provider for LocalProvider {
             );
 
             // First, get tokenizer and encode the prompt (clone tokenizer for safety)
-            let (mut ids, eos_token_ids, tokenizer, _is_gemma) = {
+            let (ids, eos_token_ids, tokenizer, _is_gemma) = {
                 tracing::debug!("[LocalProvider::complete] Acquiring model lock...");
                 let guard = self.inner.lock().await;
                 tracing::debug!("[LocalProvider::complete] Model lock acquired");
@@ -268,191 +267,15 @@ impl Provider for LocalProvider {
                 )));
             }
 
-            let start_len = ids.len();
-
-            let start_time = std::time::Instant::now();
-
-            tracing::info!(
-                "Starting generation with {} prompt tokens, max {} tokens to generate",
-                prompt_len,
-                max_tokens
-            );
-
-            // Reserve capacity for generated tokens
-            ids.reserve(max_tokens);
-
-            // Get device from model loader
-            let device = {
-                let guard = self.inner.lock().await;
-                guard.model_loader.device().clone()
-            };
-
-            // Process the prompt first (all tokens at once)
-            let prompt_len = ids.len();
-
-            for index in 0..max_tokens {
-                let token_start = std::time::Instant::now();
-
-                // Lock for forward pass
-                let next = {
-                    let mut guard = self.inner.lock().await;
-
-                    if index % 10 == 0 || index < 3 {
-                        tracing::info!(
-                            "[LocalProvider::complete] Generation step {}/{}, total time: {:?}",
-                            index,
-                            max_tokens,
-                            start_time.elapsed()
-                        );
-                    }
-
-                    // On first iteration (index=0), process the entire prompt
-                    // On subsequent iterations, only process the last generated token
-                    let (input_tokens, position) = if index == 0 {
-                        // First pass: process entire prompt
-                        tracing::debug!(
-                            "[LocalProvider::complete] Processing full prompt: {} tokens",
-                            ids.len()
-                        );
-                        (ids.as_slice(), 0)
-                    } else {
-                        // Subsequent passes: only the last token
-                        (&ids[ids.len() - 1..ids.len()], prompt_len + index - 1)
-                    };
-
-                    // Forward pass based on model architecture
-                    tracing::debug!(
-                        "[LocalProvider::complete] Running forward pass at position {}",
-                        position
-                    );
-
-                    let mut logits = match guard.model_loader.get_model_mut() {
-                        Some(Model::QuantizedGemma3(model)) => {
-                            // Gemma3 expects batch dimension
-                            let input = Tensor::new(input_tokens, &device)
-                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
-                                .unsqueeze(0)
-                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-                            model.forward(&input, position).map_err(|e| {
-                                Error::Model(format!("Gemma3 forward pass failed: {e}"))
-                            })?
-                        }
-                        Some(Model::QuantizedLlama(model)) => {
-                            // QuantizedLlama expects 2D tensor with shape [1, seq_len]
-                            let input = Tensor::new(input_tokens, &device)
-                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
-                                .unsqueeze(0)
-                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-
-                            // Debug print input shape
-                            tracing::debug!(
-                                "Llama input shape: {:?}, position: {}",
-                                input.shape(),
-                                position
-                            );
-
-                            model.forward(&input, position).map_err(|e| {
-                                Error::Model(format!("Llama forward pass failed: {e}"))
-                            })?
-                        }
-                        Some(Model::QuantizedPhi(model)) => {
-                            // QuantizedPhi expects 2D tensor with shape [1, seq_len]
-                            let input = Tensor::new(input_tokens, &device)
-                                .map_err(|e| Error::Model(format!("Failed to create tensor: {e}")))?
-                                .unsqueeze(0)
-                                .map_err(|e| Error::Model(format!("Failed to unsqueeze: {e}")))?;
-
-                            model.forward(&input, position).map_err(|e| {
-                                Error::Model(format!("Phi forward pass failed: {e}"))
-                            })?
-                        }
-                        #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "snpe"))]
-                        Some(Model::Snpe(_)) => {
-                            return Err(Error::Inference(
-                                "SNPE models use async execution, not forward pass".to_string(),
-                            ));
-                        }
-                        None => {
-                            return Err(Error::Model("Model not loaded".to_string()));
-                        }
-                    };
-
-                    // Ensure logits are F32 for subsequent operations
-                    if logits.dtype() != candle_core::DType::F32 {
-                        logits = logits.to_dtype(candle_core::DType::F32).map_err(|e| {
-                            Error::Model(format!("Failed to convert logits to F32: {e}"))
-                        })?;
-                    }
-
-                    // Apply sampling with temperature and repetition penalty
-                    let logits_1d = logits
-                        .squeeze(0)
-                        .map_err(|e| Error::Model(format!("Failed to squeeze: {e}")))?;
-
-                    // Use sampling parameters
-                    let sampling_params = super::sampling::SamplingParams::default();
-                    super::sampling::sample_next_token(
-                        &logits_1d,
-                        sampling_params.temperature,
-                        sampling_params.top_p,
-                        sampling_params.repetition_penalty,
-                        &ids[start_len..], // Only apply repetition penalty to generated tokens
-                    )?
-                };
-
-                let token_time = token_start.elapsed();
-                if index < 5 || index % 20 == 0 {
-                    tracing::info!(
-                        "[LocalProvider::complete] Token {} generated: id={}, time={:?}",
-                        index,
-                        next,
-                        token_time
-                    );
-                }
-
-                ids.push(next);
-
-                // Early stop on any EOS token
-                if eos_token_ids.contains(&next) {
-                    tracing::info!(
-                        "[LocalProvider::complete] Hit EOS token {} at position {}",
-                        next,
-                        index
-                    );
-                    break;
-                }
-            }
-
-            // Decode only the generated tokens (not the prompt)
-            let generated_ids = &ids[start_len..];
-            let mut output = tokenizer
-                .decode(generated_ids, false)
-                .map_err(|e| Error::Model(format!("Failed to decode output: {e}")))?;
-
-            // Manually remove the EOS token if it's present at the end
-            if let Some(stripped) = output.strip_suffix("<|endoftext|>") {
-                output = stripped.to_string();
-            }
-
-            // Log generation metrics
-            let generation_time = start_time.elapsed();
-            let tokens_generated = ids.len() - start_len;
-            let device_name = {
-                let guard = self.inner.lock().await;
-                format!("{:?}", guard.model_loader.device())
-            };
-
-            tracing::info!(
-                model = %self.model_name,
-                device = %device_name,
-                prompt_tokens = %start_len,
-                generated_tokens = %tokens_generated,
-                generation_ms = %generation_time.as_millis(),
-                tokens_per_second = %(tokens_generated as f64 / generation_time.as_secs_f64()),
-                "Local generation completed"
-            );
-
-            Ok(output)
+            super::generation::generate_tokens(
+                self.inner.clone(),
+                &self.model_name,
+                ids,
+                eos_token_ids,
+                (*tokenizer).clone(),
+                max_tokens,
+            )
+            .await
         }
     }
 
@@ -577,5 +400,90 @@ impl Provider for LocalProvider {
 
     fn name(&self) -> &str {
         &self.model_name
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        #[cfg(not(feature = "llm-local"))]
+        {
+            return Err(Error::Config(
+                "Local provider requires 'llm-local' feature to be enabled".to_string(),
+            ));
+        }
+
+        #[cfg(feature = "llm-local")]
+        {
+            use crate::mcp_converter::McpConverter;
+
+            let system_prompt = if let Some(tools_value) = tools.as_ref() {
+                let tools_array = tools_value
+                    .as_array()
+                    .ok_or_else(|| Error::Provider("Tools must be an array".into()))?;
+
+                let tool_infos: Vec<arkavo_mcp_tools::registry::ToolInfo> = tools_array
+                    .iter()
+                    .filter_map(|t| {
+                        Some(arkavo_mcp_tools::registry::ToolInfo {
+                            name: t.get("name")?.as_str()?.to_string(),
+                            description: t.get("description")?.as_str()?.to_string(),
+                            schema: t.get("input_schema")?.clone(),
+                            category: "general".to_string(),
+                        })
+                    })
+                    .collect();
+
+                McpConverter::to_xml_prompt(&tool_infos)
+            } else {
+                String::new()
+            };
+
+            let mut modified_messages = messages.clone();
+            if !system_prompt.is_empty() {
+                if let Some(first) = modified_messages.first_mut() {
+                    if first.role == Role::System {
+                        first.content = format!("{}\n\n{}", system_prompt, first.content);
+                    } else {
+                        modified_messages.insert(
+                            0,
+                            Message {
+                                role: Role::System,
+                                content: system_prompt,
+                                images: None,
+                            },
+                        );
+                    }
+                } else {
+                    modified_messages.push(Message {
+                        role: Role::System,
+                        content: system_prompt,
+                        images: None,
+                    });
+                }
+            }
+
+            let content = self
+                .complete_with_options(modified_messages, max_tokens)
+                .await?;
+
+            let tool_calls = if tools.is_some() {
+                ToolParser::parse_xml(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            Ok(ProviderResponse {
+                content,
+                tool_calls,
+                finish_reason: None,
+            })
+        }
     }
 }

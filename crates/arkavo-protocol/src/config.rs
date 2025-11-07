@@ -6,18 +6,13 @@ use anyhow::Result;
 use arkavo_observability::config::SecureConfigProvider;
 use tracing::{info, instrument, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChatStreamingMode {
-    /// Stream individual deltas character-by-character (default)
+    /// Stream individual deltas character-by-character
     Delta,
-    /// Aggregate response and send as single coherent message
+    /// Aggregate response and send as single coherent message (default for A2A protocol)
+    #[default]
     Aggregated,
-}
-
-impl Default for ChatStreamingMode {
-    fn default() -> Self {
-        Self::Aggregated // Default to aggregated for A2A protocol
-    }
 }
 
 #[derive(Debug, Clone)]

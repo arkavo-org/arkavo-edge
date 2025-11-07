@@ -1,6 +1,6 @@
 use crate::{
-    chunker::SemanticChunker, compressor::ContextCompressor, deduplicator::Deduplicator,
-    metrics::CompressionMetrics, Result,
+    Result, chunker::SemanticChunker, compressor::ContextCompressor, deduplicator::Deduplicator,
+    metrics::CompressionMetrics,
 };
 use std::time::Instant;
 

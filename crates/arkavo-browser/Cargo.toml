@@ -1,13 +1,17 @@
 [package]
 name = "arkavo-browser"
-version = "0.33.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Browser automation and WebDriver support for Arkavo Edge"
+repository.workspace = true
 
 [dependencies]
 arkavo-mcp = { path = "../arkavo-mcp" }
-async-trait = "0.1"
+async-trait = { workspace = true }
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
-futures = "0.3"
-serde_json = "1.0"
-thiserror = "2.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "sync", "time", "io-util", "process"] }
+futures = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

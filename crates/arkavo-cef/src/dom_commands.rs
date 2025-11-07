@@ -1,3 +1,4 @@
+use crate::command_tracker::CommandTracker;
 use crate::error::{CefError, Result};
 use crate::uds::UdsTransport;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct DOMCommandBuilder {
     transport: UdsTransport,
     next_id: AtomicU32,
     rate_limiter: Arc<Semaphore>,
+    tracker: Arc<CommandTracker>,
 }
 
 impl DOMCommandBuilder {
@@ -33,7 +35,21 @@ impl DOMCommandBuilder {
             transport,
             next_id: AtomicU32::new(0),
             rate_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_COMMANDS)),
+            tracker: Arc::new(CommandTracker::new()),
         }
+    }
+
+    pub fn with_tracker(transport: UdsTransport, tracker: Arc<CommandTracker>) -> Self {
+        Self {
+            transport,
+            next_id: AtomicU32::new(0),
+            rate_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_COMMANDS)),
+            tracker,
+        }
+    }
+
+    pub fn tracker(&self) -> Arc<CommandTracker> {
+        self.tracker.clone()
     }
 
     /// Attempts to receive an event from the transport (non-blocking).
@@ -117,6 +133,10 @@ impl DOMCommandBuilder {
         let id = self.next_id();
         println!("[DEBUG] Sending command with id={id}");
 
+        self.tracker
+            .track_command(id, DOMOp::ReplaceInnerHTML as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(id, DOMOp::ReplaceInnerHTML as u8, selector, html, None)
             .await?;
@@ -127,6 +147,8 @@ impl DOMCommandBuilder {
             "[DEBUG] Received feedback: status={}, message='{}'",
             feedback.status, feedback.message
         );
+
+        self.tracker.complete_command(id).await;
 
         if feedback.status != 0 {
             eprintln!(
@@ -159,6 +181,10 @@ impl DOMCommandBuilder {
             .expect("Semaphore should never be closed");
 
         let id = self.next_id();
+        self.tracker
+            .track_command(id, DOMOp::SetAttribute as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(
                 id,
@@ -170,6 +196,8 @@ impl DOMCommandBuilder {
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
+        self.tracker.complete_command(id).await;
+
         if feedback.status != 0 {
             return Err(CefError::DomCommandFailed(feedback.message));
         }
@@ -191,11 +219,17 @@ impl DOMCommandBuilder {
             .expect("Semaphore should never be closed");
 
         let id = self.next_id();
+        self.tracker
+            .track_command(id, DOMOp::SetStyle as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(id, DOMOp::SetStyle as u8, selector, value, Some(property))
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
+        self.tracker.complete_command(id).await;
+
         if feedback.status != 0 {
             return Err(CefError::DomCommandFailed(feedback.message));
         }
@@ -217,11 +251,17 @@ impl DOMCommandBuilder {
             .expect("Semaphore should never be closed");
 
         let id = self.next_id();
+        self.tracker
+            .track_command(id, DOMOp::SetTextContent as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(id, DOMOp::SetTextContent as u8, selector, text, None)
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
+        self.tracker.complete_command(id).await;
+
         if feedback.status != 0 {
             return Err(CefError::DomCommandFailed(feedback.message));
         }
@@ -241,11 +281,17 @@ impl DOMCommandBuilder {
             .expect("Semaphore should never be closed");
 
         let id = self.next_id();
+        self.tracker
+            .track_command(id, DOMOp::RemoveNode as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(id, DOMOp::RemoveNode as u8, selector, "", None)
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
+        self.tracker.complete_command(id).await;
+
         if feedback.status != 0 {
             return Err(CefError::DomCommandFailed(feedback.message));
         }
@@ -265,6 +311,10 @@ impl DOMCommandBuilder {
             .expect("Semaphore should never be closed");
 
         let id = self.next_id();
+        self.tracker
+            .track_command(id, DOMOp::AddEventListener as u8, selector.to_string())
+            .await;
+
         self.transport
             .send_command(
                 id,
@@ -276,6 +326,8 @@ impl DOMCommandBuilder {
             .await?;
 
         let feedback = self.transport.recv_feedback().await?;
+        self.tracker.complete_command(id).await;
+
         if feedback.status != 0 {
             return Err(CefError::DomCommandFailed(feedback.message));
         }

@@ -49,7 +49,7 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 
 # Random number generation
-rand = "0.8"
+rand = { workspace = true }
 
 # Regular expressions for ANSI code stripping
 regex = { workspace = true }
@@ -58,7 +58,7 @@ regex = { workspace = true }
 base64 = { workspace = true }
 
 # Template engine for reporting
-handlebars = "6.3"
+handlebars = { workspace = true }
 
 # Test utilities
 async-trait = { workspace = true }
@@ -73,10 +73,6 @@ jsonschema = { workspace = true }
 # System calls (Unix only)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[[bin]]
-name = "test_swift_discovery"
-path = "src/bin/test_swift_discovery.rs"
 
 [build-dependencies]
 cc = "1.0"

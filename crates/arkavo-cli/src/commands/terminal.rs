@@ -26,8 +26,8 @@ fn get_or_create_runtime() -> &'static Runtime {
 }
 
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
-    // Try in-process MCP first on macOS with test-harness feature
-    #[cfg(all(target_os = "macos", feature = "test-harness"))]
+    // Try in-process MCP first on macOS with mcp-tools feature
+    #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
     {
         let result = McpConnection::new_in_process();
         match result {
@@ -186,6 +186,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut messages_clone = messages;
 
     // Spawn LLM processing task
+    // Note: Terminal UI uses direct streaming for real-time UX
+    // Router quality gate integration deferred until async validation available
     let llm_handle = runtime.spawn(async move {
         if SHOW_DEBUG.load(Ordering::Relaxed) {
             eprintln!("[LLM Task] Started, waiting for messages...");

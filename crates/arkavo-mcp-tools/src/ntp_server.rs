@@ -124,8 +124,9 @@ impl NtpServer {
         info!("Stopping NTP server...");
         self.running.store(false, Ordering::SeqCst);
 
-        if let Some(handle) = self.task_handle.write().await.take() {
-            let _ = handle.await;
+        let handle = self.task_handle.write().await.take();
+        if let Some(h) = handle {
+            let _ = h.await;
         }
     }
 

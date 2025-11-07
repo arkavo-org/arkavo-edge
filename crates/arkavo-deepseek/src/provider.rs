@@ -98,6 +98,15 @@ impl DeepSeekProvider {
         self
     }
 
+    /// Complete with tool support (exposes lower-level client API)
+    pub async fn complete_with_tools(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Option<Vec<crate::types::Tool>>,
+    ) -> LlmResult<crate::types::ChatCompletionResponse> {
+        self.client.complete(messages, tools, None, None).await
+    }
+
     /// Convert messages to DeepSeek format
     fn convert_messages(&self, messages: Vec<Message>) -> Vec<ChatMessage> {
         messages

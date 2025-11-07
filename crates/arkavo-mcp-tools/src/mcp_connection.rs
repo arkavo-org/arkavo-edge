@@ -3,6 +3,9 @@ use crate::{
     filesystem::FileSystemKit,
     git::GitStatusKit,
     github::GitHubPrListKit,
+    github_org_knowledge::{
+        GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
+    },
     server::Tool,
     state::QueryStateKit,
     tui::{interaction::TuiInteractionKit, keyboard::TuiKeyboardKit, screenshot::TuiScreenshotKit},
@@ -57,6 +60,24 @@ impl McpConnection {
             Arc::new(CodeAnalysisKit::new()),
         );
         tools.insert("query_state".to_string(), Arc::new(QueryStateKit::new()));
+
+        // GitHub org knowledge tools
+        tools.insert(
+            "github_org_repos".to_string(),
+            Arc::new(GitHubOrgReposTool::new()),
+        );
+        tools.insert(
+            "github_related_issues".to_string(),
+            Arc::new(GitHubRelatedIssuesTool::new()),
+        );
+        tools.insert(
+            "github_ci_status".to_string(),
+            Arc::new(GitHubCiStatusTool::new()),
+        );
+        tools.insert(
+            "github_org_overview".to_string(),
+            Arc::new(GitHubOrgOverviewTool::new()),
+        );
 
         // TUI tools (work on all platforms with terminal)
         tools.insert("tui_keyboard".to_string(), Arc::new(TuiKeyboardKit::new()));

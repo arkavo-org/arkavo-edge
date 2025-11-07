@@ -5,6 +5,9 @@ use async_trait::async_trait;
 pub mod web_renderer;
 
 #[cfg(feature = "cef-ui")]
+pub mod async_cef_renderer;
+
+#[cfg(feature = "cef-ui")]
 pub mod cef_renderer;
 
 #[async_trait]

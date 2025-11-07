@@ -1,8 +1,13 @@
 //! Adapter to use arkavo-deepseek provider with arkavo-llm
 
-use crate::{Error, Message, Provider, Result, Role, StreamResponse};
-use arkavo_deepseek::{DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider};
+use crate::tool_parser::ParsedToolCall;
+use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
+use arkavo_deepseek::{
+    ChatMessage, DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider, MessageContent, Tool,
+    ToolFunction,
+};
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio_stream::Stream;
 
 /// DeepSeek provider adapter for arkavo-llm
@@ -54,18 +59,22 @@ impl DeepSeekProvider {
     }
 }
 
-/// Convert arkavo-llm messages to arkavo-deepseek messages
-fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<arkavo_deepseek::Message> {
+/// Convert arkavo-llm messages to arkavo-deepseek ChatMessage
+fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
     messages
         .into_iter()
-        .map(|msg| arkavo_deepseek::Message {
+        .map(|msg| ChatMessage {
             role: match msg.role {
-                Role::System => arkavo_deepseek::MessageRole::System,
-                Role::User => arkavo_deepseek::MessageRole::User,
-                Role::Assistant => arkavo_deepseek::MessageRole::Assistant,
+                Role::System => arkavo_deepseek::Role::System,
+                Role::User => arkavo_deepseek::Role::User,
+                Role::Assistant => arkavo_deepseek::Role::Assistant,
             },
-            content: msg.content,
-            images: msg.images,
+            content: MessageContent::Text {
+                content: msg.content,
+            },
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
         })
         .collect()
 }
@@ -87,11 +96,9 @@ impl Provider for DeepSeekProvider {
     ) -> Result<String> {
         let deepseek_messages = convert_messages_to_deepseek(messages);
 
-        // Use the arkavo-deepseek Provider trait
-        use arkavo_deepseek::Provider as DeepSeekProviderTrait;
-
-        self.inner
-            .complete(deepseek_messages)
+        let response = self
+            .inner
+            .complete_with_tools(deepseek_messages, None)
             .await
             .map_err(|e| match e {
                 arkavo_deepseek::DeepSeekError::ConfigError { message } => Error::Config(message),
@@ -103,27 +110,45 @@ impl Provider for DeepSeekProvider {
                     Error::Provider(message.unwrap_or_else(|| "Rate limited".to_string()))
                 }
                 arkavo_deepseek::DeepSeekError::AuthenticationFailed { message } => {
-                    Error::Provider(format!("Authentication failed: {}", message))
+                    Error::Provider(format!("Authentication failed: {message}"))
                 }
                 arkavo_deepseek::DeepSeekError::ModelNotFound { model } => {
-                    Error::Provider(format!("Model not found: {}", model))
+                    Error::Provider(format!("Model not found: {model}"))
                 }
                 _ => Error::Provider(e.to_string()),
-            })
+            })?;
+
+        response
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
+            .ok_or_else(|| Error::Provider("No content in response".into()))
     }
 
     async fn stream(
         &self,
         messages: Vec<Message>,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        let deepseek_messages = convert_messages_to_deepseek(messages);
+        // Convert to provider Message format for stream
+        let provider_messages: Vec<arkavo_deepseek::provider::Message> = messages
+            .into_iter()
+            .map(|msg| arkavo_deepseek::provider::Message {
+                role: match msg.role {
+                    Role::System => arkavo_deepseek::provider::MessageRole::System,
+                    Role::User => arkavo_deepseek::provider::MessageRole::User,
+                    Role::Assistant => arkavo_deepseek::provider::MessageRole::Assistant,
+                },
+                content: msg.content,
+                images: msg.images,
+            })
+            .collect();
 
         // Use the arkavo-deepseek Provider trait
         use arkavo_deepseek::Provider as DeepSeekProviderTrait;
 
         let deepseek_stream = self
             .inner
-            .stream(deepseek_messages)
+            .stream(provider_messages)
             .await
             .map_err(|e| match e {
                 arkavo_deepseek::DeepSeekError::ConfigError { message } => Error::Config(message),
@@ -153,5 +178,108 @@ impl Provider for DeepSeekProvider {
         // Use the arkavo-deepseek Provider trait
         use arkavo_deepseek::Provider as DeepSeekProviderTrait;
         self.inner.name()
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        _max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse> {
+        let deepseek_messages = convert_messages_to_deepseek(messages);
+
+        let tool_defs = tools.and_then(|t| Self::convert_tools_to_deepseek(&t).ok());
+
+        let response = self
+            .inner
+            .complete_with_tools(deepseek_messages, tool_defs)
+            .await
+            .map_err(|e| match e {
+                arkavo_deepseek::DeepSeekError::ConfigError { message } => Error::Config(message),
+                arkavo_deepseek::DeepSeekError::NetworkError { message } => {
+                    Error::Provider(message)
+                }
+                arkavo_deepseek::DeepSeekError::StreamError { message } => Error::Stream(message),
+                arkavo_deepseek::DeepSeekError::RateLimited { message, .. } => {
+                    Error::Provider(message.unwrap_or_else(|| "Rate limited".to_string()))
+                }
+                arkavo_deepseek::DeepSeekError::AuthenticationFailed { message } => {
+                    Error::Provider(format!("Authentication failed: {message}"))
+                }
+                arkavo_deepseek::DeepSeekError::ModelNotFound { model } => {
+                    Error::Provider(format!("Model not found: {model}"))
+                }
+                _ => Error::Provider(e.to_string()),
+            })?;
+
+        let first_choice = response
+            .choices
+            .first()
+            .ok_or_else(|| Error::Provider("No choices in response".into()))?;
+
+        let parsed_tool_calls = first_choice
+            .message
+            .tool_calls
+            .as_ref()
+            .map(|calls| {
+                calls
+                    .iter()
+                    .filter_map(|tc| {
+                        let args: Value = serde_json::from_str(&tc.function.arguments).ok()?;
+                        Some(ParsedToolCall {
+                            tool_name: tc.function.name.clone(),
+                            arguments: args,
+                            call_id: Some(tc.id.clone()),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let finish_reason = first_choice.finish_reason.clone();
+
+        Ok(ProviderResponse {
+            content: first_choice.message.content.clone().unwrap_or_default(),
+            tool_calls: parsed_tool_calls,
+            finish_reason,
+        })
+    }
+}
+
+impl DeepSeekProvider {
+    fn convert_tools_to_deepseek(tools_json: &Value) -> Result<Vec<Tool>> {
+        let tools_array = tools_json
+            .as_array()
+            .ok_or_else(|| Error::Provider("Tools must be an array".into()))?;
+
+        tools_array
+            .iter()
+            .map(|tool| {
+                Ok(Tool {
+                    tool_type: "function".to_string(),
+                    function: ToolFunction {
+                        name: tool
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| Error::Provider("Tool missing name".into()))?
+                            .to_string(),
+                        description: tool
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| Error::Provider("Tool missing description".into()))?
+                            .to_string(),
+                        parameters: tool
+                            .get("input_schema")
+                            .cloned()
+                            .ok_or_else(|| Error::Provider("Tool missing input_schema".into()))?,
+                    },
+                    strict: None,
+                })
+            })
+            .collect()
     }
 }

@@ -6,6 +6,7 @@ use arkavo_llama_cpp::multimodal::{
     MtmdBitmap, MtmdContext, default_media_marker, encode_chunk, get_output_embeddings,
     preprocess_image_for_clip, tokenize_with_images,
 };
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits, batch_get_one_with_offset,
     batch_init_with_tokens, create_sampler_chain, decode_batch, token_to_piece,
@@ -25,6 +26,7 @@ pub(crate) fn is_debug() -> bool {
     DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 #[derive(Debug, Clone)]
 pub(crate) struct StreamingConfig {
     pub temperature: f32,
@@ -34,6 +36,7 @@ pub(crate) struct StreamingConfig {
     pub seed: u32,
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub(crate) async fn generate_tokens(
     model: Arc<LlamaModel>,
     prompt_bytes: Vec<u8>,
@@ -154,6 +157,7 @@ pub(crate) async fn generate_tokens(
     }
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> {
     if is_debug() {
         eprintln!(
@@ -193,6 +197,7 @@ fn process_input_tokens(ctx: &LlamaContext, input_tokens: &[i32]) -> Result<()> 
     Ok(())
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn validate_logits(ctx: &LlamaContext) -> Result<()> {
     let logits_ptr = ctx.get_logits_ith(-1);
     if logits_ptr.is_null() {
@@ -203,6 +208,7 @@ fn validate_logits(ctx: &LlamaContext) -> Result<()> {
     Ok(())
 }
 
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 fn send_metrics(
     start_time: Instant,
     first_token_time: Option<Instant>,
