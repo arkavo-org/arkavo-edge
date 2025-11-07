@@ -18,7 +18,7 @@ kimi = ["dep:arkavo-kimi", "dep:reqwest", "dep:log"]
 deepseek = ["dep:arkavo-deepseek", "dep:reqwest", "dep:log"]
 qwen = ["dep:arkavo-qwen", "dep:reqwest", "dep:log"]
 gemini = ["dep:arkavo-gemini", "dep:log"]
-llama-cpp = ["dep:arkavo-llama-cpp", "arkavo-llama-cpp/llama-cpp", "dep:tracing", "dep:scopeguard", "dep:tokio-util"]
+llama-cpp = ["dep:arkavo-llama-cpp", "dep:tracing", "dep:scopeguard", "dep:tokio-util"]
 snpe = ["dep:arkavo-snpe", "dep:log"]
 local = ["llm-local"]
 metal = ["candle-core/metal", "candle-transformers/metal"]
@@ -64,7 +64,7 @@ arkavo-kimi = { path = "../arkavo-kimi", optional = true }
 arkavo-deepseek = { path = "../arkavo-deepseek", optional = true }
 arkavo-qwen = { path = "../arkavo-qwen", optional = true }
 arkavo-gemini = { path = "../arkavo-gemini", optional = true }
-arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true, default-features = false }
+arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 # llama-cpp specific dependencies

@@ -1,11 +1,11 @@
 #![allow(clippy::disallowed_methods)] // Benchmarks need block_on
 
 use arkavo_llama_cpp::{
-    LlamaContext, LlamaModel, apply_chat_template, batch_get_one_with_logits,
-    batch_get_one_with_offset, create_sampler_chain, decode_batch, ffi, init_llama_logging,
-    token_to_piece, tokenize_with_model,
+    apply_chat_template, batch_get_one_with_logits, batch_get_one_with_offset,
+    create_sampler_chain, decode_batch, ffi, init_llama_logging, token_to_piece,
+    tokenize_with_model, LlamaContext, LlamaModel,
 };
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::ffi::CString;
 use std::time::Duration;
 
@@ -85,10 +85,7 @@ fn bench_tokenization(c: &mut Criterion) {
 
     let prompts = vec![
         ("short", "Hello, world!"),
-        (
-            "medium",
-            "Explain quantum computing in simple terms. What are the key principles?",
-        ),
+        ("medium", "Explain quantum computing in simple terms. What are the key principles?"),
         (
             "long",
             "Write a detailed essay about the history of artificial intelligence, covering major milestones from the Turing test to modern large language models. Discuss key breakthroughs, challenges, and future directions.",

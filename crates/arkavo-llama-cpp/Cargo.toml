@@ -1,13 +1,6 @@
 [package]
 name = "arkavo-llama-cpp"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-
-[features]
-default = ["llama-cpp"]
-llama-cpp = []
+edition = "2021"
 
 [dependencies]
 arkavo-llama-cpp-sys = { path = "../arkavo-llama-cpp-sys" }

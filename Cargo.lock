@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.38.3"
+version = "0.0.0"
 dependencies = [
  "arkavo-llama-cpp-sys",
  "criterion",
