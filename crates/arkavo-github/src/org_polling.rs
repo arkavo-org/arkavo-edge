@@ -1,3 +1,4 @@
+use crate::constants::{default_state_db_path, default_tasks_db_path};
 use crate::error::{GitHubError, Result};
 use crate::poller::{OrgPoller, OrgPollerConfig};
 use arkavo_budget::{BudgetTracker, config::BudgetConfig};
@@ -62,9 +63,7 @@ pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
         config.organizations.join(", ")
     );
 
-    let state_db_path = config
-        .state_db_path
-        .unwrap_or_else(|| PathBuf::from(".arkavo/orchestrator-org-state.db"));
+    let state_db_path = config.state_db_path.unwrap_or_else(default_state_db_path);
 
     let orchestrator = create_orchestrator(&token).await?;
 
@@ -131,7 +130,7 @@ async fn create_orchestrator(token: &str) -> Result<Arc<Orchestrator>> {
     let budget_tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await?);
     let agent_registry = Arc::new(AgentRegistry::new());
 
-    let task_store_path = PathBuf::from(".arkavo/orchestrator-tasks.db");
+    let task_store_path = default_tasks_db_path();
     let task_store = Arc::new(SqliteTaskStore::new(&task_store_path).await?)
         as Arc<dyn arkavo_protocol::task_store::TaskStore>;
     let task_executor = Arc::new(TaskExecutor::new(task_store, TaskExecutorConfig::default()));

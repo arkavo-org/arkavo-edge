@@ -6,7 +6,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 const DEFAULT_RETENTION_DAYS: i64 = 7;
-const MAX_PROCESSED_ISSUES_PER_REPO: u64 = 10000;
+const MAX_PROCESSED_ISSUES_PER_REPO: u64 = 5000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "lowercase")]
@@ -171,6 +171,12 @@ impl OrchestratorStateStore {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_task_id ON processed_issues(task_id)")
             .execute(&self.pool)
             .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_org_repo_status ON processed_issues(org, repo_name, status)",
+        )
+        .execute(&self.pool)
+        .await?;
 
         sqlx::query(
             r#"

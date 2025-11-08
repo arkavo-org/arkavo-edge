@@ -15,6 +15,8 @@ use uuid::Uuid;
 const DEFAULT_MAX_CONCURRENT_REPOS: usize = 10;
 const DEFAULT_DISCOVERY_INTERVAL_SECS: u64 = 300;
 const REPO_ERROR_THRESHOLD: u32 = 5;
+const POLLING_TIMEOUT_SECS: u64 = 600;
+const ISSUE_LOOKBACK_DAYS: i64 = 7;
 
 #[derive(Clone)]
 pub struct OrgPollerConfig {
@@ -105,11 +107,14 @@ impl OrgPoller {
         info!("Stopping OrgPoller for {}", self.org_name);
         *self.running.write().await = false;
 
-        {
-            let mut tasks = self.active_tasks.write().await;
-            for task in tasks.drain(..) {
-                task.abort();
-            }
+        let tasks = {
+            let mut tasks_guard = self.active_tasks.write().await;
+            tasks_guard.drain(..).collect::<Vec<_>>()
+        };
+
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
         }
 
         Ok(())
@@ -127,14 +132,43 @@ impl OrgPoller {
             }
 
             if last_discovery.elapsed() >= self.config.discovery_interval {
-                if let Err(e) = self.discover_and_update_repos().await {
-                    error!("Failed to discover repos for {}: {e}", self.org_name);
+                match tokio::time::timeout(
+                    Duration::from_secs(POLLING_TIMEOUT_SECS),
+                    self.discover_and_update_repos(),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        last_discovery = std::time::Instant::now();
+                    }
+                    Ok(Err(e)) => {
+                        error!("Failed to discover repos for {}: {e}", self.org_name);
+                    }
+                    Err(_) => {
+                        error!(
+                            "Discovery timeout exceeded for {} ({} seconds)",
+                            self.org_name, POLLING_TIMEOUT_SECS
+                        );
+                    }
                 }
-                last_discovery = std::time::Instant::now();
             }
 
-            if let Err(e) = self.poll_all_repos().await {
-                error!("Failed to poll repos for {}: {e}", self.org_name);
+            match tokio::time::timeout(
+                Duration::from_secs(POLLING_TIMEOUT_SECS),
+                self.poll_all_repos(),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    error!("Failed to poll repos for {}: {e}", self.org_name);
+                }
+                Err(_) => {
+                    error!(
+                        "Polling timeout exceeded for {} ({} seconds)",
+                        self.org_name, POLLING_TIMEOUT_SECS
+                    );
+                }
             }
 
             tokio::time::sleep(self.config.poll_interval).await;
@@ -176,7 +210,7 @@ impl OrgPoller {
                 let new_state = RepoState {
                     org: self.org_name.clone(),
                     repo_name: repo_info.name.clone(),
-                    last_poll_at: Utc::now() - chrono::Duration::days(7),
+                    last_poll_at: Utc::now() - chrono::Duration::days(ISSUE_LOOKBACK_DAYS),
                     issues_processed: 0,
                     issues_failed: 0,
                     last_error: None,
