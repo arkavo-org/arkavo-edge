@@ -94,7 +94,12 @@ impl OrchestratorStateStore {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
+        let db_path_str = db_path.display().to_string();
+        let db_url = if db_path_str.starts_with("file:") {
+            format!("sqlite://{db_path_str}")
+        } else {
+            format!("sqlite://{db_path_str}?mode=rwc")
+        };
 
         let pool = SqlitePool::connect(&db_url).await?;
 
