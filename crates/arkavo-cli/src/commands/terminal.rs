@@ -227,11 +227,13 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     )
                     .await
                     .map(|s| (s, true)) // true = router used
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
             } else {
                 client_clone
                     .stream(messages_clone.clone())
                     .await
                     .map(|s| (s, false)) // false = direct LLM
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
             };
 
             // Fallback to direct LLM streaming (other platforms)
@@ -239,7 +241,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let stream_result = client_clone
                 .stream(messages_clone.clone())
                 .await
-                .map(|s| (s, false));
+                .map(|s| (s, false))
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
 
             match stream_result {
                 Ok((mut stream, used_router)) => {
