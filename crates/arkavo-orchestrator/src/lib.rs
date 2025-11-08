@@ -15,7 +15,6 @@ pub mod github_operations;
 pub mod issue_analyzer;
 pub mod issue_router;
 pub mod orchestrator;
-pub mod org_poller;
 pub mod types;
 pub mod webhook;
 
@@ -28,6 +27,5 @@ pub use github_operations::{GitHubOperations, IssueUpdate};
 pub use issue_analyzer::{Complexity, IssueAnalysis, IssueAnalyzer, IssueType};
 pub use issue_router::{ExecutionStrategy, IssueRouter, Priority, RoutingDecision};
 pub use orchestrator::Orchestrator;
-pub use org_poller::{OrgPoller, OrgPollerConfig};
 pub use types::{GitHubEvent, IssueEvent, PullRequestEvent};
 pub use webhook::WebhookServer;

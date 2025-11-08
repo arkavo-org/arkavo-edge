@@ -29,9 +29,6 @@ pub enum Error {
     #[error("Memory store error: {0}")]
     Memory(#[from] arkavo_memory::error::MemoryError),
 
-    #[error("Discovery error: {0}")]
-    Discovery(#[from] arkavo_org_discovery::DiscoveryError),
-
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

@@ -55,6 +55,49 @@ enum OrchestratorSubcommand {
         labels: Option<String>,
     },
 
+    /// Poll entire GitHub organization for new issues
+    PollOrg {
+        /// Organization(s) to poll (can specify multiple)
+        #[arg(short, long, required = true)]
+        org: Vec<String>,
+
+        /// Poll interval in seconds
+        #[arg(short, long, default_value = "300")]
+        interval: u64,
+
+        /// Run once and exit (no continuous polling)
+        #[arg(long)]
+        once: bool,
+
+        /// GitHub personal access token
+        #[arg(long, env = "GITHUB_TOKEN")]
+        token: Option<String>,
+
+        /// Labels to filter issues (comma-separated)
+        #[arg(long)]
+        labels: Option<String>,
+
+        /// Regex pattern to include repositories
+        #[arg(long)]
+        repo_include: Option<String>,
+
+        /// Regex pattern to exclude repositories
+        #[arg(long)]
+        repo_exclude: Option<String>,
+
+        /// Include archived repositories
+        #[arg(long)]
+        include_archived: bool,
+
+        /// Maximum concurrent repositories to poll
+        #[arg(long, default_value = "10")]
+        max_concurrent: usize,
+
+        /// State database path
+        #[arg(long)]
+        state_db: Option<String>,
+    },
+
     /// Process a specific GitHub issue
     Process {
         /// Repository (format: owner/repo)
@@ -108,6 +151,34 @@ pub async fn run(cmd: &OrchestratorCommand) -> Result<()> {
                 labels.clone(),
             )
             .await
+        }
+        OrchestratorSubcommand::PollOrg {
+            org,
+            interval,
+            once,
+            token,
+            labels,
+            repo_include,
+            repo_exclude,
+            include_archived,
+            max_concurrent,
+            state_db,
+        } => {
+            let config = arkavo_github::OrgPollingConfig {
+                organizations: org.clone(),
+                poll_interval_secs: *interval,
+                max_concurrent_repos: *max_concurrent,
+                repo_include_pattern: repo_include.clone(),
+                repo_exclude_pattern: repo_exclude.clone(),
+                include_archived: *include_archived,
+                labels_filter: labels.clone(),
+                state_db_path: state_db.as_ref().map(|s| s.into()),
+                github_token: token.clone(),
+                run_once: *once,
+            };
+            arkavo_github::poll_organization(config)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to poll organization: {e}"))
         }
         OrchestratorSubcommand::Process { repo, issue, token } => {
             process_issue(repo.clone(), *issue, token.clone()).await

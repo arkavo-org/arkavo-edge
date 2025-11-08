@@ -49,6 +49,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-orchestrator = { path = "../arkavo-orchestrator" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
+arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }

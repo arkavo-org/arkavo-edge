@@ -51,16 +51,16 @@ impl RepoFilter {
                     return false;
                 }
 
-                if let Some(ref include) = self.include_pattern {
-                    if !include.is_match(&repo.full_name) {
-                        return false;
-                    }
+                if let Some(ref include) = self.include_pattern
+                    && !include.is_match(&repo.full_name)
+                {
+                    return false;
                 }
 
-                if let Some(ref exclude) = self.exclude_pattern {
-                    if exclude.is_match(&repo.full_name) {
-                        return false;
-                    }
+                if let Some(ref exclude) = self.exclude_pattern
+                    && exclude.is_match(&repo.full_name)
+                {
+                    return false;
                 }
 
                 true

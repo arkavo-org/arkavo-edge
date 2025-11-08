@@ -1,4 +1,4 @@
-use crate::error::{DiscoveryError, Result};
+use crate::error::{GitHubError, Result};
 use chrono::{DateTime, Duration, Utc};
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ impl OrgDiscovery {
             Octocrab::builder()
                 .personal_token(token)
                 .build()
-                .map_err(|e| DiscoveryError::Octocrab(Box::new(e)))?
+                .map_err(|e| GitHubError::Octocrab(Box::new(e)))?
         } else {
             Octocrab::default()
         };
@@ -59,26 +59,26 @@ impl OrgDiscovery {
 
     pub async fn discover_repos(&self, org: &str) -> Result<Vec<RepoInfo>> {
         if let Some(cached) = self.get_cached_repos(org).await {
-            debug!("Using cached repos for organization: {}", org);
+            debug!("Using cached repos for organization: {org}");
             return Ok(cached);
         }
 
-        info!("Discovering repositories for organization: {}", org);
+        info!("Discovering repositories for organization: {org}");
         let repos = self.fetch_all_repos(org).await?;
 
         if repos.is_empty() {
-            warn!("No repositories found for organization: {}", org);
-            return Err(DiscoveryError::NoRepositories(org.to_string()));
+            warn!("No repositories found for organization: {org}");
+            return Err(GitHubError::NoRepositories(org.to_string()));
         }
 
         self.update_cache(org, repos.clone()).await;
-        info!("Discovered {} repositories for {}", repos.len(), org);
+        info!("Discovered {} repositories for {org}", repos.len());
 
         Ok(repos)
     }
 
     pub async fn refresh_cache(&self, org: &str) -> Result<()> {
-        info!("Refreshing cache for organization: {}", org);
+        info!("Refreshing cache for organization: {org}");
         let repos = self.fetch_all_repos(org).await?;
         self.update_cache(org, repos).await;
         Ok(())
@@ -95,14 +95,13 @@ impl OrgDiscovery {
     }
 
     async fn get_cached_repos(&self, org: &str) -> Option<Vec<RepoInfo>> {
-        let cache = self.cache.read().await;
-        if let Some(cached) = cache.get(org) {
-            let age = Utc::now() - cached.cached_at;
-            if age < self.cache_ttl {
-                return Some(cached.repos.clone());
-            }
+        let cached = self.cache.read().await.get(org).cloned()?;
+        let age = Utc::now() - cached.cached_at;
+        if age < self.cache_ttl {
+            Some(cached.repos)
+        } else {
+            None
         }
-        None
     }
 
     async fn update_cache(&self, org: &str, repos: Vec<RepoInfo>) {
@@ -121,7 +120,7 @@ impl OrgDiscovery {
         let mut page = 1u32;
 
         loop {
-            debug!("Fetching page {} for organization: {}", page, org);
+            debug!("Fetching page {page} for organization: {org}");
 
             let page_repos = self
                 .github_client
@@ -133,11 +132,11 @@ impl OrgDiscovery {
                 .await
                 .map_err(|e| {
                     if e.to_string().contains("404") {
-                        DiscoveryError::OrgNotFound(org.to_string())
+                        GitHubError::OrgNotFound(org.to_string())
                     } else if e.to_string().contains("rate limit") {
-                        DiscoveryError::RateLimitExceeded(60)
+                        GitHubError::RateLimitExceeded(60)
                     } else {
-                        DiscoveryError::Octocrab(Box::new(e))
+                        GitHubError::Octocrab(Box::new(e))
                     }
                 })?;
 
@@ -151,7 +150,7 @@ impl OrgDiscovery {
                 .map(|repo| RepoInfo {
                     full_name: repo
                         .full_name
-                        .unwrap_or_else(|| format!("{}/{}", org, repo.name)),
+                        .unwrap_or_else(|| format!("{org}/{}", repo.name)),
                     owner: org.to_string(),
                     name: repo.name,
                     is_archived: repo.archived.unwrap_or(false),
@@ -196,14 +195,14 @@ mod tests {
 
         match repos {
             Ok(repos) => {
-                assert!(!repos.is_empty(), "{} should have repositories", test_org);
-                println!("Found {} repositories in {}", repos.len(), test_org);
+                assert!(!repos.is_empty(), "{test_org} should have repositories");
+                println!("Found {} repositories in {test_org}", repos.len());
                 for repo in repos.iter().take(5) {
                     println!("  - {}", repo.full_name);
                 }
             }
             Err(e) => {
-                println!("Error (expected if no token): {}", e);
+                println!("Error (expected if no token): {e}");
             }
         }
     }

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum DiscoveryError {
+pub enum GitHubError {
     #[error("GitHub API error: {0}")]
     GitHubApi(String),
 
@@ -22,6 +22,18 @@ pub enum DiscoveryError {
 
     #[error("No repositories found for organization: {0}")]
     NoRepositories(String),
+
+    #[error("Orchestrator error: {0}")]
+    Orchestrator(#[from] arkavo_orchestrator::Error),
+
+    #[error("Memory store error: {0}")]
+    Memory(#[from] arkavo_memory::error::MemoryError),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Anyhow error: {0}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
-pub type Result<T> = std::result::Result<T, DiscoveryError>;
+pub type Result<T> = std::result::Result<T, GitHubError>;

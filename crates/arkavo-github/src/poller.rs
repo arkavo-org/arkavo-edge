@@ -1,7 +1,8 @@
+use crate::discovery::OrgDiscovery;
 use crate::error::Result;
-use crate::orchestrator::Orchestrator;
+use crate::filters::RepoFilter;
 use arkavo_memory::{OrchestratorStateStore, RepoState, RepoStatus};
-use arkavo_org_discovery::{OrgDiscovery, RepoFilter};
+use arkavo_orchestrator::Orchestrator;
 use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ const DEFAULT_MAX_CONCURRENT_REPOS: usize = 10;
 const DEFAULT_DISCOVERY_INTERVAL_SECS: u64 = 300;
 const REPO_ERROR_THRESHOLD: u32 = 5;
 
+#[derive(Clone)]
 pub struct OrgPollerConfig {
     pub poll_interval: Duration,
     pub max_concurrent_repos: usize,
@@ -56,7 +58,7 @@ impl OrgPoller {
         state_db_path: PathBuf,
         config: OrgPollerConfig,
     ) -> Result<Self> {
-        let discovery = Arc::new(OrgDiscovery::new(github_token.clone())?);
+        let discovery = Arc::new(OrgDiscovery::new(github_token)?);
         let state_store = Arc::new(OrchestratorStateStore::new(&state_db_path).await?);
 
         Ok(Self {
@@ -87,7 +89,7 @@ impl OrgPoller {
         let poller_clone = Arc::new(self.clone_self());
         let handle = tokio::spawn(async move {
             if let Err(e) = poller_clone.run_polling_loop().await {
-                error!("OrgPoller error for {}: {}", poller_clone.org_name, e);
+                error!("OrgPoller error for {}: {e}", poller_clone.org_name);
             }
         });
 
@@ -100,9 +102,11 @@ impl OrgPoller {
         info!("Stopping OrgPoller for {}", self.org_name);
         *self.running.write().await = false;
 
-        let mut tasks = self.active_tasks.write().await;
-        for task in tasks.drain(..) {
-            task.abort();
+        {
+            let mut tasks = self.active_tasks.write().await;
+            for task in tasks.drain(..) {
+                task.abort();
+            }
         }
 
         Ok(())
@@ -119,13 +123,13 @@ impl OrgPoller {
 
             if last_discovery.elapsed() > self.config.discovery_interval {
                 if let Err(e) = self.discover_and_update_repos().await {
-                    error!("Failed to discover repos for {}: {}", self.org_name, e);
+                    error!("Failed to discover repos for {}: {e}", self.org_name);
                 }
                 last_discovery = std::time::Instant::now();
             }
 
             if let Err(e) = self.poll_all_repos().await {
-                error!("Failed to poll repos for {}: {}", self.org_name, e);
+                error!("Failed to poll repos for {}: {e}", self.org_name);
             }
 
             tokio::time::sleep(self.config.poll_interval).await;
@@ -205,11 +209,11 @@ impl OrgPoller {
         let mut poll_handles = Vec::new();
 
         for repo_state in active_repos {
-            let permit = semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to acquire semaphore permit: {e}"))?;
+            let permit = semaphore.clone().acquire_owned().await.map_err(|e| {
+                crate::error::GitHubError::GitHubApi(format!(
+                    "Failed to acquire semaphore permit: {e}"
+                ))
+            })?;
             let repo_clone = repo_state.clone();
             let repo_name = repo_state.repo_name.clone();
             let org_name = self.org_name.clone();
@@ -230,7 +234,7 @@ impl OrgPoller {
                 drop(permit);
 
                 if let Err(e) = result {
-                    error!("Error polling {}/{}: {}", org_name, repo_name, e);
+                    error!("Error polling {org_name}/{repo_name}: {e}");
                 }
             });
 
@@ -251,9 +255,9 @@ impl OrgPoller {
         _orchestrator: Arc<Orchestrator>,
         _labels_filter: Option<String>,
     ) -> Result<()> {
-        debug!("Polling repository: {}/{}", org, repo_state.repo_name);
+        debug!("Polling repository: {org}/{}", repo_state.repo_name);
 
-        match Self::fetch_and_process_issues(org, &repo_state, &state_store).await {
+        match Self::fetch_and_process_issues(org, &repo_state, &state_store) {
             Ok(processed_count) => {
                 repo_state.last_poll_at = Utc::now();
                 repo_state.issues_processed += processed_count;
@@ -265,13 +269,13 @@ impl OrgPoller {
 
                 if processed_count > 0 {
                     info!(
-                        "Processed {} issues from {}/{}",
-                        processed_count, org, repo_state.repo_name
+                        "Processed {processed_count} issues from {org}/{}",
+                        repo_state.repo_name
                     );
                 }
             }
             Err(e) => {
-                error!("Failed to poll {}/{}: {}", org, repo_state.repo_name, e);
+                error!("Failed to poll {org}/{}: {e}", repo_state.repo_name);
 
                 repo_state.error_count += 1;
                 repo_state.last_error = Some(e.to_string());
@@ -279,8 +283,8 @@ impl OrgPoller {
 
                 if repo_state.error_count >= REPO_ERROR_THRESHOLD {
                     warn!(
-                        "Repository {}/{} has {} errors, pausing",
-                        org, repo_state.repo_name, repo_state.error_count
+                        "Repository {org}/{} has {} errors, pausing",
+                        repo_state.repo_name, repo_state.error_count
                     );
                     repo_state.status = RepoStatus::Paused;
                     repo_state.issues_failed += 1;
@@ -293,7 +297,7 @@ impl OrgPoller {
         Ok(())
     }
 
-    async fn fetch_and_process_issues(
+    fn fetch_and_process_issues(
         _org: &str,
         _repo_state: &RepoState,
         _state_store: &OrchestratorStateStore,
