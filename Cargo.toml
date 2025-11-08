@@ -37,6 +37,7 @@ members = [
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
     "crates/arkavo-orchestrator",
+    "crates/arkavo-org-discovery",
     "crates/arkavo-cef",
     ".cargo/xtask",
 ]

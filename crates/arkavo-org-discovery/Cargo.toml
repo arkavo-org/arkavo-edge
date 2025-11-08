@@ -1,0 +1,20 @@
+[package]
+name = "arkavo-org-discovery"
+version = "0.1.0"
+edition = "2021"
+authors = ["Arkavo Team"]
+description = "GitHub organization repository discovery and enumeration"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+octocrab = "0.38"
+tokio = { version = "1.36", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+thiserror = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.6"
