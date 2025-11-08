@@ -724,6 +724,7 @@ dependencies = [
  "arkavo-llm",
  "arkavo-memory",
  "arkavo-observability",
+ "arkavo-org-discovery",
  "arkavo-protocol",
  "arkavo-router",
  "async-trait",

@@ -32,6 +32,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-memory = { path = "../arkavo-memory" }
+arkavo-org-discovery = { path = "../arkavo-org-discovery" }
 arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
 arkavo-llm = { path = "../arkavo-llm" }
 
