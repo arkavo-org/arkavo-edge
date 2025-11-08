@@ -38,3 +38,4 @@ bytemuck = { workspace = true }
 
 [dev-dependencies]
 arkavo-events = { path = "../arkavo-events" }
+tempfile = "3.9"

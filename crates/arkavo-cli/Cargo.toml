@@ -46,6 +46,10 @@ arkavo-router = { path = "../arkavo-router" }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
+arkavo-orchestrator = { path = "../arkavo-orchestrator" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
@@ -54,6 +58,7 @@ anyhow = { workspace = true }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "signal", "fs", "process"] }
 tokio-stream = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -64,6 +69,8 @@ indicatif = { workspace = true }
 tiktoken-rs = { workspace = true }
 hf-hub = { workspace = true }
 dirs = { workspace = true }
+reqwest = { workspace = true }
+axum = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

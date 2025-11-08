@@ -37,6 +37,7 @@ members = [
     "crates/arkavo-ui-core",
     "crates/arkavo-snpe",
     "crates/arkavo-orchestrator",
+    "crates/arkavo-github",
     "crates/arkavo-cef",
     ".cargo/xtask",
 ]
@@ -84,7 +85,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.38.3"
+version = "0.39.0"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Arkavo Edge Contributors"]
@@ -98,7 +99,7 @@ anyhow = "1.0.98"
 tokio = "1.45"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-clap = { version = "4.5.40", features = ["derive", "color"] }
+clap = { version = "4.5.40", features = ["derive", "color", "env"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 futures = "0.3.31"

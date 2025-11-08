@@ -4,6 +4,7 @@ pub mod dataflow;
 #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
 pub mod mcp;
 pub mod model;
+pub mod orchestrator;
 pub mod task;
 pub mod terminal;
 #[cfg(all(target_os = "macos", feature = "mcp-tools"))]
