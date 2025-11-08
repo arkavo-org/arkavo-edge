@@ -1,7 +1,7 @@
 use crate::discovery::OrgDiscovery;
 use crate::error::Result;
 use crate::filters::RepoFilter;
-use arkavo_memory::{OrchestratorStateStore, RepoState, RepoStatus};
+use arkavo_memory::{IssueProcessingStatus, OrchestratorStateStore, RepoState, RepoStatus};
 use arkavo_orchestrator::Orchestrator;
 use chrono::Utc;
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 const DEFAULT_MAX_CONCURRENT_REPOS: usize = 10;
 const DEFAULT_DISCOVERY_INTERVAL_SECS: u64 = 300;
@@ -42,6 +43,7 @@ impl Default for OrgPollerConfig {
 
 pub struct OrgPoller {
     org_name: String,
+    github_token: Option<String>,
     orchestrator: Arc<Orchestrator>,
     discovery: Arc<OrgDiscovery>,
     state_store: Arc<OrchestratorStateStore>,
@@ -58,11 +60,12 @@ impl OrgPoller {
         state_db_path: PathBuf,
         config: OrgPollerConfig,
     ) -> Result<Self> {
-        let discovery = Arc::new(OrgDiscovery::new(github_token)?);
+        let discovery = Arc::new(OrgDiscovery::new(github_token.clone())?);
         let state_store = Arc::new(OrchestratorStateStore::new(&state_db_path).await?);
 
         Ok(Self {
             org_name,
+            github_token,
             orchestrator,
             discovery,
             state_store,
@@ -220,6 +223,7 @@ impl OrgPoller {
             let state_store = self.state_store.clone();
             let orchestrator = self.orchestrator.clone();
             let labels_filter = self.config.labels_filter.clone();
+            let github_token = self.github_token.clone();
 
             let handle = tokio::spawn(async move {
                 let result = Self::poll_repository(
@@ -228,6 +232,7 @@ impl OrgPoller {
                     state_store,
                     orchestrator,
                     labels_filter,
+                    github_token,
                 )
                 .await;
 
@@ -253,11 +258,20 @@ impl OrgPoller {
         mut repo_state: RepoState,
         state_store: Arc<OrchestratorStateStore>,
         _orchestrator: Arc<Orchestrator>,
-        _labels_filter: Option<String>,
+        labels_filter: Option<String>,
+        github_token: Option<String>,
     ) -> Result<()> {
         debug!("Polling repository: {org}/{}", repo_state.repo_name);
 
-        match Self::fetch_and_process_issues(org, &repo_state, &state_store) {
+        match Self::fetch_and_process_issues(
+            org,
+            &repo_state,
+            &state_store,
+            github_token.as_deref(),
+            labels_filter.as_deref(),
+        )
+        .await
+        {
             Ok(processed_count) => {
                 repo_state.last_poll_at = Utc::now();
                 repo_state.issues_processed += processed_count;
@@ -297,17 +311,73 @@ impl OrgPoller {
         Ok(())
     }
 
-    fn fetch_and_process_issues(
-        _org: &str,
-        _repo_state: &RepoState,
-        _state_store: &OrchestratorStateStore,
+    async fn fetch_and_process_issues(
+        org: &str,
+        repo_state: &RepoState,
+        state_store: &OrchestratorStateStore,
+        github_token: Option<&str>,
+        labels_filter: Option<&str>,
     ) -> Result<u64> {
-        Ok(0)
+        let token = github_token.ok_or_else(|| {
+            crate::error::GitHubError::GitHubApi(
+                "GitHub token required for fetching issues".to_string(),
+            )
+        })?;
+
+        let issues = crate::github_api::fetch_new_issues(
+            org,
+            &repo_state.repo_name,
+            token,
+            repo_state.last_poll_at,
+            labels_filter,
+        )
+        .await?;
+
+        if issues.is_empty() {
+            return Ok(0);
+        }
+
+        let mut processed_count = 0u64;
+
+        for issue in issues {
+            let already_processed = state_store
+                .is_issue_processed(org, &repo_state.repo_name, issue.number)
+                .await?;
+
+            if already_processed {
+                debug!(
+                    "Skipping already processed issue #{} in {org}/{}",
+                    issue.number, repo_state.repo_name
+                );
+                continue;
+            }
+
+            info!(
+                "Processing issue #{}: {} in {org}/{}",
+                issue.number, issue.title, repo_state.repo_name
+            );
+
+            let task_id = Uuid::new_v4();
+            state_store
+                .mark_issue_processed(
+                    org,
+                    &repo_state.repo_name,
+                    issue.number,
+                    task_id,
+                    IssueProcessingStatus::Pending,
+                )
+                .await?;
+
+            processed_count += 1;
+        }
+
+        Ok(processed_count)
     }
 
     fn clone_self(&self) -> Self {
         Self {
             org_name: self.org_name.clone(),
+            github_token: self.github_token.clone(),
             orchestrator: self.orchestrator.clone(),
             discovery: self.discovery.clone(),
             state_store: self.state_store.clone(),

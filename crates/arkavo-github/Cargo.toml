@@ -20,6 +20,7 @@ regex.workspace = true
 
 # External dependencies
 octocrab = "0.38"
+reqwest = { workspace = true }
 
 # Workspace crates
 arkavo-orchestrator = { path = "../arkavo-orchestrator" }
