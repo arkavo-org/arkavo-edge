@@ -83,7 +83,9 @@ impl GitHubApp {
     }
 
     fn generate_jwt(&self) -> Result<String> {
-        let private_key = self.private_key.as_ref()
+        let private_key = self
+            .private_key
+            .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("GitHub App private key not available")))?;
 
         let now = Utc::now().timestamp();

@@ -332,6 +332,7 @@ dependencies = [
  "arkavo-terminal",
  "arkavo-ui-core",
  "async-trait",
+ "axum",
  "chrono",
  "clap",
  "dirs",
@@ -349,6 +350,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
+ "tracing",
  "tracing-subscriber",
  "uuid",
 ]

@@ -41,10 +41,7 @@ impl GitHubOperations {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
-            github_app,
-            client,
-        }
+        Self { github_app, client }
     }
 
     async fn get_token(&self, owner: &str, repo: &str) -> Result<String> {

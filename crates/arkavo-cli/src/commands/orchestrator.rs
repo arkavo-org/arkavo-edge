@@ -1,12 +1,16 @@
-use anyhow::{anyhow, Result};
-use arkavo_budget::BudgetTracker;
-use arkavo_events::EventWriter;
+use anyhow::{Result, anyhow};
+use arkavo_budget::{BudgetTracker, config::BudgetConfig};
+use arkavo_events::{EventWriter, writer::EventWriterConfig};
 use arkavo_orchestrator::{
     GitHubApp, GitHubOperations, Orchestrator, OrchestratorConfig, WebhookServer,
+    types::IssueAction,
 };
 use arkavo_protocol::{
-    agent_registry::AgentRegistry, mcp::McpClient, rate_limit::RateLimitConfig,
-    task_executor::TaskExecutor,
+    agent_registry::AgentRegistry,
+    mcp::McpClient,
+    rate_limit::RateLimitConfig,
+    task_executor::{TaskExecutor, TaskExecutorConfig},
+    task_store::SqliteTaskStore,
 };
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
@@ -17,6 +21,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info, warn};
+
+const MAX_IP_ENTRIES: usize = 10_000;
+const IP_ENTRY_TTL_SECONDS: u64 = 3600;
 
 #[derive(Args)]
 pub struct OrchestratorCommand {
@@ -125,8 +132,8 @@ pub async fn run(cmd: &OrchestratorCommand) -> Result<()> {
         OrchestratorSubcommand::Process { repo, issue, token } => {
             process_issue(repo.clone(), *issue, token.clone()).await
         }
-        OrchestratorSubcommand::Config => show_config().await,
-        OrchestratorSubcommand::Status => show_status().await,
+        OrchestratorSubcommand::Config => show_config(),
+        OrchestratorSubcommand::Status => show_status(),
     }
 }
 
@@ -156,28 +163,35 @@ async fn start_orchestrator(
     info!("Webhook secret: {}", config.get_masked_secret());
 
     let rate_limit_config = RateLimitConfig {
-        requests_per_second: config.rate_limit_requests_per_second,
+        max_requests_per_second: config.rate_limit_requests_per_second,
         burst_size: config.rate_limit_burst_size,
+        enabled: true,
+        max_ip_entries: MAX_IP_ENTRIES,
+        ip_entry_ttl_seconds: IP_ENTRY_TTL_SECONDS,
     };
 
     let (webhook_server, mut event_rx) =
         WebhookServer::new(config.webhook_secret.clone(), rate_limit_config);
 
-    let github_app = Arc::new(
-        GitHubApp::new(
-            config.github_app_id.clone(),
-            config.github_app_private_key.clone(),
-        )
-        .await?,
-    );
+    let github_app = Arc::new(GitHubApp::new(
+        config.github_app_id.parse()?,
+        &config.github_app_private_key,
+    )?);
 
     let github_ops = Arc::new(GitHubOperations::new(Arc::clone(&github_app)));
 
     let session_id = uuid::Uuid::new_v4().to_string();
-    let event_writer = Arc::new(EventWriter::new(10000, session_id.clone()));
-    let budget_tracker = Arc::new(BudgetTracker::new(1_000_000));
+    let event_writer = Arc::new(EventWriter::new(EventWriterConfig::default()));
+    let budget_tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await?);
     let agent_registry = Arc::new(AgentRegistry::new());
-    let task_executor = Arc::new(TaskExecutor::new());
+
+    let task_store_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".arkavo")
+        .join("orchestrator-tasks.db");
+    let task_store = Arc::new(SqliteTaskStore::new(&task_store_path).await?)
+        as Arc<dyn arkavo_protocol::task_store::TaskStore>;
+    let task_executor = Arc::new(TaskExecutor::new(task_store, TaskExecutorConfig::default()));
 
     let mcp_client = Arc::new(McpClient::new());
 
@@ -212,7 +226,7 @@ async fn start_orchestrator(
                     "Received issue event"
                 );
 
-                if let Err(e) = orchestrator_clone.handle_issue_event(issue_event).await {
+                if let Err(e) = orchestrator_clone.handle_issue_event(*issue_event).await {
                     error!(error = %e, "Failed to handle issue event");
                 }
             }
@@ -243,10 +257,18 @@ async fn start_orchestrator(
     Ok(())
 }
 
+const MAX_PROCESSED_ISSUES: usize = 1000;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct PollState {
     last_poll: DateTime<Utc>,
     processed_issues: HashSet<u64>,
+    #[serde(default = "default_max_processed")]
+    max_processed_issues: usize,
+}
+
+fn default_max_processed() -> usize {
+    MAX_PROCESSED_ISSUES
 }
 
 impl PollState {
@@ -254,6 +276,23 @@ impl PollState {
         Self {
             last_poll: Utc::now(),
             processed_issues: HashSet::new(),
+            max_processed_issues: MAX_PROCESSED_ISSUES,
+        }
+    }
+
+    fn insert_processed(&mut self, issue_number: u64) {
+        self.processed_issues.insert(issue_number);
+
+        if self.processed_issues.len() > self.max_processed_issues {
+            let to_remove: Vec<u64> = self
+                .processed_issues
+                .iter()
+                .take(self.processed_issues.len() - self.max_processed_issues)
+                .copied()
+                .collect();
+            for num in to_remove {
+                self.processed_issues.remove(&num);
+            }
         }
     }
 
@@ -262,7 +301,7 @@ impl PollState {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".arkavo")
-            .join(format!("orchestrator-poll-{}.json", repo_safe))
+            .join(format!("orchestrator-poll-{repo_safe}.json"))
     }
 
     fn load(repo: &str) -> Result<Self> {
@@ -310,7 +349,9 @@ async fn poll_github(
     token: Option<String>,
     labels: Option<String>,
 ) -> Result<()> {
-    let token = token.ok_or_else(|| anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or use --token"))?;
+    let token = token.ok_or_else(|| {
+        anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or use --token")
+    })?;
 
     info!("Starting GitHub polling for repository: {}", repo);
     if once {
@@ -334,18 +375,12 @@ async fn poll_github(
                         continue;
                     }
 
-                    info!(
-                        "Processing issue #{}: {}",
-                        issue.number, issue.title
-                    );
+                    info!("Processing issue #{}: {}", issue.number, issue.title);
 
                     if let Err(e) = process_github_issue(&orchestrator, &repo, &issue).await {
-                        error!(
-                            "Failed to process issue #{}: {}",
-                            issue.number, e
-                        );
+                        error!("Failed to process issue #{}: {}", issue.number, e);
                     } else {
-                        state.processed_issues.insert(issue.number);
+                        state.insert_processed(issue.number);
                     }
                 }
 
@@ -371,7 +406,9 @@ async fn poll_github(
 }
 
 async fn process_issue(repo: String, issue_number: u64, token: Option<String>) -> Result<()> {
-    let token = token.ok_or_else(|| anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or use --token"))?;
+    let token = token.ok_or_else(|| {
+        anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or use --token")
+    })?;
 
     info!("Processing issue #{} from {}", issue_number, repo);
 
@@ -386,14 +423,22 @@ async fn process_issue(repo: String, issue_number: u64, token: Option<String>) -
 }
 
 async fn create_polling_orchestrator(token: &str) -> Result<Arc<Orchestrator>> {
-    let github_app = Arc::new(GitHubApp::new_from_token(token.to_string()).await?);
+    let github_app = Arc::new(GitHubApp::new_from_token(token.to_string())?);
     let github_ops = Arc::new(GitHubOperations::new(Arc::clone(&github_app)));
 
     let session_id = uuid::Uuid::new_v4().to_string();
-    let event_writer = Arc::new(EventWriter::new(10000, session_id.clone()));
-    let budget_tracker = Arc::new(BudgetTracker::new(1_000_000));
+    let event_writer = Arc::new(EventWriter::new(EventWriterConfig::default()));
+    let budget_tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await?);
     let agent_registry = Arc::new(AgentRegistry::new());
-    let task_executor = Arc::new(TaskExecutor::new());
+
+    let task_store_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".arkavo")
+        .join("orchestrator-tasks.db");
+    let task_store = Arc::new(SqliteTaskStore::new(&task_store_path).await?)
+        as Arc<dyn arkavo_protocol::task_store::TaskStore>;
+    let task_executor = Arc::new(TaskExecutor::new(task_store, TaskExecutorConfig::default()));
+
     let mcp_client = Arc::new(McpClient::new());
 
     let orchestrator = Arc::new(
@@ -419,52 +464,83 @@ async fn fetch_new_issues(
     since: &DateTime<Utc>,
     label_filter: Option<&str>,
 ) -> Result<Vec<GitHubIssue>> {
-    let (owner, repo_name) = parse_repo(repo)?;
-    let client = reqwest::Client::new();
+    fetch_new_issues_impl(
+        repo.to_string(),
+        token.to_string(),
+        *since,
+        label_filter.map(|s| s.to_string()),
+    )
+    .await
+}
 
-    let mut url = format!(
-        "https://api.github.com/repos/{}/{}/issues?state=open&since={}",
-        owner,
-        repo_name,
-        since.to_rfc3339()
-    );
+fn fetch_new_issues_impl(
+    repo: String,
+    token: String,
+    since: DateTime<Utc>,
+    label_filter: Option<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<GitHubIssue>>> + Send>> {
+    Box::pin(async move {
+        use reqwest::StatusCode;
+        use tokio::time::Duration;
 
-    if let Some(labels) = label_filter {
-        url.push_str(&format!("&labels={}", labels));
-    }
+        let (owner, repo_name) = parse_repo(&repo)?;
+        let client = reqwest::Client::new();
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("User-Agent", "arkavo-orchestrator")
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await?;
+        let mut url = format!(
+            "https://api.github.com/repos/{}/{}/issues?state=open&since={}",
+            owner,
+            repo_name,
+            since.to_rfc3339()
+        );
 
-    if !response.status().is_success() {
-        return Err(anyhow!(
-            "GitHub API error: {} - {}",
-            response.status(),
-            response.text().await?
-        ));
-    }
+        if let Some(labels) = &label_filter {
+            url = format!("{url}&labels={labels}");
+        }
 
-    let issues: Vec<GitHubIssue> = response.json().await?;
-    Ok(issues)
+        let response = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("User-Agent", "arkavo-orchestrator")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await?;
+
+        match response.status() {
+            StatusCode::OK => {
+                let issues: Vec<GitHubIssue> = response.json().await?;
+                Ok(issues)
+            }
+            StatusCode::FORBIDDEN => {
+                if let Some(reset) = response.headers().get("x-ratelimit-reset")
+                    && let Ok(reset_str) = reset.to_str()
+                    && let Ok(reset_time) = reset_str.parse::<i64>()
+                {
+                    let now = Utc::now().timestamp();
+                    let wait_seconds = (reset_time - now).max(0) as u64;
+                    warn!("Rate limited. Waiting {} seconds", wait_seconds);
+                    tokio::time::sleep(Duration::from_secs(wait_seconds + 1)).await;
+                    return fetch_new_issues_impl(repo, token, since, label_filter).await;
+                }
+                Err(anyhow!("GitHub API forbidden: {}", response.text().await?))
+            }
+            status => Err(anyhow!(
+                "GitHub API error: {} - {}",
+                status,
+                response.text().await?
+            )),
+        }
+    })
 }
 
 async fn fetch_issue(repo: &str, token: &str, issue_number: u64) -> Result<GitHubIssue> {
     let (owner, repo_name) = parse_repo(repo)?;
     let client = reqwest::Client::new();
 
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/issues/{}",
-        owner, repo_name, issue_number
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo_name}/issues/{issue_number}");
 
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", "arkavo-orchestrator")
         .header("Accept", "application/vnd.github+json")
         .send()
@@ -486,40 +562,69 @@ async fn process_github_issue(
     repo: &str,
     issue: &GitHubIssue,
 ) -> Result<()> {
-    use arkavo_orchestrator::{IssueEvent, types::{Issue, Repository, User}};
+    use arkavo_orchestrator::{
+        IssueEvent,
+        types::{Issue, Label, Repository, User},
+    };
 
     let (owner, repo_name) = parse_repo(repo)?;
 
     let issue_event = IssueEvent {
-        action: "opened".to_string(),
+        action: IssueAction::Opened,
         issue: Issue {
+            id: 0,
             number: issue.number,
             title: issue.title.clone(),
             body: issue.body.clone(),
             state: issue.state.clone(),
             html_url: issue.html_url.clone(),
             user: User {
-                login: "unknown".to_string(),
                 id: 0,
+                login: "unknown".to_string(),
+                user_type: "User".to_string(),
+                avatar_url: String::new(),
+                html_url: String::new(),
             },
-            labels: issue.labels.iter().map(|l| arkavo_orchestrator::types::Label {
-                name: l.name.clone(),
-            }).collect(),
+            labels: issue
+                .labels
+                .iter()
+                .map(|l| Label {
+                    id: 0,
+                    name: l.name.clone(),
+                    color: String::new(),
+                    description: None,
+                })
+                .collect(),
+            assignees: Vec::new(),
             created_at: issue.created_at.clone(),
             updated_at: issue.updated_at.clone(),
+            closed_at: None,
+            milestone: None,
         },
         repository: Repository {
+            id: 0,
             full_name: repo.to_string(),
-            name: repo_name.to_string(),
+            name: repo_name.clone(),
             owner: User {
-                login: owner.to_string(),
                 id: 0,
+                login: owner.clone(),
+                user_type: "User".to_string(),
+                avatar_url: String::new(),
+                html_url: String::new(),
             },
+            html_url: String::new(),
+            description: None,
+            default_branch: "main".to_string(),
+            language: None,
         },
         sender: User {
-            login: "polling".to_string(),
             id: 0,
+            login: "polling".to_string(),
+            user_type: "User".to_string(),
+            avatar_url: String::new(),
+            html_url: String::new(),
         },
+        assignee: None,
     };
 
     orchestrator.handle_issue_event(issue_event).await?;
@@ -530,14 +635,21 @@ fn parse_repo(repo: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = repo.split('/').collect();
     if parts.len() != 2 {
         return Err(anyhow!(
-            "Invalid repository format. Expected 'owner/repo', got '{}'",
-            repo
+            "Invalid repository format. Expected 'owner/repo', got '{repo}'"
         ));
     }
-    Ok((parts[0].to_string(), parts[1].to_string()))
+
+    let owner = parts[0].trim();
+    let repo_name = parts[1].trim();
+
+    if owner.is_empty() || repo_name.is_empty() {
+        return Err(anyhow!("Owner and repository name cannot be empty"));
+    }
+
+    Ok((owner.to_string(), repo_name.to_string()))
 }
 
-async fn show_config() -> Result<()> {
+fn show_config() -> Result<()> {
     let config = OrchestratorConfig::from_env()?;
 
     println!("Orchestrator Configuration:");
@@ -558,7 +670,7 @@ async fn show_config() -> Result<()> {
     Ok(())
 }
 
-async fn show_status() -> Result<()> {
+fn show_status() -> Result<()> {
     println!("Orchestrator Status:");
     println!("  Implementation: Phase 1-2 Complete");
     println!("  Features:");
