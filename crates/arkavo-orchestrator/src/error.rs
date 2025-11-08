@@ -26,6 +26,9 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Memory store error: {0}")]
+    Memory(#[from] arkavo_memory::error::MemoryError),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

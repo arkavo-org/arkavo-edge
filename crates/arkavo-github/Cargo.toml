@@ -1,0 +1,37 @@
+[package]
+name = "arkavo-github"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GitHub integration for Arkavo - orchestration, polling, and automation"
+
+[dependencies]
+# Workspace dependencies
+anyhow.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+
+# External dependencies
+octocrab = "0.38"
+reqwest = { workspace = true }
+
+# Workspace crates
+arkavo-orchestrator = { path = "../arkavo-orchestrator" }
+arkavo-memory = { path = "../arkavo-memory" }
+arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-events = { path = "../arkavo-events" }
+
+# Additional dependencies
+uuid = { workspace = true }
+dirs = { workspace = true }
+
+[lints]
+workspace = true
