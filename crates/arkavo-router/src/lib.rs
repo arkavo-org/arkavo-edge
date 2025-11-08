@@ -33,6 +33,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::Stream;
 
+/// Default buffer size for streaming channels
+/// Balance between memory usage and backpressure handling
+const STREAM_BUFFER_SIZE: usize = 100;
+
 /// Intelligent router for cost-optimized model selection
 pub struct Router {
     classifier: Arc<TaskClassifier>,
@@ -284,13 +288,15 @@ impl Router {
 
     /// Route with streaming and async quality validation
     /// Streams responses immediately for real-time UX, validates in background
-    /// Note: Streaming mode cannot retry on failure - use route_with_quality_gate() for retry capability
+    ///
+    /// Note: Streaming mode cannot retry on failure - use route_with_quality_gate() for retry capability.
+    /// The _max_retries parameter is kept for API compatibility with non-streaming version.
     pub async fn route_with_quality_gate_stream(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
-        _max_retries: u8,
+        _max_retries: u8, // API compatibility - streaming cannot retry once started
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let decision = self.route(task_description).await?;
         let provider = self.instantiate_provider(&decision.recommended_model)?;
@@ -300,7 +306,7 @@ impl Router {
             .await
             .map_err(|e| Error::ModelExecution(format!("Provider streaming error: {e}")))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         let model = decision.recommended_model.clone();
         let tool_infos = tool_registry.map(|r| r.list_tools());
         #[cfg(feature = "llama-cpp")]
@@ -327,6 +333,8 @@ impl Router {
                 }
             }
 
+            // Async quality validation - runs after streaming completes
+            // Future enhancement: Track validation failures for metrics/alerting
             if let Some(tools) = tool_infos {
                 let response = ProviderResponse {
                     content: accumulated.clone(),
@@ -334,21 +342,29 @@ impl Router {
                     finish_reason: Some("stop".to_string()),
                 };
 
+                // Fast validation: Check for hallucinated tools and parameter issues
                 let validator = validator::ResponseValidator::new(&tools);
                 if let Err(e) = validator.quick_validate(&response) {
-                    tracing::warn!("Async validation failed for {:?}: {}", model, e);
+                    tracing::warn!(
+                        target: "arkavo_router::quality_gate",
+                        model = ?model,
+                        error = %e,
+                        "Async validation failed - consider metrics/alerting"
+                    );
                 }
 
+                // Deep validation with LLM judge (when available)
                 #[cfg(feature = "llama-cpp")]
                 {
                     if let Ok(judge) = judge::ResponseJudge::new_gemma_4b() {
                         if let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await {
                             if !judgment.passed {
                                 tracing::warn!(
-                                    "Async judge rejected {:?}: {:?} - {}",
-                                    model,
-                                    judgment.issue_type,
-                                    judgment.reason.as_deref().unwrap_or("No reason")
+                                    target: "arkavo_router::quality_gate",
+                                    model = ?model,
+                                    issue = ?judgment.issue_type,
+                                    reason = %judgment.reason.as_deref().unwrap_or("No reason"),
+                                    "Async judge rejected response - consider metrics/alerting"
                                 );
                             }
                         }

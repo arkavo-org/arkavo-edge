@@ -213,7 +213,8 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let user_message = Message::user(user_input.clone());
             messages_clone.push(user_message);
 
-            // Try router-based streaming with quality gate first
+            // Try router-based streaming with quality gate first (Unix + mcp-tools)
+            // Router provides: cost optimization, quality validation, model escalation
             #[cfg(all(unix, feature = "mcp-tools"))]
             let stream_result = if let Some(ref router) = router {
                 let task_desc = user_input.clone();
@@ -225,15 +226,15 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         3,
                     )
                     .await
-                    .map(|s| (s, true))
+                    .map(|s| (s, true)) // true = router used
             } else {
                 client_clone
                     .stream(messages_clone.clone())
                     .await
-                    .map(|s| (s, false))
+                    .map(|s| (s, false)) // false = direct LLM
             };
 
-            // Fallback to direct streaming without router on non-Unix or without mcp-tools
+            // Fallback to direct LLM streaming (other platforms)
             #[cfg(not(all(unix, feature = "mcp-tools")))]
             let stream_result = client_clone
                 .stream(messages_clone.clone())
@@ -241,7 +242,17 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 .map(|s| (s, false));
 
             match stream_result {
-                Ok((mut stream, _used_router)) => {
+                Ok((mut stream, used_router)) => {
+                    if SHOW_DEBUG.load(Ordering::Relaxed) {
+                        eprintln!(
+                            "[LLM Task] Streaming via {}",
+                            if used_router {
+                                "Router Quality Gate"
+                            } else {
+                                "Direct LLM"
+                            }
+                        );
+                    }
                     let mut full_response = String::new();
 
                     // Send start streaming signal
