@@ -282,136 +282,82 @@ impl Router {
         ))
     }
 
-    /// Route with streaming and hybrid quality validation
-    /// Streams responses immediately for real-time UX, validates after completion,
-    /// and retries with escalated model if validation fails
+    /// Route with streaming and async quality validation
+    /// Streams responses immediately for real-time UX, validates in background
+    /// Note: Streaming mode cannot retry on failure - use route_with_quality_gate() for retry capability
     pub async fn route_with_quality_gate_stream(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
-        max_retries: u8,
+        _max_retries: u8,
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        let mut current_decision = self.route(task_description).await?;
+        let decision = self.route(task_description).await?;
+        let provider = self.instantiate_provider(&decision.recommended_model)?;
 
-        for attempt in 0..max_retries {
-            let provider = self.instantiate_provider(&current_decision.recommended_model)?;
+        let stream = provider
+            .stream(messages.clone())
+            .await
+            .map_err(|e| Error::ModelExecution(format!("Provider streaming error: {e}")))?;
 
-            let mut stream = provider
-                .stream(messages.clone())
-                .await
-                .map_err(|e| Error::ModelExecution(format!("Provider streaming error: {e}")))?;
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let model = decision.recommended_model.clone();
+        let tool_infos = tool_registry.map(|r| r.list_tools());
+        #[cfg(feature = "llama-cpp")]
+        let task_desc = task_description.to_string();
 
-            let mut accumulated_content = String::new();
-            let mut chunks = Vec::new();
+        tokio::spawn(async move {
+            let mut stream = stream;
+            let mut accumulated = String::new();
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(chunk) => {
-                        accumulated_content.push_str(&chunk.content);
-                        chunks.push(Ok(chunk));
-                    }
-                    Err(e) => {
-                        if attempt + 1 < max_retries {
-                            current_decision.recommended_model =
-                                self.upgrade_model(&current_decision.recommended_model);
-                            tracing::warn!(
-                                "Stream error on attempt {}/{}, upgrading to {:?}: {}",
-                                attempt + 1,
-                                max_retries,
-                                current_decision.recommended_model,
-                                e
-                            );
+                        accumulated.push_str(&chunk.content);
+                        if tx.send(Ok(chunk)).await.is_err() {
                             break;
                         }
-                        return Err(Error::ModelExecution(format!("Stream error: {e}")));
+                    }
+                    Err(e) => {
+                        let _ = tx
+                            .send(Err(Error::ModelExecution(format!("Stream error: {e}"))))
+                            .await;
+                        break;
                     }
                 }
             }
 
-            if chunks.is_empty() {
-                continue;
-            }
+            if let Some(tools) = tool_infos {
+                let response = ProviderResponse {
+                    content: accumulated.clone(),
+                    tool_calls: Vec::new(),
+                    finish_reason: Some("stop".to_string()),
+                };
 
-            let synthetic_response = ProviderResponse {
-                content: accumulated_content,
-                tool_calls: Vec::new(),
-                finish_reason: Some("stop".to_string()),
-            };
-
-            if let Some(registry) = tool_registry {
-                let tool_infos = registry.list_tools();
-                let validator = validator::ResponseValidator::new(&tool_infos);
-
-                if let Err(validation_error) = validator.quick_validate(&synthetic_response) {
-                    tracing::warn!(
-                        "Post-stream validation failed on attempt {}/{}: {}",
-                        attempt + 1,
-                        max_retries,
-                        validation_error
-                    );
-
-                    if attempt + 1 < max_retries {
-                        current_decision.recommended_model =
-                            self.upgrade_model(&current_decision.recommended_model);
-                        tracing::info!(
-                            "Upgrading to {:?} due to validation failure",
-                            current_decision.recommended_model
-                        );
-                        continue;
-                    }
-                    return Err(Error::ModelExecution(format!(
-                        "Max retries exceeded. Last error: {validation_error}"
-                    )));
+                let validator = validator::ResponseValidator::new(&tools);
+                if let Err(e) = validator.quick_validate(&response) {
+                    tracing::warn!("Async validation failed for {:?}: {}", model, e);
                 }
 
                 #[cfg(feature = "llama-cpp")]
                 {
-                    // Try to create judge, but gracefully degrade if model unavailable
-                    match judge::ResponseJudge::new_gemma_4b() {
-                        Ok(judge) => {
-                            let judgment = judge
-                                .evaluate(task_description, &synthetic_response, &tool_infos)
-                                .await?;
-
+                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b() {
+                        if let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await {
                             if !judgment.passed {
                                 tracing::warn!(
-                                    "Judge rejected streamed response on attempt {}/{}: {:?} - {}",
-                                    attempt + 1,
-                                    max_retries,
+                                    "Async judge rejected {:?}: {:?} - {}",
+                                    model,
                                     judgment.issue_type,
-                                    judgment.reason.as_deref().unwrap_or("No reason provided")
+                                    judgment.reason.as_deref().unwrap_or("No reason")
                                 );
-
-                                if attempt + 1 < max_retries {
-                                    current_decision.recommended_model =
-                                        self.upgrade_model(&current_decision.recommended_model);
-                                    tracing::info!(
-                                        "Upgrading to {:?} after judge rejection",
-                                        current_decision.recommended_model
-                                    );
-                                    continue;
-                                }
-                                return Err(Error::ModelExecution(format!(
-                                    "Max retries exceeded. Judge rejected: {:?}",
-                                    judgment.issue_type
-                                )));
                             }
-                        }
-                        Err(e) => {
-                            // Judge unavailable, skip LLM-based validation
-                            tracing::debug!("Judge validation skipped (model unavailable): {}", e);
                         }
                     }
                 }
             }
+        });
 
-            return Ok(Box::new(tokio_stream::iter(chunks)));
-        }
-
-        Err(Error::ModelExecution(
-            "Max retries exceeded without successful stream".to_string(),
-        ))
+        Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
 
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {

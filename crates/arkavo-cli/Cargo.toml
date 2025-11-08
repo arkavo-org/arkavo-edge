@@ -15,18 +15,18 @@ categories = ["command-line-utilities", "development-tools"]
 # Default features - portable across all platforms with pure Rust mDNS
 default = ["memory", "mdns", "mcp-tools", "llm-remote", "llama-cpp", "web-ui"]
 # Default features for Windows (no C++ dependencies)
-windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows", "web-ui"]
-mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools"]
+windows-default = ["memory", "mdns", "llm-remote", "arkavo-agui/windows", "arkavo-router/windows", "web-ui"]
+mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "arkavo-router/gemini"]
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
 local = ["arkavo-llm/local", "arkavo-dataflow/llm-local", "arkavo-terminal/llm-local"]
 metal = ["arkavo-llm/metal"]
-llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote"]
+llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote"]
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
-gemini = ["arkavo-llm/gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp"]
+gemini = ["arkavo-llm/gemini", "arkavo-router/gemini"]
+llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/llama-cpp", "arkavo-router/llama-cpp"]
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
@@ -42,7 +42,7 @@ arkavo-mcp-runtime = { path = "../arkavo-mcp-runtime" }
 arkavo-dataflow = { path = "../arkavo-dataflow", default-features = false, features = ["nl", "sandbox"] }
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-repo = { path = "../arkavo-repo" }
-arkavo-router = { path = "../arkavo-router" }
+arkavo-router = { path = "../arkavo-router", default-features = false }
 arkavo-agui = { path = "../arkavo-agui", default-features = false, features = ["mdns"] }
 arkavo-ui-core = { path = "../arkavo-ui-core", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
