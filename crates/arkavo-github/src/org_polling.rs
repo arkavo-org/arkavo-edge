@@ -45,28 +45,26 @@ impl Default for OrgPollingConfig {
 }
 
 pub async fn poll_organization(config: OrgPollingConfig) -> Result<()> {
-    let token = config.github_token.ok_or_else(|| {
-        GitHubError::GitHubApi(
-            "GitHub token required. Set GITHUB_TOKEN environment variable or use --token"
-                .to_string(),
-        )
-    })?;
-
     if config.organizations.is_empty() {
         return Err(GitHubError::GitHubApi(
             "At least one organization must be specified".to_string(),
         ));
     }
 
+    let token = config.github_token.ok_or_else(|| {
+        GitHubError::GitHubApi(
+            "GitHub token required. Set GITHUB_TOKEN environment variable or use --token.\nNote: Unauthenticated access is limited to 60 requests/hour.".to_string(),
+        )
+    })?;
+
     info!(
         "Starting organization polling for: {}",
         config.organizations.join(", ")
     );
 
-    let state_db_path = config.state_db_path.unwrap_or_else(|| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".arkavo/orchestrator-org-state.db")
-    });
+    let state_db_path = config
+        .state_db_path
+        .unwrap_or_else(|| PathBuf::from(".arkavo/orchestrator-org-state.db"));
 
     let orchestrator = create_orchestrator(&token).await?;
 
@@ -133,10 +131,7 @@ async fn create_orchestrator(token: &str) -> Result<Arc<Orchestrator>> {
     let budget_tracker = Arc::new(BudgetTracker::new(BudgetConfig::default()).await?);
     let agent_registry = Arc::new(AgentRegistry::new());
 
-    let task_store_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".arkavo")
-        .join("orchestrator-tasks.db");
+    let task_store_path = PathBuf::from(".arkavo/orchestrator-tasks.db");
     let task_store = Arc::new(SqliteTaskStore::new(&task_store_path).await?)
         as Arc<dyn arkavo_protocol::task_store::TaskStore>;
     let task_executor = Arc::new(TaskExecutor::new(task_store, TaskExecutorConfig::default()));

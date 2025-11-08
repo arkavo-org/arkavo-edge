@@ -116,7 +116,9 @@ impl OrgPoller {
     }
 
     async fn run_polling_loop(&self) -> Result<()> {
-        let mut last_discovery = std::time::Instant::now();
+        let mut last_discovery = std::time::Instant::now()
+            .checked_sub(self.config.discovery_interval)
+            .unwrap_or_else(std::time::Instant::now);
 
         loop {
             if !*self.running.read().await {
@@ -124,7 +126,7 @@ impl OrgPoller {
                 break;
             }
 
-            if last_discovery.elapsed() > self.config.discovery_interval {
+            if last_discovery.elapsed() >= self.config.discovery_interval {
                 if let Err(e) = self.discover_and_update_repos().await {
                     error!("Failed to discover repos for {}: {e}", self.org_name);
                 }
@@ -174,7 +176,7 @@ impl OrgPoller {
                 let new_state = RepoState {
                     org: self.org_name.clone(),
                     repo_name: repo_info.name.clone(),
-                    last_poll_at: Utc::now(),
+                    last_poll_at: Utc::now() - chrono::Duration::days(7),
                     issues_processed: 0,
                     issues_failed: 0,
                     last_error: None,
@@ -318,11 +320,13 @@ impl OrgPoller {
         github_token: Option<&str>,
         labels_filter: Option<&str>,
     ) -> Result<u64> {
-        let token = github_token.ok_or_else(|| {
-            crate::error::GitHubError::GitHubApi(
-                "GitHub token required for fetching issues".to_string(),
-            )
-        })?;
+        let Some(token) = github_token else {
+            debug!(
+                "No GitHub token provided, skipping issue fetching for {org}/{}",
+                repo_state.repo_name
+            );
+            return Ok(0);
+        };
 
         let issues = crate::github_api::fetch_new_issues(
             org,
