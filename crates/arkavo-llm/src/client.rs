@@ -43,6 +43,8 @@ impl LlmClient {
             #[cfg(feature = "gemini")]
             "gemini" => {
                 use crate::GeminiProvider;
+                // Try to create Gemini provider, but return error if API key is missing
+                // The error message now indicates this is optional and will fallback
                 let provider = Box::new(GeminiProvider::new()?);
                 Ok(Self::new(provider))
             }
