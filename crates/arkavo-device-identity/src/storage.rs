@@ -356,4 +356,90 @@ mod tests {
 
         let _ = delete();
     }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_malformed_device_id() {
+        use std::fs;
+
+        let _ = delete();
+
+        #[cfg(target_os = "macos")]
+        let storage_path = {
+            let mut path = dirs::home_dir().unwrap();
+            path.push("Library/Application Support/arkavo/device_id");
+            path
+        };
+
+        #[cfg(target_os = "linux")]
+        let storage_path = {
+            let mut path = dirs::data_local_dir().unwrap();
+            path.push("arkavo/device_id");
+            path
+        };
+
+        fs::write(&storage_path, "invalid_hex_data").expect("Failed to write malformed data");
+
+        let result = get();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DeviceIdentityError::InvalidFormat(_)
+        ));
+
+        fs::remove_file(&storage_path).ok();
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_wrong_size_device_id() {
+        use std::fs;
+
+        let _ = delete();
+
+        #[cfg(target_os = "macos")]
+        let storage_path = {
+            let mut path = dirs::home_dir().unwrap();
+            path.push("Library/Application Support/arkavo/device_id");
+            path
+        };
+
+        #[cfg(target_os = "linux")]
+        let storage_path = {
+            let mut path = dirs::data_local_dir().unwrap();
+            path.push("arkavo/device_id");
+            path
+        };
+
+        let wrong_size_data = hex::encode(&[0u8; 8]);
+        fs::write(&storage_path, wrong_size_data).expect("Failed to write wrong size data");
+
+        let result = get();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, DeviceIdentityError::InvalidFormat(_)));
+        assert!(err.to_string().contains("Expected 16 bytes"));
+
+        fs::remove_file(&storage_path).ok();
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_delete_nonexistent() {
+        let _ = delete();
+
+        let result = delete();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn test_get_nonexistent() {
+        let _ = delete();
+
+        let result = get().expect("get() should not fail");
+        assert!(result.is_none());
+
+        let _ = delete();
+    }
 }

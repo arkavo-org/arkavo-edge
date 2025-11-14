@@ -41,7 +41,6 @@ members = [
     "crates/arkavo-cef",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
-    "crates/arkavo-dpop",
     ".cargo/xtask",
 ]
 default-members = [
@@ -84,14 +83,13 @@ default-members = [
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
-    "crates/arkavo-dpop",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.39.0"
+version = "0.40.0"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Arkavo Edge Contributors"]

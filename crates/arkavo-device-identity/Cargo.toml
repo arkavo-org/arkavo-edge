@@ -1,14 +1,14 @@
 [package]
 name = "arkavo-device-identity"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Device-bound identity management for arkavo-edge"
 
 [dependencies]
-uuid = { version = "1.11", features = ["v4", "serde"] }
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
+uuid.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.1"

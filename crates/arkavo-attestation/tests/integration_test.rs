@@ -1,7 +1,9 @@
 use arkavo_attestation::{
-    detect_platform_code, evidence, platform, AttestationType, SecurityState,
+    AttestationType, SecurityState, detect_platform_code, evidence, platform,
 };
-use arkavo_device_identity::{get_or_create_device_id, AgentIdentity};
+use arkavo_device_identity::{AgentIdentity, get_or_create_device_id};
+
+const TEST_APP_VERSION: &str = "0.38.2";
 
 #[test]
 fn test_end_to_end_device_attestation_flow() {
@@ -12,7 +14,7 @@ fn test_end_to_end_device_attestation_flow() {
     println!("✓ Device ID: {}", device_id);
 
     println!("\nStep 2: Create agent identity");
-    let agent_identity = AgentIdentity::with_device_id(device_id, "0.38.2".to_string());
+    let agent_identity = AgentIdentity::with_device_id(device_id, TEST_APP_VERSION.to_string());
     println!("✓ Agent identity created");
     println!("  - Device ID: {}", agent_identity.device_id);
     println!("  - App version: {}", agent_identity.app_version);
@@ -63,7 +65,7 @@ fn test_end_to_end_device_attestation_flow() {
 
     assert_eq!(evidence.device_id, device_id);
     assert_eq!(evidence.platform_code, platform_code);
-    assert_eq!(evidence.app_version, "0.38.2");
+    assert_eq!(evidence.app_version, TEST_APP_VERSION);
     assert!(!evidence.evidence_blob.is_empty());
     assert!(matches!(
         evidence.platform_state,
@@ -91,7 +93,7 @@ fn test_attestation_freshness() {
     println!("\n=== Testing Attestation Freshness ===\n");
 
     let device_id = get_or_create_device_id().expect("Failed to get device ID");
-    let identity = AgentIdentity::with_device_id(device_id, "0.38.2".to_string());
+    let identity = AgentIdentity::with_device_id(device_id, TEST_APP_VERSION.to_string());
     let platform_code = detect_platform_code();
     let attestor = platform::create_attestor(identity, platform_code);
 
@@ -129,7 +131,7 @@ fn test_security_state_detection() {
     println!("\n=== Testing Security State Detection ===\n");
 
     let device_id = get_or_create_device_id().expect("Failed to get device ID");
-    let identity = AgentIdentity::with_device_id(device_id, "0.38.2".to_string());
+    let identity = AgentIdentity::with_device_id(device_id, TEST_APP_VERSION.to_string());
     let platform_code = detect_platform_code();
     let attestor = platform::create_attestor(identity, platform_code);
 

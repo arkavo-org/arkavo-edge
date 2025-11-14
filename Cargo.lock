@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -209,18 +209,17 @@ dependencies = [
 
 [[package]]
 name = "arkavo-attestation"
-version = "0.1.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-device-identity",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
- "tss-esapi",
 ]
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -239,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-bench"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-mcp",
  "arkavo-workspace",
@@ -253,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -266,7 +265,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -286,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-observability",
  "async-trait",
@@ -303,7 +302,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-claude-code"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-authorization",
@@ -324,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -375,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-code-search"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -395,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-llm",
  "serde",
@@ -405,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -436,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -453,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -472,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-device-identity"
-version = "0.1.0"
+version = "0.40.0"
 dependencies = [
  "dirs 5.0.1",
  "hex",
@@ -486,23 +485,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "arkavo-dpop"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "ecdsa",
- "jsonwebtoken",
- "p256",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.17",
- "uuid",
-]
-
-[[package]]
 name = "arkavo-events"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -515,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "bytes",
  "dashmap",
@@ -535,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "git2",
  "tempfile",
@@ -544,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-github"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -567,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -605,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -652,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -661,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -671,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -700,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -717,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -741,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -763,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -781,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-orchestrator"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -813,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -857,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -875,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -894,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -918,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -933,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -958,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-core"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -974,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -1000,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-workspace"
-version = "0.39.0"
+version = "0.40.0"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -1314,12 +1298,6 @@ name = "bit_field"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
-
-[[package]]
-name = "bitfield"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
 
 [[package]]
 name = "bitflags"
@@ -2033,18 +2011,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
-name = "crypto-bigint"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
-dependencies = [
- "generic-array",
- "rand_core 0.6.4",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2316,47 +2282,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 
 [[package]]
-name = "ecdsa"
-version = "0.16.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
-dependencies = [
- "der",
- "digest",
- "elliptic-curve",
- "rfc6979",
- "signature",
- "spki",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "elliptic-curve"
-version = "0.13.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
-dependencies = [
- "base16ct",
- "crypto-bigint",
- "digest",
- "ff",
- "generic-array",
- "group",
- "hkdf",
- "pem-rfc7468",
- "pkcs8",
- "rand_core 0.6.4",
- "sec1",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -2390,26 +2321,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
  "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "enumflags2"
-version = "0.7.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
-dependencies = [
- "enumflags2_derive",
-]
-
-[[package]]
-name = "enumflags2_derive"
-version = "0.7.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
-dependencies = [
  "proc-macro2",
  "quote",
  "syn",
@@ -2600,16 +2511,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
-]
-
-[[package]]
-name = "ff"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
-dependencies = [
- "rand_core 0.6.4",
- "subtle",
 ]
 
 [[package]]
@@ -3111,7 +3012,6 @@ checksum = "4bb6743198531e02858aeaea5398fcc883e71851fcbcb5a2f773e2fb6cb1edf2"
 dependencies = [
  "typenum",
  "version_check",
- "zeroize",
 ]
 
 [[package]]
@@ -3311,17 +3211,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "group"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
-dependencies = [
- "ff",
- "rand_core 0.6.4",
- "subtle",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3511,12 +3400,6 @@ checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "hostname-validator"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f558a64ac9af88b5ba400d99b579451af0d39c6d360980045b91aac966d705e2"
 
 [[package]]
 name = "html-escape"
@@ -4641,16 +4524,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mbox"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26d142aeadbc4e8c679fc6d93fbe7efe1c021fa7d80629e615915b519e3bc6de"
-dependencies = [
- "libc",
- "stable_deref_trait",
-]
-
-[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5264,15 +5137,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oid"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c19903c598813dba001b53beeae59bb77ad4892c5c1b9b3500ce4293a0d06c2"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5391,18 +5255,6 @@ name = "outref"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
-
-[[package]]
-name = "p256"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
-dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
- "sha2",
-]
 
 [[package]]
 name = "parking"
@@ -5582,41 +5434,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picky-asn1"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "295eea0f33c16be21e2a98b908fdd4d73c04dd48c8480991b76dbcf0cb58b212"
-dependencies = [
- "oid",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "picky-asn1-der"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5df7873a9e36d42dadb393bea5e211fe83d793c172afad5fb4ec846ec582793f"
-dependencies = [
- "picky-asn1",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "picky-asn1-x509"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c5f20f71a68499ff32310f418a6fad8816eac1a2859ed3f0c5c741389dd6208"
-dependencies = [
- "base64 0.21.7",
- "oid",
- "picky-asn1",
- "picky-asn1-der",
- "serde",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5776,15 +5593,6 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn",
-]
-
-[[package]]
-name = "primeorder"
-version = "0.13.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
-dependencies = [
- "elliptic-curve",
 ]
 
 [[package]]
@@ -6356,16 +6164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rfc6979"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
-dependencies = [
- "hmac",
- "subtle",
-]
-
-[[package]]
 name = "rgb"
 version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6661,20 +6459,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
-name = "sec1"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
-dependencies = [
- "base16ct",
- "der",
- "generic-array",
- "pkcs8",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "secrecy"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6749,16 +6533,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde_bytes"
-version = "0.11.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
-dependencies = [
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -8188,39 +7962,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
-name = "tss-esapi"
-version = "7.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78ea9ccde878b029392ac97b5be1f470173d06ea41d18ad0bb3c92794c16a0f2"
-dependencies = [
- "bitfield",
- "enumflags2",
- "getrandom 0.2.16",
- "hostname-validator",
- "log",
- "mbox",
- "num-derive",
- "num-traits",
- "oid",
- "picky-asn1",
- "picky-asn1-x509",
- "regex",
- "serde",
- "tss-esapi-sys",
- "zeroize",
-]
-
-[[package]]
-name = "tss-esapi-sys"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535cd192581c2ec4d5f82e670b1d3fbba6a23ccce8c85de387642051d7cad5b5"
-dependencies = [
- "pkg-config",
- "target-lexicon",
-]
-
-[[package]]
 name = "tungstenite"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9410,20 +9151,6 @@ name = "zeroize"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
-dependencies = [
- "zeroize_derive",
-]
-
-[[package]]
-name = "zeroize_derive"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "zerotrie"

@@ -55,7 +55,7 @@ impl PlatformEvidence {
             app_version: identity.app_version,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
+                .expect("System time before Unix epoch")
                 .as_secs() as i64,
         }
     }

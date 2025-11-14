@@ -1,9 +1,23 @@
 use crate::{
-    evidence, AttestationCapabilities, AttestationError, AttestationType, PlatformAttestor,
-    PlatformEvidence, Result, SecurityState,
+    AttestationCapabilities, AttestationError, AttestationType, PlatformAttestor, PlatformEvidence,
+    Result, SecurityState, evidence,
 };
 use arkavo_device_identity::AgentIdentity;
 
+/// macOS Secure Enclave attestation backend.
+///
+/// **Implementation Status**: This implementation uses `ioreg` to collect platform
+/// information (IOPlatformUUID, serial number, model) as evidence. It does NOT yet
+/// use the Secure Enclave for cryptographic signing of attestation statements.
+///
+/// **Current Capabilities**:
+/// - Platform information collection via ioreg
+/// - Secure Enclave presence detection
+/// - Security state detection (jailbreak, debug mode)
+///
+/// **Future Enhancement**:
+/// True Secure Enclave cryptographic attestation will use the Security framework
+/// to generate signed attestation statements with hardware-backed keys.
 pub struct SecureEnclaveAttestor {
     identity: AgentIdentity,
     platform_code: String,
@@ -69,6 +83,11 @@ fn is_secure_enclave_available() -> bool {
     false
 }
 
+/// Generate platform attestation statement using ioreg.
+///
+/// Note: This collects platform information but does not perform cryptographic
+/// signing with the Secure Enclave. Future versions will use Security framework
+/// for hardware-backed attestation signatures.
 fn generate_attestation_statement() -> Result<Vec<u8>> {
     use std::process::Command;
 
@@ -111,7 +130,7 @@ fn generate_attestation_statement() -> Result<Vec<u8>> {
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("System time before Unix epoch")
         .as_secs();
     statement.extend_from_slice(timestamp.to_string().as_bytes());
 
@@ -128,6 +147,8 @@ fn generate_attestation_statement() -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::detect_platform_code;
+
+    const TEST_APP_VERSION: &str = "0.38.2";
 
     #[test]
     fn test_is_secure_enclave_available() {
@@ -155,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_secure_enclave_attestor_creation() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
 
         match SecureEnclaveAttestor::new(identity, platform_code) {
@@ -177,7 +198,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn test_secure_enclave_collect_evidence() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
 
         if let Ok(attestor) = SecureEnclaveAttestor::new(identity, platform_code) {

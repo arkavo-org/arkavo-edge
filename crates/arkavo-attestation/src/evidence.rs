@@ -86,9 +86,11 @@ mod tests {
     use crate::detect_platform_code;
     use arkavo_device_identity::AgentIdentity;
 
+    const TEST_APP_VERSION: &str = "0.38.2";
+
     #[test]
     fn test_validate_evidence_success() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
 
         assert!(validate_evidence(&evidence).is_ok());
@@ -96,21 +98,23 @@ mod tests {
 
     #[test]
     fn test_validate_evidence_empty_platform_code() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let mut evidence = PlatformEvidence::from_agent_identity(identity, "".to_string());
         evidence.platform_code = String::new();
 
         let result = validate_evidence(&evidence);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Platform code cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Platform code cannot be empty")
+        );
     }
 
     #[test]
     fn test_validate_evidence_old_timestamp() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let mut evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
         evidence.timestamp = 0;
 
@@ -129,5 +133,58 @@ mod tests {
                 | SecurityState::Compromised
                 | SecurityState::Unknown
         ));
+    }
+
+    #[test]
+    fn test_validate_evidence_empty_evidence_blob() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
+
+        let result = validate_evidence(&evidence);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_evidence_future_timestamp() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let mut evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
+
+        evidence.timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs() as i64
+            + 7200;
+
+        let result = validate_evidence(&evidence);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("future"));
+    }
+
+    #[test]
+    fn test_validate_evidence_invalid_app_version() {
+        let identity = AgentIdentity::new("".to_string());
+        let mut evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
+        evidence.app_version = String::new();
+
+        let result = validate_evidence(&evidence);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("App version cannot be empty")
+        );
+    }
+
+    #[test]
+    fn test_corrupted_evidence_serialization() {
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
+        let evidence = PlatformEvidence::from_agent_identity(identity, detect_platform_code());
+
+        let json = serde_json::to_string(&evidence).expect("Should serialize");
+        assert!(!json.is_empty());
+
+        let deserialized: std::result::Result<PlatformEvidence, _> = serde_json::from_str(&json);
+        assert!(deserialized.is_ok());
     }
 }

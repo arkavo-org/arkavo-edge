@@ -1,6 +1,6 @@
 use crate::{
-    evidence, AttestationCapabilities, AttestationType, PlatformAttestor, PlatformEvidence, Result,
-    SecurityState,
+    AttestationCapabilities, AttestationType, PlatformAttestor, PlatformEvidence, Result,
+    SecurityState, evidence,
 };
 use arkavo_device_identity::AgentIdentity;
 
@@ -101,15 +101,6 @@ pub fn create_attestor(
         }
     }
 
-    #[cfg(feature = "tpm")]
-    {
-        if let Ok(tpm_attestor) =
-            crate::platform::tpm::TpmAttestor::new(identity.clone(), platform_code.clone())
-        {
-            return Box::new(tpm_attestor);
-        }
-    }
-
     Box::new(FallbackAttestor::new(identity, platform_code))
 }
 
@@ -118,9 +109,11 @@ mod tests {
     use super::*;
     use crate::detect_platform_code;
 
+    const TEST_APP_VERSION: &str = "0.38.2";
+
     #[test]
     fn test_fallback_attestor_creation() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
         let attestor = FallbackAttestor::new(identity, platform_code);
 
@@ -132,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_fallback_attestor_collect_evidence() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
         let attestor = FallbackAttestor::new(identity, platform_code);
 
@@ -155,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_create_attestor_selects_best_backend() {
-        let identity = AgentIdentity::new("0.38.2".to_string());
+        let identity = AgentIdentity::new(TEST_APP_VERSION.to_string());
         let platform_code = detect_platform_code();
         let attestor = create_attestor(identity, platform_code);
 
