@@ -356,18 +356,17 @@ impl Router {
                 // Deep validation with LLM judge (when available)
                 #[cfg(feature = "llama-cpp")]
                 {
-                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b() {
-                        if let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await {
-                            if !judgment.passed {
-                                tracing::warn!(
-                                    target: "arkavo_router::quality_gate",
-                                    model = ?model,
-                                    issue = ?judgment.issue_type,
-                                    reason = %judgment.reason.as_deref().unwrap_or("No reason"),
-                                    "Async judge rejected response - consider metrics/alerting"
-                                );
-                            }
-                        }
+                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b()
+                        && let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await
+                        && !judgment.passed
+                    {
+                        tracing::warn!(
+                            target: "arkavo_router::quality_gate",
+                            model = ?model,
+                            issue = ?judgment.issue_type,
+                            reason = %judgment.reason.as_deref().unwrap_or("No reason"),
+                            "Async judge rejected response - consider metrics/alerting"
+                        );
                     }
                 }
             }
