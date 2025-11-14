@@ -15,14 +15,20 @@ pub struct GeminiProvider {
 
 impl GeminiProvider {
     pub fn new() -> Result<Self> {
-        let api_key = env::var("GEMINI_API_KEY")
-            .map_err(|_| Error::Config("GEMINI_API_KEY not set".into()))?;
+        let api_key = env::var("GEMINI_API_KEY").map_err(|_| {
+            Error::Config("GEMINI_API_KEY not set (optional - will fallback to local model)".into())
+        })?;
 
         let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-flash-latest".to_string());
 
         Ok(Self {
             client: RestClient::new(api_key, model),
         })
+    }
+
+    /// Try to create a Gemini provider, returning None if API key is not available
+    pub fn try_new() -> Option<Self> {
+        Self::new().ok()
     }
 }
 
