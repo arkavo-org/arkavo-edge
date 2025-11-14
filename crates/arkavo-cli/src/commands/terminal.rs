@@ -1,10 +1,16 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
-use arkavo_llm::{LlmClient, Message};
+use arkavo_llm::{LlmClient, Message, StreamResponse};
 use arkavo_memory::storage::MemoryStorage;
+use futures::TryStreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Runtime;
+
+#[cfg(all(unix, feature = "mcp-tools"))]
+use arkavo_mcp_tools::ToolRegistry;
+#[cfg(all(unix, feature = "mcp-tools"))]
+use arkavo_router::Router;
 
 // Global flag to control whether to show debug messages
 // Set via ARKAVO_DEBUG_CHAT=1 environment variable
@@ -23,6 +29,21 @@ fn get_or_create_runtime() -> &'static Runtime {
             .build()
             .expect("Failed to create Tokio runtime")
     })
+}
+
+// Type alias for boxed error stream
+type BoxedErrorStream = Box<
+    dyn tokio_stream::Stream<
+            Item = Result<StreamResponse, Box<dyn std::error::Error + Send + Sync>>,
+        > + Send
+        + Unpin,
+>;
+
+// Helper function to convert any error to Box<dyn Error + Send + Sync>
+fn box_error<E: std::error::Error + Send + Sync + 'static>(
+    e: E,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(e)
 }
 
 fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
@@ -185,12 +206,20 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let client_clone: Arc<LlmClient> = Arc::clone(&client);
     let mut messages_clone = messages;
 
-    // Spawn LLM processing task
-    // Note: Terminal UI uses direct streaming for real-time UX
-    // Router quality gate integration deferred until async validation available
+    // Initialize router and tool registry for quality gate
+    #[cfg(all(unix, feature = "mcp-tools"))]
+    let (router, tool_registry) = {
+        let router = runtime.block_on(Router::new()).ok();
+        let registry = mcp_client
+            .as_ref()
+            .map(|_| ToolRegistry::from_mcp_or_default(None));
+        (router, registry)
+    };
+
+    // Spawn LLM processing task with router quality gate integration
     let llm_handle = runtime.spawn(async move {
         if SHOW_DEBUG.load(Ordering::Relaxed) {
-            eprintln!("[LLM Task] Started, waiting for messages...");
+            eprintln!("[LLM Task] Started with router quality gate...");
         }
         while let Some(user_input) = ui_rx.recv().await {
             if SHOW_DEBUG.load(Ordering::Relaxed) {
@@ -200,9 +229,60 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let user_message = Message::user(user_input.clone());
             messages_clone.push(user_message);
 
-            // Get streaming response from LLM
-            match client_clone.stream(messages_clone.clone()).await {
-                Ok(mut stream) => {
+            // Try router-based streaming with quality gate first (Unix + mcp-tools)
+            // Router provides: cost optimization, quality validation, model escalation
+            #[cfg(all(unix, feature = "mcp-tools"))]
+            let stream_result: Result<
+                (BoxedErrorStream, bool),
+                Box<dyn std::error::Error + Send + Sync>,
+            > = match (router.as_ref(), &client_clone) {
+                (Some(router), _) => {
+                    let task_desc = user_input.clone();
+                    match router
+                        .route_with_quality_gate_stream(
+                            &task_desc,
+                            messages_clone.clone(),
+                            tool_registry.as_ref(),
+                            3,
+                        )
+                        .await
+                    {
+                        Ok(s) => {
+                            let boxed_stream: BoxedErrorStream = Box::new(s.map_err(box_error));
+                            Ok((boxed_stream, true))
+                        }
+                        Err(e) => Err(box_error(e)),
+                    }
+                }
+                (None, client) => match client.stream(messages_clone.clone()).await {
+                    Ok(s) => {
+                        let boxed_stream: BoxedErrorStream = Box::new(s.map_err(box_error));
+                        Ok((boxed_stream, false))
+                    }
+                    Err(e) => Err(box_error(e)),
+                },
+            };
+
+            // Fallback to direct LLM streaming (other platforms)
+            #[cfg(not(all(unix, feature = "mcp-tools")))]
+            let stream_result = client_clone
+                .stream(messages_clone.clone())
+                .await
+                .map(|s| (s, false))
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+
+            match stream_result {
+                Ok((mut stream, used_router)) => {
+                    if SHOW_DEBUG.load(Ordering::Relaxed) {
+                        eprintln!(
+                            "[LLM Task] Streaming via {}",
+                            if used_router {
+                                "Router Quality Gate"
+                            } else {
+                                "Direct LLM"
+                            }
+                        );
+                    }
                     let mut full_response = String::new();
 
                     // Send start streaming signal
