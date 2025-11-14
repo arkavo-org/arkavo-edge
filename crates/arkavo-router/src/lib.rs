@@ -468,7 +468,7 @@ impl Router {
                         )
                         .map_err(|e| {
                             Error::ModelExecution(format!(
-                                "Failed to create fallback local provider: {}. Install model with: huggingface-cli download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf", e
+                                "Failed to create fallback local provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf"
                             ))
                         })?;
                         Ok(Box::new(provider))
