@@ -11,7 +11,7 @@ pub mod keys;
 pub mod policy;
 
 pub use error::{Error, Result};
-pub use kas::{DEFAULT_KAS_URL, KasConfig};
+pub use kas::{DEFAULT_IDENTITY_URL, DEFAULT_KAS_URL, KasConfig};
 pub use keys::{KeyPair, PrivateKey, PublicKey};
 pub use policy::{Policy, PolicyAttribute};
 

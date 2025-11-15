@@ -16,15 +16,17 @@ This crate provides secure configuration bundle encryption using [OpenTDF](https
 
 ## KAS Configuration
 
-The crate is configured to use the Arkavo production KAS by default:
+The crate is configured to use the Arkavo production services by default:
 
 ```
-KAS URL: https://100.arkavo.net/kas/v2/rewrap
+KAS URL:      https://100.arkavo.net/kas/v2/rewrap
+Identity URL: https://identity.arkavo.net
 ```
 
 ### Environment Variables
 
 - `ARKAVO_KAS_URL`: Override the default KAS URL
+- `ARKAVO_IDENTITY_URL`: Override the default Identity service URL
 - `ARKAVO_KAS_TOKEN`: OAuth token for KAS authentication
 
 ### Usage
@@ -32,11 +34,16 @@ KAS URL: https://100.arkavo.net/kas/v2/rewrap
 ```rust
 use arkavo_config_encryption::KasConfig;
 
-// Use production KAS (default)
+// Use production services (default)
 let kas = KasConfig::production();
+println!("KAS: {}", kas.rewrap_url());
+println!("Identity: {}", kas.identity_url());
 
-// Use custom KAS
-let kas = KasConfig::custom("https://custom.kas.example.com/rewrap");
+// Use custom endpoints
+let kas = KasConfig::custom(
+    "https://custom.kas.example.com/rewrap",
+    "https://custom.identity.example.com"
+);
 
 // Load from environment
 let kas = KasConfig::from_env();
@@ -233,15 +240,23 @@ cargo run --example kas_encrypt_decrypt
                  │
                  │ KAS rewrap
                  │
-┌─────────────────────────────────────────┐
-│  Arkavo KAS                              │
-│  https://100.arkavo.net/kas/v2/rewrap   │
-│                                          │
-│  - Policy evaluation                    │
-│  - Attribute verification                │
-│  - Key unwrapping                        │
-│  - Audit logging                         │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Arkavo Services                                      │
+│                                                       │
+│  ┌────────────────────────────────────────────────┐  │
+│  │ Identity Service (https://identity.arkavo.net) │  │
+│  │  - OAuth 2.0 authentication                    │  │
+│  │  - Token issuance and validation               │  │
+│  │  - Attribute verification                      │  │
+│  └────────────────────────────────────────────────┘  │
+│                                                       │
+│  ┌────────────────────────────────────────────────┐  │
+│  │ KAS (https://100.arkavo.net/kas/v2/rewrap)     │  │
+│  │  - Policy evaluation                           │  │
+│  │  - Key unwrapping                              │  │
+│  │  - Audit logging                               │  │
+│  └────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## Security
