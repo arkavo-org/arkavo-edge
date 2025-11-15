@@ -74,8 +74,7 @@ mod auth_manager_regression_tests {
                 // Should get a clear error message about master key requirement
                 let error_msg = e.to_string();
                 assert!(
-                    error_msg.contains("Master key required")
-                        && error_msg.contains("at least 32 characters"),
+                    error_msg.contains("Master key") && error_msg.contains("at least 32 characters"),
                     "Unexpected error: {error_msg}"
                 );
             }

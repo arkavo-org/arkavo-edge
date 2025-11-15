@@ -5,7 +5,6 @@ use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_llm::{Message as LlmMessage, Provider, Role};
 use arkavo_mcp_tools::ToolRegistry;
-use arkavo_protocol::mcp::McpClient;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -53,7 +52,6 @@ pub struct VerificationResult {
 }
 
 pub struct CognitiveEngine {
-    mcp_client: Arc<McpClient>,
     budget_tracker: Arc<BudgetTracker>,
     event_writer: Arc<EventWriter>,
     github_ops: Arc<GitHubOperations>,
@@ -65,7 +63,6 @@ pub struct CognitiveEngine {
 
 impl CognitiveEngine {
     pub fn new(
-        mcp_client: Arc<McpClient>,
         budget_tracker: Arc<BudgetTracker>,
         event_writer: Arc<EventWriter>,
         github_ops: Arc<GitHubOperations>,
@@ -74,7 +71,6 @@ impl CognitiveEngine {
         session_id: String,
     ) -> Self {
         Self {
-            mcp_client,
             budget_tracker,
             event_writer,
             github_ops,
@@ -203,13 +199,14 @@ impl CognitiveEngine {
 
         if success {
             info!("Execution successful, creating pull request");
-            match self.create_pull_request(&assignment, &plan, steps_completed, total_tokens).await {
+            match self
+                .create_pull_request(&assignment, &plan, steps_completed, total_tokens)
+                .await
+            {
                 Ok(pr_url) => {
                     info!(pr_url, "Pull request created successfully");
-                    let pr_comment = format!(
-                        "🎉 Pull request created: {}\n\n{}",
-                        pr_url, final_comment
-                    );
+                    let pr_comment =
+                        format!("🎉 Pull request created: {}\n\n{}", pr_url, final_comment);
                     self.post_progress(&assignment, &pr_comment).await?;
                 }
                 Err(e) => {
@@ -448,12 +445,7 @@ impl CognitiveEngine {
 
             let response = self
                 .router
-                .route_with_quality_gate(
-                    command,
-                    messages,
-                    Some(&self.tool_registry),
-                    3,
-                )
+                .route_with_quality_gate(command, messages, Some(&self.tool_registry), 3)
                 .await
                 .map_err(|e| Error::Other(anyhow::anyhow!("Command execution failed: {e}")))?;
 
@@ -906,14 +898,7 @@ impl CognitiveEngine {
         // TODO: Replace with MCP tool call in production
         let output = tokio::process::Command::new("gh")
             .args(&[
-                "pr",
-                "create",
-                "--title",
-                &pr_title,
-                "--body",
-                &pr_body,
-                "--base",
-                "main",
+                "pr", "create", "--title", &pr_title, "--body", &pr_body, "--base", "main",
             ])
             .output()
             .await
