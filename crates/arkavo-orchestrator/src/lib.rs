@@ -8,6 +8,10 @@
 
 pub mod agent_assignment;
 pub mod cognitive_engine;
+mod cognitive_engine_core;
+mod cognitive_engine_planning;
+mod cognitive_engine_pr;
+mod cognitive_engine_verification;
 pub mod config;
 pub mod error;
 pub mod github_auth;

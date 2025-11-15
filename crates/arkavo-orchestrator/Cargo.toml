@@ -34,6 +34,7 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-memory = { path = "../arkavo-memory" }
 arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] }
 arkavo-llm = { path = "../arkavo-llm" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 # GitHub-specific dependencies
 hmac = "0.12"
