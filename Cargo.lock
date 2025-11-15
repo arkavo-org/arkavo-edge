@@ -771,6 +771,7 @@ dependencies = [
  "arkavo-budget",
  "arkavo-events",
  "arkavo-llm",
+ "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-protocol",

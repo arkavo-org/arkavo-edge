@@ -4,6 +4,7 @@ use crate::github_operations::GitHubOperations;
 use arkavo_budget::{BudgetTracker, TokenCost, cost::TokenUsage};
 use arkavo_events::{Event, EventPayload, EventWriter};
 use arkavo_llm::{Message as LlmMessage, Provider, Role};
+use arkavo_mcp_tools::ToolRegistry;
 use arkavo_protocol::mcp::McpClient;
 use arkavo_router::Router;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,7 @@ pub struct CognitiveEngine {
     event_writer: Arc<EventWriter>,
     github_ops: Arc<GitHubOperations>,
     router: Arc<Router>,
+    tool_registry: Arc<ToolRegistry>,
     session_id: String,
     sequence: std::sync::atomic::AtomicU64,
 }
@@ -68,6 +70,7 @@ impl CognitiveEngine {
         event_writer: Arc<EventWriter>,
         github_ops: Arc<GitHubOperations>,
         router: Arc<Router>,
+        tool_registry: Arc<ToolRegistry>,
         session_id: String,
     ) -> Self {
         Self {
@@ -76,6 +79,7 @@ impl CognitiveEngine {
             event_writer,
             github_ops,
             router,
+            tool_registry,
             session_id,
             sequence: std::sync::atomic::AtomicU64::new(0),
         }
@@ -405,41 +409,52 @@ impl CognitiveEngine {
         for command in &step.commands {
             debug!(command, "Executing command");
 
-            let is_analysis_command = command.contains("analyze")
-                || command.contains("review")
-                || command.contains("explain")
-                || command.contains("describe");
+            let task_prompt = format!(
+                "Execute this command as part of fixing a GitHub issue:\n\
+                Step {}: {}\n\
+                Command: {}\n\n\
+                Use the available tools to complete this task. \
+                You have access to filesystem, git, and github tools.",
+                step.step_number, step.description, command
+            );
 
-            if is_analysis_command {
-                let analysis_prompt = format!(
-                    "You are executing step {} of a GitHub issue fix.\n\
-                    Step description: {}\n\
-                    Command to execute: {}\n\n\
-                    Provide a brief analysis of what this command will do and any potential issues to watch for.",
-                    step.step_number, step.description, command
+            let messages = vec![LlmMessage {
+                role: Role::User,
+                content: task_prompt.clone(),
+                images: None,
+            }];
+
+            let response = self
+                .router
+                .route_with_quality_gate(
+                    command,
+                    messages,
+                    Some(&self.tool_registry),
+                    3,
+                )
+                .await
+                .map_err(|e| Error::Other(anyhow::anyhow!("Command execution failed: {e}")))?;
+
+            info!(
+                step = step.step_number,
+                tool_calls = response.tool_calls.len(),
+                "Command executed with {} tool calls",
+                response.tool_calls.len()
+            );
+
+            let estimated_tokens = (task_prompt.len() + response.content.len()) / 4;
+            tokens_used += estimated_tokens as u32;
+
+            if !response.tool_calls.is_empty() {
+                debug!(
+                    "Tool calls executed: {:?}",
+                    response
+                        .tool_calls
+                        .iter()
+                        .map(|tc| &tc.tool_name)
+                        .collect::<Vec<_>>()
                 );
-
-                let decision = self
-                    .router
-                    .route(&analysis_prompt)
-                    .await
-                    .map_err(|e| Error::Other(anyhow::anyhow!("Routing failed: {e}")))?;
-
-                info!(
-                    model = ?decision.recommended_model,
-                    "Using {:?} for command analysis",
-                    decision.recommended_model
-                );
-
-                tokens_used += (analysis_prompt.len() / 4) as u32;
             }
-
-            let _result = self
-                .mcp_client
-                .send(command)
-                .map_err(|e| Error::Other(anyhow::anyhow!("Command failed: {e}")))?;
-
-            tokens_used += 100;
         }
 
         Ok(tokens_used)

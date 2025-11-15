@@ -6,6 +6,7 @@ use crate::issue_router::{ExecutionStrategy, IssueRouter};
 use crate::types::IssueEvent;
 use arkavo_budget::BudgetTracker;
 use arkavo_events::EventWriter;
+use arkavo_mcp_tools::ToolRegistry;
 use arkavo_protocol::{
     agent_registry::AgentRegistry,
     mcp::McpClient,
@@ -48,12 +49,15 @@ impl Orchestrator {
                 .map_err(|e| Error::Other(anyhow::anyhow!("Failed to initialize router: {e}")))?,
         );
 
+        let tool_registry = Arc::new(ToolRegistry::new());
+
         let cognitive_engine = Arc::new(CognitiveEngine::new(
             mcp_client,
             budget_tracker,
             event_writer,
             Arc::clone(&github_ops),
             router,
+            tool_registry,
             session_id,
         ));
 
