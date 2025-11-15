@@ -7,9 +7,9 @@ Closes #311
 ## Architecture
 
 - **Configuration Bundle Packager**: Orchestrator-side bundle creation with settings, roles, entitlements, and secrets
-- **OpenTDF Encryption**: End-to-end encryption with attribute-based access control policies
-- **Public/Private Key Authentication**: Agent identity verification using asymmetric cryptography (replaces mTLS)
-- **Centralized KAS**: Key Access Service using arkavo-rs for key management and policy enforcement
+- **OpenTDF Encryption**: End-to-end encryption with attribute-based access control policies using opentdf-rs
+- **Public/Private Key Authentication**: Agent identity verification using ECDSA P-256 asymmetric cryptography
+- **Centralized KAS**: Key Access Service at https://100.arkavo.net/kas/v2/rewrap for policy enforcement and key unwrapping
 - **Secure Distribution**: Signed requests with public/private key pairs + JWT authentication
 
 ## Implementation Plan
@@ -24,7 +24,11 @@ Closes #311
 - ✅ OpenTDF encryption using opentdf-rs PolicyBuilder and Tdf::encrypt
 - ✅ Policy management and attribute definitions
 - ✅ Unit tests with >85% coverage
-- ⚠️ Decryption requires async KAS integration (planned for Phase 3)
+- ✅ KAS configuration module with production URL (https://100.arkavo.net/kas/v2/rewrap)
+- ✅ decrypt_bundle_async() method ready for KAS client integration
+- ✅ Complete example demonstrating encryption workflow
+- ✅ Comprehensive README with architecture diagrams and usage
+- ⚠️ Full decrypt requires KAS OAuth token (Phase 3)
 
 ### Phase 2: Distribution System (Week 3-4) - 40 hours
 **New Crates:**
