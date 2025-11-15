@@ -20,6 +20,9 @@ pub enum Error {
     #[error("Authorization error: {0}")]
     Authorization(String),
 
+    #[error("Policy error: {0}")]
+    Policy(String),
+
     #[error("Key generation error: {0}")]
     KeyGeneration(String),
 

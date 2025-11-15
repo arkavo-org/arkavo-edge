@@ -14,10 +14,13 @@ serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", branch = "main" }
 ring = "0.17"
 base64 = "0.22"
-aes-gcm = "0.10"
-rand = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
+
+[features]
+default = []
+kas = []
