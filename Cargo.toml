@@ -41,6 +41,9 @@ members = [
     "crates/arkavo-cef",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
+    "crates/arkavo-config-bundle",
+    "crates/arkavo-config-encryption",
+    "crates/arkavo-config-transport",
     ".cargo/xtask",
 ]
 default-members = [
@@ -83,6 +86,9 @@ default-members = [
     "crates/arkavo-orchestrator",
     "crates/arkavo-device-identity",
     "crates/arkavo-attestation",
+    "crates/arkavo-config-bundle",
+    "crates/arkavo-config-encryption",
+    "crates/arkavo-config-transport",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz"]
