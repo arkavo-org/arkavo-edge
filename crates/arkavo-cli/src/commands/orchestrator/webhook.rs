@@ -20,7 +20,7 @@ pub(super) async fn start_orchestrator(
     let config = if let (Some(secret), Some(id), Some(key)) = (webhook_secret, app_id, private_key)
     {
         OrchestratorConfig {
-            webhook_secret: secret,
+            webhook_secret: Some(secret),
             github_app_id: id,
             github_app_private_key: key,
             webhook_port: port,
@@ -34,6 +34,13 @@ pub(super) async fn start_orchestrator(
     info!("GitHub App ID: {}", config.github_app_id);
     info!("Webhook secret: {}", config.get_masked_secret());
 
+    let webhook_secret = config.webhook_secret.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Webhook secret is required for webhook server mode. \
+            Set ARKAVO_GITHUB_WEBHOOK_SECRET environment variable or use polling mode instead."
+        )
+    })?;
+
     let rate_limit_config = RateLimitConfig {
         max_requests_per_second: config.rate_limit_requests_per_second,
         burst_size: config.rate_limit_burst_size,
@@ -42,8 +49,7 @@ pub(super) async fn start_orchestrator(
         ip_entry_ttl_seconds: IP_ENTRY_TTL_SECONDS,
     };
 
-    let (webhook_server, mut event_rx) =
-        WebhookServer::new(config.webhook_secret.clone(), rate_limit_config);
+    let (webhook_server, mut event_rx) = WebhookServer::new(webhook_secret, rate_limit_config);
 
     let github_app = Arc::new(GitHubApp::new(
         config.github_app_id.parse()?,

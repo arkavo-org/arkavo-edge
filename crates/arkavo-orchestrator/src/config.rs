@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct OrchestratorConfig {
-    pub webhook_secret: String,
+    pub webhook_secret: Option<String>,
     pub github_app_id: String,
     pub github_app_private_key: String,
     pub rate_limit_requests_per_second: u32,
@@ -21,8 +21,7 @@ impl OrchestratorConfig {
 
         let webhook_secret = provider
             .get_config("ARKAVO_GITHUB_WEBHOOK_SECRET")
-            .map_err(|e| Error::Other(anyhow::anyhow!("Config error: {e}")))?
-            .ok_or_else(|| Error::Other(anyhow::anyhow!("Missing ARKAVO_GITHUB_WEBHOOK_SECRET")))?;
+            .map_err(|e| Error::Other(anyhow::anyhow!("Config error: {e}")))?;
 
         let github_app_id = provider
             .get_config("ARKAVO_GITHUB_APP_ID")
@@ -78,8 +77,7 @@ impl OrchestratorConfig {
     fn build_config_provider() -> Result<Arc<SecureConfigProvider>> {
         let mut provider = SecureConfigProvider::new();
 
-        let webhook_secret = env::var("ARKAVO_GITHUB_WEBHOOK_SECRET")
-            .map_err(|_| Error::Other(anyhow::anyhow!("Missing ARKAVO_GITHUB_WEBHOOK_SECRET")))?;
+        let webhook_secret = env::var("ARKAVO_GITHUB_WEBHOOK_SECRET").ok();
 
         let github_app_id = env::var("ARKAVO_GITHUB_APP_ID")
             .map_err(|_| Error::Other(anyhow::anyhow!("Missing ARKAVO_GITHUB_APP_ID")))?;
@@ -87,18 +85,16 @@ impl OrchestratorConfig {
         let github_app_private_key = env::var("ARKAVO_GITHUB_APP_PRIVATE_KEY")
             .map_err(|_| Error::Other(anyhow::anyhow!("Missing ARKAVO_GITHUB_APP_PRIVATE_KEY")))?;
 
-        let mut validator = ConfigValidator::sensitive();
-        validator.min_length = Some(20);
-        validator.max_length = Some(256);
-        validator.required = true;
+        if let Some(secret) = webhook_secret {
+            let mut validator = ConfigValidator::sensitive();
+            validator.min_length = Some(20);
+            validator.max_length = Some(256);
+            validator.required = false;
 
-        provider
-            .set_config(
-                "ARKAVO_GITHUB_WEBHOOK_SECRET",
-                webhook_secret.as_str(),
-                validator,
-            )
-            .map_err(|e| Error::Other(anyhow::anyhow!("Config validation failed: {e}")))?;
+            provider
+                .set_config("ARKAVO_GITHUB_WEBHOOK_SECRET", secret.as_str(), validator)
+                .map_err(|e| Error::Other(anyhow::anyhow!("Config validation failed: {e}")))?;
+        }
 
         let mut validator = ConfigValidator::required();
         validator.min_length = Some(1);
@@ -125,10 +121,10 @@ impl OrchestratorConfig {
     }
 
     pub fn get_masked_secret(&self) -> String {
-        if self.webhook_secret.len() > 8 {
-            format!("{}***", &self.webhook_secret[..4])
-        } else {
-            "***".to_string()
+        match &self.webhook_secret {
+            Some(secret) if secret.len() > 8 => format!("{}***", &secret[..4]),
+            Some(_) => "***".to_string(),
+            None => "Not configured (polling mode)".to_string(),
         }
     }
 
@@ -148,7 +144,7 @@ impl OrchestratorConfig {
 impl Default for OrchestratorConfig {
     fn default() -> Self {
         Self {
-            webhook_secret: String::new(),
+            webhook_secret: None,
             github_app_id: String::new(),
             github_app_private_key: String::new(),
             rate_limit_requests_per_second: 100,
@@ -177,8 +173,14 @@ mod tests {
     #[test]
     fn test_masked_secret() {
         let mut config = OrchestratorConfig::default();
-        config.webhook_secret = "test-secret-12345".to_string();
+        config.webhook_secret = Some("test-secret-12345".to_string());
         assert_eq!(config.get_masked_secret(), "test***");
+    }
+
+    #[test]
+    fn test_masked_secret_none() {
+        let config = OrchestratorConfig::default();
+        assert_eq!(config.get_masked_secret(), "Not configured (polling mode)");
     }
 
     #[test]

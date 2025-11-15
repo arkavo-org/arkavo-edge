@@ -1,13 +1,30 @@
 use crate::error::{GitHubError, Result};
+use arkavo_protocol::rate_limit::{RateLimitConfig, RateLimiter};
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::warn;
+use tracing::{debug, warn};
 
 const GITHUB_API_TIMEOUT_SECS: u64 = 30;
 const MAX_RATE_LIMIT_RETRIES: usize = 3;
 const USER_AGENT: &str = concat!("Arkavo-Orchestrator/", env!("CARGO_PKG_VERSION"));
+
+static GITHUB_RATE_LIMITER: std::sync::OnceLock<Arc<RateLimiter>> = std::sync::OnceLock::new();
+
+fn get_rate_limiter() -> &'static Arc<RateLimiter> {
+    GITHUB_RATE_LIMITER.get_or_init(|| {
+        let config = RateLimitConfig {
+            max_requests_per_second: 5000,
+            burst_size: 100,
+            enabled: true,
+            max_ip_entries: 1000,
+            ip_entry_ttl_seconds: 3600,
+        };
+        Arc::new(RateLimiter::new(config))
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubIssue {
@@ -48,6 +65,13 @@ pub async fn fetch_new_issues(
     since: DateTime<Utc>,
     label_filter: Option<&str>,
 ) -> Result<Vec<GitHubIssue>> {
+    let rate_limiter = get_rate_limiter();
+
+    if let Err(e) = rate_limiter.check_rate_limit() {
+        warn!("Global rate limit exceeded: {}", e);
+        return Err(GitHubError::RateLimitExceeded(60));
+    }
+
     let client = create_client()?;
 
     let mut url = format!(
@@ -58,6 +82,11 @@ pub async fn fetch_new_issues(
     if let Some(labels) = label_filter {
         url = format!("{url}&labels={labels}");
     }
+
+    debug!(
+        org,
+        repo_name, "Fetching issues from GitHub API (with rate limiting)"
+    );
 
     for retry_count in 0..=MAX_RATE_LIMIT_RETRIES {
         let response = client
