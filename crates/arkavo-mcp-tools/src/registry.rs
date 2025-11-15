@@ -253,14 +253,14 @@ impl ToolRegistry {
     /// token consumption by up to 98% compared to loading all tool definitions.
     pub fn search_tools(&self, query: &str, detail: DetailLevel) -> Vec<MinimalToolInfo> {
         let query_lower = query.to_lowercase();
-        
+
         self.tools
             .values()
             .filter_map(|tool| {
                 let schema = tool.schema();
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
-                
+
                 // Match against name or description
                 if name_lower.contains(&query_lower) || desc_lower.contains(&query_lower) {
                     Some(self.build_minimal_info(schema, detail))
@@ -409,15 +409,22 @@ mod tests {
     fn test_search_tools_name_only() {
         let registry = ToolRegistry::new();
         let results = registry.search_tools("github", DetailLevel::NameOnly);
-        
+
         assert!(!results.is_empty(), "Should find GitHub tools");
-        
-        for tool in &amp;results {
-            assert!(tool.name.to_lowercase().contains("github") 
-                    || tool.name.starts_with("gh_"),
-                    "Tool name should contain 'github' or start with 'gh_'");
-            assert!(tool.category.is_none(), "NameOnly should not include category");
-            assert!(tool.description.is_none(), "NameOnly should not include description");
+
+        for tool in &results {
+            assert!(
+                tool.name.to_lowercase().contains("github") || tool.name.starts_with("gh_"),
+                "Tool name should contain 'github' or start with 'gh_'"
+            );
+            assert!(
+                tool.category.is_none(),
+                "NameOnly should not include category"
+            );
+            assert!(
+                tool.description.is_none(),
+                "NameOnly should not include description"
+            );
             assert!(tool.schema.is_none(), "NameOnly should not include schema");
         }
     }
@@ -426,10 +433,10 @@ mod tests {
     fn test_search_tools_name_and_description() {
         let registry = ToolRegistry::new();
         let results = registry.search_tools("security", DetailLevel::NameAndDescription);
-        
+
         assert!(!results.is_empty(), "Should find security-related tools");
-        
-        for tool in &amp;results {
+
+        for tool in &results {
             assert!(tool.category.is_some(), "Should include category");
             assert!(tool.description.is_some(), "Should include description");
             assert!(tool.schema.is_none(), "Should not include full schema");
@@ -440,10 +447,10 @@ mod tests {
     fn test_search_tools_full_schema() {
         let registry = ToolRegistry::new();
         let results = registry.search_tools("semgrep", DetailLevel::FullSchema);
-        
+
         assert!(!results.is_empty(), "Should find semgrep tool");
-        
-        for tool in &amp;results {
+
+        for tool in &results {
             assert!(tool.category.is_some(), "Should include category");
             assert!(tool.description.is_some(), "Should include description");
             assert!(tool.schema.is_some(), "Should include full schema");
@@ -453,20 +460,28 @@ mod tests {
     #[test]
     fn test_search_tools_case_insensitive() {
         let registry = ToolRegistry::new();
-        
+
         let lower = registry.search_tools("github", DetailLevel::NameOnly);
         let upper = registry.search_tools("GITHUB", DetailLevel::NameOnly);
         let mixed = registry.search_tools("GiTHuB", DetailLevel::NameOnly);
-        
-        assert_eq!(lower.len(), upper.len(), "Search should be case-insensitive");
-        assert_eq!(lower.len(), mixed.len(), "Search should be case-insensitive");
+
+        assert_eq!(
+            lower.len(),
+            upper.len(),
+            "Search should be case-insensitive"
+        );
+        assert_eq!(
+            lower.len(),
+            mixed.len(),
+            "Search should be case-insensitive"
+        );
     }
 
     #[test]
     fn test_search_tools_no_matches() {
         let registry = ToolRegistry::new();
         let results = registry.search_tools("nonexistent_tool_xyz", DetailLevel::NameOnly);
-        
+
         assert!(results.is_empty(), "Should return empty vec for no matches");
     }
 
@@ -474,23 +489,26 @@ mod tests {
     fn test_search_tools_matches_description() {
         let registry = ToolRegistry::new();
         let results = registry.search_tools("check", DetailLevel::NameAndDescription);
-        
-        assert!(!results.is_empty(), "Should find tools matching description");
+
+        assert!(
+            !results.is_empty(),
+            "Should find tools matching description"
+        );
     }
 
     #[test]
     fn test_get_tool_info() {
         let registry = ToolRegistry::new();
-        
+
         if let Some(first_tool) = registry.list_tools().first() {
-            let tool_info = registry.get_tool_info(&amp;first_tool.name);
+            let tool_info = registry.get_tool_info(&first_tool.name);
             assert!(tool_info.is_some(), "Should find existing tool");
-            
+
             let info = tool_info.unwrap();
             assert_eq!(info.name, first_tool.name);
             assert!(!info.description.is_empty());
         }
-        
+
         let missing = registry.get_tool_info("nonexistent_tool");
         assert!(missing.is_none(), "Should return None for missing tool");
     }
@@ -498,24 +516,26 @@ mod tests {
     #[test]
     fn test_progressive_disclosure_token_efficiency() {
         let registry = ToolRegistry::new();
-        
+
         let all_tools = registry.list_tools();
-        let all_tools_json = serde_json::to_string(&amp;all_tools).unwrap();
+        let all_tools_json = serde_json::to_string(&all_tools).unwrap();
         let all_tools_size = all_tools_json.len();
-        
+
         let minimal_tools = registry.search_tools("github", DetailLevel::NameOnly);
-        let minimal_json = serde_json::to_string(&amp;minimal_tools).unwrap();
+        let minimal_json = serde_json::to_string(&minimal_tools).unwrap();
         let minimal_size = minimal_json.len();
-        
-        assert!(minimal_size < all_tools_size / 10, 
-                "NameOnly should use <10% of tokens compared to full list");
+
+        assert!(
+            minimal_size < all_tools_size / 10,
+            "NameOnly should use <10% of tokens compared to full list"
+        );
     }
 
     #[test]
     fn test_detail_level_serialization() {
         let level = DetailLevel::NameAndDescription;
-        let json = serde_json::to_string(&amp;level).unwrap();
-        let deserialized: DetailLevel = serde_json::from_str(&amp;json).unwrap();
+        let json = serde_json::to_string(&level).unwrap();
+        let deserialized: DetailLevel = serde_json::from_str(&json).unwrap();
         assert_eq!(level, deserialized);
     }
 }
