@@ -32,14 +32,13 @@ Arkavo Edge is an open-source agentic CLI tool that aims to provide developer-ce
 
 ## Build, Test, and Development Commands
 
+**IMPORTANT**: Do NOT use `--release` flag during development. Debug builds are faster to compile and we are in development mode.
+
 ```bash
-# Build the project
+# Build the project (debug mode - always use this)
 cargo build
 
-# Build release version
-cargo build --release
-
-# Run the project
+# Run the project (debug mode)
 cargo run
 
 # Run chat with prompt (default, no embeddings)
