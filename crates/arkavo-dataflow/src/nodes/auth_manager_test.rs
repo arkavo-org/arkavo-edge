@@ -35,13 +35,20 @@ mod auth_manager_regression_tests {
         // The test should fail with an error about the key being too short
         match result {
             Ok(_) => {
-                panic!("Auth manager should not succeed with a short master key");
+                panic!(
+                    "Expected AuthManager to reject master key='short' (5 chars) but it was accepted. \
+                    Master keys must be at least 32 characters."
+                );
             }
             Err(err) => {
-                // Environment variable was required and validation worked
+                let error_msg = err.to_string();
                 assert!(
-                    err.to_string().contains("at least 32 characters"),
-                    "Error message should mention 32 character requirement, got: {err}"
+                    error_msg.contains("at least 32 characters"),
+                    "Expected error message to mention '32 character' requirement.\n\
+                    Expected: Message containing 'at least 32 characters'\n\
+                    Actual: {}\n\
+                    Context: Validation should reject master_key='short' (5 chars)",
+                    error_msg
                 );
             }
         }
@@ -68,15 +75,21 @@ mod auth_manager_regression_tests {
         // The test should fail with an error about the master key being required
         match result {
             Ok(_manager) => {
-                panic!("Auth manager should not succeed without a master key");
+                panic!(
+                    "Expected AuthManager to fail without ARKAVO_MASTER_KEY env var, but it succeeded. \
+                    Auth manager requires master key from environment or keychain."
+                );
             }
             Err(e) => {
-                // Should get a clear error message about master key requirement
                 let error_msg = e.to_string();
                 assert!(
-                    error_msg.contains("Master key required")
+                    error_msg.contains("Master key")
                         && error_msg.contains("at least 32 characters"),
-                    "Unexpected error: {error_msg}"
+                    "Expected error message to mention both 'Master key' and '32 characters'.\n\
+                    Expected: Message containing 'Master key' AND 'at least 32 characters'\n\
+                    Actual: {}\n\
+                    Context: AuthManager should fail when no master key is available from env or keychain",
+                    error_msg
                 );
             }
         }
