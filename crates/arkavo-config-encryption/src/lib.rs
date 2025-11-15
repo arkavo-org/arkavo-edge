@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 pub mod error;
+pub mod kas;
 pub mod keys;
 pub mod policy;
 
 pub use error::{Error, Result};
+pub use kas::{DEFAULT_KAS_URL, KasConfig};
 pub use keys::{KeyPair, PrivateKey, PublicKey};
 pub use policy::{Policy, PolicyAttribute};
 
