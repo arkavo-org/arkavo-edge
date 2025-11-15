@@ -201,6 +201,28 @@ impl CognitiveEngine {
 
         self.post_progress(&assignment, &final_comment).await?;
 
+        if success {
+            info!("Execution successful, creating pull request");
+            match self.create_pull_request(&assignment, &plan, steps_completed, total_tokens).await {
+                Ok(pr_url) => {
+                    info!(pr_url, "Pull request created successfully");
+                    let pr_comment = format!(
+                        "🎉 Pull request created: {}\n\n{}",
+                        pr_url, final_comment
+                    );
+                    self.post_progress(&assignment, &pr_comment).await?;
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to create pull request");
+                    let fallback = format!(
+                        "{}\n\n⚠️ Note: Could not create PR automatically: {}",
+                        final_comment, e
+                    );
+                    self.post_progress(&assignment, &fallback).await?;
+                }
+            }
+        }
+
         Ok(ExecutionResult {
             success,
             steps_completed,
@@ -827,6 +849,87 @@ impl CognitiveEngine {
             )));
         }
         Ok((parts[0].to_string(), parts[1].to_string()))
+    }
+
+    async fn create_pull_request(
+        &self,
+        assignment: &AgentAssignment,
+        plan: &ExecutionPlan,
+        steps_completed: usize,
+        tokens_used: u32,
+    ) -> Result<String> {
+        info!("Creating pull request via GitHub operations");
+
+        let issue_number = assignment.issue_number;
+        let pr_title = format!("Fix issue #{}: {}", issue_number, assignment.issue_title);
+
+        let pr_body = format!(
+            "## Summary\n\nAutonomously resolved issue #{}\n\n\
+            ## What Changed\n\n{}\n\n\
+            ## Execution Details\n\n\
+            - Steps completed: {}/{}\n\
+            - Tokens used: {}\n\
+            - All verifications passed ✓\n\n\
+            ## Plan Executed\n\n{}\n\n\
+            ---\n\n\
+            🤖 Autonomous execution by Arkavo Edge\n\
+            Resolves #{}\n",
+            issue_number,
+            plan.steps
+                .iter()
+                .enumerate()
+                .map(|(i, step)| format!("{}. {}", i + 1, step.description))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            steps_completed,
+            plan.steps.len(),
+            tokens_used,
+            plan.steps
+                .iter()
+                .enumerate()
+                .map(|(i, step)| format!(
+                    "### Step {}: {}\n\nCommands:\n{}\n",
+                    i + 1,
+                    step.description,
+                    step.commands
+                        .iter()
+                        .map(|c| format!("- `{}`", c))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            issue_number
+        );
+
+        // For MVP: Use gh CLI directly to create PR
+        // TODO: Replace with MCP tool call in production
+        let output = tokio::process::Command::new("gh")
+            .args(&[
+                "pr",
+                "create",
+                "--title",
+                &pr_title,
+                "--body",
+                &pr_body,
+                "--base",
+                "main",
+            ])
+            .output()
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("Failed to execute gh command: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::Other(anyhow::anyhow!(
+                "gh pr create failed: {stderr}"
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let pr_url = stdout.lines().last().unwrap_or("PR created").trim();
+
+        Ok(pr_url.to_string())
     }
 }
 
