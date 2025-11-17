@@ -36,6 +36,7 @@ pub enum TaskCategory {
     TestGeneration,
     Documentation,
     Refactoring,
+    CodeGeneration,
     VisionAnalysis,
     General,
 }
@@ -50,6 +51,7 @@ impl TaskCategory {
             "test_generation" | "tests" | "testing" => Self::TestGeneration,
             "documentation" | "docs" => Self::Documentation,
             "refactoring" | "refactor" => Self::Refactoring,
+            "code_generation" | "codegen" | "patch" | "diff" | "generate" => Self::CodeGeneration,
             "vision_analysis" | "vision" | "screenshot" | "image" => Self::VisionAnalysis,
             _ => Self::General,
         }
@@ -64,6 +66,7 @@ impl TaskCategory {
             Self::TestGeneration => "test_generation",
             Self::Documentation => "documentation",
             Self::Refactoring => "refactoring",
+            Self::CodeGeneration => "code_generation",
             Self::VisionAnalysis => "vision_analysis",
             Self::General => "general",
         }
@@ -98,6 +101,10 @@ impl TaskCategory {
             Self::Refactoring => TokenEstimate {
                 input: 400,
                 output: 1200,
+            },
+            Self::CodeGeneration => TokenEstimate {
+                input: 800,
+                output: 3000,
             },
             Self::VisionAnalysis => TokenEstimate {
                 input: 2000,

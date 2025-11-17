@@ -111,7 +111,7 @@ impl CodeSolver {
         let response = self
             .router
             .route_with_quality_gate(
-                "Generate a solution for the given problem as a git diff",
+                "code_generation: Generate a unified git diff patch to solve the problem",
                 messages,
                 Some(&tool_registry),
                 self.config.max_quality_retries,

@@ -458,12 +458,41 @@ impl Router {
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma4B => {
                 let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH")
+                    .or_else(|_| {
+                        // Check HuggingFace cache
+                        let home = std::env::var("HOME")
+                            .or_else(|_| std::env::var("USERPROFILE"))?;
+
+                        // Check standard locations
+                        let possible_locations = vec![
+                            format!("{}/.cache/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF", home),
+                            "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF".to_string(),
+                        ];
+
+                        for hf_cache in possible_locations {
+                            let cache_path = std::path::PathBuf::from(&hf_cache);
+                            if cache_path.exists() {
+                                // Find the snapshot directory
+                                let snapshots = cache_path.join("snapshots");
+                                if let Ok(entries) = std::fs::read_dir(&snapshots) {
+                                    for entry in entries.flatten() {
+                                        let gguf_path = entry.path().join("gemma-3-4b-it-Q4_0.gguf");
+                                        if gguf_path.exists() {
+                                            return Ok(gguf_path.to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(std::env::VarError::NotPresent)
+                    })
                     .unwrap_or_else(|_| "models/gemma-3-4b-it.gguf".to_string());
+
                 let provider =
                     arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
                         .map_err(|e| {
                             Error::ModelExecution(format!(
-                                "Failed to create LlamaCpp provider: {e}"
+                                "Failed to create LlamaCpp provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF gemma-3-4b-it-Q4_0.gguf"
                             ))
                         })?;
                 Ok(Box::new(provider))
