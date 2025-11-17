@@ -109,7 +109,7 @@ impl Router {
             TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
                 ModelChoice::LocalGemma4B
             }
-            TaskCategory::CodeGeneration => ModelChoice::LocalDeepSeekCoder,
+            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
             _ => ModelChoice::LocalGemma4B,
         }
     }
