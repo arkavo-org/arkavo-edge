@@ -7,6 +7,7 @@ pub mod deduplicator;
 pub mod error;
 pub mod metrics;
 pub mod pipeline;
+pub mod prompt_enricher;
 
 pub use chunker::SemanticChunker;
 pub use compressor::ContextCompressor;
@@ -14,3 +15,6 @@ pub use deduplicator::Deduplicator;
 pub use error::{Error, Result};
 pub use metrics::{CompressionMetrics, CompressionStats};
 pub use pipeline::CompressionPipeline;
+pub use prompt_enricher::{
+    CodeContext, FileContext, ProblemStatement, PromptEnricher, PromptTemplate,
+};

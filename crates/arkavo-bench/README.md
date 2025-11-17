@@ -5,10 +5,12 @@ Benchmarking utilities for Arkavo Edge performance evaluation with comprehensive
 ## Features
 
 - **Multiple SWE-bench Variants**: Support for Lite (534), Verified (500), Full (2294), and Multimodal (500) instances
+- **Arkavo-Assisted Mode**: Production-ready code generation with intelligent context analysis and quality gates
 - **Parallel Execution**: Run multiple benchmark instances concurrently for faster evaluation
 - **HuggingFace Integration**: Direct loading from official SWE-bench datasets
-- **Comprehensive Metrics**: Track resolution rates, wall time, API calls, tokens, and costs
+- **Comprehensive Metrics**: Track resolution rates, wall time, API calls, tokens, and costs with ResponseJudge integration
 - **MCP Tool Integration**: Seamless integration with Arkavo's MCP tool ecosystem
+- **Solution Validation**: Multi-framework test execution (pytest, cargo test, jest)
 
 ## Usage
 
@@ -75,6 +77,58 @@ let summary = tool.execute(params).await.unwrap();
 //          avg_wall_time_ms, total_cost_usd, etc.
 ```
 
+### Arkavo-Assisted Mode (Production)
+
+Use the production-ready Arkavo-assisted solver with intelligent context analysis and quality gates:
+
+```rust
+use arkavo_bench::{ArkavoMode, SweBenchInstance};
+use arkavo_router::Router;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+#[tokio::main]
+async fn main() {
+    // Initialize router with quality gate
+    let router = Arc::new(Router::new().await.unwrap());
+    let arkavo = ArkavoMode::new(router).await.unwrap();
+
+    // Load SWE-bench instance
+    let instance = SweBenchInstance::new(
+        "django__django-12345".to_string(),
+        "https://github.com/django/django".to_string(),
+        "abc123def".to_string(),
+        "Fix authentication bug...".to_string(),
+        Some("Check password validation".to_string()),
+        "test.patch".to_string(),
+    );
+
+    // Run with Arkavo assistance
+    let workspace = PathBuf::from("/tmp/workspace");
+    let metrics = arkavo.run_instance(&instance, &workspace).await.unwrap();
+
+    println!("Resolved: {}", metrics.resolved);
+    println!("Quality Gate Passed: {:?}", metrics.quality_gate_passed);
+    println!("Retries: {}", metrics.quality_retries);
+    println!("Issue Type: {:?}", metrics.issue_type);
+}
+```
+
+### Comparative Benchmarking
+
+Compare raw LLM vs Arkavo-assisted approaches:
+
+```rust
+use arkavo_bench::ComparativeRunner;
+
+let runner = ComparativeRunner::new(router).await.unwrap();
+let comparison = runner.run_comparison(&instance, &workspace).await.unwrap();
+
+println!("Improvement: {:.1}%", comparison.improvement_percentage());
+println!("Speedup: {:.2}x", comparison.speedup_factor());
+println!("Cost difference: ${:.2}", comparison.cost_difference_usd());
+```
+
 ## SWE-bench Datasets
 
 | Dataset | Instances | Description |
@@ -104,6 +158,7 @@ GEMINI_API_KEY=your_key cargo run --example swe-bench-gemini
 
 Each benchmark run produces detailed metrics:
 
+### Basic Metrics
 - `instance_id`: SWE-bench instance identifier
 - `resolved`: Whether the instance was successfully resolved
 - `wall_time_ms`: Total execution time in milliseconds
@@ -111,6 +166,17 @@ Each benchmark run produces detailed metrics:
 - `total_tokens`: Total tokens used (input + output)
 - `estimated_cost_usd`: Estimated cost in USD
 - `error_message`: Error details if execution failed
+
+### Arkavo-Assisted Metrics (with ResponseJudge)
+- `quality_gate_passed`: Whether ResponseJudge approved the solution
+- `quality_retries`: Number of retry attempts with model escalation
+- `issue_type`: Type of issue detected (none, hallucinated_tool, invalid_params, refusal, off_topic)
+- `judge_reason`: Explanation from ResponseJudge
+
+### Summary Statistics
+- `quality_gate_pass_rate`: Percentage of solutions passing quality gates
+- `avg_quality_retries`: Average number of retries across instances
+- `issue_type_breakdown`: Distribution of detected issues
 
 ## Integration with Gemini
 

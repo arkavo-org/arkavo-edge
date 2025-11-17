@@ -29,6 +29,15 @@ pub enum Error {
     #[error("Memory store error: {0}")]
     Memory(#[from] arkavo_memory::error::MemoryError),
 
+    #[error("Context error: {0}")]
+    Context(#[from] arkavo_context::Error),
+
+    #[error("Git error: {0}")]
+    Git(#[from] arkavo_git::backend::GitError),
+
+    #[error("External error: {0}")]
+    External(String),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

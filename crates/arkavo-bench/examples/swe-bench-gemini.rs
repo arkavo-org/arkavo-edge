@@ -8,8 +8,7 @@ use std::time::Instant;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = env::var("GEMINI_API_KEY")
-        .expect("GEMINI_API_KEY environment variable not set");
+    let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY environment variable not set");
 
     println!("🚀 SWE-bench × Gemini Comparative Benchmark");
     println!("============================================\n");
@@ -28,7 +27,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "limit": 3
     });
 
-    let instances_result = bench_tool.execute(load_params).await
+    let instances_result = bench_tool
+        .execute(load_params)
+        .await
         .map_err(|e| format!("Failed to load instances: {}", e))?;
     let instances = instances_result
         .get("instances")
@@ -59,8 +60,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
-            println!("\n  [{}/{}] Instance: {}", idx + 1, instances.len(), instance_id);
-            println!("  Problem: {}...", &problem.chars().take(80).collect::<String>());
+            println!(
+                "\n  [{}/{}] Instance: {}",
+                idx + 1,
+                instances.len(),
+                instance_id
+            );
+            println!(
+                "  Problem: {}...",
+                &problem.chars().take(80).collect::<String>()
+            );
 
             let start = Instant::now();
 
@@ -86,7 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if solution.len() < 200 {
                         println!("  📄 Full solution:\n{}", solution);
                     } else {
-                        println!("  📄 Preview: {}...", &solution.chars().take(150).collect::<String>());
+                        println!(
+                            "  📄 Preview: {}...",
+                            &solution.chars().take(150).collect::<String>()
+                        );
                     }
 
                     results.push((
@@ -109,19 +121,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let total = results.len();
         let successful = results.iter().filter(|(_, t, _, _)| *t > 0).count();
         let total_time: u64 = results.iter().map(|(_, t, _, _)| t).sum();
-        let avg_time = if successful > 0 { total_time as f64 / successful as f64 } else { 0.0 };
+        let avg_time = if successful > 0 {
+            total_time as f64 / successful as f64
+        } else {
+            0.0
+        };
         let total_tokens: usize = results.iter().map(|(_, _, tk, _)| tk).sum();
         let total_cost: f64 = results.iter().map(|(_, _, _, c)| c).sum();
 
         println!("  Total instances: {}", total);
         println!("  Successful generations: {}", successful);
-        println!("  Success rate: {:.2}%", (successful as f64 / total as f64) * 100.0);
+        println!(
+            "  Success rate: {:.2}%",
+            (successful as f64 / total as f64) * 100.0
+        );
         println!("  Avg time per instance: {:.2}ms", avg_time);
         println!("  Total tokens: {}", total_tokens);
         println!("  Total cost: ${:.4}", total_cost);
-        println!("  Cost per instance: ${:.4}", if total > 0 { total_cost / total as f64 } else { 0.0 });
+        println!(
+            "  Cost per instance: ${:.4}",
+            if total > 0 {
+                total_cost / total as f64
+            } else {
+                0.0
+            }
+        );
 
-        let model_file_name = model_id.replace("models/", "").replace('.', "_").replace('-', "_");
+        let model_file_name = model_id
+            .replace("models/", "")
+            .replace('.', "_")
+            .replace('-', "_");
         let metrics_file = format!("/tmp/swe-bench-{}.json", model_file_name);
         let metrics_json = serde_json::to_string_pretty(&results)?;
         tokio::fs::write(&metrics_file, metrics_json).await?;
@@ -141,8 +170,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let flash_results: Vec<(String, u64, usize, f64)> = serde_json::from_str(&flash_data)?;
         let pro_results: Vec<(String, u64, usize, f64)> = serde_json::from_str(&pro_data)?;
 
-        let flash_avg_time: f64 = flash_results.iter().map(|(_, t, _, _)| *t as f64).sum::<f64>() / flash_results.len() as f64;
-        let pro_avg_time: f64 = pro_results.iter().map(|(_, t, _, _)| *t as f64).sum::<f64>() / pro_results.len() as f64;
+        let flash_avg_time: f64 = flash_results
+            .iter()
+            .map(|(_, t, _, _)| *t as f64)
+            .sum::<f64>()
+            / flash_results.len() as f64;
+        let pro_avg_time: f64 = pro_results
+            .iter()
+            .map(|(_, t, _, _)| *t as f64)
+            .sum::<f64>()
+            / pro_results.len() as f64;
 
         let flash_total_cost: f64 = flash_results.iter().map(|(_, _, _, c)| c).sum();
         let pro_total_cost: f64 = pro_results.iter().map(|(_, _, _, c)| c).sum();
@@ -150,13 +187,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n┌─────────────────────┬─────────────┬─────────────┐");
         println!("│ Metric              │ Flash       │ Pro         │");
         println!("├─────────────────────┼─────────────┼─────────────┤");
-        println!("│ Avg Time (ms)       │ {:>11.2} │ {:>11.2} │", flash_avg_time, pro_avg_time);
-        println!("│ Total Cost ($)      │ {:>11.4} │ {:>11.4} │", flash_total_cost, pro_total_cost);
-        println!("│ Speed Advantage     │ {:>10.1}x │ {:>10.1}x │",
+        println!(
+            "│ Avg Time (ms)       │ {:>11.2} │ {:>11.2} │",
+            flash_avg_time, pro_avg_time
+        );
+        println!(
+            "│ Total Cost ($)      │ {:>11.4} │ {:>11.4} │",
+            flash_total_cost, pro_total_cost
+        );
+        println!(
+            "│ Speed Advantage     │ {:>10.1}x │ {:>10.1}x │",
             pro_avg_time / flash_avg_time.max(0.1),
             flash_avg_time / pro_avg_time.max(0.1)
         );
-        println!("│ Cost Efficiency     │ {:>10.1}x │ {:>10.1}x │",
+        println!(
+            "│ Cost Efficiency     │ {:>10.1}x │ {:>10.1}x │",
             pro_total_cost / flash_total_cost.max(0.0001),
             flash_total_cost / pro_total_cost.max(0.0001)
         );
