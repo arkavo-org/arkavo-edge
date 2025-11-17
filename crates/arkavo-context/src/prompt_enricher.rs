@@ -223,11 +223,19 @@ impl PromptEnricher {
     fn format_output_format(&self) -> String {
         "## Output Format\n\n\
         Provide your solution as a unified git diff that can be applied with `git apply`. \
-        Include:\n\n\
-        - Clear file paths (diff --git a/path b/path)\n\
-        - Proper diff headers (@@@ line numbers)\n\
-        - Context lines for accurate patching\n\
-        - Only changes necessary to solve the problem\n\n\
+        \n\n\
+        **CRITICAL REQUIREMENTS**:\n\
+        - Use EXACT file paths from the \"Relevant Code Files\" section above\n\
+        - Do NOT create new files or reference files not shown in the context\n\
+        - Include at least 3 lines of context before and after each change\n\
+        - Ensure line numbers match the actual file content provided\n\
+        - Use @@ (two at-signs) for hunk headers, not @@@\n\n\
+        Format requirements:\n\
+        - File headers: diff --git a/path/to/file b/path/to/file\n\
+        - Hunk headers: @@ -oldstart,oldcount +newstart,newcount @@\n\
+        - Context lines: start with space\n\
+        - Removed lines: start with -\n\
+        - Added lines: start with +\n\n\
         Example format:\n\
         ```diff\n\
         diff --git a/src/example.py b/src/example.py\n\
@@ -236,11 +244,19 @@ impl PromptEnricher {
         +++ b/src/example.py\n\
         @@ -10,7 +10,7 @@\n\
          context line\n\
+         context line\n\
+         context line\n\
         -old line\n\
         +new line\n\
          context line\n\
+         context line\n\
+         context line\n\
         ```\n\n\
-        **Important**: Only output the diff. Do not include explanations or markdown outside the diff block.\n"
+        **IMPORTANT**: \n\
+        - Output ONLY the diff, nothing else\n\
+        - Do not include explanations before or after the diff\n\
+        - Do not wrap the diff in markdown code blocks\n\
+        - Start directly with 'diff --git'\n"
             .to_string()
     }
 
