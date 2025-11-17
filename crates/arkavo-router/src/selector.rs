@@ -56,7 +56,7 @@ impl ModelSelector {
                 ModelChoice::GeminiFlash
             }
 
-            TaskCategory::CodeGeneration => ModelChoice::LocalDeepSeekCoder,
+            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
 
             TaskCategory::VisionAnalysis => ModelChoice::GeminiFlash,
 
