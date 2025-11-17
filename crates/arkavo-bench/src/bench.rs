@@ -19,6 +19,26 @@ pub struct SweBenchInstance {
     pub test_patch: String,
 }
 
+impl SweBenchInstance {
+    pub fn new(
+        instance_id: String,
+        repo: String,
+        base_commit: String,
+        problem_statement: String,
+        hints_text: Option<String>,
+        test_patch: String,
+    ) -> Self {
+        Self {
+            instance_id,
+            repo,
+            base_commit,
+            problem_statement,
+            hints_text,
+            test_patch,
+        }
+    }
+}
+
 pub struct SweBenchTool {
     schema: ToolSchema,
     workspace: WorkspaceTool,

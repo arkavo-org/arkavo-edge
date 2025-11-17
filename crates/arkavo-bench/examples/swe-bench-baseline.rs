@@ -68,11 +68,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if let Some(summary) = result.get("summary") {
                 println!("📈 Summary:");
-                println!("   Total instances: {}", summary.get("total_instances").and_then(|v| v.as_u64()).unwrap_or(0));
-                println!("   Resolved: {}", summary.get("resolved_count").and_then(|v| v.as_u64()).unwrap_or(0));
-                println!("   Resolution rate: {:.2}%", summary.get("resolved_percentage").and_then(|v| v.as_f64()).unwrap_or(0.0));
-                println!("   Avg wall time: {}ms", summary.get("avg_wall_time_ms").and_then(|v| v.as_u64()).unwrap_or(0));
-                println!("   Total cost: ${:.4}", summary.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0));
+                println!(
+                    "   Total instances: {}",
+                    summary
+                        .get("total_instances")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
+                );
+                println!(
+                    "   Resolved: {}",
+                    summary
+                        .get("resolved_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
+                );
+                println!(
+                    "   Resolution rate: {:.2}%",
+                    summary
+                        .get("resolved_percentage")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0)
+                );
+                println!(
+                    "   Avg wall time: {}ms",
+                    summary
+                        .get("avg_wall_time_ms")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
+                );
+                println!(
+                    "   Total cost: ${:.4}",
+                    summary
+                        .get("total_cost_usd")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0)
+                );
             }
 
             println!("\n📁 Metrics saved to /tmp/swe-bench-baseline.json");

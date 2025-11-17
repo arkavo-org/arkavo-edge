@@ -240,8 +240,11 @@ dependencies = [
 name = "arkavo-bench"
 version = "0.40.3"
 dependencies = [
+ "arkavo-context",
  "arkavo-gemini",
  "arkavo-mcp",
+ "arkavo-orchestrator",
+ "arkavo-router",
  "arkavo-workspace",
  "async-trait",
  "futures",
@@ -250,6 +253,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -771,12 +775,16 @@ version = "0.40.3"
 dependencies = [
  "anyhow",
  "arkavo-budget",
+ "arkavo-code-search",
+ "arkavo-context",
  "arkavo-events",
+ "arkavo-git",
  "arkavo-llm",
  "arkavo-mcp-tools",
  "arkavo-memory",
  "arkavo-observability",
  "arkavo-protocol",
+ "arkavo-repo",
  "arkavo-router",
  "async-trait",
  "axum",
