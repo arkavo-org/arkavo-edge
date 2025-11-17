@@ -211,14 +211,16 @@ impl SolutionApplier {
         for line in output.lines() {
             if line.contains("passed") || line.contains("failed") {
                 if let Some(passed_str) = line.split_whitespace().find(|s| s.ends_with("passed"))
-                    && let Ok(num) = passed_str.trim_end_matches("passed").parse::<u32>() {
-                        passed = num;
-                    }
+                    && let Ok(num) = passed_str.trim_end_matches("passed").parse::<u32>()
+                {
+                    passed = num;
+                }
 
                 if let Some(failed_str) = line.split_whitespace().find(|s| s.ends_with("failed"))
-                    && let Ok(num) = failed_str.trim_end_matches("failed").parse::<u32>() {
-                        failed = num;
-                    }
+                    && let Ok(num) = failed_str.trim_end_matches("failed").parse::<u32>()
+                {
+                    failed = num;
+                }
             }
         }
 
@@ -236,14 +238,18 @@ impl SolutionApplier {
             if line.contains("test result:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 for (i, part) in parts.iter().enumerate() {
-                    if *part == "passed;" && i > 0
-                        && let Ok(num) = parts[i - 1].parse::<u32>() {
-                            passed = num;
-                        }
-                    if *part == "failed;" && i > 0
-                        && let Ok(num) = parts[i - 1].parse::<u32>() {
-                            failed = num;
-                        }
+                    if *part == "passed;"
+                        && i > 0
+                        && let Ok(num) = parts[i - 1].parse::<u32>()
+                    {
+                        passed = num;
+                    }
+                    if *part == "failed;"
+                        && i > 0
+                        && let Ok(num) = parts[i - 1].parse::<u32>()
+                    {
+                        failed = num;
+                    }
                 }
             }
         }
@@ -264,14 +270,16 @@ impl SolutionApplier {
                 for part in parts {
                     if part.contains("passed")
                         && let Some(num_str) = part.split_whitespace().next()
-                            && let Ok(num) = num_str.parse::<u32>() {
-                                passed = num;
-                            }
+                        && let Ok(num) = num_str.parse::<u32>()
+                    {
+                        passed = num;
+                    }
                     if part.contains("failed")
                         && let Some(num_str) = part.split_whitespace().next()
-                            && let Ok(num) = num_str.parse::<u32>() {
-                                failed = num;
-                            }
+                        && let Ok(num) = num_str.parse::<u32>()
+                    {
+                        failed = num;
+                    }
                 }
             }
         }

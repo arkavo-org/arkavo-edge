@@ -247,6 +247,7 @@ dependencies = [
  "arkavo-router",
  "arkavo-workspace",
  "async-trait",
+ "chrono",
  "futures",
  "reqwest",
  "serde",
@@ -254,6 +255,8 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

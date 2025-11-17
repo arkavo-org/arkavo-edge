@@ -1,5 +1,6 @@
 use crate::{Error, Result};
 use arkavo_context::{CodeContext, FileContext, ProblemStatement, PromptEnricher, PromptTemplate};
+use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_router::{IssueType, JudgmentResult, Router};
 use serde::{Deserialize, Serialize};
@@ -104,12 +105,14 @@ impl CodeSolver {
 
         let tool_registry = ToolRegistry::default();
 
+        let messages = vec![Message::user(enriched_prompt.clone())];
+
         let solution_start = Instant::now();
         let response = self
             .router
             .route_with_quality_gate(
-                &enriched_prompt,
-                vec![],
+                "Generate a solution for the given problem as a git diff",
+                messages,
                 Some(&tool_registry),
                 self.config.max_quality_retries,
             )
@@ -232,28 +235,54 @@ impl CodeSolver {
 
     async fn search_files(&self, repo_path: &Path, term: &str) -> Result<Vec<FileContext>> {
         let mut matches = Vec::new();
+        self.search_files_recursive(repo_path, term, &mut matches, 0)?;
+        Ok(matches)
+    }
 
-        if let Ok(entries) = std::fs::read_dir(repo_path) {
+    fn search_files_recursive(
+        &self,
+        dir: &Path,
+        term: &str,
+        matches: &mut Vec<FileContext>,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > 10 {
+            return Ok(());
+        }
+
+        if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
 
-                if path.is_file()
-                    && let Some(ext) = path.extension()
-                        && matches!(ext.to_str(), Some("py" | "rs" | "js" | "ts" | "go"))
-                            && let Ok(content) = std::fs::read_to_string(&path)
-                                && content.contains(term) {
-                                    let relevance = self.calculate_relevance(&content, term);
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && (name.starts_with('.')
+                        || name == "node_modules"
+                        || name == "target"
+                        || name == "__pycache__")
+                {
+                    continue;
+                }
 
-                                    matches.push(FileContext {
-                                        path: path.display().to_string(),
-                                        content,
-                                        relevance_score: relevance,
-                                    });
-                                }
+                if path.is_dir() {
+                    self.search_files_recursive(&path, term, matches, depth + 1)?;
+                } else if path.is_file()
+                    && let Some(ext) = path.extension()
+                    && matches!(ext.to_str(), Some("py" | "rs" | "js" | "ts" | "go"))
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                    && content.contains(term)
+                {
+                    let relevance = self.calculate_relevance(&content, term);
+
+                    matches.push(FileContext {
+                        path: path.display().to_string(),
+                        content,
+                        relevance_score: relevance,
+                    });
+                }
             }
         }
 
-        Ok(matches)
+        Ok(())
     }
 
     fn calculate_relevance(&self, content: &str, term: &str) -> f32 {
@@ -278,14 +307,15 @@ impl CodeSolver {
 
                 if path.is_file()
                     && let Some(ext) = path.extension()
-                        && matches!(ext.to_str(), Some("py" | "rs" | "js" | "ts"))
-                            && let Ok(content) = std::fs::read_to_string(&path) {
-                                files.push(FileContext {
-                                    path: path.display().to_string(),
-                                    content,
-                                    relevance_score: 0.5,
-                                });
-                            }
+                    && matches!(ext.to_str(), Some("py" | "rs" | "js" | "ts"))
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
+                    files.push(FileContext {
+                        path: path.display().to_string(),
+                        content,
+                        relevance_score: 0.5,
+                    });
+                }
             }
         }
 

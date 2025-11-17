@@ -104,9 +104,10 @@ impl ArkavoMode {
             metrics.set_resolved(test_result.passed);
 
             if !test_result.passed
-                && let Some(error_msg) = test_result.error_message {
-                    metrics.set_error(error_msg);
-                }
+                && let Some(error_msg) = test_result.error_message
+            {
+                metrics.set_error(error_msg);
+            }
 
             debug!(
                 "Tests completed: {} passed, {} failed",
