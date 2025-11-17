@@ -240,9 +240,11 @@ dependencies = [
 name = "arkavo-bench"
 version = "0.40.3"
 dependencies = [
+ "arkavo-gemini",
  "arkavo-mcp",
  "arkavo-workspace",
  "async-trait",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",

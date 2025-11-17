@@ -11,8 +11,12 @@ repository.workspace = true
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-workspace = { path = "../arkavo-workspace" }
 async-trait = { workspace = true }
+futures = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+arkavo-gemini = { path = "../arkavo-gemini" }
