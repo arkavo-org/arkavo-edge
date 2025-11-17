@@ -281,12 +281,6 @@ cat /tmp/arkavo-phase3-*/phase3-metrics.json | jq '.instances[0]'
 cat /tmp/arkavo-phase3-*/phase3-metrics.json | jq '.instances | map(select(.resolved)) | length'
 ```
 
-## Gemini API Key
-
-The user provided: `REDACTED_API_KEY`
-
-**DO NOT COMMIT THIS KEY**. Use it only for testing, export as environment variable.
-
 ---
 
-**Ready to execute!** All infrastructure is in place, bugs are fixed, code is committed and pushed. Just run the commands above to validate Phase 3 targets.
+**Ready to execute!** Set your `GEMINI_API_KEY` environment variable and run the commands above to validate Phase 3 targets.
