@@ -1,5 +1,5 @@
 // Test to list all tools and verify filesystem tool registration
-use arkavo_mcp_tools::{ToolRegistry, DetailLevel};
+use arkavo_mcp_tools::{DetailLevel, ToolRegistry};
 
 #[tokio::test]
 async fn test_list_all_tools() {
@@ -58,7 +58,10 @@ async fn test_filesystem_tool_registration() {
     // Test direct lookup
     println!("Direct lookup 'filesystem_tools':");
     let direct = registry.get("filesystem_tools");
-    assert!(direct.is_some(), "Should find filesystem_tools by direct name");
+    assert!(
+        direct.is_some(),
+        "Should find filesystem_tools by direct name"
+    );
 
     if let Some(tool) = direct {
         let schema = tool.schema();
@@ -67,29 +70,47 @@ async fn test_filesystem_tool_registration() {
 
         if let Some(aliases) = &schema.aliases {
             println!("    Aliases: {:?}", aliases);
-            assert!(aliases.contains(&"filesystem".to_string()), "Should have 'filesystem' alias");
-            assert!(aliases.contains(&"fs".to_string()), "Should have 'fs' alias");
+            assert!(
+                aliases.contains(&"filesystem".to_string()),
+                "Should have 'filesystem' alias"
+            );
+            assert!(
+                aliases.contains(&"fs".to_string()),
+                "Should have 'fs' alias"
+            );
         }
     }
 
     // Test alias lookups
     println!("\nAlias lookup 'filesystem':");
     let alias1 = registry.get("filesystem");
-    assert!(alias1.is_some(), "Should find filesystem_tools via 'filesystem' alias");
+    assert!(
+        alias1.is_some(),
+        "Should find filesystem_tools via 'filesystem' alias"
+    );
 
     if let Some(tool) = alias1 {
         let schema = tool.schema();
-        println!("  ✓ Found via alias: {} (actual name: {})", "filesystem", schema.name);
+        println!(
+            "  ✓ Found via alias: {} (actual name: {})",
+            "filesystem", schema.name
+        );
         assert_eq!(schema.name, "filesystem_tools");
     }
 
     println!("\nAlias lookup 'fs':");
     let alias2 = registry.get("fs");
-    assert!(alias2.is_some(), "Should find filesystem_tools via 'fs' alias");
+    assert!(
+        alias2.is_some(),
+        "Should find filesystem_tools via 'fs' alias"
+    );
 
     if let Some(tool) = alias2 {
         let schema = tool.schema();
-        println!("  ✓ Found via alias: {} (actual name: {})", "fs", schema.name);
+        println!(
+            "  ✓ Found via alias: {} (actual name: {})",
+            "fs", schema.name
+        );
         assert_eq!(schema.name, "filesystem_tools");
     }
 }
@@ -112,7 +133,10 @@ async fn test_search_file_tools() {
 
     // Verify filesystem_tools is in the search results
     let has_filesystem = file_tools.iter().any(|t| t.name == "filesystem_tools");
-    assert!(has_filesystem, "Search for 'file' should include filesystem_tools");
+    assert!(
+        has_filesystem,
+        "Search for 'file' should include filesystem_tools"
+    );
 }
 
 #[tokio::test]
@@ -123,7 +147,10 @@ async fn test_total_tool_count() {
     let all_tools = registry.search_tools("", DetailLevel::NameOnly);
     println!("Total registered tools: {}", all_tools.len());
 
-    assert!(all_tools.len() > 0, "Should have at least one registered tool");
+    assert!(
+        all_tools.len() > 0,
+        "Should have at least one registered tool"
+    );
 
     // Verify filesystem_tools is in the registry
     let has_filesystem = all_tools.iter().any(|t| t.name == "filesystem_tools");
