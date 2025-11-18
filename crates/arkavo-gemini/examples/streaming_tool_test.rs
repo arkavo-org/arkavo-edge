@@ -14,7 +14,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY required");
-    let model = "models/gemini-flash-latest";
+    let model =
+        env::var("GEMINI_MODEL").unwrap_or_else(|_| "models/gemini-3-pro-preview".to_string());
 
     println!("Setting up tool dispatcher...");
     let dispatcher = ToolDispatcher::new(2);
@@ -68,8 +69,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✓ Registered {} tools\n", tools.len());
     println!("Creating REST client...");
+    println!("Using model: {}\n", model);
 
-    let client = RestClient::new(api_key, model);
+    let client = RestClient::new(api_key, &model);
 
     println!("Starting streaming request...\n");
     let start_time = std::time::Instant::now();

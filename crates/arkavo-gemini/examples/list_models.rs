@@ -69,6 +69,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  - {}", model.name);
     }
 
+    // Check for Gemini 3 Pro Preview
+    let gemini_3_preview = response.models.iter().find(|m| {
+        m.name.contains("gemini-3-pro-preview") || m.name.contains("models/gemini-3-pro-preview")
+    });
+
+    if let Some(model) = gemini_3_preview {
+        println!("\n{}", "=".repeat(80));
+        println!("🎯 Gemini 3 Pro Preview detected!");
+        println!("  Model: {}", model.name);
+        if let Some(methods) = &model.supported_generation_methods {
+            let has_streaming = methods.iter().any(|m| m == "streamGenerateContent");
+            println!(
+                "  Streaming: {}",
+                if has_streaming { "✅ YES" } else { "❌ NO" }
+            );
+        }
+        if let Some(input) = model.input_token_limit {
+            println!("  Input tokens: {}", input);
+        }
+        if let Some(output) = model.output_token_limit {
+            println!("  Output tokens: {}", output);
+        }
+    } else {
+        println!("\n⚠️  Gemini 3 Pro Preview not found in model list");
+        println!("  Model may not be available yet or requires different API access");
+    }
+
     if let Some(next_token) = response.next_page_token {
         println!("\nMore models available (next page token: {next_token})");
     }
