@@ -109,6 +109,7 @@ impl Router {
             TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
                 ModelChoice::LocalGemma4B
             }
+            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
             _ => ModelChoice::LocalGemma4B,
         }
     }
@@ -380,6 +381,7 @@ impl Router {
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
             ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
+            ModelChoice::LocalDeepSeekCoder => ModelChoice::GeminiFlash,
             ModelChoice::GeminiFlash => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::GeminiPro,
         }
@@ -458,12 +460,46 @@ impl Router {
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma4B => {
                 let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH")
+                    .or_else(|_| {
+                        // Check HuggingFace cache
+                        let home =
+                            std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))?;
+
+                        // Check standard locations
+                        let possible_locations = vec![
+                            format!(
+                                "{}/.cache/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF",
+                                home
+                            ),
+                            "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF"
+                                .to_string(),
+                        ];
+
+                        for hf_cache in possible_locations {
+                            let cache_path = std::path::PathBuf::from(&hf_cache);
+                            if cache_path.exists() {
+                                // Find the snapshot directory
+                                let snapshots = cache_path.join("snapshots");
+                                if let Ok(entries) = std::fs::read_dir(&snapshots) {
+                                    for entry in entries.flatten() {
+                                        let gguf_path =
+                                            entry.path().join("gemma-3-4b-it-Q4_0.gguf");
+                                        if gguf_path.exists() {
+                                            return Ok(gguf_path.to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(std::env::VarError::NotPresent)
+                    })
                     .unwrap_or_else(|_| "models/gemma-3-4b-it.gguf".to_string());
+
                 let provider =
                     arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
                         .map_err(|e| {
                             Error::ModelExecution(format!(
-                                "Failed to create LlamaCpp provider: {e}"
+                                "Failed to create LlamaCpp provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF gemma-3-4b-it-Q4_0.gguf"
                             ))
                         })?;
                 Ok(Box::new(provider))
@@ -477,6 +513,48 @@ impl Router {
                         .map_err(|e| {
                             Error::ModelExecution(format!(
                                 "Failed to create LlamaCpp provider: {e}"
+                            ))
+                        })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalDeepSeekCoder => {
+                let model_path = std::env::var("ARKAVO_DEEPSEEK_CODER_PATH")
+                    .or_else(|_| {
+                        // Check HuggingFace cache in standard and custom locations
+                        let home = std::env::var("HOME")
+                            .or_else(|_| std::env::var("USERPROFILE"))?;
+
+                        let possible_locations = vec![
+                            format!("{home}/.cache/huggingface/hub/models--bartowski--DeepSeek-Coder-V2-Lite-Instruct-GGUF"),
+                            "/Volumes/SSD/huggingface/hub/models--bartowski--DeepSeek-Coder-V2-Lite-Instruct-GGUF".to_string(),
+                        ];
+
+                        for hf_cache in possible_locations {
+                            let cache_path = std::path::PathBuf::from(&hf_cache);
+                            if cache_path.exists() {
+                                // Find the snapshot directory
+                                let snapshots = cache_path.join("snapshots");
+                                if let Ok(entries) = std::fs::read_dir(&snapshots) {
+                                    for entry in entries.flatten() {
+                                        // Try Q4_K_M first (best balance)
+                                        let gguf_path = entry.path().join("DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf");
+                                        if gguf_path.exists() {
+                                            return Ok(gguf_path.to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(std::env::VarError::NotPresent)
+                    })
+                    .unwrap_or_else(|_| "models/deepseek-coder-v2-lite-instruct.gguf".to_string());
+
+                let provider =
+                    arkavo_llm::LlamaCppProvider::new("deepseek-coder-v2-lite-instruct".to_string(), model_path)
+                        .map_err(|e| {
+                            Error::ModelExecution(format!(
+                                "Failed to create DeepSeek-Coder provider: {e}. Install model with: huggingface-cli download bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"
                             ))
                         })?;
                 Ok(Box::new(provider))

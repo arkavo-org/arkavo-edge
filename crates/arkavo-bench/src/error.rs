@@ -25,6 +25,16 @@ pub enum BenchError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("External error: {0}")]
+    External(String),
+
+    #[error("Timeout: {0}")]
+    Timeout(String),
 }
 
 pub type Result<T> = std::result::Result<T, BenchError>;
+pub use BenchError as Error;

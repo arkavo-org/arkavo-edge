@@ -3,8 +3,10 @@ use crate::{BenchError, Result};
 use arkavo_mcp::{Tool, ToolSchema};
 use arkavo_workspace::WorkspaceTool;
 use async_trait::async_trait;
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +17,26 @@ pub struct SweBenchInstance {
     pub problem_statement: String,
     pub hints_text: Option<String>,
     pub test_patch: String,
+}
+
+impl SweBenchInstance {
+    pub fn new(
+        instance_id: String,
+        repo: String,
+        base_commit: String,
+        problem_statement: String,
+        hints_text: Option<String>,
+        test_patch: String,
+    ) -> Self {
+        Self {
+            instance_id,
+            repo,
+            base_commit,
+            problem_statement,
+            hints_text,
+            test_patch,
+        }
+    }
 }
 
 pub struct SweBenchTool {
@@ -39,8 +61,8 @@ impl SweBenchTool {
                         },
                         "subset": {
                             "type": "string",
-                            "enum": ["lite", "verified", "live", "test"],
-                            "description": "SWE-bench dataset subset"
+                            "enum": ["lite", "verified", "full", "multimodal", "test"],
+                            "description": "SWE-bench dataset subset (lite: 534 instances, verified: 500 instances, full: 2294 instances, multimodal: 500 instances)"
                         },
                         "instance_id": {
                             "type": "string",
@@ -57,6 +79,10 @@ impl SweBenchTool {
                         "metrics_file": {
                             "type": "string",
                             "description": "Path to save/load metrics JSON"
+                        },
+                        "parallel": {
+                            "type": "integer",
+                            "description": "Number of parallel instances to run concurrently (default: 1)"
                         }
                     },
                     "required": ["action"]
@@ -71,16 +97,12 @@ impl SweBenchTool {
         subset: &str,
         limit: Option<usize>,
     ) -> Result<Vec<SweBenchInstance>> {
-        let url = match subset {
-            "lite" => {
-                "https://raw.githubusercontent.com/princeton-nlp/SWE-bench/main/swebench/lite.json"
-            }
-            "verified" => {
-                "https://raw.githubusercontent.com/princeton-nlp/SWE-bench/main/swebench/verified.json"
-            }
-            "test" => {
-                "https://raw.githubusercontent.com/princeton-nlp/SWE-bench/main/swebench/test.json"
-            }
+        let (dataset_name, split) = match subset {
+            "lite" => ("princeton-nlp/SWE-bench_Lite", "test"),
+            "verified" => ("princeton-nlp/SWE-bench_Verified", "test"),
+            "full" => ("princeton-nlp/SWE-bench", "test"),
+            "multimodal" => ("SWE-bench/SWE-bench_Multimodal", "test"),
+            "test" => ("princeton-nlp/SWE-bench_Lite", "dev"),
             _ => {
                 return Err(BenchError::InvalidParams(format!(
                     "Unknown subset: {subset}"
@@ -88,10 +110,40 @@ impl SweBenchTool {
             }
         };
 
-        let response = reqwest::get(url).await?;
-        let mut instances: Vec<SweBenchInstance> = response.json().await.map_err(|e| {
-            BenchError::TaskLoadingFailed(format!("Failed to parse instances: {e}"))
+        let url = format!(
+            "https://datasets-server.huggingface.co/rows?dataset={}&config=default&split={}&offset=0&length=100",
+            dataset_name, split
+        );
+
+        let response = reqwest::get(&url).await?;
+        let json_response: serde_json::Value = response.json().await.map_err(|e| {
+            BenchError::TaskLoadingFailed(format!("Failed to fetch from HuggingFace: {e}"))
         })?;
+
+        let rows = json_response
+            .get("rows")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                BenchError::TaskLoadingFailed("Invalid HuggingFace response".to_string())
+            })?;
+
+        let mut instances: Vec<SweBenchInstance> = rows
+            .iter()
+            .filter_map(|row| {
+                let row_data = row.get("row")?;
+                Some(SweBenchInstance {
+                    instance_id: row_data.get("instance_id")?.as_str()?.to_string(),
+                    repo: row_data.get("repo")?.as_str()?.to_string(),
+                    base_commit: row_data.get("base_commit")?.as_str()?.to_string(),
+                    problem_statement: row_data.get("problem_statement")?.as_str()?.to_string(),
+                    hints_text: row_data
+                        .get("hints_text")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    test_patch: row_data.get("test_patch")?.as_str()?.to_string(),
+                })
+            })
+            .collect();
 
         if let Some(n) = limit {
             instances.truncate(n);
@@ -281,13 +333,33 @@ impl SweBenchTool {
                     .and_then(|v| v.as_u64())
                     .map(|n| n as usize);
 
-                let instances = self.load_instances(subset, limit).await?;
-                let mut all_metrics = Vec::new();
+                let parallel = params
+                    .get("parallel")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize)
+                    .unwrap_or(1);
 
-                for instance in instances {
-                    let metrics = self.run_instance(&instance).await?;
-                    all_metrics.push(metrics);
-                }
+                let instances = self.load_instances(subset, limit).await?;
+
+                let all_metrics = if parallel > 1 {
+                    let self_arc = Arc::new(self);
+                    stream::iter(instances)
+                        .map(|instance| {
+                            let self_clone = Arc::clone(&self_arc);
+                            async move { self_clone.run_instance(&instance).await }
+                        })
+                        .buffer_unordered(parallel)
+                        .collect::<Vec<_>>()
+                        .await
+                        .into_iter()
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    let mut metrics = Vec::new();
+                    for instance in instances {
+                        metrics.push(self.run_instance(&instance).await?);
+                    }
+                    metrics
+                };
 
                 let summary = BenchSummary::from_metrics(&all_metrics);
 

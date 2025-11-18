@@ -56,6 +56,8 @@ impl ModelSelector {
                 ModelChoice::GeminiFlash
             }
 
+            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
+
             TaskCategory::VisionAnalysis => ModelChoice::GeminiFlash,
 
             _ => ModelChoice::GeminiFlash,
@@ -71,6 +73,9 @@ impl ModelSelector {
             TaskCategory::TestGeneration => "Test generation: Gemini Pro for comprehensive tests",
             TaskCategory::Documentation => "Documentation: Local Gemma 4B sufficient",
             TaskCategory::Refactoring => "Refactoring: Gemini Flash for quick iterations",
+            TaskCategory::CodeGeneration => {
+                "Code generation: DeepSeek-Coder V2 Lite optimized for code/patch generation"
+            }
             TaskCategory::VisionAnalysis => "Vision analysis: Gemini Flash with multimodal support",
             TaskCategory::General => "General task: Gemini Flash as balanced default",
         };
@@ -81,6 +86,9 @@ impl ModelSelector {
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
+            ModelChoice::LocalDeepSeekCoder => {
+                "Code-specialized (4s), zero cost, optimized for patches"
+            }
         };
 
         format!(

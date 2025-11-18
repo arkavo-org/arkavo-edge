@@ -60,13 +60,31 @@ impl Provider for GeminiProvider {
 
         let prompt = &last_message.content;
 
-        let (text, _function_calls) = self
+        let mut gemini_stream = self
             .client
-            .generate_content(prompt, None)
+            .stream_generate_content(prompt, None)
             .await
-            .map_err(|e| Error::Provider(format!("Gemini API error: {e}")))?;
+            .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 
-        text.ok_or_else(|| Error::Provider("No text response from Gemini".into()))
+        let mut accumulated_text = String::new();
+
+        while let Some(chunk_result) = gemini_stream.next().await {
+            let chunk = chunk_result.map_err(|e| Error::Stream(format!("Stream error: {e}")))?;
+
+            if let Some(text) = chunk.text {
+                accumulated_text.push_str(&text);
+            }
+
+            if chunk.done {
+                break;
+            }
+        }
+
+        if accumulated_text.is_empty() {
+            return Err(Error::Provider("No text response from Gemini".into()));
+        }
+
+        Ok(accumulated_text)
     }
 
     async fn stream(
@@ -123,13 +141,32 @@ impl Provider for GeminiProvider {
 
         let tool_declarations = tools.and_then(|t| Self::convert_tools_to_declarations(&t).ok());
 
-        let (text, function_calls) = self
+        let mut gemini_stream = self
             .client
-            .generate_content(prompt, tool_declarations)
+            .stream_generate_content(prompt, tool_declarations)
             .await
-            .map_err(|e| Error::Provider(format!("Gemini API error: {e}")))?;
+            .map_err(|e| Error::Provider(format!("Gemini streaming error: {e}")))?;
 
-        let parsed_tool_calls = function_calls
+        let mut accumulated_text = String::new();
+        let mut all_function_calls = Vec::new();
+
+        while let Some(chunk_result) = gemini_stream.next().await {
+            let chunk = chunk_result.map_err(|e| Error::Stream(format!("Stream error: {e}")))?;
+
+            if let Some(text) = chunk.text {
+                accumulated_text.push_str(&text);
+            }
+
+            if !chunk.function_calls.is_empty() {
+                all_function_calls.extend(chunk.function_calls);
+            }
+
+            if chunk.done {
+                break;
+            }
+        }
+
+        let parsed_tool_calls = all_function_calls
             .into_iter()
             .map(|fc| ParsedToolCall {
                 tool_name: fc.name,
@@ -139,7 +176,7 @@ impl Provider for GeminiProvider {
             .collect();
 
         Ok(ProviderResponse {
-            content: text.unwrap_or_default(),
+            content: accumulated_text,
             tool_calls: parsed_tool_calls,
             finish_reason: None,
         })

@@ -206,8 +206,15 @@ impl LlamaContext {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or_else(|_| num_cores <= 4);
 
-        // Detect Qualcomm Adreno GPU (via GGML_VK_MAX_BATCH env var or ARM64 architecture)
-        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok() || cfg!(target_arch = "aarch64");
+        // Detect Qualcomm Adreno GPU (Android devices only, not Apple Silicon)
+        let is_apple_silicon = cfg!(all(target_arch = "aarch64", target_os = "macos"));
+        let is_adreno = std::env::var("GGML_VK_MAX_BATCH").is_ok()
+            || (cfg!(target_arch = "aarch64") && !is_apple_silicon);
+
+        // Allow manual context size override
+        let manual_ctx = std::env::var("ARKAVO_N_CTX")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok());
 
         // Try to create context, catch Vulkan crashes
         let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
@@ -216,7 +223,12 @@ impl LlamaContext {
         if gpu_status != 2 {
             let mut gpu_params = unsafe { ffi::llama_context_default_params() };
 
-            if is_adreno {
+            if let Some(ctx) = manual_ctx {
+                // Use manual override
+                gpu_params.n_ctx = ctx;
+                gpu_params.n_batch = (ctx / 16).clamp(16, 2048);
+                gpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
+            } else if is_adreno {
                 gpu_params.n_ctx = 2048;
                 gpu_params.n_batch = 16;
                 gpu_params.n_ubatch = 16;
@@ -225,6 +237,7 @@ impl LlamaContext {
                 gpu_params.n_batch = 512;
                 gpu_params.n_ubatch = 256;
             } else {
+                // Normal desktop/laptop: use larger context
                 gpu_params.n_ctx = 32768;
                 gpu_params.n_batch = 2048;
                 gpu_params.n_ubatch = 512;
@@ -264,11 +277,17 @@ impl LlamaContext {
         // CPU fallback
         let mut cpu_params = unsafe { ffi::llama_context_default_params() };
 
-        if is_adreno || is_low_power {
+        if let Some(ctx) = manual_ctx {
+            // Use manual override
+            cpu_params.n_ctx = ctx;
+            cpu_params.n_batch = (ctx / 16).clamp(16, 2048);
+            cpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
+        } else if is_adreno || is_low_power {
             cpu_params.n_ctx = 2048;
             cpu_params.n_batch = 512;
             cpu_params.n_ubatch = 256;
         } else {
+            // Normal desktop/laptop: use larger context
             cpu_params.n_ctx = 32768;
             cpu_params.n_batch = 2048;
             cpu_params.n_ubatch = 512;

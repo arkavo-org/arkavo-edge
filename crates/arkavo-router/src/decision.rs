@@ -9,6 +9,7 @@ pub enum ModelChoice {
     LocalGemma270M,
     LocalGemma4B,
     LocalGemma12B,
+    LocalDeepSeekCoder,
 }
 
 impl ModelChoice {
@@ -19,13 +20,17 @@ impl ModelChoice {
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
+            Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
         }
     }
 
     pub fn is_local(&self) -> bool {
         matches!(
             self,
-            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B
+            Self::LocalGemma270M
+                | Self::LocalGemma4B
+                | Self::LocalGemma12B
+                | Self::LocalDeepSeekCoder
         )
     }
 
@@ -118,7 +123,8 @@ impl RoutingDecision {
             }
             ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
-            | ModelChoice::LocalGemma12B => 0.0,
+            | ModelChoice::LocalGemma12B
+            | ModelChoice::LocalDeepSeekCoder => 0.0,
         }
     }
 
@@ -129,6 +135,7 @@ impl RoutingDecision {
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
+            ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
         }
     }
 }
