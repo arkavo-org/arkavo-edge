@@ -14,6 +14,7 @@ impl Default for Ios26BetaGuidance {
         Self {
             schema: ToolSchema {
                 name: "ios26_beta_guidance".to_string(),
+                aliases: None,
                 description: "Get guidance for handling iOS 26 beta compilation issues with XCTest framework. This provides embedded knowledge about workarounds and solutions for beta SDK problems.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

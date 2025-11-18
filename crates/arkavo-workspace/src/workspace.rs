@@ -20,6 +20,7 @@ impl WorkspaceTool {
         Self {
             schema: ToolSchema {
                 name: "workspace_container".to_string(),
+                aliases: None,
                 description:
                     "Create and manage ephemeral containerized workspaces with resource quotas"
                         .to_string(),

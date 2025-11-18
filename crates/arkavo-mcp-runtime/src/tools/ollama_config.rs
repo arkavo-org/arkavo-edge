@@ -139,6 +139,7 @@ impl Tool for OllamaConfigTool {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| {
             ToolSchema {
                 name: "ollama_config".to_string(),
+                aliases: None,
                 description: "Manage Ollama server configurations. Add new servers, list existing ones, or remove them.".to_string(),
                 parameters: json!({
                     "type": "object",

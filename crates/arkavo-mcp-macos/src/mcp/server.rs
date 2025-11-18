@@ -733,6 +733,7 @@ impl QueryStateKit {
         Self {
             schema: ToolSchema {
                 name: "query_state".to_string(),
+                aliases: None,
                 description: "Query application state".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -813,6 +814,7 @@ impl MutateStateKit {
         Self {
             schema: ToolSchema {
                 name: "mutate_state".to_string(),
+                aliases: None,
                 description: "Mutate application state".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -952,6 +954,7 @@ impl SnapshotKit {
         Self {
             schema: ToolSchema {
                 name: "snapshot".to_string(),
+                aliases: None,
                 description: "Create or restore state snapshots".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -1052,6 +1055,7 @@ impl RunTestKit {
         Self {
             schema: ToolSchema {
                 name: "run_test".to_string(),
+                aliases: None,
                 description: "Execute a test scenario".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -2014,6 +2018,7 @@ impl ListTestsKit {
         Self {
             schema: ToolSchema {
                 name: "list_tests".to_string(),
+                aliases: None,
                 description: "List all available tests in the repository".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

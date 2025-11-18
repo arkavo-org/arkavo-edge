@@ -16,6 +16,7 @@ impl CalibrationSetupKit {
         Self {
             schema: ToolSchema {
                 name: "setup_calibration".to_string(),
+                aliases: None,
                 description: "Setup and launch the test host app in calibration mode. The app will display tap coordinates prominently on screen for easy screenshot detection. Each tap by the MCP server will show X,Y coordinates in large text.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

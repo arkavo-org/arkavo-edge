@@ -22,6 +22,7 @@ impl LogStreamKit {
         Self {
             schema: ToolSchema {
                 name: "log_stream".to_string(),
+                aliases: None,
                 description: "Stream logs from iOS apps running in the simulator. Captures console output, diagnostic logs, and system messages.".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -330,6 +331,7 @@ impl AppDiagnosticExporter {
         Self {
             schema: ToolSchema {
                 name: "app_diagnostic_export".to_string(),
+                aliases: None,
                 description: "Export diagnostic data from ArkavoReference app using deep links"
                     .to_string(),
                 parameters: json!({

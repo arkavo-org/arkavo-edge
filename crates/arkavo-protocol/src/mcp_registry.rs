@@ -158,6 +158,7 @@ impl McpRegistry {
                 .into_iter()
                 .map(|tool| ToolSchema {
                     name: tool.name,
+                    aliases: None,
                     description: tool.description,
                     parameters: tool.input_schema.unwrap_or_default(),
                 })

@@ -25,6 +25,7 @@ impl UiInteractionKit {
         Self {
             schema: ToolSchema {
                 name: "ui_interaction".to_string(),
+                aliases: None,
                 description: "Interact with iOS UI elements using coordinates. 🎯 WORKFLOW: 1) Use build_test_harness ONCE per app for fast AXP touch injection, 2) Use screen_capture to see UI, 3) Use coordinates: {\"action\":\"tap\",\"target\":{\"x\":200,\"y\":300}}. DO NOT use setup_xcuitest (deprecated). Coordinates are in logical points.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -1905,6 +1906,7 @@ impl ScreenCaptureKit {
         Self {
             schema: ToolSchema {
                 name: "screen_capture".to_string(),
+                aliases: None,
                 description: "Capture iOS simulator screen. 🎯 WORKFLOW: 1) FIRST run build_test_harness (prevents IDB failures), 2) Use screen_capture to take screenshot, 3) Read the image file to see UI elements, 4) Use ui_interaction with coordinates. Without build_test_harness, taps are 10x slower and may fail!".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -2042,6 +2044,7 @@ impl UiQueryKit {
         Self {
             schema: ToolSchema {
                 name: "ui_query".to_string(),
+                aliases: None,
                 description: "Query UI elements (LIMITED). For best results: 1) Use build_test_harness for the app, 2) Use screen_capture and Read to see UI visually, 3) Use ui_interaction with coordinates. Visual analysis is more reliable than programmatic queries.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

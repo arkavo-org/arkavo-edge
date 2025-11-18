@@ -28,6 +28,7 @@ impl CalibrationTool {
         Ok(Self {
             schema: ToolSchema {
                 name: "calibration_manager".to_string(),
+                aliases: None,
                 description: "Manages UI automation calibration for iOS simulators. Automatically calibrates coordinate systems and interaction patterns using a reference app.".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -731,6 +732,7 @@ impl CalibrationStatusTool {
         Self {
             schema: ToolSchema {
                 name: "calibration_status".to_string(),
+                aliases: None,
                 description: "Quick status check for all calibrations and recommendations"
                     .to_string(),
                 parameters: json!({

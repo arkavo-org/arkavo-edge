@@ -15,6 +15,7 @@ impl IntelligentBugFinderKit {
         Self {
             schema: ToolSchema {
                 name: "intelligent_bug_finder".to_string(),
+                aliases: None,
                 description: "Use AI to find complex bugs in specific code modules".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -86,6 +87,7 @@ impl InvariantDiscoveryKit {
         Self {
             schema: ToolSchema {
                 name: "discover_invariants".to_string(),
+                aliases: None,
                 description: "Discover invariants that should always be true in a system"
                     .to_string(),
                 parameters: serde_json::json!({
@@ -151,6 +153,7 @@ impl ChaosTestingKit {
         Self {
             schema: ToolSchema {
                 name: "chaos_test".to_string(),
+                aliases: None,
                 description: "Test system behavior under failure conditions".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -221,6 +224,7 @@ impl EdgeCaseExplorerKit {
         Self {
             schema: ToolSchema {
                 name: "explore_edge_cases".to_string(),
+                aliases: None,
                 description: "Explore edge cases in system flows".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

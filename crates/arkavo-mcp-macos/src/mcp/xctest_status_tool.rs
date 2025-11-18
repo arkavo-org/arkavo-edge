@@ -16,6 +16,7 @@ impl XCTestStatusKit {
         Self {
             schema: ToolSchema {
                 name: "xctest_status".to_string(),
+                aliases: None,
                 description: "Check XCTest bridge functionality status for all devices or a specific device. Returns detailed information about which devices have functional XCTest support.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

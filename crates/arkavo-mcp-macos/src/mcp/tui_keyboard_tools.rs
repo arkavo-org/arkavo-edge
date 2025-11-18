@@ -46,6 +46,7 @@ impl TuiKeyboardKit {
             retry_delay: Duration::from_millis(500),
             schema: ToolSchema {
                 name: "tui_keyboard".to_string(),
+                aliases: None,
                 description: "Send keyboard input to TUI applications".to_string(),
                 parameters: json!({
                     "type": "object",

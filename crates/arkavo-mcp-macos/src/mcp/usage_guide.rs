@@ -12,6 +12,7 @@ impl UsageGuideKit {
         Self {
             schema: ToolSchema {
                 name: "usage_guide".to_string(),
+                aliases: None,
                 description: "Get usage guidance and best practices for iOS automation. Learn about the new AXP-based automation approach that's 10x faster than the old XCUITest method. For step-by-step workflows, use ios_automation_guide instead.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

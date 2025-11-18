@@ -21,6 +21,7 @@ impl UiElementHandler {
             simulator_interaction: SimulatorInteraction::new(),
             schema: ToolSchema {
                 name: "ui_element_handler".to_string(),
+                aliases: None,
                 description: "Advanced UI element interaction with multiple strategies for checkboxes, switches, and other controls".to_string(),
                 parameters: json!({
                     "type": "object",

@@ -21,6 +21,7 @@ impl IdbManagementTool {
         Self {
             schema: ToolSchema {
                 name: "idb_management".to_string(),
+                aliases: None,
                 description: "Manage IDB companion health, status, and recovery operations"
                     .to_string(),
                 parameters: json!({

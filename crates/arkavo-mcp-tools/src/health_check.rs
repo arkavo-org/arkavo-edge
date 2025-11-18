@@ -13,6 +13,7 @@ impl HealthCheckTool {
         Self {
             schema: ToolSchema {
                 name: "get_system_health".to_string(),
+                aliases: None,
                 description: "Query health status of all system components. Returns health reports for UI generation, routing, LLM providers, and other registered components.".to_string(),
                 parameters: json!({
                     "type": "object",

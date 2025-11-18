@@ -44,6 +44,7 @@ impl Tool for DiscoverLlmProvidersTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "discover_llm_providers".to_string(),
             description: "Discover available Ollama LLM providers on the network".to_string(),
             parameters: json!({
@@ -110,6 +111,7 @@ impl Tool for ConfigureLlmProvidersTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "configure_llm_providers".to_string(),
             description: "Configure multiple LLM providers for dataflow pipelines".to_string(),
             parameters: json!({
@@ -190,6 +192,7 @@ impl Tool for GenerateLlmBlueprintTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "generate_llm_blueprint".to_string(),
             description: "Generate a dataflow blueprint with LLM nodes for a specific task"
                 .to_string(),
@@ -259,6 +262,7 @@ impl Tool for SetModelPreferenceTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "set_model_preference".to_string(),
             description: "Set preferred model for a specific task type".to_string(),
             parameters: json!({
@@ -492,6 +496,7 @@ impl Tool for ListAvailableModelsTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "list_available_models".to_string(),
             description: "List available models from the model registry".to_string(),
             parameters: json!({
@@ -568,6 +573,7 @@ impl Tool for ValidateProviderConfigTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "validate_provider_config".to_string(),
             description: "Validate LLM provider configuration before use".to_string(),
             parameters: json!({
@@ -655,6 +661,7 @@ impl Tool for TestProviderConnectionTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "test_provider_connection".to_string(),
             description: "Test connection to a configured LLM provider".to_string(),
             parameters: json!({
@@ -762,6 +769,7 @@ impl Tool for ManageAuthCredentialsTool {
 
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
+            aliases: None,
             name: "manage_auth_credentials".to_string(),
             description: "Manage authentication credentials for LLM providers".to_string(),
             parameters: json!({

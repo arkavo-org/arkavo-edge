@@ -16,6 +16,7 @@ impl BiometricTestScenario {
         Self {
             schema: ToolSchema {
                 name: "biometric_test_scenario".to_string(),
+                aliases: None,
                 description:
                     "Execute biometric test scenarios including success, failure, and edge cases"
                         .to_string(),
@@ -346,6 +347,7 @@ impl SmartBiometricHandler {
         Self {
             schema: ToolSchema {
                 name: "smart_biometric_handler".to_string(),
+                aliases: None,
                 description: "Intelligently handle biometric dialogs based on test context"
                     .to_string(),
                 parameters: json!({

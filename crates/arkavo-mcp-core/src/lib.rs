@@ -13,6 +13,9 @@ use serde_json::Value;
 pub struct ToolSchema {
     /// The name of the tool
     pub name: String,
+    /// Alternative names for the tool (for backwards compatibility)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliases: Option<Vec<String>>,
     /// Human-readable description of what the tool does
     pub description: String,
     /// JSON Schema for the tool's parameters

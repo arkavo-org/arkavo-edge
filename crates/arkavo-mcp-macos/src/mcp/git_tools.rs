@@ -51,6 +51,7 @@ impl GitStatusKit {
         Self {
             schema: ToolSchema {
                 name: "git_status".to_string(),
+                aliases: None,
                 description: "Get the current Git repository status".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -113,6 +114,7 @@ impl GitDiffKit {
         Self {
             schema: ToolSchema {
                 name: "git_diff".to_string(),
+                aliases: None,
                 description: "Get the diff of changes in the repository".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -190,6 +192,7 @@ impl GitCommitKit {
         Self {
             schema: ToolSchema {
                 name: "git_commit".to_string(),
+                aliases: None,
                 description: "Stage all changes and create a commit".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -274,6 +277,7 @@ impl GitBranchKit {
         Self {
             schema: ToolSchema {
                 name: "git_branch".to_string(),
+                aliases: None,
                 description: "List, create, or switch Git branches".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -376,6 +380,7 @@ impl GitLogKit {
         Self {
             schema: ToolSchema {
                 name: "git_log".to_string(),
+                aliases: None,
                 description: "Show commit history".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -458,6 +463,7 @@ impl GitRemoteKit {
         Self {
             schema: ToolSchema {
                 name: "git_remote".to_string(),
+                aliases: None,
                 description: "Manage remote repository operations (fetch, pull, push)".to_string(),
                 parameters: json!({
                     "type": "object",

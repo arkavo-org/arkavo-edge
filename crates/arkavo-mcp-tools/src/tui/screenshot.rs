@@ -47,6 +47,7 @@ impl TuiScreenshotKit {
         Self {
             schema: ToolSchema {
                 name: "tui_screenshot".to_string(),
+                aliases: None,
                 description: "Capture TUI application screen state".to_string(),
                 parameters: json!({
                     "type": "object",

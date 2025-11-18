@@ -61,6 +61,7 @@ impl GitHubPrCreateKit {
         Self {
             schema: ToolSchema {
                 name: "github_pr_create".to_string(),
+                aliases: None,
                 description: "Create a pull request on GitHub".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -202,6 +203,7 @@ impl GitHubPrListKit {
         Self {
             schema: ToolSchema {
                 name: "github_pr_list".to_string(),
+                aliases: None,
                 description: "List pull requests on GitHub".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -312,6 +314,7 @@ impl GitHubIssueCreateKit {
         Self {
             schema: ToolSchema {
                 name: "github_issue_create".to_string(),
+                aliases: None,
                 description: "Create an issue on GitHub".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -422,6 +425,7 @@ impl GitHubIssueListKit {
         Self {
             schema: ToolSchema {
                 name: "github_issue_list".to_string(),
+                aliases: None,
                 description: "List issues on GitHub".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -532,6 +536,7 @@ impl GitHubRepoCloneKit {
         Self {
             schema: ToolSchema {
                 name: "github_repo_clone".to_string(),
+                aliases: None,
                 description: "Clone a GitHub repository".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -609,6 +614,7 @@ impl GitHubReleaseCreateKit {
         Self {
             schema: ToolSchema {
                 name: "github_release_create".to_string(),
+                aliases: None,
                 description: "Create a GitHub release".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -710,6 +716,7 @@ impl GitHubPrMergeKit {
         Self {
             schema: ToolSchema {
                 name: "github_pr_merge".to_string(),
+                aliases: None,
                 description: "Merge a pull request on GitHub".to_string(),
                 parameters: json!({
                     "type": "object",

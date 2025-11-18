@@ -15,6 +15,7 @@ impl CoordinateValidator {
         Self {
             schema: ToolSchema {
                 name: "coordinate_validator".to_string(),
+                aliases: None,
                 description: "Validate and adjust coordinates for the current device screen bounds"
                     .to_string(),
                 parameters: json!({

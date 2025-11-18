@@ -18,6 +18,7 @@ impl DeviceManagementKit {
         Self {
             schema: ToolSchema {
                 name: "device_management".to_string(),
+                aliases: None,
                 description: "Manage iOS devices and simulators for testing".to_string(),
                 parameters: json!({
                     "type": "object",

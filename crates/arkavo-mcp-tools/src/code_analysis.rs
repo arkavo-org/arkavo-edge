@@ -14,6 +14,7 @@ impl FindBugsKit {
         Self {
             schema: ToolSchema {
                 name: "find_bugs".to_string(),
+                aliases: Some(vec!["bugs".to_string()]),
                 description: "Find potential bugs and code issues in the codebase".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -110,6 +111,7 @@ impl CodeAnalysisKit {
         Self {
             schema: ToolSchema {
                 name: "analyze_code".to_string(),
+                aliases: Some(vec!["analyze".to_string()]),
                 description: "Analyze code quality, complexity, and potential issues".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -188,6 +190,7 @@ impl TestAnalysisKit {
         Self {
             schema: ToolSchema {
                 name: "analyze_tests".to_string(),
+                aliases: Some(vec!["tests".to_string()]),
                 description: "Analyze test coverage and identify missing test cases".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

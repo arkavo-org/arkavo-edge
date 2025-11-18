@@ -18,6 +18,7 @@ impl EnrollmentDialogHandler {
         Self {
             schema: ToolSchema {
                 name: "enrollment_dialog".to_string(),
+                aliases: None,
                 description: "Handle the 'Simulator requires enrolled biometrics to use passkeys' dialog with device-specific coordinates".to_string(),
                 parameters: json!({
                     "type": "object",

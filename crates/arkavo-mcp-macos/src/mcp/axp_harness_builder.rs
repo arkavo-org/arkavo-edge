@@ -22,6 +22,7 @@ impl AxpHarnessBuilder {
         Self {
             schema: ToolSchema {
                 name: "build_test_harness".to_string(),
+                aliases: None,
                 description: "🚀 REQUIRED FIRST STEP! Build a generic AXP test harness for fast touch injection. Without this, taps take 300ms+ and IDB may fail with port conflicts. This creates a lightweight service that provides <30ms taps for ANY iOS app. Just provide the bundle ID - no Xcode project needed. Run this ONCE per app before any UI testing.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

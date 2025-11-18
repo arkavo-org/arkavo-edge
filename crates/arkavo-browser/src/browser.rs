@@ -17,6 +17,7 @@ impl BrowserTool {
         Self {
             schema: ToolSchema {
                 name: "browser_cdp".to_string(),
+                aliases: None,
                 description:
                     "Chrome DevTools Protocol browser automation for E2E testing and debugging"
                         .to_string(),

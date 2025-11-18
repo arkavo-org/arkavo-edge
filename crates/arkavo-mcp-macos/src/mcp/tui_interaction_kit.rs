@@ -92,6 +92,7 @@ impl TuiInteractionKit {
             screenshot: TuiScreenshotKit::new(),
             schema: ToolSchema {
                 name: "tui_interaction".to_string(),
+                aliases: None,
                 description:
                     "Comprehensive TUI interaction combining keyboard input and verification"
                         .to_string(),

@@ -13,6 +13,7 @@ impl TemplateDiagnosticsKit {
         Self {
             schema: ToolSchema {
                 name: "template_diagnostics".to_string(),
+                aliases: None,
                 description: "Diagnose template location and version issues. Shows where templates are being loaded from and their content.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

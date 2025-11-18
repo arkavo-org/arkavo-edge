@@ -32,6 +32,7 @@ impl Tool for UiInspectTool {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| {
             ToolSchema {
                 name: "ui_inspect".to_string(),
+                aliases: None,
                 description: "Get the current state of the terminal UI including providers, models, and debug logs".to_string(),
                 parameters: json!({
                     "type": "object",
