@@ -23,7 +23,7 @@ pub struct SolverConfig {
 impl Default for SolverConfig {
     fn default() -> Self {
         Self {
-            max_context_tokens: 131_072,  // 128K default (supports most cloud models)
+            max_context_tokens: 131_072, // 128K default (supports most cloud models)
             max_quality_retries: 3,
             include_dependencies: true,
             include_tests: true,

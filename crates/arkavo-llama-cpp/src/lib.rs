@@ -226,8 +226,8 @@ impl LlamaContext {
             if let Some(ctx) = manual_ctx {
                 // Use manual override
                 gpu_params.n_ctx = ctx;
-                gpu_params.n_batch = (ctx / 16).max(16).min(2048);
-                gpu_params.n_ubatch = (ctx / 32).max(16).min(512);
+                gpu_params.n_batch = (ctx / 16).clamp(16, 2048);
+                gpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
             } else if is_adreno {
                 gpu_params.n_ctx = 2048;
                 gpu_params.n_batch = 16;
@@ -280,8 +280,8 @@ impl LlamaContext {
         if let Some(ctx) = manual_ctx {
             // Use manual override
             cpu_params.n_ctx = ctx;
-            cpu_params.n_batch = (ctx / 16).max(16).min(2048);
-            cpu_params.n_ubatch = (ctx / 32).max(16).min(512);
+            cpu_params.n_batch = (ctx / 16).clamp(16, 2048);
+            cpu_params.n_ubatch = (ctx / 32).clamp(16, 512);
         } else if is_adreno || is_low_power {
             cpu_params.n_ctx = 2048;
             cpu_params.n_batch = 512;

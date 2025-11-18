@@ -22,6 +22,8 @@ impl ArkavoMode {
             include_dependencies: true,
             include_tests: true,
             search_depth: 5,
+            min_patch_tokens: 100,
+            enable_escalation: true,
         };
 
         let solver = CodeSolver::new(router, Some(config))
