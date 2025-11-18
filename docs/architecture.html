@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkavo Edge Architecture Diagrams</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 50px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+        }
+        .diagram-container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .description {
+            background: #ecf0f1;
+            border-left: 4px solid #3498db;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .mermaid {
+            text-align: center;
+        }
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .metrics-table th {
+            background: #3498db;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        .metrics-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .metrics-table tr:hover {
+            background: #f8f9fa;
+        }
+        .highlight-box {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .highlight-box h3 {
+            color: #856404;
+            margin-top: 0;
+        }
+    </style>
+    <script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+<h1>🏗️ Arkavo Edge Architecture Diagrams</h1>
+<p><strong>Technical Review Companion Document</strong></p>
+<p>Visual representations of the Arkavo-assisted SWE-bench architecture, cost models, and optimization strategies.</p>
+
+<h2>1. Current Architecture Overview</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        graph TB
+        subgraph "Phase 1: Baseline (Complete)"
+        User[User Request] --> Bench[SWE-bench Tool]
+        Bench --> HF[HuggingFace API]
+        HF --> Instances[Load Instances]
+        Instances --> Gemini[Gemini API]
+        Gemini --> Flash[Flash Latest]
+        Gemini --> Pro[2.5 Pro]
+        Flash --> Solution1[Generate Solution]
+        Pro --> Solution2[Generate Solution]
+        Solution1 --> Eval[Evaluate]
+        Solution2 --> Eval
+        Eval --> Metrics[Collect Metrics]
+        end
+
+        style User fill:#3498db,stroke:#2980b9,color:#fff
+        style Bench fill:#2ecc71,stroke:#27ae60,color:#fff
+        style Gemini fill:#e74c3c,stroke:#c0392b,color:#fff
+        style Metrics fill:#9b59b6,stroke:#8e44ad,color:#fff
+    </div>
+    <div class="description">
+        <strong>Current State:</strong> Phase 1 provides baseline benchmarking with direct Gemini API calls. No MCP tools, no context enrichment, single-shot generation. Achieves 100% generation success but ~60% estimated resolution rate.
+    </div>
+</div>
+
+<h2>2. Proposed Arkavo-Assisted Architecture</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        graph TB
+        subgraph "Phase 2: Arkavo-Assisted (Proposed)"
+        Problem[Problem Statement] --> Router[Hybrid Router]
+
+        Router --> Local{Use Local?}
+        Router --> Cloud{Use Cloud?}
+        Router --> Premium{Use Premium?}
+
+        Local --> Gemma[Gemma 4B]
+        Cloud --> Flash[Gemini Flash]
+        Premium --> Pro[Gemini Pro]
+
+        Gemma --> ContextLocal[Build Context]
+        Flash --> ContextCloud[Build Context]
+        Pro --> ContextPremium[Build Context]
+
+        ContextLocal --> Tools1[MCP Tools]
+        ContextCloud --> Tools2[MCP Tools]
+        ContextPremium --> Tools3[MCP Tools]
+
+        Tools1 --> CodeSearch1[Code Search]
+        Tools1 --> TreeSitter1[Tree-sitter]
+        Tools1 --> FileSystem1[Filesystem]
+
+        Tools2 --> CodeSearch2[Code Search]
+        Tools2 --> TreeSitter2[Tree-sitter]
+        Tools2 --> FileSystem2[Filesystem]
+
+        Tools3 --> CodeSearch3[Code Search]
+        Tools3 --> TreeSitter3[Tree-sitter]
+        Tools3 --> FileSystem3[Filesystem]
+
+        CodeSearch1 --> Compress1[Context Compression]
+        TreeSitter1 --> Compress1
+        FileSystem1 --> Compress1
+
+        CodeSearch2 --> Compress2[Context Compression]
+        TreeSitter2 --> Compress2
+        FileSystem2 --> Compress2
+
+        CodeSearch3 --> Compress3[Context Compression]
+        TreeSitter3 --> Compress3
+        FileSystem3 --> Compress3
+
+        Compress1 --> Enrich1[Prompt Enrichment]
+        Compress2 --> Enrich2[Prompt Enrichment]
+        Compress3 --> Enrich3[Prompt Enrichment]
+
+        Enrich1 --> Generate1[Generate Solution]
+        Enrich2 --> Generate2[Generate Solution]
+        Enrich3 --> Generate3[Generate Solution]
+
+        Generate1 --> QualityGate[Quality Gate]
+        Generate2 --> QualityGate
+        Generate3 --> QualityGate
+
+        QualityGate --> Pass{Pass?}
+        Pass -->|Yes| Final[Final Solution]
+        Pass -->|No| Retry{Retry?}
+        Retry -->|Yes| Router
+        Retry -->|No| Final
+        end
+
+        style Router fill:#3498db,stroke:#2980b9,color:#fff
+        style QualityGate fill:#e74c3c,stroke:#c0392b,color:#fff
+        style Final fill:#2ecc71,stroke:#27ae60,color:#fff
+    </div>
+    <div class="description">
+        <strong>Proposed Architecture:</strong> Multi-tier routing with MCP tools for context enrichment. Local models for simple tasks, cloud models for complex tasks, with quality gates and retry logic. Targets 5-7% improvement with 5-7x cost increase.
+    </div>
+</div>
+
+<h2>3. Hybrid Routing Decision Tree</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        graph TD
+        Start[Problem Received] --> Classify[Classify Complexity]
+
+        Classify --> Simple{Simple?}
+        Classify --> Medium{Medium?}
+        Classify --> Complex{Complex?}
+
+        Simple -->|Yes| CheckBudget1{Budget > $0.00007?}
+        CheckBudget1 -->|Yes| LocalFirst[Try Local Gemma]
+        CheckBudget1 -->|No| LocalOnly[Local Only]
+
+        LocalFirst --> LocalSuccess{Success?}
+        LocalSuccess -->|Yes| Done1[Done]
+        LocalSuccess -->|No| FallbackFlash[Fallback to Flash]
+
+        Medium -->|Yes| CheckBudget2{Budget > $0.0002?}
+        CheckBudget2 -->|Yes| FlashTools[Flash + Limited Tools]
+        CheckBudget2 -->|No| FlashNoTools[Flash No Tools]
+
+        Complex -->|Yes| CheckBudget3{Budget > $0.0005?}
+        CheckBudget3 -->|Yes| ProTools[Pro + Full Tools]
+        CheckBudget3 -->|No| FlashTools2[Flash + Tools]
+
+        FallbackFlash --> Done2[Done]
+        FlashTools --> QG1{Quality Gate?}
+        FlashNoTools --> QG2{Quality Gate?}
+        ProTools --> QG3{Quality Gate?}
+        FlashTools2 --> QG4{Quality Gate?}
+
+        QG1 -->|Pass| Done3[Done]
+        QG1 -->|Fail| Retry1{Retries Left?}
+        Retry1 -->|Yes| ProTools
+        Retry1 -->|No| Done4[Done]
+
+        QG2 -->|Pass| Done5[Done]
+        QG2 -->|Fail| Done6[Done]
+
+        QG3 -->|Pass| Done7[Done]
+        QG3 -->|Fail| Done8[Done]
+
+        QG4 -->|Pass| Done9[Done]
+        QG4 -->|Fail| Done10[Done]
+
+        style Start fill:#3498db,stroke:#2980b9,color:#fff
+        style LocalFirst fill:#2ecc71,stroke:#27ae60,color:#fff
+        style FlashTools fill:#f39c12,stroke:#e67e22,color:#fff
+        style ProTools fill:#e74c3c,stroke:#c0392b,color:#fff
+    </div>
+    <div class="description">
+        <strong>Routing Logic:</strong> Decision tree for selecting the appropriate model tier based on problem complexity and budget constraints. Implements progressive enhancement with fallback strategies.
+    </div>
+</div>
+
+<h2>4. Cost Model Comparison</h2>
+<div class="diagram-container">
+    <table class="metrics-table">
+        <thead>
+        <tr>
+            <th>Approach</th>
+            <th>Avg Cost/Instance</th>
+            <th>Resolution Rate</th>
+            <th>Cost Multiplier</th>
+            <th>ROI</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td><strong>Baseline (Flash)</strong></td>
+            <td>$0.00007</td>
+            <td>60%</td>
+            <td>1x</td>
+            <td>Baseline</td>
+        </tr>
+        <tr>
+            <td><strong>Baseline (Pro)</strong></td>
+            <td>$0.00200</td>
+            <td>~62%</td>
+            <td>28.6x</td>
+            <td>0.07x</td>
+        </tr>
+        <tr>
+            <td><strong>Naive Arkavo (Issue #350)</strong></td>
+            <td>$0.00091</td>
+            <td>70% (target)</td>
+            <td>13x</td>
+            <td>1.28x</td>
+        </tr>
+        <tr style="background: #d4edda;">
+            <td><strong>Optimized Hybrid (Recommended)</strong></td>
+            <td>$0.00027</td>
+            <td>67%</td>
+            <td>3.9x</td>
+            <td>2.95x</td>
+        </tr>
+        <tr>
+            <td><strong>Aggressive Compression</strong></td>
+            <td>$0.00019</td>
+            <td>65%</td>
+            <td>2.7x</td>
+            <td>3.09x</td>
+        </tr>
+        <tr>
+            <td><strong>Selective Tools</strong></td>
+            <td>$0.00023</td>
+            <td>66%</td>
+            <td>3.3x</td>
+            <td>3.03x</td>
+        </tr>
+        </tbody>
+    </table>
+    <div class="description">
+        <strong>Cost Analysis:</strong> Comparison of different approaches showing cost per instance, resolution rates, and ROI. The optimized hybrid approach offers the best balance of cost and performance.
+    </div>
+</div>
+
+<h2>5. Context Compression Pipeline</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        graph LR
+        subgraph "Context Building"
+        Raw[Raw Context<br/>8,500 tokens] --> Score[Relevance Scoring]
+        Score --> Rank[Rank Files]
+        Rank --> Deps[Dependency Analysis]
+        Deps --> Critical[Extract Critical Deps]
+        Critical --> Summarize[Extractive Summarization]
+        Summarize --> Compress[Compressed Context<br/>3,000 tokens]
+        end
+
+        subgraph "Scoring Factors"
+        Score --> KW[Keyword Match 30%]
+        Score --> Import[Import Centrality 30%]
+        Score --> Test[Test Coverage 20%]
+        Score --> Recent[Recent Changes 20%]
+        end
+
+        subgraph "Compression Strategies"
+        Summarize --> Keep[Keep High-Score Files]
+        Summarize --> Sum[Summarize Low-Score]
+        Summarize --> Deps2[Always Include Deps]
+        end
+
+        Compress --> Enrich[Prompt Enrichment]
+        Enrich --> Final[Final Prompt<br/>3,500 tokens]
+
+        style Raw fill:#e74c3c,stroke:#c0392b,color:#fff
+        style Compress fill:#f39c12,stroke:#e67e22,color:#fff
+        style Final fill:#2ecc71,stroke:#27ae60,color:#fff
+    </div>
+    <div class="description">
+        <strong>Context Compression:</strong> Multi-stage pipeline for reducing context from 8,500 to 3,000 tokens while retaining 85-90% of critical information. Uses relevance scoring, dependency analysis, and extractive summarization.
+    </div>
+</div>
+
+<h2>6. Tool Selection Matrix</h2>
+<div class="diagram-container">
+    <table class="metrics-table">
+        <thead>
+        <tr>
+            <th>Problem Type</th>
+            <th>Code Search</th>
+            <th>Tree-sitter</th>
+            <th>Filesystem</th>
+            <th>Test Runner</th>
+            <th>Cost Impact</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td><strong>Simple Bug Fix</strong></td>
+            <td>❌</td>
+            <td>❌</td>
+            <td>✅</td>
+            <td>❌</td>
+            <td>1x</td>
+        </tr>
+        <tr>
+            <td><strong>Multi-file Change</strong></td>
+            <td>✅</td>
+            <td>❌</td>
+            <td>✅</td>
+            <td>❌</td>
+            <td>1.5x</td>
+        </tr>
+        <tr>
+            <td><strong>Dependency Issue</strong></td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>❌</td>
+            <td>2x</td>
+        </tr>
+        <tr>
+            <td><strong>Test-related</strong></td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>2.5x</td>
+        </tr>
+        <tr>
+            <td><strong>Complex Refactor</strong></td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>✅</td>
+            <td>3x</td>
+        </tr>
+        </tbody>
+    </table>
+    <div class="description">
+        <strong>Selective Tool Usage:</strong> Matrix showing which tools to use for different problem types. Reduces average tool cost by 40% through intelligent selection.
+    </div>
+</div>
+
+<h2>7. Quality Gate Multi-Signal Evaluation</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        graph TB
+        Solution[Generated Solution] --> Signals[Quality Signals]
+
+        Signals --> S1[Syntax Check<br/>30% weight]
+        Signals --> S2[Test Execution<br/>20% weight]
+        Signals --> S3[Model Confidence<br/>20% weight]
+        Signals --> S4[Diff Quality<br/>20% weight]
+        Signals --> S5[Structural Consistency<br/>10% weight]
+
+        S1 --> TreeSitter[Tree-sitter Parse]
+        S2 --> TestRunner[Run Tests]
+        S3 --> ConfScore[Confidence Score]
+        S4 --> DiffAnalyzer[Diff Analyzer]
+        S5 --> ConsistencyCheck[Consistency Check]
+
+        TreeSitter --> Aggregate[Aggregate Signals]
+        TestRunner --> Aggregate
+        ConfScore --> Aggregate
+        DiffAnalyzer --> Aggregate
+        ConsistencyCheck --> Aggregate
+
+        Aggregate --> Score{Score > 0.7?}
+        Score -->|Yes| Pass[Pass Quality Gate]
+        Score -->|No| Fail[Fail Quality Gate]
+
+        Pass --> Accept[Accept Solution]
+        Fail --> Retry[Retry with Higher Tier]
+
+        style Solution fill:#3498db,stroke:#2980b9,color:#fff
+        style Pass fill:#2ecc71,stroke:#27ae60,color:#fff
+        style Fail fill:#e74c3c,stroke:#c0392b,color:#fff
+    </div>
+    <div class="description">
+        <strong>Quality Assessment:</strong> Multi-signal evaluation combining syntax checking, test execution, model confidence, diff quality, and structural consistency. Weighted aggregation determines pass/fail.
+    </div>
+</div>
+
+<div class="highlight-box">
+    <h3>⚠️ Key Insights from Architecture Analysis</h3>
+    <ul>
+        <li><strong>Cost Paradox:</strong> Naive tool usage exceeds budget by 4.9x. Requires intelligent compression and selective invocation.</li>
+        <li><strong>Hybrid is Essential:</strong> Local models for context building (free) + cloud models for generation is the only viable path.</li>
+        <li><strong>Context Quality > Quantity:</strong> 3,000 well-chosen tokens outperform 8,500 random tokens.</li>
+        <li><strong>Progressive Enhancement:</strong> Start simple, escalate only when needed. Saves 40-50% on costs.</li>
+        <li><strong>Realistic Targets:</strong> 5-7% improvement is achievable; 10% is optimistic given SWE-bench limitations.</li>
+    </ul>
+</div>
+
+<h2>8. Implementation Roadmap</h2>
+<div class="diagram-container">
+    <div class="mermaid">
+        gantt
+        title Arkavo-Assisted Implementation Timeline
+        dateFormat YYYY-MM-DD
+        section Week 1: Infrastructure
+        HybridRouter           :a1, 2024-12-16, 2d
+        SmartContextCompressor :a2, after a1, 3d
+        ToolSelector          :a3, after a1, 2d
+        Integration Tests     :a4, after a2, 2d
+
+        section Week 2: Refinement
+        IterativeContextBuilder :b1, 2024-12-23, 2d
+        EnhancedQualityGate    :b2, after b1, 2d
+        AdaptiveRouter         :b3, after b1, 2d
+        Metrics Collection     :b4, after b2, 2d
+
+        section Week 3: Testing
+        Unit Tests            :c1, 2024-12-30, 3d
+        Integration Tests     :c2, after c1, 3d
+        Small Benchmark       :c3, after c2, 2d
+
+        section Week 4: Benchmark
+        Full SWE-bench Run    :d1, 2025-01-06, 2d
+        Results Analysis      :d2, after d1, 3d
+        Report Writing        :d3, after d2, 3d
+    </div>
+    <div class="description">
+        <strong>Timeline:</strong> 4-week implementation plan with clear milestones. Week 1-2 focus on core infrastructure, Week 3 on testing, Week 4 on full benchmark and analysis.
+    </div>
+</div>
+
+<div style="margin-top: 50px; padding: 20px; background: #ecf0f1; border-radius: 8px;">
+    <h3>📊 Summary Statistics</h3>
+    <table class="metrics-table">
+        <tr>
+            <td><strong>Current Resolution Rate</strong></td>
+            <td>60% (estimated)</td>
+        </tr>
+        <tr>
+            <td><strong>Target Resolution Rate</strong></td>
+            <td>65-67% (conservative) | 70% (optimistic)</td>
+        </tr>
+        <tr>
+            <td><strong>Current Cost per Instance</strong></td>
+            <td>$0.00007 (Flash) | $0.00200 (Pro)</td>
+        </tr>
+        <tr>
+            <td><strong>Target Cost per Instance</strong></td>
+            <td>$0.00027 (optimized hybrid)</td>
+        </tr>
+        <tr>
+            <td><strong>Expected ROI</strong></td>
+            <td>2.95x (cost-performance ratio)</td>
+        </tr>
+        <tr>
+            <td><strong>Implementation Time</strong></td>
+            <td>4 weeks (160 hours)</td>
+        </tr>
+        <tr>
+            <td><strong>Full Benchmark Cost</strong></td>
+            <td>$80-$144 (534 instances)</td>
+        </tr>
+    </table>
+</div>
+
+<script>
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'default',
+        themeVariables: {
+            primaryColor: '#3498db',
+            primaryTextColor: '#fff',
+            primaryBorderColor: '#2980b9',
+            lineColor: '#34495e',
+            secondaryColor: '#2ecc71',
+            tertiaryColor: '#e74c3c'
+        }
+    });
+</script>
+</body>
+</html>

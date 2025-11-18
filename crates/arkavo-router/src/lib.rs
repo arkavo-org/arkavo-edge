@@ -1,6 +1,7 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::unused_async)]
 
+pub mod adaptive_budget;
 pub mod classifier;
 pub mod connectivity;
 pub mod decision;
@@ -13,7 +14,8 @@ pub mod prediction;
 pub mod selector;
 pub mod validator;
 
-pub use classifier::{TaskCategory, TaskClassifier};
+pub use adaptive_budget::{AdaptiveBudgetManager, BudgetStats, TierThreshold};
+pub use classifier::{ProblemComplexity, TaskCategory, TaskClassifier, calculate_complexity_score};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
 pub use error::{Error, Result};
@@ -392,40 +394,49 @@ impl Router {
             #[cfg(feature = "gemini")]
             ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
                 // Try to create Gemini provider, fallback to local if API key not available
-                if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
-                    Ok(Box::new(provider))
-                } else {
-                    // Fallback to local model when Gemini API key is not available
-                    #[cfg(feature = "llama-cpp")]
-                    {
-                        // Try to find model in HuggingFace cache or use env var
-                        let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH")
-                            .or_else(|_| {
-                                // Check HuggingFace cache
-                                let home = std::env::var("HOME")
-                                    .or_else(|_| std::env::var("USERPROFILE"))?;
-                                let hf_cache = std::path::PathBuf::from(home).join(
+                match arkavo_llm::GeminiProvider::new() {
+                    Ok(provider) => {
+                        tracing::debug!("Using Gemini provider for {:?}", model);
+                        Ok(Box::new(provider))
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Gemini provider unavailable ({}), falling back to local model",
+                            e
+                        );
+                        // Fallback to local model when Gemini API key is not available
+                        #[cfg(feature = "llama-cpp")]
+                        {
+                            // Try to find model in HuggingFace cache or use env var
+                            let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH")
+                                .or_else(|_| {
+                                    // Check HuggingFace cache
+                                    let home = std::env::var("HOME")
+                                        .or_else(|_| std::env::var("USERPROFILE"))?;
+                                    let hf_cache = std::path::PathBuf::from(home).join(
                                     ".cache/huggingface/hub/models--unsloth--gemma-3-270m-it-GGUF",
                                 );
 
-                                if hf_cache.exists() {
-                                    // Find the snapshot directory
-                                    let snapshots = hf_cache.join("snapshots");
-                                    if let Ok(entries) = std::fs::read_dir(&snapshots) {
-                                        for entry in entries.flatten() {
-                                            let gguf_path =
-                                                entry.path().join("gemma-3-270m-it-Q4_0.gguf");
-                                            if gguf_path.exists() {
-                                                return Ok(gguf_path.to_string_lossy().to_string());
+                                    if hf_cache.exists() {
+                                        // Find the snapshot directory
+                                        let snapshots = hf_cache.join("snapshots");
+                                        if let Ok(entries) = std::fs::read_dir(&snapshots) {
+                                            for entry in entries.flatten() {
+                                                let gguf_path =
+                                                    entry.path().join("gemma-3-270m-it-Q4_0.gguf");
+                                                if gguf_path.exists() {
+                                                    return Ok(gguf_path
+                                                        .to_string_lossy()
+                                                        .to_string());
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                Err(std::env::VarError::NotPresent)
-                            })
-                            .unwrap_or_else(|_| "models/gemma-3-270m-it.gguf".to_string());
+                                    Err(std::env::VarError::NotPresent)
+                                })
+                                .unwrap_or_else(|_| "models/gemma-3-270m-it.gguf".to_string());
 
-                        let provider = arkavo_llm::LlamaCppProvider::new(
+                            let provider = arkavo_llm::LlamaCppProvider::new(
                             "gemma-3-270m-it".to_string(),
                             model_path,
                         )
@@ -434,13 +445,14 @@ impl Router {
                                 "Failed to create fallback local provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf"
                             ))
                         })?;
-                        Ok(Box::new(provider))
-                    }
-                    #[cfg(not(feature = "llama-cpp"))]
-                    {
-                        Err(Error::ModelExecution(
+                            Ok(Box::new(provider))
+                        }
+                        #[cfg(not(feature = "llama-cpp"))]
+                        {
+                            Err(Error::ModelExecution(
                             "Gemini API key not set and no local model fallback available. Set GEMINI_API_KEY or rebuild with llama-cpp feature.".to_string()
                         ))
+                        }
                     }
                 }
             }

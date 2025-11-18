@@ -16,16 +16,20 @@ pub struct SolverConfig {
     pub include_dependencies: bool,
     pub include_tests: bool,
     pub search_depth: usize,
+    pub min_patch_tokens: usize,
+    pub enable_escalation: bool,
 }
 
 impl Default for SolverConfig {
     fn default() -> Self {
         Self {
-            max_context_tokens: 8000,
+            max_context_tokens: 131_072,  // 128K default (supports most cloud models)
             max_quality_retries: 3,
             include_dependencies: true,
             include_tests: true,
             search_depth: 5,
+            min_patch_tokens: 100,
+            enable_escalation: true,
         }
     }
 }
@@ -38,6 +42,8 @@ pub struct SolverMetrics {
     pub quality_retries: u8,
     pub total_tokens: u32,
     pub files_analyzed: usize,
+    pub escalated_to_cloud: bool,
+    pub local_attempt_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +87,8 @@ impl CodeSolver {
             quality_retries: 0,
             total_tokens: 0,
             files_analyzed: 0,
+            escalated_to_cloud: false,
+            local_attempt_tokens: None,
         };
 
         info!(
@@ -108,18 +116,83 @@ impl CodeSolver {
         let messages = vec![Message::user(enriched_prompt.clone())];
 
         let solution_start = Instant::now();
-        let response = self
-            .router
-            .route_with_quality_gate(
-                "code_generation: Generate a unified git diff patch to solve the problem",
-                messages,
-                Some(&tool_registry),
-                self.config.max_quality_retries,
-            )
-            .await
-            .map_err(|e| Error::External(format!("Router error: {e}")))?;
+
+        // For SWE-bench patch generation, skip local models and go straight to Gemini
+        // Local models (Gemma 4B, DeepSeek-Coder) generate malformed git patches
+        let is_patch_generation = enriched_prompt.contains("unified diff")
+            || enriched_prompt.contains("git diff")
+            || enriched_prompt.contains("patch");
+
+        let final_response = if is_patch_generation
+            && self.config.enable_escalation
+            && self.router.check_connectivity().await
+        {
+            info!("Patch generation detected, using Gemini directly (skipping local models)");
+            metrics.escalated_to_cloud = true;
+            metrics.local_attempt_tokens = Some(0);
+
+            self.router
+                .route_with_quality_gate(
+                    "Generate a complete unified git diff patch with full context and implementation details for code issue resolution",
+                    messages,
+                    Some(&tool_registry),
+                    self.config.max_quality_retries,
+                )
+                .await
+                .map_err(|e| Error::External(format!("Cloud model error: {e}")))?
+        } else {
+            // Try local model first for non-patch tasks
+            info!("Attempting code generation with local model (Gemma 4B)");
+            let response = self
+                .router
+                .route_with_quality_gate(
+                    "code_generation: Generate a unified git diff patch to solve the problem",
+                    messages.clone(),
+                    Some(&tool_registry),
+                    self.config.max_quality_retries,
+                )
+                .await
+                .map_err(|e| Error::External(format!("Router error: {e}")))?;
+
+            let response_tokens = response.content.split_whitespace().count();
+            metrics.local_attempt_tokens = Some(response_tokens);
+
+            // Check if patch is too short and escalation is enabled
+            if self.config.enable_escalation
+                && response_tokens < self.config.min_patch_tokens
+                && self.router.check_connectivity().await
+            {
+                warn!(
+                    "Local model generated only {} tokens (min: {}), escalating to cloud",
+                    response_tokens, self.config.min_patch_tokens
+                );
+                metrics.escalated_to_cloud = true;
+
+                // Escalate to Gemini Flash (use generic task to trigger fallback routing)
+                info!("Escalating to Gemini Flash for complete patch generation");
+                self.router
+                    .route_with_quality_gate(
+                        "Generate a complete unified git diff patch with full context and implementation details for code issue resolution",
+                        messages,
+                        Some(&tool_registry),
+                        self.config.max_quality_retries,
+                    )
+                    .await
+                    .map_err(|e| Error::External(format!("Cloud escalation error: {e}")))?
+            } else {
+                if response_tokens < self.config.min_patch_tokens {
+                    warn!(
+                        "Local model generated only {} tokens but escalation disabled",
+                        response_tokens
+                    );
+                }
+                response
+            }
+        };
 
         metrics.solution_gen_time_ms = solution_start.elapsed().as_millis() as u64;
+
+        let solution = final_response.content;
 
         let judgment = JudgmentResult {
             passed: true,
@@ -135,7 +208,7 @@ impl CodeSolver {
         );
 
         Ok(SolverResult {
-            solution: response.content,
+            solution,
             judgment,
             metrics,
         })

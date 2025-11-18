@@ -43,7 +43,7 @@ pub struct PromptEnricher {
 impl Default for PromptEnricher {
     fn default() -> Self {
         Self {
-            max_context_tokens: 8000,
+            max_context_tokens: 131_072,  // 128K default (supports most cloud models)
             include_dependencies: true,
             include_tests: true,
         }

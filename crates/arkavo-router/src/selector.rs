@@ -1,5 +1,8 @@
 use crate::Result;
-use crate::classifier::{Classification, TaskCategory};
+use crate::adaptive_budget::AdaptiveBudgetManager;
+use crate::classifier::{
+    Classification, ProblemComplexity, TaskCategory, calculate_complexity_score,
+};
 use crate::decision::{ModelChoice, RoutingDecision};
 
 pub struct ModelSelector {
@@ -128,6 +131,99 @@ impl ModelSelector {
 
         Ok(decision)
     }
+
+    pub fn select_with_complexity(
+        &self,
+        classification: &Classification,
+        problem_text: &str,
+    ) -> Result<RoutingDecision> {
+        if classification.category != TaskCategory::CodeGeneration {
+            return self.select(classification, problem_text);
+        }
+
+        let (complexity, score) = calculate_complexity_score(problem_text);
+
+        let model = match complexity {
+            ProblemComplexity::Simple => ModelChoice::LocalDeepSeekCoder,
+            ProblemComplexity::Medium => ModelChoice::GeminiFlash,
+            ProblemComplexity::Complex => ModelChoice::GeminiPro,
+        };
+
+        let reasoning = format!(
+            "CodeGeneration task with {} complexity (score: {}). {}",
+            match complexity {
+                ProblemComplexity::Simple => "simple",
+                ProblemComplexity::Medium => "medium",
+                ProblemComplexity::Complex => "complex",
+            },
+            score,
+            self.explain_selection(&model, classification)
+        );
+
+        Ok(RoutingDecision::new(
+            model,
+            classification.category,
+            classification.confidence,
+            reasoning,
+        ))
+    }
+
+    pub fn select_with_adaptive_budget(
+        &self,
+        classification: &Classification,
+        problem_text: &str,
+        budget_manager: &AdaptiveBudgetManager,
+    ) -> Result<RoutingDecision> {
+        if classification.category != TaskCategory::CodeGeneration {
+            return self.select(classification, problem_text);
+        }
+
+        let (complexity, score) = calculate_complexity_score(problem_text);
+
+        let model = match complexity {
+            ProblemComplexity::Simple => ModelChoice::LocalDeepSeekCoder,
+            ProblemComplexity::Medium => {
+                if budget_manager.should_use_local_for_medium() {
+                    ModelChoice::LocalDeepSeekCoder
+                } else if budget_manager.should_use_pro_for_medium() {
+                    ModelChoice::GeminiPro
+                } else {
+                    ModelChoice::GeminiFlash
+                }
+            }
+            ProblemComplexity::Complex => ModelChoice::GeminiPro,
+        };
+
+        let threshold_info = match budget_manager.get_tier_threshold() {
+            crate::adaptive_budget::TierThreshold::IncreaseLocal => {
+                " (budget high, increased local usage)"
+            }
+            crate::adaptive_budget::TierThreshold::DecreaseLocal => {
+                " (budget low, increased quality)"
+            }
+            crate::adaptive_budget::TierThreshold::Standard => "",
+        };
+
+        let reasoning = format!(
+            "CodeGeneration task with {} complexity (score: {}){}. Avg cost: ${:.6}. {}",
+            match complexity {
+                ProblemComplexity::Simple => "simple",
+                ProblemComplexity::Medium => "medium",
+                ProblemComplexity::Complex => "complex",
+            },
+            score,
+            threshold_info,
+            budget_manager.average_cost(),
+            self.explain_selection(&model, classification)
+        );
+
+        Ok(RoutingDecision::new(
+            model,
+            classification.category,
+            classification.confidence,
+            reasoning,
+        ))
+    }
 }
 
 impl Default for ModelSelector {
@@ -212,5 +308,62 @@ mod tests {
             .unwrap();
 
         assert_eq!(decision.recommended_model, ModelChoice::GeminiPro);
+    }
+
+    #[tokio::test]
+    async fn test_complexity_based_routing_simple() {
+        let selector = ModelSelector::new();
+
+        let classification = Classification {
+            category: TaskCategory::CodeGeneration,
+            confidence: 0.90,
+            reasoning: "Code generation task".to_string(),
+        };
+
+        let decision = selector
+            .select_with_complexity(&classification, "Fix a simple typo in the test.py file. There is a clear error message in the traceback.")
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::LocalDeepSeekCoder);
+        assert!(decision.reasoning.contains("simple"));
+    }
+
+    #[tokio::test]
+    async fn test_complexity_based_routing_complex() {
+        let selector = ModelSelector::new();
+
+        let classification = Classification {
+            category: TaskCategory::CodeGeneration,
+            confidence: 0.90,
+            reasoning: "Code generation task".to_string(),
+        };
+
+        let decision = selector
+            .select_with_complexity(
+                &classification,
+                "Refactor the authentication system with dependency changes across multiple modules",
+            )
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::GeminiPro);
+        assert!(decision.reasoning.contains("complex"));
+    }
+
+    #[tokio::test]
+    async fn test_complexity_based_routing_medium() {
+        let selector = ModelSelector::new();
+
+        let classification = Classification {
+            category: TaskCategory::CodeGeneration,
+            confidence: 0.90,
+            reasoning: "Code generation task".to_string(),
+        };
+
+        let decision = selector
+            .select_with_complexity(&classification, "Add error handling to the login function. The specific file is auth.py and has a clear error message in the traceback.")
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::GeminiFlash);
+        assert!(decision.reasoning.contains("medium"));
     }
 }

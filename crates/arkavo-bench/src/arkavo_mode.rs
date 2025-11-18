@@ -3,25 +3,34 @@ use crate::solution_applier::SolutionApplier;
 use crate::{BenchError, Result, SweBenchInstance};
 use arkavo_context::{ProblemStatement, PromptTemplate};
 use arkavo_orchestrator::{CodeSolver, SolverConfig};
-use arkavo_router::Router;
+use arkavo_router::{AdaptiveBudgetManager, ProblemComplexity, Router};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 pub struct ArkavoMode {
     solver: CodeSolver,
     applier: SolutionApplier,
+    budget_manager: Arc<Mutex<AdaptiveBudgetManager>>,
+    enable_adaptive_budget: bool,
 }
 
 impl ArkavoMode {
     pub async fn new(router: Arc<Router>) -> Result<Self> {
+        // Use device-aware context limits (respects Arduino, Raspberry Pi, Desktop capabilities)
+        use arkavo_llm::context_limits::{ProviderLimit, get_effective_context_limit};
+        let max_context = get_effective_context_limit(ProviderLimit::GeminiPro);
+
         let config = SolverConfig {
-            max_context_tokens: 8000,
+            max_context_tokens: max_context,
             max_quality_retries: 3,
             include_dependencies: true,
             include_tests: true,
             search_depth: 5,
+            min_patch_tokens: 100,
+            enable_escalation: true,
         };
 
         let solver = CodeSolver::new(router, Some(config))
@@ -30,7 +39,24 @@ impl ArkavoMode {
 
         let applier = SolutionApplier::new(300);
 
-        Ok(Self { solver, applier })
+        let budget_manager = Arc::new(Mutex::new(AdaptiveBudgetManager::from_env()));
+
+        let enable_adaptive_budget = std::env::var("ARKAVO_ADAPTIVE_BUDGET")
+            .ok()
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+
+        Ok(Self {
+            solver,
+            applier,
+            budget_manager,
+            enable_adaptive_budget,
+        })
+    }
+
+    pub async fn get_budget_stats(&self) -> arkavo_router::BudgetStats {
+        let manager = self.budget_manager.lock().await;
+        manager.get_stats()
     }
 
     pub async fn run_instance(
@@ -71,6 +97,30 @@ impl ArkavoMode {
             solver_result.metrics.quality_retries as u32,
         );
         metrics.add_api_call(solver_result.metrics.total_tokens as usize);
+
+        if self.enable_adaptive_budget {
+            let cost = self.estimate_cost_from_tokens(
+                solver_result.metrics.total_tokens,
+                solver_result.metrics.escalated_to_cloud,
+            );
+            let complexity = self.estimate_complexity(&instance.problem_statement);
+            let used_local = !solver_result.metrics.escalated_to_cloud;
+
+            let mut manager = self.budget_manager.lock().await;
+            manager.record_instance(cost, complexity, used_local);
+
+            let stats = manager.get_stats();
+            info!(
+                "Budget stats: avg=${:.6}, tier_dist={:.1}%/{:.1}%/{:.1}%, model_dist={:.1}%/{:.1}%/{:.1}%",
+                stats.average_cost,
+                stats.tier_distribution().0 * 100.0,
+                stats.tier_distribution().1 * 100.0,
+                stats.tier_distribution().2 * 100.0,
+                stats.model_distribution().0 * 100.0,
+                stats.model_distribution().1 * 100.0,
+                stats.model_distribution().2 * 100.0,
+            );
+        }
 
         if !solver_result.judgment.passed {
             warn!(
@@ -132,6 +182,33 @@ impl ArkavoMode {
             hints,
             repo_name: instance.repo.clone(),
             base_commit: instance.base_commit.clone(),
+        }
+    }
+
+    fn estimate_complexity(&self, problem_text: &str) -> ProblemComplexity {
+        let (complexity, _) = arkavo_router::calculate_complexity_score(problem_text);
+        complexity
+    }
+
+    fn estimate_cost_from_tokens(&self, total_tokens: u32, escalated: bool) -> f64 {
+        if !escalated {
+            return 0.0;
+        }
+
+        let input_tokens = (total_tokens as f64 * 0.6).round() as u32;
+        let output_tokens = total_tokens - input_tokens;
+
+        let gemini_model =
+            std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+
+        if gemini_model.contains("flash") {
+            let input_cost = (input_tokens as f64 / 1_000_000.0) * 0.30;
+            let output_cost = (output_tokens as f64 / 1_000_000.0) * 2.50;
+            input_cost + output_cost
+        } else {
+            let input_cost = (input_tokens as f64 / 1_000_000.0) * 1.25;
+            let output_cost = (output_tokens as f64 / 1_000_000.0) * 5.00;
+            input_cost + output_cost
         }
     }
 }

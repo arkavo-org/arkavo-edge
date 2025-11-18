@@ -37,6 +37,23 @@ impl ModelChoice {
     pub fn is_cloud(&self) -> bool {
         !self.is_local()
     }
+
+    /// Get the effective context window size for this model in tokens
+    /// Takes into account both provider API limits and device capabilities
+    pub fn context_limit(&self) -> u32 {
+        use arkavo_llm::context_limits::{ProviderLimit, get_effective_context_limit};
+
+        let provider = match self {
+            Self::GeminiPro => ProviderLimit::GeminiPro,
+            Self::GeminiFlash => ProviderLimit::GeminiFlash,
+            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => {
+                ProviderLimit::LocalGemma
+            }
+            Self::LocalDeepSeekCoder => ProviderLimit::LocalDeepSeek,
+        };
+
+        get_effective_context_limit(provider)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +115,12 @@ impl RoutingDecision {
             }
             (ModelChoice::GeminiPro, _) => {
                 vec![ModelChoice::GeminiFlash, ModelChoice::LocalGemma12B]
+            }
+            (ModelChoice::LocalDeepSeekCoder, TaskCategory::CodeGeneration) => {
+                vec![ModelChoice::GeminiFlash, ModelChoice::GeminiPro]
+            }
+            (ModelChoice::GeminiFlash, TaskCategory::CodeGeneration) => {
+                vec![ModelChoice::GeminiPro, ModelChoice::LocalGemma12B]
             }
             (ModelChoice::LocalGemma4B, _) => vec![ModelChoice::LocalGemma12B],
             (ModelChoice::LocalGemma270M, _) => {

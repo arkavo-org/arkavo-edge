@@ -655,6 +655,68 @@ impl TaskClassifier {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProblemComplexity {
+    Simple,
+    Medium,
+    Complex,
+}
+
+pub fn calculate_complexity_score(problem_text: &str) -> (ProblemComplexity, u32) {
+    let mut score: u32 = 0;
+
+    let text_lower = problem_text.to_lowercase();
+
+    if text_lower.matches('\n').count() <= 10 || problem_text.len() < 500 {
+        score += 2;
+    }
+
+    if text_lower.contains("typo")
+        || text_lower.contains("missing import")
+        || text_lower.contains("syntax error")
+        || text_lower.contains("simple fix")
+    {
+        score += 3;
+    }
+
+    if text_lower.contains("specific file") || text_lower.contains("in file") {
+        score += 2;
+    }
+
+    if text_lower.contains("error message") || text_lower.contains("traceback") {
+        score += 2;
+    }
+
+    if text_lower.contains("refactor")
+        || text_lower.contains("architectural")
+        || text_lower.contains("redesign")
+    {
+        score = score.saturating_sub(3);
+    }
+
+    if text_lower.contains("dependency")
+        || text_lower.contains("multiple files")
+        || text_lower.contains("cross-module")
+    {
+        score = score.saturating_sub(2);
+    }
+
+    if text_lower.contains("api change")
+        || text_lower.contains("breaking change")
+        || text_lower.contains("migration")
+    {
+        score = score.saturating_sub(2);
+    }
+
+    let complexity = match score {
+        0..=3 => ProblemComplexity::Complex,
+        4..=6 => ProblemComplexity::Medium,
+        _ => ProblemComplexity::Simple,
+    };
+
+    (complexity, score)
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
@@ -697,5 +759,32 @@ mod tests {
 
         assert_eq!(classification.category, TaskCategory::FrontendUI);
         assert!(classification.confidence > 0.8);
+    }
+
+    #[test]
+    fn test_complexity_scoring_simple() {
+        let (complexity, score) = calculate_complexity_score(
+            "Fix a simple typo in the test.py file. There is a clear error message in the traceback.",
+        );
+        assert_eq!(complexity, ProblemComplexity::Simple);
+        assert!(score >= 7);
+    }
+
+    #[test]
+    fn test_complexity_scoring_complex() {
+        let (complexity, score) = calculate_complexity_score(
+            "Refactor the authentication system across multiple modules with dependency changes and API breaking changes",
+        );
+        assert_eq!(complexity, ProblemComplexity::Complex);
+        assert!(score <= 3);
+    }
+
+    #[test]
+    fn test_complexity_scoring_medium() {
+        let (complexity, score) = calculate_complexity_score(
+            "Add error handling to the login function. The specific file is auth.py and has a clear error message in the traceback.",
+        );
+        assert_eq!(complexity, ProblemComplexity::Medium);
+        assert!(score >= 4 && score <= 6);
     }
 }

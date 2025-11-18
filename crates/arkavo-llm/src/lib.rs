@@ -2,6 +2,7 @@ pub mod chat;
 pub mod client;
 #[cfg(feature = "llm-remote")]
 pub mod common;
+pub mod context_limits;
 pub mod error;
 pub mod image;
 #[cfg(feature = "llm-local")]
