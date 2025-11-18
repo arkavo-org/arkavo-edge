@@ -117,77 +117,59 @@ impl CodeSolver {
 
         let solution_start = Instant::now();
 
-        // For SWE-bench patch generation, skip local models and go straight to Gemini
-        // Local models (Gemma 4B, DeepSeek-Coder) generate malformed git patches
-        let is_patch_generation = enriched_prompt.contains("unified diff")
-            || enriched_prompt.contains("git diff")
-            || enriched_prompt.contains("patch");
+        // Always try local model first (cost optimization goal)
+        info!("Attempting code generation with local model");
+        let response = self
+            .router
+            .route_with_quality_gate(
+                "code_generation: Generate a unified git diff patch to solve the problem",
+                messages.clone(),
+                Some(&tool_registry),
+                self.config.max_quality_retries,
+            )
+            .await
+            .map_err(|e| Error::External(format!("Router error: {e}")))?;
 
-        let final_response = if is_patch_generation
-            && self.config.enable_escalation
-            && self.router.check_connectivity().await
-        {
-            info!("Patch generation detected, using Gemini directly (skipping local models)");
+        let response_tokens = response.content.split_whitespace().count();
+        metrics.local_attempt_tokens = Some(response_tokens);
+
+        // Validate patch syntax (not just quality gate)
+        let patch_valid = Self::validate_patch_syntax(&response.content);
+
+        // Escalate if: (1) patch invalid OR (2) too short
+        let should_escalate = self.config.enable_escalation
+            && (!patch_valid || response_tokens < self.config.min_patch_tokens)
+            && self.router.check_connectivity().await;
+
+        let final_response = if should_escalate {
+            if !patch_valid {
+                warn!("Local model generated invalid patch syntax, escalating to cloud");
+            } else {
+                warn!(
+                    "Local model generated only {} tokens (min: {}), escalating to cloud",
+                    response_tokens, self.config.min_patch_tokens
+                );
+            }
             metrics.escalated_to_cloud = true;
-            metrics.local_attempt_tokens = Some(0);
 
+            info!("Escalating to Gemini for complete patch generation");
             self.router
                 .route_with_quality_gate(
-                    "Generate a complete unified git diff patch with full context and implementation details for code issue resolution",
+                    "code_generation: Generate a complete unified git diff patch with full context",
                     messages,
                     Some(&tool_registry),
                     self.config.max_quality_retries,
                 )
                 .await
-                .map_err(|e| Error::External(format!("Cloud model error: {e}")))?
+                .map_err(|e| Error::External(format!("Cloud escalation error: {e}")))?
         } else {
-            // Try local model first for non-patch tasks
-            info!("Attempting code generation with local model (Gemma 4B)");
-            let response = self
-                .router
-                .route_with_quality_gate(
-                    "code_generation: Generate a unified git diff patch to solve the problem",
-                    messages.clone(),
-                    Some(&tool_registry),
-                    self.config.max_quality_retries,
-                )
-                .await
-                .map_err(|e| Error::External(format!("Router error: {e}")))?;
-
-            let response_tokens = response.content.split_whitespace().count();
-            metrics.local_attempt_tokens = Some(response_tokens);
-
-            // Check if patch is too short and escalation is enabled
-            if self.config.enable_escalation
-                && response_tokens < self.config.min_patch_tokens
-                && self.router.check_connectivity().await
-            {
+            if response_tokens < self.config.min_patch_tokens {
                 warn!(
-                    "Local model generated only {} tokens (min: {}), escalating to cloud",
-                    response_tokens, self.config.min_patch_tokens
+                    "Local model generated only {} tokens but escalation disabled",
+                    response_tokens
                 );
-                metrics.escalated_to_cloud = true;
-
-                // Escalate to Gemini Flash (use generic task to trigger fallback routing)
-                info!("Escalating to Gemini Flash for complete patch generation");
-                self.router
-                    .route_with_quality_gate(
-                        "Generate a complete unified git diff patch with full context and implementation details for code issue resolution",
-                        messages,
-                        Some(&tool_registry),
-                        self.config.max_quality_retries,
-                    )
-                    .await
-                    .map_err(|e| Error::External(format!("Cloud escalation error: {e}")))?
-            } else {
-                if response_tokens < self.config.min_patch_tokens {
-                    warn!(
-                        "Local model generated only {} tokens but escalation disabled",
-                        response_tokens
-                    );
-                }
-                response
             }
+            response
         };
 
         metrics.solution_gen_time_ms = solution_start.elapsed().as_millis() as u64;
@@ -212,6 +194,52 @@ impl CodeSolver {
             judgment,
             metrics,
         })
+    }
+
+    /// Validate git patch syntax
+    /// Checks for: diff headers, file markers, hunk headers, line prefixes
+    fn validate_patch_syntax(content: &str) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Must have at least one diff header
+        let has_diff = lines.iter().any(|l| l.starts_with("diff --git"));
+        if !has_diff {
+            return false;
+        }
+
+        // Must have file markers (--- and +++)
+        let has_from = lines.iter().any(|l| l.starts_with("---"));
+        let has_to = lines.iter().any(|l| l.starts_with("+++"));
+        if !has_from || !has_to {
+            return false;
+        }
+
+        // Must have at least one hunk header
+        let has_hunk = lines.iter().any(|l| l.starts_with("@@"));
+        if !has_hunk {
+            return false;
+        }
+
+        // Check for malformed hunks (common local model error)
+        for line in &lines {
+            // Valid patch lines start with: ' ', '+', '-', '@', 'd', 'i', '---', '+++'
+            if !line.is_empty() {
+                let first_char = line.chars().next().unwrap();
+                let is_valid = matches!(first_char, ' ' | '+' | '-' | '@' | 'd' | 'i' | '\\')
+                    || line.starts_with("---")
+                    || line.starts_with("+++")
+                    || line.starts_with("new file")
+                    || line.starts_with("index ")
+                    || line.starts_with("Binary files");
+
+                if !is_valid {
+                    debug!("Invalid patch line detected: {}", line);
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 
     async fn build_context(
