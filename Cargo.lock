@@ -242,6 +242,7 @@ version = "0.40.3"
 dependencies = [
  "arkavo-context",
  "arkavo-gemini",
+ "arkavo-llm",
  "arkavo-mcp",
  "arkavo-orchestrator",
  "arkavo-router",
