@@ -1,8 +1,33 @@
 use arkavo_git::{GitManager, safety::RepoGuard};
+use arkavo_protocol::{
+    agent_registry::{AgentInfo, AgentRegistry},
+    http::HttpTransport,
+    transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TlsConfig, TransportConfig},
+    types::{
+        Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest,
+        TaskGetResponse, TaskStatus,
+    },
+};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::{debug, info, warn};
+
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
+struct TaskConfig {
+    auto_approve: bool,
+    push: bool,
+    validate: bool,
+    message: Option<String>,
+    use_local_only: bool,
+    target_agent_id: Option<String>,
+    mesh_only: bool,
+}
 
 #[derive(Debug, Clone)]
 enum ModelCapability {
@@ -125,6 +150,9 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut message: Option<String> = None;
     let mut validate = true;
     let mut task_description: Option<String> = None;
+    let mut use_local_only = false;
+    let mut target_agent_id: Option<String> = None;
+    let mut mesh_only = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -132,12 +160,22 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "--yes" | "-y" => auto_approve = true,
             "--push" => push = true,
             "--no-validate" => validate = false,
+            "--local-only" => use_local_only = true,
+            "--mesh-only" => mesh_only = true,
             "--message" | "-m" => {
                 if i + 1 < args.len() {
                     message = Some(args[i + 1].clone());
                     i += 1;
                 } else {
                     return Err("--message requires an argument".into());
+                }
+            }
+            "--agent-id" => {
+                if i + 1 < args.len() {
+                    target_agent_id = Some(args[i + 1].clone());
+                    i += 1;
+                } else {
+                    return Err("--agent-id requires an argument".into());
                 }
             }
             "--help" | "-h" => {
@@ -164,7 +202,16 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // If task description provided, run AI agent mode
     if let Some(task) = task_description {
-        return execute_ai_task(&task, auto_approve, push, validate, message);
+        let config = TaskConfig {
+            auto_approve,
+            push,
+            validate,
+            message,
+            use_local_only,
+            target_agent_id,
+            mesh_only,
+        };
+        return execute_ai_task(&task, &config);
     }
 
     let git_manager = GitManager::new();
@@ -298,6 +345,94 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Discover agents on the mesh network using mDNS
+#[cfg(feature = "mdns")]
+fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
+    use std::time::Duration;
+
+    info!("Discovering mesh agents via mDNS...");
+
+    let mdns = ServiceDaemon::new()?;
+    let receiver = mdns.browse("_a2a._tcp.local.")?;
+
+    let mut agents = Vec::new();
+    let timeout = Duration::from_secs(3);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(event) => {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    let agent_id = info
+                        .get_property_val_str("agent_id")
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let name = info.get_fullname().to_string();
+                    let purpose = info
+                        .get_property_val_str("purpose")
+                        .unwrap_or("")
+                        .to_string();
+
+                    let capabilities_str = info
+                        .get_property_val_str("capabilities")
+                        .unwrap_or_default();
+                    let mut capabilities: Vec<String> = if capabilities_str.is_empty() {
+                        vec![]
+                    } else {
+                        capabilities_str.split(',').map(|s| s.to_string()).collect()
+                    };
+
+                    let mcp_tools_str = info.get_property_val_str("mcp_tools").unwrap_or_default();
+                    if !mcp_tools_str.is_empty() {
+                        let mcp_tools: Vec<String> =
+                            mcp_tools_str.split(',').map(|s| s.to_string()).collect();
+                        capabilities.extend(mcp_tools);
+                    }
+
+                    let address = info
+                        .get_addresses()
+                        .iter()
+                        .next()
+                        .map(|addr| format!("http://{}:{}", addr, info.get_port()));
+
+                    let mut metadata = HashMap::new();
+                    if let Some(model) = info.get_property_val_str("model") {
+                        metadata.insert("model".to_string(), model.to_string());
+                    }
+
+                    agents.push(AgentInfo {
+                        agent_id,
+                        name: name.clone(),
+                        purpose,
+                        capabilities,
+                        device_caps: None,
+                        metadata,
+                        last_seen: chrono::Utc::now(),
+                        load: 0.0,
+                        is_available: true,
+                        address,
+                    });
+
+                    debug!("Discovered agent: {}", name);
+                }
+            }
+            Err(_) => {
+                // Timeout on recv - continue until overall timeout
+            }
+        }
+    }
+
+    info!("Discovered {} agents via mDNS", agents.len());
+    Ok(agents)
+}
+
+#[cfg(not(feature = "mdns"))]
+fn discover_mesh_agents() -> Result<Vec<AgentInfo>, Box<dyn std::error::Error>> {
+    warn!("mDNS feature not compiled in - cannot discover agents");
+    Ok(Vec::new())
+}
+
 fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Plan Summary ===\n");
 
@@ -340,17 +475,283 @@ fn show_plan_summary(current_dir: &Path) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn execute_ai_task(
-    task: &str,
-    auto_approve: bool,
-    push: bool,
-    validate: bool,
-    message: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// Try to execute task using mesh network agents
+fn try_mesh_execution(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Discover agents on the network
+    let discovered_agents = discover_mesh_agents()?;
+
+    if discovered_agents.is_empty() {
+        return Err("No mesh agents discovered".into());
+    }
+
+    println!("=== Discovered Mesh Agents ===\n");
+    for agent in &discovered_agents {
+        println!("  ✓ {} ({})", agent.name, agent.agent_id);
+        if !agent.purpose.is_empty() {
+            println!("    Purpose: {}", agent.purpose);
+        }
+        if !agent.capabilities.is_empty() {
+            println!("    Capabilities: {}", agent.capabilities.join(", "));
+        }
+        if let Some(addr) = &agent.address {
+            println!("    Address: {addr}");
+        }
+    }
+    println!();
+
+    // Select agent
+    let selected_agent = if let Some(target_id) = &config.target_agent_id {
+        discovered_agents
+            .iter()
+            .find(|a| &a.agent_id == target_id)
+            .ok_or_else(|| format!("Agent {target_id} not found"))?
+    } else {
+        // Use agent registry for load balancing
+        let registry = Arc::new(AgentRegistry::new());
+
+        // Register all discovered agents
+        #[allow(clippy::disallowed_methods)]
+        for agent in &discovered_agents {
+            let _ = tokio::runtime::Runtime::new()?.block_on(registry.register_agent(
+                agent.agent_id.clone(),
+                agent.name.clone(),
+                agent.purpose.clone(),
+                agent.capabilities.clone(),
+                agent.device_caps.clone(),
+                agent.metadata.clone(),
+                agent.address.clone(),
+            ));
+        }
+
+        // Find best agent for code generation
+        #[allow(clippy::disallowed_methods)]
+        let best_agent_id = tokio::runtime::Runtime::new()?
+            .block_on(registry.find_best_agent("code_generation"))
+            .or_else(|| {
+                // Fallback to any available agent
+                discovered_agents.first().map(|a| a.agent_id.clone())
+            })
+            .ok_or("No suitable agent found")?;
+
+        discovered_agents
+            .iter()
+            .find(|a| a.agent_id == best_agent_id)
+            .ok_or("Selected agent not found")?
+    };
+
+    println!("=== Selected Agent ===");
+    println!(
+        "  Agent: {} ({})",
+        selected_agent.name, selected_agent.agent_id
+    );
+    println!("  Load: {:.0}%", selected_agent.load * 100.0);
+    println!();
+
+    // Submit task via A2A protocol
+    let address = selected_agent
+        .address
+        .as_ref()
+        .ok_or("Agent has no address")?;
+
+    println!("=== Connecting to Agent ===\n");
+    println!("  Address: {address}");
+
+    // Execute A2A communication in async context
+    #[allow(clippy::disallowed_methods)]
+    tokio::runtime::Runtime::new()?.block_on(async {
+        // Create transport configuration
+        let transport_config = TransportConfig {
+            timeout_ms: 60000,
+            max_retries: 2,
+            tls_config: TlsConfig {
+                require_tls: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // Create HTTP transport
+        let transport = Arc::new(HttpTransport::new(transport_config)?);
+
+        // Create endpoint
+        let endpoint = A2aEndpoint {
+            url: address.clone(),
+            agent_id: selected_agent.agent_id.clone(),
+            public_key: None,
+        };
+
+        // Connect to agent
+        transport.connect(&endpoint).await.map_err(|e| {
+            format!("Failed to connect to agent: {e}")
+        })?;
+
+        println!("  ✓ Connected\n");
+
+        // Build and submit task
+        println!("=== Submitting Task ===\n");
+        println!("  Task: {task}");
+
+        let message = Message {
+            parts: vec![MessagePart::Text {
+                content: format!(
+                    "Task: {task}\n\nPlease analyze the repository, plan the changes, and execute the task. Use MCP tools to read files, make changes, and verify results."
+                ),
+            }],
+            metadata: Some(serde_json::json!({
+                "task_type": "code_task",
+                "source": "arkavo_mesh_cli",
+                "auto_execute": config.auto_approve,
+            })),
+        };
+
+        let send_request = MessageSendRequest {
+            message,
+            task_id: None,
+        };
+
+        // Wrap in object with "request" key as expected by RPC method signature
+        let rpc_request = A2aRequest::new(
+            "message/send",
+            serde_json::json!([send_request]),
+        );
+
+        let response = transport.send_request(rpc_request).await.map_err(|e| {
+            format!("Failed to send task: {e}")
+        })?;
+
+        let task_id = match response {
+            A2aResponse::Success { result, .. } => {
+                let send_response: MessageSendResponse = serde_json::from_value(result)
+                    .map_err(|e| format!("Failed to parse response: {e}"))?;
+                println!("  ✓ Task submitted!");
+                println!("  Task ID: {}", send_response.task_id);
+                println!("  Status: {:?}\n", send_response.status);
+                send_response.task_id
+            }
+            A2aResponse::Error { error, .. } => {
+                transport.close().await.ok();
+                return Err(format!("RPC error: {} - {}", error.code, error.message).into());
+            }
+        };
+
+        // Poll for task completion
+        println!("=== Monitoring Task Progress ===\n");
+
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(300); // 5 minute timeout
+
+        loop {
+            if start.elapsed() > timeout {
+                transport.close().await.ok();
+                return Err("Task execution timed out after 5 minutes".into());
+            }
+
+            let get_request = TaskGetRequest {
+                task_id: task_id.clone(),
+            };
+
+            let rpc_request = A2aRequest::new(
+                "tasks/get",
+                serde_json::json!([get_request]),
+            );
+
+            let response = transport.send_request(rpc_request).await.map_err(|e| {
+                format!("Failed to get task status: {e}")
+            })?;
+
+            match response {
+                A2aResponse::Success { result, .. } => {
+                    let task_response: TaskGetResponse = serde_json::from_value(result)
+                        .map_err(|e| format!("Failed to parse task response: {e}"))?;
+
+                    match task_response.status {
+                        TaskStatus::Completed => {
+                            println!("\n  ✓ Task completed successfully!\n");
+
+                            if let Some(result_msg) = task_response.result {
+                                println!("=== Result ===\n");
+                                for part in result_msg.parts {
+                                    if let MessagePart::Text { content } = part {
+                                        println!("{content}");
+                                    }
+                                }
+                                println!();
+                            }
+
+                            transport.close().await.ok();
+                            return Ok(());
+                        }
+                        TaskStatus::Failed => {
+                            let error_msg = if let Some(error) = &task_response.error {
+                                format!("{}: {}", error.code, error.message)
+                            } else {
+                                "Unknown error".to_string()
+                            };
+
+                            transport.close().await.ok();
+                            return Err(format!("Task failed: {error_msg}").into());
+                        }
+                        TaskStatus::Canceled => {
+                            transport.close().await.ok();
+                            return Err("Task was canceled".into());
+                        }
+                        TaskStatus::Submitted | TaskStatus::Working | TaskStatus::InputRequired => {
+                            // Show progress
+                            if let Some(progress) = &task_response.progress {
+                                if let Some(msg) = &progress.message {
+                                    println!("  → {msg}");
+                                }
+                                if let Some(pct) = progress.percentage {
+                                    println!("  {pct}% complete");
+                                }
+                            } else {
+                                println!("  Status: {:?}", task_response.status);
+                            }
+
+                            // Wait before next poll
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                        _ => {
+                            println!("  Status: {:?}", task_response.status);
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                    }
+                }
+                A2aResponse::Error { error, .. } => {
+                    transport.close().await.ok();
+                    return Err(format!("RPC error: {} - {}", error.code, error.message).into());
+                }
+            }
+        }
+    })
+}
+
+fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::error::Error>> {
     use std::env;
 
     println!("=== Task: Plan and Execute ===\n");
     println!("Task: {task}\n");
+
+    // Try to use mesh agents unless --local-only specified
+    if !config.use_local_only {
+        match try_mesh_execution(task, config) {
+            Ok(()) => {
+                println!("\n✓ Task completed via mesh network");
+                return Ok(());
+            }
+            Err(e) => {
+                if config.mesh_only {
+                    eprintln!("Error: Mesh execution failed and --mesh-only specified");
+                    return Err(e);
+                }
+                warn!(
+                    "Mesh execution failed: {}, falling back to local execution",
+                    e
+                );
+                println!("\n⚠ Mesh agents unavailable, falling back to local execution\n");
+            }
+        }
+    }
 
     // Discover available models
     let cloud_llms = detect_available_llms();
@@ -510,7 +911,7 @@ Read the mentioned files and confirm the plan makes sense. Report any issues."
     println!("Plan created through collaboration between local and cloud agents.");
 
     use std::io::{self, Write};
-    if !auto_approve {
+    if !config.auto_approve {
         print!("\nExecute this plan? [y/N]: ");
         io::stdout().flush()?;
 
@@ -566,13 +967,13 @@ Execute the plan step by step. Show what you're doing."
 
             // Create commit with provided message or auto-generate
             let mut guard = RepoGuard::new(&repo)?;
-            if validate {
+            if config.validate {
                 println!("Running validation...");
                 guard = guard.with_fmt_check().with_clippy_check();
             }
 
             let result = guard.transaction(|repo| {
-                if let Some(msg) = message.as_ref() {
+                if let Some(msg) = config.message.as_ref() {
                     git_manager.add_all(repo)?;
                     git_manager.commit_changes(repo, msg)
                 } else {
@@ -584,7 +985,7 @@ Execute the plan step by step. Show what you're doing."
                 Ok(oid) => {
                     println!("✓ Committed: {oid}");
 
-                    if push {
+                    if config.push {
                         println!("Pushing to remote...");
                         git_manager.publish(&repo)?;
                         println!("✓ Pushed");
@@ -617,7 +1018,7 @@ fn detect_available_llms() -> Vec<LlmInfo> {
 
     // Check for Gemini
     if env::var("GEMINI_API_KEY").is_ok() {
-        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+        let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
         llms.push(LlmInfo {
             name: "Gemini".to_string(),
             provider: "Google".to_string(),
@@ -691,17 +1092,24 @@ fn print_usage() {
     println!("Plan and apply code changes");
     println!();
     println!("USAGE:");
-    println!("    arkavo task [TASK]              Execute AI task");
+    println!(
+        "    arkavo task [TASK]              Execute AI task (tries mesh, falls back to local)"
+    );
     println!("    arkavo task [OPTIONS]           Commit existing changes");
     println!();
     println!("EXAMPLES:");
     println!("    arkavo task 'fix all warnings'");
-    println!("    arkavo task --yes               # Auto-approve commit");
+    println!("    arkavo task 'add tests' --mesh-only     # Require mesh agents");
+    println!("    arkavo task 'refactor' --local-only     # Force local execution");
+    println!("    arkavo task --yes                        # Auto-approve commit");
     println!();
     println!("OPTIONS:");
     println!("    -y, --yes          Auto-approve without prompting");
     println!("    --push             Push to remote after committing");
     println!("    --no-validate      Skip pre-commit validation");
     println!("    -m, --message <M>  Use custom commit message");
+    println!("    --local-only       Skip mesh discovery, use local execution only");
+    println!("    --mesh-only        Fail if no mesh agents available (no fallback)");
+    println!("    --agent-id <ID>    Target specific agent by ID");
     println!("    -h, --help         Show this help");
 }

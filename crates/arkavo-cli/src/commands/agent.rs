@@ -231,7 +231,7 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         vec![AgentConfig {
             name: agent_name,
             purpose: "A general-purpose AI agent".to_string(),
-            model: String::new(),  // Empty model - let arkavo-router decide
+            model: String::new(), // Empty model - let arkavo-router decide
             listen: format!("0.0.0.0:{port}"),
             mdns_enabled: true,
             mcp_servers: Vec::new(),
@@ -320,7 +320,7 @@ pub struct AgentConfig {
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
     pub api_keys: std::collections::HashMap<String, String>,
-    pub quiet: bool,  // Default true (quiet), false if --verbose is specified
+    pub quiet: bool, // Default true (quiet), false if --verbose is specified
 }
 
 #[derive(Debug, Clone)]
@@ -373,7 +373,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
-                    quiet: true,  // Default is quiet
+                    quiet: true, // Default is quiet
                 });
                 in_agent_section = true;
                 continue;
@@ -417,7 +417,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
-                        quiet: true,  // Default is quiet
+                        quiet: true, // Default is quiet
                     });
                     in_agent_section = true;
                 }
@@ -490,7 +490,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mdns_enabled: true, // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
-                    quiet: true,  // Default is quiet
+                    quiet: true, // Default is quiet
                 });
                 in_agent_section = true;
                 continue;
