@@ -91,7 +91,6 @@ fn test_cli_02_stdout_redirection() {
 
     let mut cmd = Command::new(get_arkavo_binary_path());
     cmd.arg("task")
-        .arg("--prompt")
         .arg("Generate a simple Rust struct called 'User' with fields: name (String) and age (u32). Output only the code, no explanation.")
         .env("GEMINI_API_KEY", get_api_key())
         .env("GEMINI_MODEL", "models/gemini-3-pro-preview")

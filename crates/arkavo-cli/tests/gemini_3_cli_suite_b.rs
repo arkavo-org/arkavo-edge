@@ -39,7 +39,6 @@ fn test_cli_05_filesystem_access() {
 
     let mut cmd = Command::new(get_arkavo_binary_path());
     cmd.arg("task")
-        .arg("--prompt")
         .arg(&prompt)
         .current_dir(temp_dir.path())
         .env("GEMINI_API_KEY", get_api_key())
@@ -88,7 +87,6 @@ fn test_cli_05_filesystem_access() {
     let mut cmd_restricted = Command::new(get_arkavo_binary_path());
     cmd_restricted
         .arg("task")
-        .arg("--prompt")
         .arg(&prompt_restricted)
         .env("GEMINI_API_KEY", get_api_key())
         .env("GEMINI_MODEL", "models/gemini-3-pro-preview")
