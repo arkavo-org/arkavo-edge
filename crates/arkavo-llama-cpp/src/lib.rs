@@ -198,7 +198,7 @@ impl LlamaModel {
     }
 
     pub fn model_name(&self) -> &str {
-        self.path.split('/').last().unwrap_or(&self.path)
+        self.path.split('/').next_back().unwrap_or(&self.path)
     }
 }
 
@@ -254,7 +254,7 @@ impl LlamaContext {
         // Scale context based on trained size to prevent memory exhaustion
         // KV cache memory usage: ~460KB per token for typical small models
         // On 16GB systems, safe limit is ~16K tokens (~7.5GB KV cache + model + system)
-        let safe_ctx = if trained_ctx < 512 || trained_ctx > 1048576 {
+        let safe_ctx = if !(512..=1048576).contains(&trained_ctx) {
             eprintln!(
                 "⚠ Model '{}' reported unusual trained context size: {}, using 8192",
                 model_name, trained_ctx

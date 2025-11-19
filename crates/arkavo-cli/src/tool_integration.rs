@@ -122,9 +122,19 @@ pub async fn process_with_tools(
                     let tool_list = expanded_tools
                         .iter()
                         .map(|t| {
+                            let aliases_text = if let Some(aliases) = &t.aliases {
+                                if !aliases.is_empty() {
+                                    format!(" (aliases: {})", aliases.join(", "))
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
                             format!(
-                                "- {}: {}",
+                                "- {}{}: {}",
                                 t.name,
+                                aliases_text,
                                 t.description.as_deref().unwrap_or("No description")
                             )
                         })

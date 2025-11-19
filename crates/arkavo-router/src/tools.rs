@@ -47,8 +47,7 @@ impl Tool for ListModelsTool {
         }
 
         let result = ModelsResponse { models };
-        let json =
-            serde_json::to_value(result).map_err(|e| arkavo_mcp_tools::ToolError::Json(e))?;
+        let json = serde_json::to_value(result).map_err(arkavo_mcp_tools::ToolError::Json)?;
 
         Ok(json)
     }

@@ -50,16 +50,14 @@ impl ResponseJudge {
             let candidates = vec![
                 format!("{hf_path}/hub/models--unsloth--gemma-3-270m-it-GGUF/snapshots/*/gemma-3-270m-it-Q4_K_M.gguf"),
                 format!("{hf_path}/hub/models--bartowski--gemma-3-270m-it-GGUF/snapshots/*/gemma-3-270m-it-Q4_K_M.gguf"),
-                "models/gemma-3-270m-it.gguf".to_string(),
-                "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-270m-it-GGUF/snapshots/*/gemma-3-270m-it-Q4_K_M.gguf".to_string(),
             ];
 
             // Return first existing path or default
             for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate)
-                    && let Some(Ok(path)) = entries.into_iter().next()
-                {
-                    return path.to_string_lossy().to_string();
+                if let Ok(entries) = glob::glob(&candidate) {
+                    if let Some(Ok(path)) = entries.into_iter().next() {
+                        return path.to_string_lossy().to_string();
+                    }
                 }
             }
 
@@ -87,16 +85,14 @@ impl ResponseJudge {
             // Check multiple possible locations
             let candidates = vec![
                 format!("{hf_path}/hub/models--unsloth--gemma-3-4b-it-GGUF/snapshots/*/gemma-3-4b-it-Q4_K_M.gguf"),
-                "models/gemma-3-4b-it.gguf".to_string(),
-                "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF/snapshots/*/gemma-3-4b-it-Q4_K_M.gguf".to_string(),
             ];
 
             // Return first existing path or default
             for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate)
-                    && let Some(Ok(path)) = entries.into_iter().next()
-                {
-                    return path.to_string_lossy().to_string();
+                if let Ok(entries) = glob::glob(&candidate) {
+                    if let Some(Ok(path)) = entries.into_iter().next() {
+                        return path.to_string_lossy().to_string();
+                    }
                 }
             }
 
@@ -190,7 +186,7 @@ impl ResponseJudge {
             .map_err(|e| {
                 tracing::warn!("Judge LLM failed, falling back to heuristics: {}", e);
                 // Fall back to heuristic result if LLM fails
-                return crate::Error::ModelExecution(format!("Judge evaluation failed: {e}"));
+                crate::Error::ModelExecution(format!("Judge evaluation failed: {e}"))
             })?;
 
         tracing::debug!("Judge raw output:\n{}", judgment_text);
@@ -350,7 +346,7 @@ impl ResponseJudge {
     ) -> String {
         let tools_list = available_tools
             .iter()
-            .take(10) // Limit to first 10 tools to keep prompt short
+            .take(25) // Increased to ensure all core tools are visible
             .map(|t| format!("- {} ({})", t.name, t.description))
             .collect::<Vec<_>>()
             .join("\n");

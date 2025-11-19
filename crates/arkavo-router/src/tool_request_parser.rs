@@ -2,7 +2,6 @@
 ///
 /// This module enables LLMs to request tools by keywords when they're not
 /// visible due to progressive disclosure or limited context windows.
-
 /// Parse tool requests from LLM response text
 ///
 /// Looks for patterns like "REQUEST_TOOL: <keyword>" and extracts the keywords.
@@ -30,7 +29,6 @@ pub fn parse_tool_requests(response: &str) -> Vec<String> {
 
             // Extract the first word after the marker
             if let Some(keyword) = after_marker
-                .trim()
                 .split_whitespace()
                 .next()
                 .filter(|s| !s.is_empty())

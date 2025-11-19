@@ -87,6 +87,8 @@ pub struct MinimalToolInfo {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aliases: Option<Vec<String>>,
 }
 
 pub struct ToolRegistry {
@@ -108,10 +110,10 @@ impl ToolRegistry {
     pub fn from_mcp_connection(
         mcp_client: Arc<dyn McpClient>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut registry = Self {
-            tools: HashMap::new(),
-        };
+        // Start with all native tools (filesystem, browser, git, time, etc.)
+        let mut registry = Self::new();
 
+        // Add MCP tools on top (they can override native tools if needed)
         let mcp_tools = mcp_client.list_tools()?;
 
         for mcp_tool in mcp_tools {
@@ -322,16 +324,18 @@ impl ToolRegistry {
                         || desc_words.iter().any(|d_word| d_word.contains(q_word))
                 });
 
-                // Also check aliases
+                // Also check aliases (using same tokenization as name/description)
                 let alias_match = schema
                     .aliases
                     .as_ref()
                     .map(|aliases| {
-                        aliases.iter().any(|alias| {
-                            let alias_lower = alias.to_lowercase();
-                            query_words
-                                .iter()
-                                .any(|q_word| alias_lower.contains(q_word))
+                        query_words.iter().any(|q_word| {
+                            aliases.iter().any(|alias| {
+                                let alias_lower = alias.to_lowercase();
+                                let alias_words: Vec<&str> =
+                                    alias_lower.split(&['_', '-', ' '][..]).collect();
+                                alias_words.iter().any(|a_word| a_word.contains(q_word))
+                            })
                         })
                     })
                     .unwrap_or(false);
@@ -416,18 +420,21 @@ impl ToolRegistry {
                 category: None,
                 description: None,
                 schema: None,
+                aliases: None,
             },
             DetailLevel::NameAndDescription => MinimalToolInfo {
                 name: schema.name.clone(),
                 category: Some(Self::categorize_tool(&schema.name)),
                 description: Some(schema.description.clone()),
                 schema: None,
+                aliases: schema.aliases.clone(),
             },
             DetailLevel::FullSchema => MinimalToolInfo {
                 name: schema.name.clone(),
                 category: Some(Self::categorize_tool(&schema.name)),
                 description: Some(schema.description.clone()),
                 schema: Some(serde_json::to_value(&schema.parameters).unwrap_or_default()),
+                aliases: schema.aliases.clone(),
             },
         }
     }

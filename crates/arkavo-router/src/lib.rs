@@ -280,19 +280,19 @@ impl Router {
                                 );
 
                                 // Special handling for MissingToolUse - search for tools instead of upgrading model
-                                if judgment.issue_type == IssueType::MissingToolUse {
-                                    if !judgment.suggested_keywords.is_empty() {
-                                        tracing::info!(
-                                            "Judge detected missing tool usage, searching for: {:?}",
-                                            judgment.suggested_keywords
-                                        );
+                                if judgment.issue_type == IssueType::MissingToolUse
+                                    && !judgment.suggested_keywords.is_empty()
+                                {
+                                    tracing::info!(
+                                        "Judge detected missing tool usage, searching for: {:?}",
+                                        judgment.suggested_keywords
+                                    );
 
-                                        // Return error with special marker to trigger tool search
-                                        return Err(Error::ModelExecution(format!(
-                                            "MISSING_TOOL_USE:{:?}",
-                                            judgment.suggested_keywords
-                                        )));
-                                    }
+                                    // Return error with special marker to trigger tool search
+                                    return Err(Error::ModelExecution(format!(
+                                        "MISSING_TOOL_USE:{:?}",
+                                        judgment.suggested_keywords
+                                    )));
                                 }
 
                                 if attempt + 1 < max_retries {

@@ -20,7 +20,6 @@ fn test_model_sizes_available() {
     assert!(true);
 }
 
-#[cfg(feature = "llama-cpp")]
 #[tokio::test]
 async fn test_model_paths_structure() {
     let loader = Qwen25VLModelLoader::new().unwrap();
