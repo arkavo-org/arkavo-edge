@@ -27,81 +27,46 @@ Download the installer from the [releases page](https://github.com/arkavo-org/ar
 
 ### Launch
 ```bash
-# Launch agent (auto-configures on first run)
+# Start an agent (zero config)
 arkavo
 
-# Launch web UI
+# Or launch web UI
 arkavo ui
 ```
 
+That's it. No configuration files, no setup. Agents auto-discover via mDNS and form a mesh.
+
 ## Why Arkavo?
-- **True zero-config discovery:** agents auto-find each other with mDNS/DNS-SRV.
-- **Built for performance:** Rust core pushes ≤ 2 ms A2A round-trips on commodity Macs.
-- **Visual flow map:** instant insight into who's talking to whom
+- **Zero config:** Just run `arkavo`. Auto-naming, auto-routing, auto-discovery.
+- **Fast:** ≤ 2ms agent-to-agent latency on commodity hardware.
+- **Visual:** See live agent communication flows in real-time.
 
-## Key Features
-| Feature                       | What you get                                                              |
-|-------------------------------|---------------------------------------------------------------------------|
-| **Agent Orchestration UI**    | Web + TUI dashboards that animate live data-flows.                        |
-| **Plug-in Core**              | Drop-in providers (Ollama, OpenAI, Anthropic, Kimi, …) with cost-aware routing. |
-| **Cross-platform automation** | Unified iOS simulator control for mobile QA (macOS only).                 |
+## Features
+- Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
+- Cost-aware model selection
+- GitHub issue orchestration
+- iOS simulator automation (macOS only)
+- Security scanning (Semgrep, OSV, SBOM)
 
-### Auto-Configuration
+## Usage Examples
 
-When you run `arkavo` for the first time in a directory, it automatically:
-- Creates an `AGENTS.md` configuration file
-- Creates a `.arkavo` storage directory
-- Generates a unique agent ID based on your directory name (e.g., `myproject-a1b2c3d`)
-- Configures default settings for immediate use
-- Starts the agent with mDNS discovery enabled
-
-### Kimi Integration
-
-Arkavo Edge now supports Kimi (Moonshot AI) models including the 128k context window variant:
-- Configure agents with `model: kimi://moonshot-v1-128k` in AGENTS.md
-- Add `MOONSHOT_API_KEY: sk-your-api-key` to the agent configuration in AGENTS.md
-- API keys are securely disseminated from the UI orchestrator to agents
-- Supports 8k, 32k, and 128k context models
-
-### DeepSeek Integration
-
-Arkavo Edge provides first-class support for DeepSeek's API with both standard and reasoning models:
-- **Anthropic-compatible API**: Full support for DeepSeek's Anthropic-style endpoints
-- **Function Calling**: Support for up to 128 tools per request with automatic schema validation
-- **Model Selection**: Use `deepseek-chat` (default) or `deepseek-reasoner` via `DEEPSEEK_MODEL` environment variable
-- **Strict Mode (Beta)**: Enhanced reliability with JSON Schema validation for tool arguments
-- **Automatic Fallback**: Seamlessly switches from `deepseek-reasoner` to `deepseek-chat` when tools are present
-
-Configure with environment variables:
-- `DEEPSEEK_API_KEY`: Your DeepSeek API key
-- `DEEPSEEK_MODEL`: Model to use (`deepseek-chat` or `deepseek-reasoner`)
-- `DEEPSEEK_BASE_URL`: Optional custom API endpoint
-
-Usage:
+### Chat
 ```bash
-# Interactive chat with DeepSeek
-DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek
-
-# Single prompt
-DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek --prompt "Explain quantum computing"
-
-# With reasoning model
-DEEPSEEK_API_KEY=your-key DEEPSEEK_MODEL=deepseek-reasoner arkavo chat --model deepseek --prompt "Solve: 15 * 23"
+# Use any provider with API key
+GEMINI_API_KEY=your-key arkavo chat --prompt "Hello"
+DEEPSEEK_API_KEY=your-key arkavo chat --model deepseek --prompt "Explain Rust"
 ```
 
-### OpenTDF Authorization
+### Custom Agent Config (Optional)
+```bash
+arkavo agent init my-agent  # Creates AGENTS.md template
+# Edit AGENTS.md to set model, capabilities, API keys
+arkavo  # Runs with your config
+```
 
-Arkavo Edge integrates with [OpenTDF](https://opentdf.io) platform for entitlement-based access control:
-- **Fine-grained permissions:** Control MCP tool execution with attribute-based policies
-- **JWT-based authentication:** Secure token validation via Entity Resolution Service v2
-- **Connect protocol support:** Uses OpenTDF Authorization v2 APIs with efficient HTTP/JSON
-- **Smart caching:** Reduces latency with TTL-aware decision caching
-- **Fail-closed security:** Denies access by default with safe diagnostic tool allowlist
+### Security (Optional)
 
-Configure with environment variables:
-- `OPENTDF_BASE_URL`: Platform endpoint (default: https://platform.opentdf.io)
-- `OIDC_ISSUER`: Token issuer for validation
-- `AUD`: Expected audience claim
+**OpenTDF Integration:** Fine-grained access control for MCP tools via [OpenTDF](https://opentdf.io). Set `OPENTDF_BASE_URL`, `OIDC_ISSUER`, and `AUD` environment variables.
 
 ## Coding Agent Toolset
 
@@ -121,46 +86,13 @@ Arkavo Edge includes a comprehensive suite of MCP tools for AI coding agents:
 - **browser_cdp**: Chrome DevTools Protocol automation via chromiumoxide
 - **test_run**: Multi-language test runner (pytest, jest, go test, cargo test, xcodebuild)
 
-### GitHub Integration
-- **gh_checks**: GitHub Checks API integration with inline annotations
-- **gh_pr_review**: PR reviews with line-level comments
-
-### GitHub Issue Orchestration
-
-Arkavo Edge can automatically handle GitHub issues through AI agents.
-
-**Polling Mode** (recommended - no infrastructure required):
+### GitHub Orchestration
 ```bash
-# Poll for new issues using GitHub personal access token
-export GITHUB_TOKEN="ghp_your_token"
-arkavo orchestrator poll --repo owner/repo --interval 300
+# Auto-handle GitHub issues with AI agents
+GITHUB_TOKEN=ghp_token arkavo orchestrator poll --repo owner/repo
 ```
 
-**Webhook Server** (for teams with public infrastructure):
-```bash
-# Start webhook server
-export ARKAVO_GITHUB_WEBHOOK_SECRET="your-webhook-secret"
-export ARKAVO_GITHUB_APP_ID="123456"
-export ARKAVO_GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)"
-
-arkavo orchestrator start --port 3000
-```
-
-**Manual Processing** (for testing):
-```bash
-export GITHUB_TOKEN="ghp_your_token"
-arkavo orchestrator process --repo owner/repo --issue 123
-```
-
-Features:
-- **Multiple Modes**: Polling (95% of users), webhook server, or manual trigger
-- **Intelligent Routing**: 4 execution strategies (AutoExecute, PlanFirst, OrchestratorConsultation, HumanApprovalRequired)
-- **Issue Analysis**: Automatic classification (Bug, Feature, Docs) with complexity assessment
-- **Agent Assignment**: Capability-based agent selection with load balancing
-- **Progress Tracking**: Real-time status updates posted as issue comments
-- **Budget Management**: Token budget tracking with automatic warnings
-
-See [crates/arkavo-orchestrator/README.md](crates/arkavo-orchestrator/README.md) for complete orchestrator documentation.
+Features: Issue classification, agent assignment, PR reviews, budget tracking. See [orchestrator docs](crates/arkavo-orchestrator/README.md).
 
 ### Ephemeral Workspaces
 - **workspace_container**: Container-based isolated execution with resource quotas (Docker/Podman)
