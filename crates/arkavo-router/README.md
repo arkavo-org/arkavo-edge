@@ -226,12 +226,20 @@ The Router includes an **automatic quality evaluation system** that detects inad
    - Missing required parameters
    - Invalid parameter types
 
-2. **LLM Judge** (~500ms, Gemma 4B) - Evaluates:
+2. **Hybrid Judge** - Dual-layer detection for missing tool usage:
+   - **Heuristics** (instant, free) - Pattern matching catches 50% of cases
+   - **270M LLM Judge** (~200ms, Gemma 270M) - Semantic validation catches the other 50%
+
+   Both work together:
+   - Heuristics: Catch obvious refusal patterns instantly (free)
+   - 270M Judge: Validate tricky cases with semantic understanding (cheap)
+
+3. **LLM Judge** (~500ms, Gemma 4B) - Evaluates other issues:
    - Tool refusal ("I don't have access to tools")
    - Off-topic responses
    - Semantic quality issues
 
-3. **Automatic Escalation** - Upgrades model on failure:
+4. **Automatic Escalation** - Upgrades model on failure:
    ```
    270M → 4B → 12B → Flash → Pro
    ```

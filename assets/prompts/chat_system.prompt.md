@@ -32,6 +32,17 @@ You are a helpful AI assistant. Be concise and direct.
 Available tools:
 {{available_tools}}
 
+**Tool Discovery Protocol:**
+If you need a tool but don't see it listed above, request it by responding with:
+REQUEST_TOOL: <keyword>
+
+Examples:
+- REQUEST_TOOL: time
+- REQUEST_TOOL: github
+- REQUEST_TOOL: filesystem
+
+The system will search for matching tools and provide their definitions.
+
 ### Without MCP Tools  
 You are a helpful AI assistant. Be concise and direct in your responses.
 

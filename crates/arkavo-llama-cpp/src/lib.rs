@@ -69,6 +69,10 @@ extern "C" fn llama_log_callback_filtered(
                     {
                         return;
                     }
+                    // Skip context size info messages (we handle this ourselves)
+                    if str_slice.contains("n_ctx_per_seq") || str_slice.contains("n_ctx_train") {
+                        return;
+                    }
                 }
                 eprint!("{}", str_slice);
             }
@@ -194,10 +198,7 @@ impl LlamaModel {
     }
 
     pub fn model_name(&self) -> &str {
-        self.path
-            .split('/')
-            .last()
-            .unwrap_or(&self.path)
+        self.path.split('/').last().unwrap_or(&self.path)
     }
 }
 
@@ -254,7 +255,10 @@ impl LlamaContext {
         // KV cache memory usage: ~460KB per token for typical small models
         // On 16GB systems, safe limit is ~16K tokens (~7.5GB KV cache + model + system)
         let safe_ctx = if trained_ctx < 512 || trained_ctx > 1048576 {
-            eprintln!("⚠ Model '{}' reported unusual trained context size: {}, using 8192", model_name, trained_ctx);
+            eprintln!(
+                "⚠ Model '{}' reported unusual trained context size: {}, using 8192",
+                model_name, trained_ctx
+            );
             8192
         } else if trained_ctx <= 8192 {
             // Small models: use full trained context
@@ -267,7 +271,12 @@ impl LlamaContext {
             (trained_ctx / 4).min(16384)
         };
 
-        eprintln!("Model '{}': trained_ctx={}, using n_ctx={}", model_name, trained_ctx, safe_ctx);
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "Model '{}': trained_ctx={}, using n_ctx={}",
+                model_name, trained_ctx, safe_ctx
+            );
+        }
 
         // Try GPU if it hasn't failed before
         if gpu_status != 2 {

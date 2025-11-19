@@ -1262,7 +1262,7 @@ async fn process_message_print_with_router(
 
     let config = ToolIntegrationConfig {
         max_tool_iterations: 3,
-        show_tool_execution: true,
+        show_tool_execution: false,
     };
 
     let result =

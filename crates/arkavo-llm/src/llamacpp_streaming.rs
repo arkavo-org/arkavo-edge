@@ -223,25 +223,27 @@ fn send_metrics(
         0.0
     };
 
-    let metrics_msg = if let Some(ttft) = ttft {
-        format!(
-            "\nGenerated {} tokens in {:.2}s ({:.1} tok/s, TTFT: {}ms)",
-            tokens_generated,
-            total_time.as_secs_f64(),
-            tokens_per_sec,
-            ttft.as_millis()
-        )
-    } else {
-        format!(
-            "\nGenerated {} tokens in {:.2}s ({:.1} tok/s)",
-            tokens_generated,
-            total_time.as_secs_f64(),
-            tokens_per_sec
-        )
-    };
+    if is_debug() {
+        let metrics_msg = if let Some(ttft) = ttft {
+            format!(
+                "\nGenerated {} tokens in {:.2}s ({:.1} tok/s, TTFT: {}ms)",
+                tokens_generated,
+                total_time.as_secs_f64(),
+                tokens_per_sec,
+                ttft.as_millis()
+            )
+        } else {
+            format!(
+                "\nGenerated {} tokens in {:.2}s ({:.1} tok/s)",
+                tokens_generated,
+                total_time.as_secs_f64(),
+                tokens_per_sec
+            )
+        };
 
-    tracing::info!("{}", metrics_msg);
-    eprintln!("{metrics_msg}");
+        tracing::info!("{}", metrics_msg);
+        eprintln!("{metrics_msg}");
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]

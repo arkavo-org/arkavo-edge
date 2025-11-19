@@ -303,7 +303,8 @@ impl ToolRegistry {
             .map(|s| s.to_string())
             .collect();
 
-        self.tools
+        let results: Vec<MinimalToolInfo> = self
+            .tools
             .values()
             .filter_map(|tool| {
                 let schema = tool.schema();
@@ -341,7 +342,22 @@ impl ToolRegistry {
                     None
                 }
             })
-            .collect()
+            .collect();
+
+        // Log if search returned no results (learning opportunity for new aliases)
+        if results.is_empty() && !query.trim().is_empty() {
+            let available_tools: Vec<&str> = self.tools.keys().map(|s| s.as_str()).collect();
+            tracing::debug!(
+                target: "arkavo_tools::search_miss",
+                query = %query,
+                query_words = ?query_words,
+                available_tools = ?available_tools,
+                tool_count = self.tools.len(),
+                "Tool search returned no results"
+            );
+        }
+
+        results
     }
 
     /// Get a list of tool names and descriptions for semantic search

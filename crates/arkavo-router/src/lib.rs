@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod orchestrator;
 pub mod prediction;
 pub mod selector;
+pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
 
@@ -262,8 +263,8 @@ impl Router {
 
                 #[cfg(feature = "llama-cpp")]
                 {
-                    // Try to create judge, but gracefully degrade if model unavailable
-                    match judge::ResponseJudge::new_gemma_4b() {
+                    // Use local Gemma-3 270M model for cost-free judgment
+                    match judge::ResponseJudge::new_gemma_270m() {
                         Ok(judge) => {
                             let judgment = judge
                                 .evaluate(task_description, &response, &tool_infos)
@@ -277,6 +278,22 @@ impl Router {
                                     judgment.issue_type,
                                     judgment.reason.as_deref().unwrap_or("No reason provided")
                                 );
+
+                                // Special handling for MissingToolUse - search for tools instead of upgrading model
+                                if judgment.issue_type == IssueType::MissingToolUse {
+                                    if !judgment.suggested_keywords.is_empty() {
+                                        tracing::info!(
+                                            "Judge detected missing tool usage, searching for: {:?}",
+                                            judgment.suggested_keywords
+                                        );
+
+                                        // Return error with special marker to trigger tool search
+                                        return Err(Error::ModelExecution(format!(
+                                            "MISSING_TOOL_USE:{:?}",
+                                            judgment.suggested_keywords
+                                        )));
+                                    }
+                                }
 
                                 if attempt + 1 < max_retries {
                                     current_decision.recommended_model =

@@ -31,7 +31,7 @@ impl GetAgentTimeTool {
         Self {
             schema: ToolSchema {
                 name: "get_agent_time".to_string(),
-                aliases: None,
+                aliases: Some(vec!["time".to_string(), "clock".to_string(), "date".to_string(), "datetime".to_string()]),
                 description: "Get the current time as understood by this agent. Supports multiple output formats and timezones.".to_string(),
                 parameters: json!({
                     "type": "object",

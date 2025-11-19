@@ -180,6 +180,7 @@ impl CodeSolver {
             passed: true,
             reason: Some("Quality gate passed".to_string()),
             issue_type: IssueType::None,
+            suggested_keywords: Vec::new(),
         };
 
         metrics.total_time_ms = start_time.elapsed().as_millis() as u64;
