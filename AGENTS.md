@@ -37,10 +37,7 @@
 - **Security**:
   - **NO OpenSSL**: Use `rustls` exclusively (musl compatibility).
   - **Secrets**: Never commit or write to docs any API keys.
-- **Components**:
-  - **CLI/TUI**: `crossterm`, `ratatui`.
-  - **Data**: SQLite (`crates/arkavo-vault`).
-  - **Networking**: mDNS, MCP adapters.
+- **Tool Pattern**: Each crate exports its own LLM tools via `register_tools(registry)`. No central tool crate. Avoids circular dependencies.
 - **Windows Specifics**:
   - Default build excludes C++ (llama-cpp) to avoid MSVC issues.
   - Ensure new deps work without C++ on Windows.

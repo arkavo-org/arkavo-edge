@@ -27,6 +27,3 @@ windows = { version = "0.58", features = ["Security_Credentials"], optional = tr
 default = []
 linux-keyring = ["dep:keyring"]
 windows-credential = ["dep:windows"]
-
-[dev-dependencies]
-tempfile = "3.14"

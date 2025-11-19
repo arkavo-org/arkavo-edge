@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod orchestrator;
 pub mod prediction;
 pub mod selector;
+pub mod tools;
 pub mod validator;
 
 pub use classifier::{TaskCategory, TaskClassifier};
@@ -170,10 +171,20 @@ impl Router {
     ) -> Result<ProviderResponse> {
         let decision = self.route(task_description).await?;
 
-        let tools_json = tool_registry.map(|registry| {
-            let tool_infos = registry.list_tools();
-            arkavo_llm::McpConverter::to_anthropic_format(&tool_infos)
-        });
+        let tools_json = match tool_registry {
+            Some(registry) => {
+                let detail_level = Self::detail_level_for_model(&decision.recommended_model);
+                let keywords = Self::extract_keywords(task_description);
+
+                // Use hybrid search: semantic + token-based
+                let tool_infos = Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+
+                Some(arkavo_llm::McpConverter::to_anthropic_format_minimal(
+                    &tool_infos,
+                ))
+            }
+            None => None,
+        };
 
         let provider = self.instantiate_provider(&decision.recommended_model)?;
 
@@ -194,16 +205,27 @@ impl Router {
         let mut current_decision = self.route(task_description).await?;
 
         for attempt in 0..max_retries {
-            let tools_json = tool_registry.map(|registry| {
-                let tool_infos = registry.list_tools();
-                // Use the correct format based on the model provider
-                match current_decision.recommended_model {
-                    decision::ModelChoice::GeminiFlash | decision::ModelChoice::GeminiPro => {
-                        arkavo_llm::McpConverter::to_gemini_format(&tool_infos)
-                    }
-                    _ => arkavo_llm::McpConverter::to_anthropic_format(&tool_infos),
+            let tools_json = match tool_registry {
+                Some(registry) => {
+                    let detail_level =
+                        Self::detail_level_for_model(&current_decision.recommended_model);
+                    let keywords = Self::extract_keywords(task_description);
+
+                    // Use hybrid search: semantic + token-based
+                    let tool_infos =
+                        Self::search_tools_hybrid(registry, &keywords, detail_level).await;
+
+                    // Use the correct format based on the model provider
+                    let json = match current_decision.recommended_model {
+                        decision::ModelChoice::GeminiFlash | decision::ModelChoice::GeminiPro => {
+                            arkavo_llm::McpConverter::to_gemini_format_minimal(&tool_infos)
+                        }
+                        _ => arkavo_llm::McpConverter::to_anthropic_format_minimal(&tool_infos),
+                    };
+                    Some(json)
                 }
-            });
+                None => None,
+            };
 
             let provider = self.instantiate_provider(&current_decision.recommended_model)?;
 
@@ -565,10 +587,52 @@ impl Router {
             ))),
         }
     }
+
+    /// Extract keywords from task description for tool search
+    fn extract_keywords(task: &str) -> String {
+        let words: Vec<&str> = task
+            .split_whitespace()
+            .filter(|w| w.len() > 2) // Allow 3-char words like "all", "get", "set"
+            .filter(|w| {
+                ![
+                    "this", "that", "with", "have", "from", "what", "where", "the", "and", "for",
+                ]
+                .contains(w)
+            })
+            .collect();
+        words.join(" ")
+    }
+
+    /// Determine detail level based on model context size
+    fn detail_level_for_model(model: &decision::ModelChoice) -> arkavo_mcp_tools::DetailLevel {
+        use decision::ModelChoice;
+        match model {
+            ModelChoice::LocalGemma270M | ModelChoice::LocalGemma4B => {
+                arkavo_mcp_tools::DetailLevel::NameOnly
+            }
+            ModelChoice::LocalGemma12B | ModelChoice::LocalDeepSeekCoder => {
+                arkavo_mcp_tools::DetailLevel::NameAndDescription
+            }
+            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
+                arkavo_mcp_tools::DetailLevel::FullSchema
+            }
+        }
+    }
+
+    /// Search tools using hybrid approach: semantic (if available) + token-based
+    async fn search_tools_hybrid(
+        registry: &arkavo_mcp_tools::ToolRegistry,
+        query: &str,
+        detail: arkavo_mcp_tools::DetailLevel,
+    ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
+        // For now, just use token search
+        // TODO: Add semantic search with local model when llama-cpp feature is enabled
+        registry.search_tools(query, detail)
+    }
 }
 
 /// Information about an available LLM
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LlmInfo {
     pub name: String,
     pub provider: String,

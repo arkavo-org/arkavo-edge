@@ -50,10 +50,18 @@ pub async fn process_with_tools(
 ) -> Result<ToolIntegrationResult, Box<dyn std::error::Error>> {
     let config = config.unwrap_or_default();
 
-    let router = Router::new().await?;
+    let router = Arc::new(Router::new().await?);
 
-    let tool_registry = ToolRegistry::from_mcp_or_default(mcp_client);
-    let tool_executor = ToolExecutor::new();
+    let mut tool_registry = ToolRegistry::from_mcp_or_default(mcp_client);
+
+    // Register tools from each crate
+    arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
+
+    // Wrap registry in Arc for shared access
+    let registry_arc = Arc::new(tool_registry);
+
+    // Create executor with the same registry that has router tools registered
+    let tool_executor = ToolExecutor::with_registry(registry_arc.clone());
 
     let mut all_tool_executions = Vec::new();
     let mut iteration = 0;
@@ -70,7 +78,7 @@ pub async fn process_with_tools(
         }
 
         let response: ProviderResponse = router
-            .route_with_quality_gate(task_description, messages.clone(), Some(&tool_registry), 3)
+            .route_with_quality_gate(task_description, messages.clone(), Some(&registry_arc), 3)
             .await?;
 
         if response.tool_calls.is_empty() {

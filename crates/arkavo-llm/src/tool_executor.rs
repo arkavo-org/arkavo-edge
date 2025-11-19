@@ -26,16 +26,22 @@ pub struct ToolExecutionResult {
     pub error: Option<String>,
 }
 
+use std::sync::Arc;
+
 /// Tool executor that runs MCP tools
 pub struct ToolExecutor {
-    registry: ToolRegistry,
+    registry: Arc<ToolRegistry>,
 }
 
 impl ToolExecutor {
     pub fn new() -> Self {
         Self {
-            registry: ToolRegistry::new(),
+            registry: Arc::new(ToolRegistry::new()),
         }
+    }
+
+    pub fn with_registry(registry: Arc<ToolRegistry>) -> Self {
+        Self { registry }
     }
 
     /// Execute a single parsed tool call

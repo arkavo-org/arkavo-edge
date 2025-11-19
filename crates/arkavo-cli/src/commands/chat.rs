@@ -630,10 +630,14 @@ Q: \"Recent commits?\" → A: @git_status
     };
 
     let system_prompt = if should_inject_context {
-        // Try to read AGENTS.md or CLAUDE.md
-        let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
-            Ok(content) => Some(content),
-            Err(_) => std::fs::read_to_string("CLAUDE.md").ok(),
+        // Try to read .arkavo/AGENTS.md first, then AGENTS.md, then CLAUDE.md
+        let agents_md_content = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+            std::fs::read_to_string(".arkavo/AGENTS.md").ok()
+        } else {
+            match std::fs::read_to_string("AGENTS.md") {
+                Ok(content) => Some(content),
+                Err(_) => std::fs::read_to_string("CLAUDE.md").ok(),
+            }
         };
 
         if let Some(agents_content) = agents_md_content {

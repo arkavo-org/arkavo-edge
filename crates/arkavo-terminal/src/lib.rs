@@ -201,12 +201,16 @@ pub async fn run() -> Result<()> {
                 "\n\nMCP Integration: Disabled".to_string()
             };
 
-            // Try to read AGENTS.md for system prompt
-            let agents_md_content = match std::fs::read_to_string("AGENTS.md") {
-                Ok(content) => Some(content),
-                Err(_) => {
-                    // Try CLAUDE.md as fallback
-                    std::fs::read_to_string("CLAUDE.md").ok()
+            // Try to read .arkavo/AGENTS.md first, then AGENTS.md, then CLAUDE.md
+            let agents_md_content = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+                std::fs::read_to_string(".arkavo/AGENTS.md").ok()
+            } else {
+                match std::fs::read_to_string("AGENTS.md") {
+                    Ok(content) => Some(content),
+                    Err(_) => {
+                        // Try CLAUDE.md as fallback
+                        std::fs::read_to_string("CLAUDE.md").ok()
+                    }
                 }
             };
 

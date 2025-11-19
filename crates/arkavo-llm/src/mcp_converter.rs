@@ -1,4 +1,4 @@
-use arkavo_mcp_tools::registry::ToolInfo;
+use arkavo_mcp_tools::registry::{MinimalToolInfo, ToolInfo};
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 
@@ -90,6 +90,54 @@ impl McpConverter {
             .collect();
 
         json!(tool_defs)
+    }
+
+    /// Convert MinimalToolInfo to Anthropic format (for progressive disclosure)
+    pub fn to_anthropic_format_minimal(tools: &[MinimalToolInfo]) -> Value {
+        let tool_defs: Vec<Value> = tools
+            .iter()
+            .map(|tool| {
+                let schema = tool
+                    .schema
+                    .clone()
+                    .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+                json!({
+                    "name": tool.name,
+                    "description": tool.description.clone().unwrap_or_default(),
+                    "input_schema": schema,
+                })
+            })
+            .collect();
+
+        json!(tool_defs)
+    }
+
+    /// Convert MinimalToolInfo to Gemini format (for progressive disclosure)
+    pub fn to_gemini_format_minimal(tools: &[MinimalToolInfo]) -> Value {
+        if tools.is_empty() {
+            return json!([]);
+        }
+
+        let function_declarations: Vec<Value> = tools
+            .iter()
+            .map(|tool| {
+                let schema = tool
+                    .schema
+                    .clone()
+                    .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+                let gemini_schema = Self::make_gemini_compatible(&schema);
+
+                json!({
+                    "name": tool.name,
+                    "description": tool.description.clone().unwrap_or_default(),
+                    "parameters": gemini_schema,
+                })
+            })
+            .collect();
+
+        json!([{
+            "functionDeclarations": function_declarations
+        }])
     }
 
     /// Convert to OpenAI JSON format (always available)

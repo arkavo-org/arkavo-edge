@@ -35,7 +35,6 @@ chrono-tz = "0.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-criterion = { workspace = true }
 
 [features]
 default = []

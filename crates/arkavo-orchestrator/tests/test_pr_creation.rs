@@ -13,11 +13,11 @@ async fn test_pr_creation_with_mcp_tool() {
     let tool_registry = Arc::new(ToolRegistry::new());
 
     let event_config = EventWriterConfig {
-        db_path: ":memory:".to_string(),
-        max_events_per_session: 1000,
-        retention_hours: 24,
+        buffer_size: 1024,
+        flush_interval: Default::default(),
+        batch_size: 100,
     };
-    let event_writer = Arc::new(EventWriter::new(event_config).await.unwrap());
+    let event_writer = Arc::new(EventWriter::new(event_config));
 
     let pr_creator = PrCreator::new(tool_registry, event_writer, "test-session".to_string());
 
@@ -77,27 +77,28 @@ fn test_pr_body_includes_resolves_reference() {
 }
 
 fn create_test_assignment() -> AgentAssignment {
-    use arkavo_orchestrator::types::{Complexity, ExecutionStrategy, IssueAnalysis, IssueType};
+    use arkavo_orchestrator::{Complexity, ExecutionStrategy, IssueAnalysis, IssueType, Priority};
 
     AgentAssignment {
         issue_number: 123,
         repository: "test-org/test-repo".to_string(),
         issue_title: "Fix authentication bug".to_string(),
         issue_body: "The login flow is broken".to_string(),
-        issue_author: "testuser".to_string(),
-        issue_labels: vec![],
         routing_decision: RoutingDecision {
-            strategy: ExecutionStrategy::Autonomous,
-            confidence: 0.9,
-            reasoning: "Simple bug fix".to_string(),
+            strategy: ExecutionStrategy::AutoExecute,
             analysis: IssueAnalysis {
                 issue_type: IssueType::Bug,
-                complexity: Complexity::Low,
+                complexity: Complexity::Simple,
                 technologies: vec!["rust".to_string()],
-                confidence: 0.95,
+                required_capabilities: vec![],
+                estimated_tokens: 50_000,
             },
-            estimated_duration_minutes: 30,
+            rationale: "Simple bug fix".to_string(),
+            should_notify_human: false,
+            priority: Priority::Low,
         },
+        assigned_agent_id: None,
+        assignment_rationale: "".to_string(),
     }
 }
 

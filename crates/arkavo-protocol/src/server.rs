@@ -958,7 +958,7 @@ impl A2aRpcServer for A2aRpcImpl {
         }
 
         // Read AGENTS.md file
-        let config_path = std::path::Path::new("AGENTS.md");
+        let config_path = std::path::Path::new(".arkavo/AGENTS.md");
         let content = match tokio::fs::read_to_string(&config_path).await {
             Ok(content) => content,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -991,7 +991,7 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // List backups if requested
         let backups = if request.include_backups {
-            let backup_dir = std::path::Path::new(".agents.md.backup");
+            let backup_dir = std::path::Path::new(".arkavo/backups");
             let mut backup_list = Vec::new();
 
             if backup_dir.exists()
@@ -1077,7 +1077,7 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        let config_path = std::path::Path::new("AGENTS.md");
+        let config_path = std::path::Path::new(".arkavo/AGENTS.md");
 
         // Check expected version for optimistic locking
         if let Some(expected_version) = &request.expected_version
@@ -1117,7 +1117,7 @@ impl A2aRpcServer for A2aRpcImpl {
         // Create backup if requested
         let backup_path = if request.create_backup {
             // Create backup directory if it doesn't exist
-            let backup_dir = std::path::Path::new(".agents.md.backup");
+            let backup_dir = std::path::Path::new(".arkavo/backups");
             if !backup_dir.exists()
                 && let Err(e) = tokio::fs::create_dir_all(backup_dir).await
             {
@@ -1146,31 +1146,13 @@ impl A2aRpcServer for A2aRpcImpl {
             None
         };
 
-        // Save last-known-good before update
-        let last_good_path = std::path::Path::new("AGENTS.md.last-known-good");
-        if config_path.exists() {
-            let _ = tokio::fs::copy(&config_path, &last_good_path).await;
-        }
-
-        // Write new configuration atomically
-        let temp_path = std::path::Path::new("AGENTS.md.tmp");
-        match tokio::fs::write(&temp_path, &request.content).await {
+        // Write new configuration directly (no temporary file)
+        match tokio::fs::write(&config_path, &request.content).await {
             Ok(_) => {
-                // Atomic rename
-                if let Err(_e) = tokio::fs::rename(&temp_path, &config_path).await {
-                    timer.error();
-                    return Ok(AgentConfigUpdateResponse {
-                        success: false,
-                        new_version: None,
-                        backup_path,
-                        error: Some(ConfigError::ReadOnlyFilesystem),
-                        reload_required: false,
-                    });
-                }
+                // File written successfully
             }
             Err(_e) => {
                 timer.error();
-                let _ = tokio::fs::remove_file(&temp_path).await;
                 return Ok(AgentConfigUpdateResponse {
                     success: false,
                     new_version: None,
@@ -1296,7 +1278,7 @@ impl A2aRpcServer for A2aRpcImpl {
             return Err(e);
         }
 
-        let backup_dir = std::path::Path::new(".agents.md.backup");
+        let backup_dir = std::path::Path::new(".arkavo/backups");
         let backup_path = backup_dir.join(&request.backup_filename);
 
         // Check if backup exists
@@ -2292,11 +2274,15 @@ impl A2aServer {
         // Stop any existing watcher
         self.stop_file_watcher().await;
 
-        let config_path = std::path::Path::new("AGENTS.md");
-        if !config_path.exists() {
+        // Try .arkavo/AGENTS.md first, then fallback to root AGENTS.md
+        let config_path = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+            std::path::Path::new(".arkavo/AGENTS.md")
+        } else if std::path::Path::new("AGENTS.md").exists() {
+            std::path::Path::new("AGENTS.md")
+        } else {
             info!("AGENTS.md not found, skipping file watcher setup");
             return Ok(());
-        }
+        };
 
         let (tx, rx) = channel();
         let mut watcher = notify::recommended_watcher(tx)
@@ -2307,7 +2293,7 @@ impl A2aServer {
             .watch(config_path, RecursiveMode::NonRecursive)
             .map_err(|e| A2aError::Internal(format!("Failed to watch AGENTS.md: {e}")))?;
 
-        info!("File watcher started for AGENTS.md");
+        info!("File watcher started for {:?}", config_path);
 
         // Clone the necessary components for hot-reload
         let agent_metadata = self.agent_metadata.clone();
@@ -2337,7 +2323,14 @@ impl A2aServer {
                             #[allow(clippy::disallowed_methods)]
 #[allow(clippy::field_reassign_with_default)]
                             rt.block_on(async move {
-                                match tokio::fs::read_to_string("AGENTS.md").await {
+                                // Try .arkavo/AGENTS.md first, then fallback to root AGENTS.md
+                                let config_content = if std::path::Path::new(".arkavo/AGENTS.md").exists() {
+                                    tokio::fs::read_to_string(".arkavo/AGENTS.md").await
+                                } else {
+                                    tokio::fs::read_to_string("AGENTS.md").await
+                                };
+
+                                match config_content {
                                     Ok(content) => {
                                         // Perform hot-reload directly here
                                         match reload_configuration_for_watcher(

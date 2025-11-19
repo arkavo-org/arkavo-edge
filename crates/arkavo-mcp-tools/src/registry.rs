@@ -169,9 +169,18 @@ impl ToolRegistry {
         self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
-        self.register("deps_osv", Box::new(OsvTool::new()));
-        self.register("sec_semgrep", Box::new(SemgrepTool::new()));
-        self.register("sbom_syft", Box::new(SyftTool::new()));
+
+        // Only register security tools if binaries are installed
+        if Self::is_binary_available("osv-scanner") {
+            self.register("deps_osv", Box::new(OsvTool::new()));
+        }
+        if Self::is_binary_available("semgrep") {
+            self.register("sec_semgrep", Box::new(SemgrepTool::new()));
+        }
+        if Self::is_binary_available("syft") {
+            self.register("sbom_syft", Box::new(SyftTool::new()));
+        }
+
         self.register("test_run", Box::new(TestRunnerTool::new()));
         self.register("get_system_health", Box::new(HealthCheckTool::new()));
 
@@ -200,6 +209,15 @@ impl ToolRegistry {
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
         self.tools.insert(name.to_string(), tool);
+    }
+
+    /// Check if a binary is available in PATH
+    fn is_binary_available(name: &str) -> bool {
+        std::process::Command::new(name)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
@@ -271,7 +289,19 @@ impl ToolRegistry {
     /// Only the requested detail level is computed, reducing memory usage and
     /// token consumption by up to 98% compared to loading all tool definitions.
     pub fn search_tools(&self, query: &str, detail: DetailLevel) -> Vec<MinimalToolInfo> {
-        let query_lower = query.to_lowercase();
+        if query.trim().is_empty() {
+            return self
+                .tools
+                .values()
+                .map(|tool| self.build_minimal_info(tool.schema(), detail))
+                .collect();
+        }
+
+        let query_words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
 
         self.tools
             .values()
@@ -280,25 +310,62 @@ impl ToolRegistry {
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
 
-                // Match against name, description, or aliases
+                // Token-based matching: check if any query word appears in name or description
+                let name_words: Vec<&str> = name_lower.split(&['_', '-', ' '][..]).collect();
+                let desc_words: Vec<&str> = desc_lower.split_whitespace().collect();
+
+                let matches = query_words.iter().any(|q_word| {
+                    // Match if query word appears in tool name words
+                    name_words.iter().any(|n_word| n_word.contains(q_word))
+                        // Or in description words
+                        || desc_words.iter().any(|d_word| d_word.contains(q_word))
+                });
+
+                // Also check aliases
                 let alias_match = schema
                     .aliases
                     .as_ref()
                     .map(|aliases| {
-                        aliases
-                            .iter()
-                            .any(|alias| alias.to_lowercase().contains(&query_lower))
+                        aliases.iter().any(|alias| {
+                            let alias_lower = alias.to_lowercase();
+                            query_words
+                                .iter()
+                                .any(|q_word| alias_lower.contains(q_word))
+                        })
                     })
                     .unwrap_or(false);
 
-                if name_lower.contains(&query_lower)
-                    || desc_lower.contains(&query_lower)
-                    || alias_match
-                {
+                if matches || alias_match {
                     Some(self.build_minimal_info(schema, detail))
                 } else {
                     None
                 }
+            })
+            .collect()
+    }
+
+    /// Get a list of tool names and descriptions for semantic search
+    pub fn get_tool_descriptions(&self) -> Vec<(String, String)> {
+        self.tools
+            .values()
+            .map(|tool| {
+                let schema = tool.schema();
+                (schema.name.clone(), schema.description.clone())
+            })
+            .collect()
+    }
+
+    /// Get tools by names (for semantic search results)
+    pub fn get_tools_by_names(
+        &self,
+        names: &[String],
+        detail: DetailLevel,
+    ) -> Vec<MinimalToolInfo> {
+        names
+            .iter()
+            .filter_map(|name| {
+                self.get(name)
+                    .map(|t| self.build_minimal_info(t.schema(), detail))
             })
             .collect()
     }
