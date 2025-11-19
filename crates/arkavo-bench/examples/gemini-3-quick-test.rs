@@ -333,7 +333,6 @@ fn estimate_cost(model: &str, tokens: usize) -> f64 {
     let (input_cost, output_cost) = match model {
         "models/gemini-flash-latest" => (0.000075, 0.0003),
         "models/gemini-3-pro-preview" => (0.00125, 0.005),
-        "models/gemini-3-pro-preview" => (0.00125, 0.005),
         _ => (0.0001, 0.0004),
     };
 

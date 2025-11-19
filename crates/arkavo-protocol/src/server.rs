@@ -651,72 +651,6 @@ impl A2aRpcServer for A2aRpcImpl {
         }
     }
 
-    async fn message_stream(
-        &self,
-        sink: PendingSubscriptionSink,
-        _task_id: String,
-    ) -> SubscriptionResult {
-        let timer = RpcTimer::new("message/stream".to_string(), self.metrics.clone());
-
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
-            timer.error();
-            return Ok(());
-        }
-
-        // Accept the subscription
-        let _sink = match sink.accept().await {
-            Ok(sink) => sink,
-            Err(_) => {
-                timer.error();
-                return Ok(());
-            }
-        };
-
-        #[cfg(feature = "stub_handlers")]
-        {
-            // Send a few mock updates
-            tokio::spawn(async move {
-                // Send initial status
-                let delta = MessageDelta {
-                    session_id: _task_id.clone(),
-                    message_id: uuid::Uuid::new_v4().to_string(),
-                    sequence: 0,
-                    delta: MessageDeltaContent::Text {
-                        text: "Processing task...".to_string(),
-                    },
-                    timestamp: chrono::Utc::now(),
-                };
-
-                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
-                    let _ = _sink.send(msg).await;
-                }
-
-                // Simulate some processing time
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-                // Send completion
-                let delta = MessageDelta {
-                    session_id: _task_id,
-                    message_id: uuid::Uuid::new_v4().to_string(),
-                    sequence: 1,
-                    delta: MessageDeltaContent::StreamEnd {
-                        reason: crate::types::StreamEndReason::Complete,
-                    },
-                    timestamp: chrono::Utc::now(),
-                };
-
-                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
-                    let _ = _sink.send(msg).await;
-                }
-            });
-        }
-
-        timer.success();
-        Ok(())
-    }
-
     async fn chat_open(&self, _request: ChatOpenRequest) -> RpcResult<ChatSession> {
         let timer = RpcTimer::new("chat_open".to_string(), self.metrics.clone());
 
@@ -804,67 +738,6 @@ impl A2aRpcServer for A2aRpcImpl {
         }
     }
 
-    async fn chat_stream(
-        &self,
-        sink: PendingSubscriptionSink,
-        session_id: String,
-    ) -> SubscriptionResult {
-        info!(session.id = %session_id, "chat_stream subscription requested");
-        let timer = RpcTimer::new("chat_stream".to_string(), self.metrics.clone());
-
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            warn!(session.id = %session_id, "Rate limit exceeded for chat_stream");
-            self.metrics.record_rate_limit_blocked(None);
-            timer.error();
-            return Ok(());
-        }
-
-        // Accept the subscription
-        info!(session.id = %session_id, "Accepting chat_stream subscription");
-        let sink = match sink.accept().await {
-            Ok(sink) => {
-                info!(session.id = %session_id, "Subscription accepted successfully");
-                sink
-            }
-            Err(e) => {
-                error!(session.id = %session_id, error = ?e, "Failed to accept subscription");
-                timer.error();
-                return Ok(());
-            }
-        };
-
-        // Get delta stream for this session
-        if let Some(mut delta_rx) = self.chat_sessions.get_delta_stream(&session_id).await {
-            info!(session.id = %session_id, "Got delta stream, spawning forwarder task");
-
-            // Spawn a task to forward deltas to the subscription
-            tokio::spawn(async move {
-                info!(session.id = %session_id, "Delta forwarder task started");
-                let mut delta_count = 0;
-                while let Some(delta) = delta_rx.recv().await {
-                    delta_count += 1;
-                    info!(session.id = %session_id, delta_count, "Forwarding delta to client");
-                    if let Ok(msg) = SubscriptionMessage::from_json(&delta)
-                        && sink.send(msg).await.is_err()
-                    {
-                        warn!(session.id = %session_id, "Client disconnected, stopping delta forwarding");
-                        break; // Client disconnected
-                    }
-                }
-                info!(session.id = %session_id, total_deltas = delta_count, "Delta forwarder task ended");
-            });
-
-            timer.success();
-            Ok(())
-        } else {
-            error!(session.id = %session_id, "Session not found for chat_stream subscription");
-            timer.error();
-            // Session not found - subscription will be closed
-            Ok(())
-        }
-    }
-
     async fn chat_metrics_ack(&self, session_id: String, last_seq: u64) -> RpcResult<()> {
         debug!(
             session.id = %session_id,
@@ -880,151 +753,6 @@ impl A2aRpcServer for A2aRpcImpl {
 
         // Note: ChatSessionManager can use this to manage buffer sizes
         // For now, just acknowledge receipt
-
-        timer.success();
-        Ok(())
-    }
-
-    async fn chat_subscribe(
-        &self,
-        sink: PendingSubscriptionSink,
-        request: ChatRequest,
-    ) -> SubscriptionResult {
-        let timer = RpcTimer::new("chat_subscribe".to_string(), self.metrics.clone());
-
-        // Check rate limit
-        if let Err(_e) = self.rate_limiter.check_rate_limit() {
-            self.metrics.record_rate_limit_blocked(None);
-            timer.error();
-            return Ok(());
-        }
-
-        // Accept the subscription
-        let sink = match sink.accept().await {
-            Ok(sink) => sink,
-            Err(_) => {
-                timer.error();
-                return Ok(());
-            }
-        };
-
-        // Generate a unique message ID for this conversation
-        let message_id = uuid::Uuid::new_v4().to_string();
-        let trace_id = uuid::Uuid::new_v4().to_string();
-
-        // Clone LLM adapter if available
-        let llm_adapter = self.llm_adapter.clone();
-        let agent_metadata = self.agent_metadata.read().await.clone();
-
-        // Spawn a task to handle the streaming response
-        tokio::spawn(async move {
-            if let Some(adapter) = llm_adapter {
-                // Create chat request
-                let chat_request = arkavo_llm::ChatRequest::new(request.message);
-
-                // Start streaming from LLM
-                match adapter.stream_chat(chat_request, trace_id).await {
-                    Ok((_stream_id, mut delta_stream)) => {
-                        while let Some(delta_result) = delta_stream.next().await {
-                            match delta_result {
-                                Ok(stream_delta) => {
-                                    // Convert StreamDelta to MessageDelta
-                                    let message_delta = match stream_delta.delta {
-                                        DeltaType::Text { content } => MessageDelta {
-                                            session_id: request
-                                                .session_id
-                                                .clone()
-                                                .unwrap_or_default(),
-                                            message_id: message_id.clone(),
-                                            sequence: 0,
-                                            delta: MessageDeltaContent::Text { text: content },
-                                            timestamp: stream_delta.timestamp,
-                                        },
-                                        DeltaType::ToolCall {
-                                            id,
-                                            name,
-                                            arguments,
-                                        } => MessageDelta {
-                                            session_id: request
-                                                .session_id
-                                                .clone()
-                                                .unwrap_or_default(),
-                                            message_id: message_id.clone(),
-                                            sequence: 0,
-                                            delta: MessageDeltaContent::ToolCall {
-                                                tool_call_id: id,
-                                                name: Some(name),
-                                                args_json_fragment: arguments
-                                                    .map(|v| v.to_string())
-                                                    .unwrap_or_else(|| "{}".to_string()),
-                                                done: false, // Will be set to true on stream end
-                                            },
-                                            timestamp: stream_delta.timestamp,
-                                        },
-                                        DeltaType::Error(err) => {
-                                            error!(
-                                                code = err.code,
-                                                message = err.message,
-                                                "Stream error during chat delta processing"
-                                            );
-                                            continue;
-                                        }
-                                        DeltaType::StreamEnd { reason: _ } => {
-                                            break;
-                                        }
-                                    };
-
-                                    // Send the delta using the subscription sink
-                                    if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
-                                        && sink.send(msg).await.is_err()
-                                    {
-                                        break; // Client disconnected
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(error = %e, "Delta stream error");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!(error = %e, "Failed to start LLM stream");
-                        let error_delta = MessageDelta {
-                            session_id: request.session_id.clone().unwrap_or_default(),
-                            message_id: message_id.clone(),
-                            sequence: 0,
-                            delta: MessageDeltaContent::Text {
-                                text: format!("Error: Failed to start LLM stream - {e}"),
-                            },
-                            timestamp: chrono::Utc::now(),
-                        };
-
-                        if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
-                            let _ = sink.send(msg).await;
-                        }
-                    }
-                }
-            } else {
-                // No LLM configured - send error message
-                let error_delta = MessageDelta {
-                    session_id: request.session_id.clone().unwrap_or_default(),
-                    message_id: message_id.clone(),
-                    sequence: 0,
-                    delta: MessageDeltaContent::Text {
-                        text: format!(
-                            "Error: No LLM configured for agent '{}'. Model: '{}'",
-                            agent_metadata.name, agent_metadata.model
-                        ),
-                    },
-                    timestamp: chrono::Utc::now(),
-                };
-
-                if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
-                    let _ = sink.send(msg).await;
-                }
-            }
-        });
 
         timer.success();
         Ok(())
@@ -1647,6 +1375,278 @@ impl A2aRpcServer for A2aRpcImpl {
                 })
             }
         }
+    }
+
+    async fn message_stream(
+        &self,
+        sink: PendingSubscriptionSink,
+        _task_id: String,
+    ) -> SubscriptionResult {
+        let timer = RpcTimer::new("message/stream".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        let _sink = match sink.accept().await {
+            Ok(sink) => sink,
+            Err(_) => {
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        #[cfg(feature = "stub_handlers")]
+        {
+            // Send a few mock updates
+            tokio::spawn(async move {
+                // Send initial status
+                let delta = MessageDelta {
+                    session_id: _task_id.clone(),
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::Text {
+                        text: "Processing task...".to_string(),
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                    let _ = _sink.send(msg).await;
+                }
+
+                // Simulate some processing time
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+                // Send completion
+                let delta = MessageDelta {
+                    session_id: _task_id,
+                    message_id: uuid::Uuid::new_v4().to_string(),
+                    sequence: 1,
+                    delta: MessageDeltaContent::StreamEnd {
+                        reason: crate::types::StreamEndReason::Complete,
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if let Ok(msg) = SubscriptionMessage::from_json(&delta) {
+                    let _ = _sink.send(msg).await;
+                }
+            });
+        }
+
+        timer.success();
+        Ok(())
+    }
+
+    async fn chat_stream(
+        &self,
+        sink: PendingSubscriptionSink,
+        session_id: String,
+    ) -> SubscriptionResult {
+        info!(session.id = %session_id, "chat_stream subscription requested");
+        let timer = RpcTimer::new("chat_stream".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            warn!(session.id = %session_id, "Rate limit exceeded for chat_stream");
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        info!(session.id = %session_id, "Accepting chat_stream subscription");
+        let sink = match sink.accept().await {
+            Ok(sink) => {
+                info!(session.id = %session_id, "Subscription accepted successfully");
+                sink
+            }
+            Err(e) => {
+                error!(session.id = %session_id, error = ?e, "Failed to accept subscription");
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        // Get delta stream for this session
+        if let Some(mut delta_rx) = self.chat_sessions.get_delta_stream(&session_id).await {
+            info!(session.id = %session_id, "Got delta stream, spawning forwarder task");
+
+            // Spawn a task to forward deltas to the subscription
+            tokio::spawn(async move {
+                info!(session.id = %session_id, "Delta forwarder task started");
+                let mut delta_count = 0;
+                while let Some(delta) = delta_rx.recv().await {
+                    delta_count += 1;
+                    info!(session.id = %session_id, delta_count, "Forwarding delta to client");
+                    if let Ok(msg) = SubscriptionMessage::from_json(&delta)
+                        && sink.send(msg.clone()).await.is_err()
+                    {
+                        warn!(session.id = %session_id, "Client disconnected, stopping delta forwarding");
+                        break; // Client disconnected
+                    }
+                }
+                info!(session.id = %session_id, total_deltas = delta_count, "Delta forwarder task ended");
+            });
+
+            timer.success();
+            Ok(())
+        } else {
+            error!(session.id = %session_id, "Session not found for chat_stream subscription");
+            timer.error();
+            // Session not found - subscription will be closed
+            Ok(())
+        }
+    }
+
+    async fn chat_subscribe(
+        &self,
+        sink: PendingSubscriptionSink,
+        request: ChatRequest,
+    ) -> SubscriptionResult {
+        let timer = RpcTimer::new("chat_subscribe".to_string(), self.metrics.clone());
+
+        // Check rate limit
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Ok(());
+        }
+
+        // Accept the subscription
+        let sink = match sink.accept().await {
+            Ok(sink) => sink,
+            Err(_) => {
+                timer.error();
+                return Ok(());
+            }
+        };
+
+        // Generate a unique message ID for this conversation
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let trace_id = uuid::Uuid::new_v4().to_string();
+
+        // Clone LLM adapter if available
+        let llm_adapter = self.llm_adapter.clone();
+        let agent_metadata = self.agent_metadata.read().await.clone();
+
+        // Spawn a task to handle the streaming response
+        tokio::spawn(async move {
+            if let Some(adapter) = llm_adapter {
+                // Create chat request
+                let chat_request = arkavo_llm::ChatRequest::new(request.message);
+
+                // Start streaming from LLM
+                match adapter.stream_chat(chat_request, trace_id).await {
+                    Ok((_stream_id, mut delta_stream)) => {
+                        while let Some(delta_result) = delta_stream.next().await {
+                            match delta_result {
+                                Ok(stream_delta) => {
+                                    // Convert StreamDelta to MessageDelta
+                                    let message_delta = match stream_delta.delta {
+                                        DeltaType::Text { content } => MessageDelta {
+                                            session_id: request
+                                                .session_id
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            message_id: message_id.clone(),
+                                            sequence: 0,
+                                            delta: MessageDeltaContent::Text { text: content },
+                                            timestamp: stream_delta.timestamp,
+                                        },
+                                        DeltaType::ToolCall {
+                                            id,
+                                            name,
+                                            arguments,
+                                        } => MessageDelta {
+                                            session_id: request
+                                                .session_id
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            message_id: message_id.clone(),
+                                            sequence: 0,
+                                            delta: MessageDeltaContent::ToolCall {
+                                                tool_call_id: id,
+                                                name: Some(name),
+                                                args_json_fragment: arguments
+                                                    .map(|v| v.to_string())
+                                                    .unwrap_or_else(|| "{}".to_string()),
+                                                done: false, // Will be set to true on stream end
+                                            },
+                                            timestamp: stream_delta.timestamp,
+                                        },
+                                        DeltaType::Error(err) => {
+                                            error!(
+                                                code = err.code,
+                                                message = err.message,
+                                                "Stream error during chat delta processing"
+                                            );
+                                            continue;
+                                        }
+                                        DeltaType::StreamEnd { reason: _ } => {
+                                            break;
+                                        }
+                                    };
+
+                                    // Send the delta using the subscription sink
+                                    if let Ok(msg) = SubscriptionMessage::from_json(&message_delta)
+                                        && sink.send(msg.clone()).await.is_err()
+                                    {
+                                        break; // Client disconnected
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(error = %e, "Delta stream error");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to start LLM stream");
+                        let error_delta = MessageDelta {
+                            session_id: request.session_id.clone().unwrap_or_default(),
+                            message_id: message_id.clone(),
+                            sequence: 0,
+                            delta: MessageDeltaContent::Text {
+                                text: format!("Error: Failed to start LLM stream - {e}"),
+                            },
+                            timestamp: chrono::Utc::now(),
+                        };
+
+                        if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+                            let _ = sink.send(msg).await;
+                        }
+                    }
+                }
+            } else {
+                // No LLM configured - send error message
+                let error_delta = MessageDelta {
+                    session_id: request.session_id.clone().unwrap_or_default(),
+                    message_id: message_id.clone(),
+                    sequence: 0,
+                    delta: MessageDeltaContent::Text {
+                        text: format!(
+                            "Error: No LLM configured for agent '{}'. Model: '{}'",
+                            agent_metadata.name, agent_metadata.model
+                        ),
+                    },
+                    timestamp: chrono::Utc::now(),
+                };
+
+                if let Ok(msg) = SubscriptionMessage::from_json(&error_delta) {
+                    let _ = sink.send(msg).await;
+                }
+            }
+        });
+
+        timer.success();
+        Ok(())
     }
 }
 
