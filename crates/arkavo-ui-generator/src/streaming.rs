@@ -76,8 +76,8 @@ impl StreamingGenerator {
                 use arkavo_gemini::RestClient;
 
                 let api_key = std::env::var("GEMINI_API_KEY").unwrap();
-                let model =
-                    std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+                let model = std::env::var("GEMINI_MODEL")
+                    .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
                 let client = RestClient::new(api_key, model);
 
                 // Define JSON schema for structured output

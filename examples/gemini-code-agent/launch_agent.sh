@@ -133,7 +133,7 @@ start_agent() {
 
     # Set model based on flag
     if [ -z "$GEMINI_MODEL" ]; then
-        GEMINI_MODEL="gemini-2.5-pro"
+        GEMINI_MODEL="gemini-3-pro-preview"
     fi
     print_status "Using model: $GEMINI_MODEL"
 
@@ -308,7 +308,7 @@ case "${1:-start}" in
         start_agent
         ;;
     --pro)
-        export GEMINI_MODEL="gemini-2.5-pro"
+        export GEMINI_MODEL="gemini-3-pro-preview"
         check_prerequisites
         start_agent
         ;;
@@ -319,7 +319,7 @@ case "${1:-start}" in
         echo "Usage: $0 {start|stop|restart|status|logs|test|budget} [options]"
         echo ""
         echo "Commands:"
-        echo "  start           - Start the Gemini Code agent (default: gemini-2.5-pro)"
+        echo "  start           - Start the Gemini Code agent (default: gemini-3-pro-preview)"
         echo "  stop            - Stop the agent"
         echo "  restart         - Restart the agent"
         echo "  status          - Check agent status"

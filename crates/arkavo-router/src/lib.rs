@@ -140,8 +140,8 @@ impl Router {
 
         // Check for Gemini
         if self.is_gemini_available() {
-            let model =
-                std::env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
+            let model = std::env::var("GEMINI_MODEL")
+                .unwrap_or_else(|_| "gemini-3-pro-preview".to_string());
             llms.push(LlmInfo {
                 name: "Gemini".to_string(),
                 provider: "Google".to_string(),

@@ -16,7 +16,7 @@ impl ModelChoice {
     pub fn name(&self) -> &str {
         match self {
             Self::GeminiFlash => "gemini-flash-latest",
-            Self::GeminiPro => "gemini-2.5-pro",
+            Self::GeminiPro => "gemini-3-pro-preview",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",

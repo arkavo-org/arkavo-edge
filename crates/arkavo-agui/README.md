@@ -29,7 +29,7 @@ Start with automatic UI generation:
 
 ```bash
 export GEMINI_API_KEY=your_api_key
-export GEMINI_MODEL=gemini-2.5-pro  # optional, defaults to gemini-2.5-pro
+export GEMINI_MODEL=gemini-3-pro-preview  # optional, defaults to gemini-3-pro-preview
 
 cargo run --bin arkavo -- ui --prompt "Build a calculator"
 ```
@@ -64,7 +64,7 @@ The system will:
 ### Environment Variables
 
 - `GEMINI_API_KEY`: Required for UI generation
-- `GEMINI_MODEL`: LLM model to use (default: `gemini-2.5-pro`)
+- `GEMINI_MODEL`: LLM model to use (default: `gemini-3-pro-preview`)
 
 ### Features
 

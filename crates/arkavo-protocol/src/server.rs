@@ -2770,7 +2770,7 @@ mod tests {
 
         // Test parsing logic for bare model name (no provider prefix)
         let api_keys = std::collections::HashMap::new();
-        let result = server.create_llm_adapter("gemini-2.5-pro", &api_keys);
+        let result = server.create_llm_adapter("gemini-3-pro-preview", &api_keys);
 
         // Should attempt to create from environment
         match result {
