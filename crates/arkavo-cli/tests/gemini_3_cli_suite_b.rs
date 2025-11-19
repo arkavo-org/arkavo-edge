@@ -12,8 +12,7 @@ fn should_skip_integration_tests() -> bool {
 }
 
 fn get_arkavo_binary_path() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let mut path = std::path::PathBuf::from(manifest_dir);
     path.pop();
     path.pop();
@@ -70,8 +69,7 @@ fn test_cli_05_filesystem_access() {
         hello_file.display()
     );
 
-    let content = fs::read_to_string(&hello_file)
-        .expect("Failed to read file");
+    let content = fs::read_to_string(&hello_file).expect("Failed to read file");
 
     assert!(
         content.to_lowercase().contains("hello"),
@@ -88,7 +86,8 @@ fn test_cli_05_filesystem_access() {
     );
 
     let mut cmd_restricted = Command::new(get_arkavo_binary_path());
-    cmd_restricted.arg("task")
+    cmd_restricted
+        .arg("task")
         .arg("--prompt")
         .arg(&prompt_restricted)
         .env("GEMINI_API_KEY", get_api_key())
@@ -165,8 +164,7 @@ fn test_cli_06_git_integration() {
         .output()
         .expect("Failed to git commit");
 
-    fs::write(&test_file, "Initial content\nNew line added\n")
-        .expect("Failed to update test file");
+    fs::write(&test_file, "Initial content\nNew line added\n").expect("Failed to update test file");
 
     Command::new("git")
         .arg("add")

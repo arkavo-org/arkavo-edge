@@ -12,8 +12,7 @@ fn should_skip_integration_tests() -> bool {
 }
 
 fn get_arkavo_binary_path() -> std::path::PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let mut path = std::path::PathBuf::from(manifest_dir);
     path.pop();
     path.pop();
@@ -30,7 +29,8 @@ fn test_cli_01_stdin_streaming() {
         return;
     }
 
-    let massive_input = "Error log:\n".to_string() + &"INFO: Normal operation\n".repeat(100)
+    let massive_input = "Error log:\n".to_string()
+        + &"INFO: Normal operation\n".repeat(100)
         + "ERROR: Connection timeout at line 543\n"
         + &"INFO: Retry attempted\n".repeat(50);
 
@@ -66,19 +66,20 @@ fn test_cli_01_stdin_streaming() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stdout_lower = stdout.to_lowercase();
 
-    assert!(
-        ttft < 120,
-        "TTFT {} seconds exceeded 120s threshold",
-        ttft
-    );
+    assert!(ttft < 120, "TTFT {} seconds exceeded 120s threshold", ttft);
 
     assert!(
-        stdout_lower.contains("error") || stdout_lower.contains("timeout") || stdout_lower.contains("543"),
+        stdout_lower.contains("error")
+            || stdout_lower.contains("timeout")
+            || stdout_lower.contains("543"),
         "Response should mention the error. Got: {}",
         stdout
     );
 
-    eprintln!("CLI-01 PASS: STDIN streaming completed in {}s, found error", ttft);
+    eprintln!(
+        "CLI-01 PASS: STDIN streaming completed in {}s, found error",
+        ttft
+    );
 }
 
 #[test]
@@ -122,7 +123,9 @@ fn test_cli_02_stdout_redirection() {
     );
 
     let prose_indicators = ["here is", "here's", "i've created", "this struct"];
-    let has_prose = prose_indicators.iter().any(|&phrase| stdout.to_lowercase().contains(phrase));
+    let has_prose = prose_indicators
+        .iter()
+        .any(|&phrase| stdout.to_lowercase().contains(phrase));
 
     assert!(
         !has_prose,
@@ -140,8 +143,8 @@ fn test_cli_03_interrupt_handling() {
         return;
     }
 
-    use std::time::Duration;
     use std::thread;
+    use std::time::Duration;
 
     let mut child = Command::new(get_arkavo_binary_path())
         .arg("chat")
@@ -184,7 +187,8 @@ fn test_cli_03_interrupt_handling() {
             .expect("Failed to run ps");
 
         let ps_stdout = String::from_utf8_lossy(&ps_output.stdout);
-        let arkavo_processes = ps_stdout.lines()
+        let arkavo_processes = ps_stdout
+            .lines()
             .filter(|line| line.contains("arkavo") && line.contains("chat"))
             .count();
 
@@ -195,7 +199,10 @@ fn test_cli_03_interrupt_handling() {
         );
     }
 
-    eprintln!("CLI-03 PASS: Process terminated cleanly in {:.2}s, no zombies", kill_duration.as_secs_f64());
+    eprintln!(
+        "CLI-03 PASS: Process terminated cleanly in {:.2}s, no zombies",
+        kill_duration.as_secs_f64()
+    );
 }
 
 #[test]
@@ -230,7 +237,8 @@ fn test_cli_04_environment_config() {
     );
 
     let mut cmd_default = Command::new(get_arkavo_binary_path());
-    cmd_default.arg("chat")
+    cmd_default
+        .arg("chat")
         .arg("--prompt")
         .arg("What is 2+2?")
         .env("GEMINI_API_KEY", get_api_key())

@@ -16,9 +16,7 @@ async fn test_orc_01_router_logic() {
         return;
     }
 
-    let router = Router::new()
-        .await
-        .expect("Failed to create router");
+    let router = Router::new().await.expect("Failed to create router");
 
     // Test 1: Math-heavy task should route to reasoning model
     let math_task = "Calculate the 500th Fibonacci number using dynamic programming";
@@ -29,9 +27,7 @@ async fn test_orc_01_router_logic() {
 
     println!(
         "Math task routed to: {:?} (category: {:?}, confidence: {:.2})",
-        math_decision.recommended_model,
-        math_decision.task_category,
-        math_decision.confidence
+        math_decision.recommended_model, math_decision.task_category, math_decision.confidence
     );
 
     // Router may classify as General or CodeGeneration depending on prompt
@@ -92,7 +88,10 @@ async fn test_orc_01b_router_multiple_categories() {
     let test_cases = vec![
         ("Add unit tests for the authentication module", "Testing"),
         ("Fix SQL injection vulnerability in user login", "Security"),
-        ("Create React component for user profile page", "Frontend UI"),
+        (
+            "Create React component for user profile page",
+            "Frontend UI",
+        ),
         ("Design REST API for payment processing", "Backend API"),
     ];
 
@@ -134,10 +133,7 @@ async fn test_orc_01c_router_fallback() {
     let task = "Generate a REST API endpoint for user authentication";
     let decision = router.route(task).await.expect("Failed to route task");
 
-    println!(
-        "Offline mode routed to: {:?}",
-        decision.recommended_model
-    );
+    println!("Offline mode routed to: {:?}", decision.recommended_model);
 
     // In offline mode, should always use local model
     assert!(
