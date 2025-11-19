@@ -353,6 +353,7 @@ async fn test_kimi_budget_model_selection() -> Result<(), Box<dyn std::error::Er
             updated_at: Utc::now(),
             metadata: None,
             pricing: None, // Will use budget module's pricing
+            snpe_metadata: None,
         },
         ModelInfo {
             model_id: "moonshot-v1-128k".to_string(),
@@ -377,6 +378,7 @@ async fn test_kimi_budget_model_selection() -> Result<(), Box<dyn std::error::Er
             updated_at: Utc::now(),
             metadata: None,
             pricing: None,
+            snpe_metadata: None,
         },
     ];
 
