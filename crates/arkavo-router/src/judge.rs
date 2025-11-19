@@ -156,10 +156,14 @@ impl ResponseJudge {
         // Check if there's any sign of refusal that needs LLM validation
         let response_lower = response.content.to_lowercase();
         let has_refusal_hint = response_lower.contains("don't")
+            || response_lower.contains("do not")
             || response_lower.contains("can't")
             || response_lower.contains("cannot")
             || response_lower.contains("unable")
-            || response_lower.contains("not able");
+            || response_lower.contains("not able")
+            || response_lower.contains("no access")
+            || response_lower.contains("don't have access")
+            || response_lower.contains("do not have access");
 
         // If heuristics say PASS but we see refusal hints, double-check with 270M judge
         if !has_refusal_hint {
@@ -214,6 +218,21 @@ impl ResponseJudge {
             || response_lower.contains("don't have access")
             || response_lower.contains("i'm not able")
             || response_lower.contains("unable to");
+
+        // Check for hallucinated tools (tools that don't exist)
+        let available_tool_names: std::collections::HashSet<&str> =
+            available_tools.iter().map(|t| t.name.as_str()).collect();
+
+        for call in &response.tool_calls {
+            if !available_tool_names.contains(call.tool_name.as_str()) {
+                return JudgmentResult {
+                    passed: false,
+                    reason: Some(format!("Tool '{}' does not exist", call.tool_name)),
+                    issue_type: IssueType::HallucinatedTool,
+                    suggested_keywords: Vec::new(),
+                };
+            }
+        }
 
         // Check if AI used any tools
         let used_tools = !response.tool_calls.is_empty();

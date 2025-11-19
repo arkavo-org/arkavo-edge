@@ -318,3 +318,38 @@ async fn test_mcp_includes_native_tools() {
     println!("  ✓ MCP tools present: mcp_test_tool");
     println!("  ✓ Total: {} tools", all_tools.len());
 }
+
+#[tokio::test]
+async fn test_github_issue_tools_registered() {
+    let registry = ToolRegistry::new();
+
+    println!("\n=== GitHub Issue Tools Registration Test ===");
+
+    let all_tools = registry.list_tools();
+
+    // Check for issue create tool
+    let has_issue_create = all_tools.iter().any(|t| t.name == "github_issue_create");
+    assert!(
+        has_issue_create,
+        "github_issue_create tool should be registered"
+    );
+
+    // Check for issue list tool
+    let has_issue_list = all_tools.iter().any(|t| t.name == "github_issue_list");
+    assert!(
+        has_issue_list,
+        "github_issue_list tool should be registered"
+    );
+
+    println!("  ✓ github_issue_create registered");
+    println!("  ✓ github_issue_list registered");
+
+    // Print all GitHub tools
+    println!("\nAll GitHub tools:");
+    for tool in all_tools
+        .iter()
+        .filter(|t| t.name.starts_with("github") || t.name.starts_with("gh"))
+    {
+        println!("  - {}: {}", tool.name, tool.description);
+    }
+}
