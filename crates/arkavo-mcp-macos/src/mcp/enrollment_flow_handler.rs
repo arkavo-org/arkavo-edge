@@ -18,6 +18,7 @@ impl EnrollmentFlowHandler {
         Self {
             schema: ToolSchema {
                 name: "enrollment_flow".to_string(),
+                aliases: None,
                 description:
                     "Complete biometric enrollment flow including dialog handling and app relaunch"
                         .to_string(),

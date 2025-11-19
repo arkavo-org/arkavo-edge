@@ -230,6 +230,40 @@ fn initialize_mcp_connection(print_mode: bool) -> Option<McpConnection> {
 #[allow(clippy::disallowed_methods)]
 #[allow(clippy::significant_drop_tightening)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Check for --help flag first
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("Start interactive chat with LLM\n");
+        println!("USAGE:");
+        println!("    arkavo chat                     Interactive chat mode");
+        println!("    arkavo chat --prompt \"query\"    One-shot query\n");
+        println!("EXAMPLES:");
+        println!("    arkavo chat");
+        println!("    arkavo chat --prompt \"What is 2+2?\"\n");
+        println!("OPTIONS:");
+        println!("    --prompt <TEXT>       One-shot query (exits after response)");
+        println!("    --image <PATH>        Attach image for vision queries");
+        println!("    --model <NAME>        Model to use (default: gemma-3-270m)");
+        println!("    --repo-context MODE   auto|on|off (default: auto)");
+        println!("    --new-session         Start fresh without history");
+        println!("    --debug               Show debug output");
+        println!("    --temperature <N>     Sampling temperature (default: 0.7)");
+        println!("    --top-p <N>           Top-p sampling (default: 0.9)");
+        println!("    --top-k <N>           Top-k sampling (default: 40)");
+        println!("    --max-tokens <N>      Max tokens (default: 4096)");
+        println!("    --seed <N>            Random seed");
+        println!("    -h, --help            Show this help\n");
+        println!("INTERACTIVE COMMANDS:");
+        println!("    /new                  Start fresh session");
+        println!("    /clear                Clear session history");
+        println!("    /context {{auto|on|off}}  Control repo context");
+        println!("    /history              Show session stats");
+        println!("    /switch <id>          Switch sessions");
+        println!("    /read <file>          Read file");
+        println!("    /list [path]          List directory");
+        println!("    /exit, /quit          Exit chat");
+        return Ok(());
+    }
+
     // Check for --debug flag in arguments
     if args.iter().any(|arg| arg == "--debug") {
         SHOW_DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);

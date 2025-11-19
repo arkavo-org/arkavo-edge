@@ -16,6 +16,7 @@ impl QueryStateKit {
         Self {
             schema: ToolSchema {
                 name: "query_state".to_string(),
+                aliases: None,
                 description: "Query application state".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -96,6 +97,7 @@ impl MutateStateKit {
         Self {
             schema: ToolSchema {
                 name: "mutate_state".to_string(),
+                aliases: None,
                 description: "Mutate application state".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -235,6 +237,7 @@ impl SnapshotKit {
         Self {
             schema: ToolSchema {
                 name: "snapshot".to_string(),
+                aliases: None,
                 description: "Create or restore state snapshots".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

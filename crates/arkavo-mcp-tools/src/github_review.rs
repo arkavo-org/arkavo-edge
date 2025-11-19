@@ -66,6 +66,7 @@ impl GitHubReviewTool {
         Self {
             schema: ToolSchema {
                 name: "gh_pr_review".to_string(),
+                aliases: None,
                 description: "Submit PR reviews with line-level comments and code suggestions"
                     .to_string(),
                 parameters: json!({

@@ -21,6 +21,7 @@ impl SimulatorControl {
         Self {
             schema: ToolSchema {
                 name: "simulator_control".to_string(),
+                aliases: None,
                 description: "Control iOS simulators - boot, shutdown, list devices".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -164,6 +165,7 @@ impl AppManagement {
         Self {
             schema: ToolSchema {
                 name: "app_management".to_string(),
+                aliases: None,
                 description: "Manage iOS apps - install, uninstall, launch, terminate".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -355,6 +357,7 @@ impl FileOperations {
         Self {
             schema: ToolSchema {
                 name: "file_operations".to_string(),
+                aliases: None,
                 description: "Transfer files to/from iOS simulator".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

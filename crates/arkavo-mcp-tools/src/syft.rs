@@ -16,6 +16,7 @@ impl SyftTool {
         Self {
             schema: ToolSchema {
                 name: "sbom_syft".to_string(),
+                aliases: None,
                 description: "Generate Software Bill of Materials (SBOM) using Syft".to_string(),
                 parameters: json!({
                     "type": "object",

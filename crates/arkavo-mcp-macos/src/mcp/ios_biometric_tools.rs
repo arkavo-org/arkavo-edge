@@ -16,6 +16,7 @@ impl BiometricKit {
         Self {
             schema: ToolSchema {
                 name: "biometric_auth".to_string(),
+                aliases: None,
                 description: "Handle Face ID/Touch ID authentication for both simulators and devices. For 'enroll' on simulator: returns instructions for manual enrollment (Features > Face ID > Enrolled) as this often cannot be done programmatically. After manual enrollment, use passkey_dialog tool to dismiss any enrollment warning dialogs. For 'match'/'fail'/'cancel': provides multiple fallback methods including simctl commands, notifications, and taps. Works best when Face ID is already enrolled in simulator.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -393,6 +394,7 @@ impl SystemDialogKit {
         Self {
             schema: ToolSchema {
                 name: "system_dialog".to_string(),
+                aliases: None,
                 description: "Handle iOS system dialogs and alerts. NOTE: For 'Simulator requires enrolled biometrics' dialogs, use the passkey_dialog tool instead with 'dismiss_enrollment_warning' action. This tool is for general system alerts like permissions, notifications, etc.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

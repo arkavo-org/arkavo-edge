@@ -17,6 +17,7 @@ impl StoreMemoryTool {
         Self {
             schema: ToolSchema {
                 name: "store_memory".to_string(),
+                aliases: None,
                 description: "Store a memory with automatic embedding generation".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -121,6 +122,7 @@ impl SearchMemoryTool {
         Self {
             schema: ToolSchema {
                 name: "search_memory".to_string(),
+                aliases: None,
                 description: "Search memories using semantic similarity".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -220,6 +222,7 @@ impl GetMemoryTool {
         Self {
             schema: ToolSchema {
                 name: "get_memory".to_string(),
+                aliases: None,
                 description: "Retrieve a specific memory by ID".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -283,6 +286,7 @@ impl CategorizeMemoryTool {
         Self {
             schema: ToolSchema {
                 name: "categorize_memory".to_string(),
+                aliases: None,
                 description: "Categorize content based on existing memories".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

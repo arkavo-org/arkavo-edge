@@ -49,6 +49,7 @@ impl SweBenchTool {
         Self {
             schema: ToolSchema {
                 name: "swe_bench".to_string(),
+                aliases: None,
                 description: "SWE-bench evaluation harness for coding agent benchmarking"
                     .to_string(),
                 parameters: json!({

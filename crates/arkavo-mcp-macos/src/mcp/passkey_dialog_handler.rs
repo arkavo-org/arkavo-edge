@@ -16,6 +16,7 @@ impl PasskeyDialogHandler {
         Self {
             schema: ToolSchema {
                 name: "passkey_dialog".to_string(),
+                aliases: None,
                 description: "Handle iOS passkey/biometric enrollment dialogs. IMPORTANT: If you see 'Simulator requires enrolled biometrics to use passkeys' dialog, this is NOT a regular system dialog - use THIS tool with 'dismiss_enrollment_warning' action. The dialog appears when trying to use passkeys without enrolled biometrics. To proceed with sign-in: 1) Use this tool to dismiss the warning, 2) The app may fallback to password login, OR 3) First enroll biometrics using biometric_auth with 'enroll' action, then retry.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

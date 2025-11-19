@@ -12,6 +12,7 @@ impl CoordinateConverterKit {
         Self {
             schema: ToolSchema {
                 name: "coordinate_converter".to_string(),
+                aliases: None,
                 description: "Convert between pixel and logical coordinates for iOS devices"
                     .to_string(),
                 parameters: json!({

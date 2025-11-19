@@ -82,6 +82,8 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 arkavo-kimi = { path = "../arkavo-kimi" }
 arkavo-budget = { path = "../arkavo-budget" }
+assert_cmd = "2.0"
+predicates = "3.0"
 
 # macOS-only dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

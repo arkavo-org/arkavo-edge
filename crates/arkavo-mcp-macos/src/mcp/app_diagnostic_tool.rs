@@ -13,6 +13,7 @@ impl AppDiagnosticTool {
         Self {
             schema: ToolSchema {
                 name: "app_diagnostic".to_string(),
+                aliases: None,
                 description: "Check if apps are installed and get their state on the simulator"
                     .to_string(),
                 parameters: serde_json::json!({

@@ -1,4 +1,5 @@
 use crate::browser::BrowserTool;
+use crate::filesystem::FileSystemKit;
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
@@ -131,6 +132,7 @@ impl ToolRegistry {
 
             let tool_schema = ToolSchema {
                 name: mcp_tool.name.clone(),
+                aliases: None,
                 description: mcp_tool.description.clone(),
                 parameters,
             };
@@ -163,6 +165,7 @@ impl ToolRegistry {
     }
 
     fn register_all(&mut self) {
+        self.register("filesystem_tools", Box::new(FileSystemKit::new()));
         self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
@@ -200,7 +203,23 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|boxed| &**boxed)
+        // Try direct lookup first
+        if let Some(tool) = self.tools.get(name) {
+            return Some(&**tool);
+        }
+
+        // Try alias lookup if direct lookup fails
+        self.tools
+            .values()
+            .find(|tool| {
+                let schema = tool.schema();
+                schema
+                    .aliases
+                    .as_ref()
+                    .map(|aliases| aliases.iter().any(|alias| alias == name))
+                    .unwrap_or(false)
+            })
+            .map(|boxed| &**boxed)
     }
 
     pub fn list_tools(&self) -> Vec<ToolInfo> {
@@ -261,8 +280,21 @@ impl ToolRegistry {
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
 
-                // Match against name or description
-                if name_lower.contains(&query_lower) || desc_lower.contains(&query_lower) {
+                // Match against name, description, or aliases
+                let alias_match = schema
+                    .aliases
+                    .as_ref()
+                    .map(|aliases| {
+                        aliases
+                            .iter()
+                            .any(|alias| alias.to_lowercase().contains(&query_lower))
+                    })
+                    .unwrap_or(false);
+
+                if name_lower.contains(&query_lower)
+                    || desc_lower.contains(&query_lower)
+                    || alias_match
+                {
                     Some(self.build_minimal_info(schema, detail))
                 } else {
                     None

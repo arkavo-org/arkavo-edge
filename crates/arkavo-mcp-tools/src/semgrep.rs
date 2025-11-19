@@ -16,6 +16,7 @@ impl SemgrepTool {
         Self {
             schema: ToolSchema {
                 name: "sec_semgrep".to_string(),
+                aliases: None,
                 description: "SAST security scanning with Semgrep for vulnerability detection"
                     .to_string(),
                 parameters: json!({

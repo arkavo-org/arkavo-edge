@@ -16,6 +16,7 @@ impl CombyTool {
         Self {
             schema: ToolSchema {
                 name: "struct_find_replace".to_string(),
+                aliases: None,
                 description:
                     "Structural code search and replace using Comby for language-aware refactoring"
                         .to_string(),

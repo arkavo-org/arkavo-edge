@@ -66,6 +66,7 @@ impl GitHubChecksTool {
         Self {
             schema: ToolSchema {
                 name: "gh_checks".to_string(),
+                aliases: None,
                 description: "Create and update GitHub Check Runs with annotations".to_string(),
                 parameters: json!({
                     "type": "object",

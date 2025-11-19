@@ -31,6 +31,7 @@ impl GetAgentTimeTool {
         Self {
             schema: ToolSchema {
                 name: "get_agent_time".to_string(),
+                aliases: None,
                 description: "Get the current time as understood by this agent. Supports multiple output formats and timezones.".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -130,6 +131,7 @@ impl SyncAgentTimeTool {
         Self {
             schema: ToolSchema {
                 name: "sync_agent_time".to_string(),
+                aliases: None,
                 description: "Synchronize agent time with NTP/SNTP server. Returns offset and round-trip time. Does not modify system clock.".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -317,6 +319,7 @@ impl GetTimeStatusTool {
         Self {
             schema: ToolSchema {
                 name: "get_time_status".to_string(),
+                aliases: None,
                 description: "Get time synchronization status and health information.".to_string(),
                 parameters: json!({
                     "type": "object",

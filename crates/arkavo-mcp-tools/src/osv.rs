@@ -16,6 +16,7 @@ impl OsvTool {
         Self {
             schema: ToolSchema {
                 name: "deps_osv".to_string(),
+                aliases: None,
                 description: "Scan dependencies for vulnerabilities using OSV-Scanner".to_string(),
                 parameters: json!({
                     "type": "object",

@@ -18,6 +18,7 @@ impl UrlDialogHandler {
         Self {
             schema: ToolSchema {
                 name: "url_dialog".to_string(),
+                aliases: None,
                 description: "Handle iOS system URL scheme confirmation dialogs that appear when opening deep links".to_string(),
                 parameters: json!({
                     "type": "object",

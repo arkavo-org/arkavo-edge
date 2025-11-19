@@ -34,6 +34,7 @@ impl SimulatorAdvancedKit {
         Self {
             schema: ToolSchema {
                 name: "simulator_advanced".to_string(),
+                aliases: None,
                 description: "Advanced simulator management including diagnostics, process management, and system information".to_string(),
                 parameters: json!({
                     "type": "object",

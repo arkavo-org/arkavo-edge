@@ -16,6 +16,7 @@ impl TreeSitterTool {
         Self {
             schema: ToolSchema {
                 name: "syntax_tree".to_string(),
+                aliases: None,
                 description: "Parse code with tree-sitter for AST analysis and precise edits"
                     .to_string(),
                 parameters: json!({

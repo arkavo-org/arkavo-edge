@@ -31,6 +31,7 @@ impl Tool for EchoTool {
     fn schema(&self) -> &ToolSchema {
         static SCHEMA: std::sync::LazyLock<ToolSchema> = std::sync::LazyLock::new(|| ToolSchema {
             name: "echo".to_string(),
+            aliases: None,
             description: "Echo back the input parameters".to_string(),
             parameters: json!({
                 "type": "object",

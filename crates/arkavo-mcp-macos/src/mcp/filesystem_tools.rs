@@ -15,6 +15,7 @@ impl FileSystemKit {
         Self {
             schema: ToolSchema {
                 name: "filesystem_tools".to_string(),
+                aliases: Some(vec!["filesystem".to_string(), "fs".to_string()]),
                 description: "Tools for reading, writing, and editing files".to_string(),
                 parameters: json!({
                     "type": "object",

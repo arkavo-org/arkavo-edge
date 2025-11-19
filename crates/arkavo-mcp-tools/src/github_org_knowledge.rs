@@ -19,6 +19,7 @@ impl GitHubOrgReposTool {
         Self {
             schema: ToolSchema {
                 name: "github_org_repos".to_string(),
+                aliases: None,
                 description: "List all repositories in a GitHub organization with health metrics"
                     .to_string(),
                 parameters: json!({
@@ -97,6 +98,7 @@ impl GitHubRelatedIssuesTool {
         Self {
             schema: ToolSchema {
                 name: "github_related_issues".to_string(),
+                aliases: None,
                 description:
                     "Find issues related to a given issue (linked, mentioned, or blocking)"
                         .to_string(),
@@ -235,6 +237,7 @@ impl GitHubCiStatusTool {
         Self {
             schema: ToolSchema {
                 name: "github_ci_status".to_string(),
+                aliases: None,
                 description: "Get CI/workflow status for a repository or pull request".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -364,6 +367,7 @@ impl GitHubOrgOverviewTool {
         Self {
             schema: ToolSchema {
                 name: "github_org_overview".to_string(),
+                aliases: None,
                 description:
                     "Get organization-wide overview: open issues, PRs, failed CI across repos"
                         .to_string(),

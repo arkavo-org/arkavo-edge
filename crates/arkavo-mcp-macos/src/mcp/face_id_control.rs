@@ -16,6 +16,7 @@ impl FaceIdController {
         Self {
             schema: ToolSchema {
                 name: "face_id_control".to_string(),
+                aliases: None,
                 description: "Control Face ID enrollment and matching state in iOS Simulator"
                     .to_string(),
                 parameters: json!({
@@ -264,6 +265,7 @@ impl FaceIdStatusChecker {
         Self {
             schema: ToolSchema {
                 name: "face_id_status".to_string(),
+                aliases: None,
                 description: "Check current Face ID enrollment and configuration status"
                     .to_string(),
                 parameters: json!({

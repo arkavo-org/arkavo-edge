@@ -14,6 +14,7 @@ impl XcodeUnavailableTool {
         Self {
             schema: ToolSchema {
                 name,
+                aliases: None,
                 description,
                 parameters,
             },

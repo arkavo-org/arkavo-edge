@@ -14,6 +14,7 @@ impl ScreenshotAnalyzer {
         Self {
             schema: ToolSchema {
                 name: "analyze_screenshot".to_string(),
+                aliases: None,
                 description: "Analyze a screenshot and describe what you see. Returns the image path for vision model processing.".to_string(),
                 parameters: json!({
                     "type": "object",

@@ -13,6 +13,7 @@ impl Default for IosAutomationGuide {
         Self {
             schema: ToolSchema {
                 name: "ios_automation_guide".to_string(),
+                aliases: None,
                 description: "Get the recommended workflow for iOS UI automation. Use this if you're unsure how to automate iOS apps or which tools to use. Returns step-by-step instructions for the most reliable approach.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

@@ -16,6 +16,7 @@ impl CodeGrepTool {
         Self {
             schema: ToolSchema {
                 name: "codegrep_search".to_string(),
+                aliases: None,
                 description: "Fast repository-wide code search using ripgrep".to_string(),
                 parameters: json!({
                     "type": "object",

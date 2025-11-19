@@ -82,6 +82,7 @@ impl TuiTestHarness {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             schema: ToolSchema {
                 name: "tui_harness".to_string(),
+                aliases: None,
                 description: "Manage TUI application sessions for testing".to_string(),
                 parameters: json!({
                     "type": "object",

@@ -15,6 +15,7 @@ impl TestRunnerTool {
         Self {
             schema: ToolSchema {
                 name: "test_run".to_string(),
+                aliases: None,
                 description:
                     "Multi-language test runner for pytest, jest, go test, cargo test, xcodebuild"
                         .to_string(),

@@ -192,7 +192,9 @@ impl ClaudeCodeCapability {
     pub async fn list_tools(&self) -> Vec<ToolSchema> {
         vec![
             ToolSchema {
+                aliases: None,
                 name: "claude_code_run".to_string(),
+
                 description: "Execute a Claude Code task with full SDK capabilities".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -210,6 +212,7 @@ impl ClaudeCodeCapability {
                 }),
             },
             ToolSchema {
+                aliases: None,
                 name: "claude_code_plan".to_string(),
                 description: "Generate a plan for a coding task without execution".to_string(),
                 parameters: serde_json::json!({
@@ -286,6 +289,7 @@ impl Tool for ClaudeCodeCapability {
         static SCHEMA: once_cell::sync::Lazy<ToolSchema> =
             once_cell::sync::Lazy::new(|| ToolSchema {
                 name: "claude_code".to_string(),
+                aliases: None,
                 description: "Claude Code SDK integration for advanced coding tasks".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

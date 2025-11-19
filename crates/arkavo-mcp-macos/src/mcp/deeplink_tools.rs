@@ -16,6 +16,7 @@ impl DeepLinkKit {
         Self {
             schema: ToolSchema {
                 name: "deep_link".to_string(),
+                aliases: None,
                 description:
                     "Open deep links or URLs in iOS apps to navigate directly to specific screens"
                         .to_string(),
@@ -147,6 +148,7 @@ impl AppLauncherKit {
         Self {
             schema: ToolSchema {
                 name: "app_launcher".to_string(),
+                aliases: None,
                 description: "Launch, terminate, or get info about iOS apps".to_string(),
                 parameters: json!({
                     "type": "object",

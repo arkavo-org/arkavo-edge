@@ -23,6 +23,7 @@ impl RepositoryContextTool {
         Ok(Self {
             schema: ToolSchema {
                 name: "build_repository_context".to_string(),
+                aliases: None,
                 description: "Builds a comprehensive context of the current repository, including git status, recent commits, and file structure.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

@@ -13,6 +13,7 @@ impl XcodeInfoTool {
         Self {
             schema: ToolSchema {
                 name: "xcode_info".to_string(),
+                aliases: None,
                 description: "Get information about the installed Xcode version and available simulator features".to_string(),
                 parameters: json!({
                     "type": "object",

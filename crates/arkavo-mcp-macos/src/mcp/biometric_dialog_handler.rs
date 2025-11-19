@@ -16,6 +16,7 @@ impl BiometricDialogHandler {
         Self {
             schema: ToolSchema {
                 name: "biometric_dialog_handler".to_string(),
+                aliases: None,
                 description: "Handle biometric authentication dialogs without external tools"
                     .to_string(),
                 parameters: json!({
@@ -249,6 +250,7 @@ impl AccessibilityDialogHandler {
         Self {
             schema: ToolSchema {
                 name: "accessibility_dialog_handler".to_string(),
+                aliases: None,
                 description: "Handle dialogs using accessibility features".to_string(),
                 parameters: json!({
                     "type": "object",

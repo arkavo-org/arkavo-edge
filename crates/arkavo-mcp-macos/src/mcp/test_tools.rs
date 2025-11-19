@@ -17,6 +17,7 @@ impl RunTestKit {
         Self {
             schema: ToolSchema {
                 name: "run_test".to_string(),
+                aliases: None,
                 description: "Execute a test scenario".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -97,6 +98,7 @@ impl ListTestsKit {
         Self {
             schema: ToolSchema {
                 name: "list_tests".to_string(),
+                aliases: None,
                 description: "List all available tests in the repository".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",

@@ -19,7 +19,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             init_agent(&args[1])
         }
-        "run" => run_agent(args.get(1).map(|s| s.as_str())),
+        "run" => run_agent(&args[1..]),
         "help" | "-h" | "--help" => {
             print_usage();
             Ok(())
@@ -39,9 +39,14 @@ fn print_usage() {
     println!("    arkavo agent <SUBCOMMAND> [OPTIONS]");
     println!();
     println!("SUBCOMMANDS:");
-    println!("    init [name]    Create a new AGENTS.md configuration file with agent purpose");
-    println!("    run [config]   Run an agent");
-    println!("    help           Print this help message");
+    println!(
+        "    init [name]         Create a new AGENTS.md configuration file with agent purpose"
+    );
+    println!("    run [config] [-v]   Run an agent (quiet by default)");
+    println!("    help                Print this help message");
+    println!();
+    println!("OPTIONS:");
+    println!("    -v, --verbose       Show startup messages and status");
 }
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
@@ -175,42 +180,93 @@ Your agent will start and be available at the configured address."#
 }
 
 #[allow(clippy::disallowed_methods)]
-fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
 
-    let config_file = config_path.unwrap_or("AGENTS.md");
+    // Parse arguments for --verbose flag and config path
+    let mut config_file = "AGENTS.md";
+    let mut verbose = false;
+
+    for arg in args {
+        if arg == "--verbose" || arg == "-v" {
+            verbose = true;
+        } else if !arg.starts_with('-') {
+            config_file = arg;
+        }
+    }
+
     let config_path = Path::new(config_file);
 
-    if !config_path.exists() {
-        // AGENTS.md is only created when an agent is explicitly configured with a purpose
-        // This prevents automatic creation during first initialization
-        return Err("AGENTS.md not found. Please create an agent configuration first with:\n  arkavo agent init <name>\n\nOr specify a configuration file:\n  arkavo agent run path/to/config.md".into());
-    }
+    // If AGENTS.md doesn't exist, use default configuration
+    let agents = if !config_path.exists() && config_file == "AGENTS.md" {
+        use std::process::Command;
 
-    let config_content = fs::read_to_string(config_path)?;
+        // Get machine hostname
+        let hostname = Command::new("hostname")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
 
-    // Parse the AGENTS.md file
-    let agents = agent::parse_agents_config(&config_content)?;
+        // Get short git SHA if in a git repo
+        let short_sha = Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "nogit".to_string());
 
-    if agents.is_empty() {
-        return Err("No agent configurations found in file".into());
-    }
+        let agent_name = format!("{hostname}-{short_sha}");
 
-    // If multiple agents are defined, let user select which one to run
-    let agent_config = if agents.len() == 1 {
-        &agents[0]
+        // Use random high port (49152-65535 range)
+        use std::net::TcpListener;
+        let port = TcpListener::bind("127.0.0.1:0")
+            .ok()
+            .and_then(|listener| listener.local_addr().ok())
+            .map(|addr| addr.port())
+            .unwrap_or(8342);
+
+        vec![AgentConfig {
+            name: agent_name,
+            purpose: "A general-purpose AI agent".to_string(),
+            model: String::new(), // Empty model - let arkavo-router decide
+            listen: format!("0.0.0.0:{port}"),
+            mdns_enabled: true,
+            mcp_servers: Vec::new(),
+            api_keys: std::collections::HashMap::new(),
+            quiet: true,
+        }]
     } else {
-        println!("Multiple agents found in configuration:");
-        for (i, agent) in agents.iter().enumerate() {
-            println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
+        let config_content = fs::read_to_string(config_path)?;
+        let agents = agent::parse_agents_config(&config_content)?;
+
+        if agents.is_empty() {
+            return Err("No agent configurations found in file".into());
         }
 
-        print!("Select agent to run (1-{}): ", agents.len());
+        agents
+    };
+
+    // If multiple agents are defined, let user select which one to run
+    let mut agent_config = if agents.len() == 1 {
+        agents[0].clone()
+    } else {
+        if verbose {
+            println!("Multiple agents found in configuration:");
+            for (i, agent) in agents.iter().enumerate() {
+                println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
+            }
+            print!("Select agent to run (1-{}): ", agents.len());
+        }
 
         // Read user input
         use std::io::{self, Write};
-        print!("Enter selection: ");
-        io::stdout().flush().unwrap();
+        if verbose {
+            print!("Enter selection: ");
+            io::stdout().flush().unwrap();
+        }
 
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
@@ -229,25 +285,14 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
             .into());
         }
 
-        &agents[selection - 1]
+        agents[selection - 1].clone()
     };
 
-    println!("Starting agent: {}", agent_config.name);
-    println!("Purpose: {}", agent_config.purpose);
-    println!("Model: {}", agent_config.model);
-    println!("Listen: {}", agent_config.listen);
-    println!("mDNS enabled: {}", agent_config.mdns_enabled);
+    // Set verbose mode - default is quiet (verbose = false)
+    agent_config.quiet = !verbose;
 
-    if !agent_config.mcp_servers.is_empty() {
-        println!("MCP servers:");
-        for server in &agent_config.mcp_servers {
-            println!("  - {}: ", server.name);
-            if let Some(cmd) = &server.command {
-                println!("    command: {} {:?}", cmd, server.args);
-            } else if let Some(url) = &server.url {
-                println!("    url: {url}");
-            }
-        }
+    if verbose {
+        println!("Starting agent: {}", agent_config.name);
     }
 
     // Start the A2A server with the agent configuration
@@ -255,12 +300,12 @@ fn run_agent(config_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
             // Already in a runtime, use the existing handle
-            handle.block_on(async { agent::start_agent_server(agent_config).await })
+            handle.block_on(async { agent::start_agent_server(&agent_config).await })
         }
         Err(_) => {
             // Not in a runtime, create one
             let runtime = tokio::runtime::Runtime::new()?;
-            runtime.block_on(async { agent::start_agent_server(agent_config).await })
+            runtime.block_on(async { agent::start_agent_server(&agent_config).await })
         }
     }
 }
@@ -275,6 +320,7 @@ pub struct AgentConfig {
     pub mdns_enabled: bool,
     pub mcp_servers: Vec<McpServerConfig>,
     pub api_keys: std::collections::HashMap<String, String>,
+    pub quiet: bool, // Default true (quiet), false if --verbose is specified
 }
 
 #[derive(Debug, Clone)]
@@ -327,6 +373,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mdns_enabled: true,
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
+                    quiet: true, // Default is quiet
                 });
                 in_agent_section = true;
                 continue;
@@ -370,6 +417,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                         mdns_enabled: true,
                         mcp_servers: Vec::new(),
                         api_keys: std::collections::HashMap::new(),
+                        quiet: true, // Default is quiet
                     });
                     in_agent_section = true;
                 }
@@ -442,6 +490,7 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                     mdns_enabled: true, // Default to true for zero-config
                     mcp_servers: Vec::new(),
                     api_keys: std::collections::HashMap::new(),
+                    quiet: true, // Default is quiet
                 });
                 in_agent_section = true;
                 continue;
@@ -673,11 +722,15 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         mcp_registry
             .register("arkavo".to_string(), Box::new(builtin_connection))
             .await;
-        println!("Registered Arkavo MCP tools (runtime and test tools)");
     }
 
+    let debug_mode = std::env::var("ARKAVO_DEBUG").is_ok();
+    let quiet = config.quiet;
+
     for mcp_config in &config.mcp_servers {
-        println!("Initializing MCP server: {}", mcp_config.name);
+        if debug_mode {
+            println!("Initializing MCP server: {}", mcp_config.name);
+        }
 
         // Create appropriate MCP connection based on config
         if let Some(command) = &mcp_config.command {
@@ -697,41 +750,24 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
                         0
                     };
 
-                    // Telemetry: MCP server started
-                    println!(
-                        "[INFO] mcp.server.started name={} command={} pid={} args={:?}",
-                        mcp_config.name, command, pid, mcp_config.args
-                    );
-
                     let connection = McpConnection::External(client);
                     let wrapped = McpConnectionWrapper::new(connection);
                     mcp_registry
                         .register(mcp_config.name.clone(), Box::new(wrapped))
                         .await;
-                    println!(
-                        "Started command-based MCP server: {} ({})",
-                        mcp_config.name, command
-                    );
+
+                    if debug_mode {
+                        println!(
+                            "[INFO] mcp.server.started name={} command={} pid={} args={:?}",
+                            mcp_config.name, command, pid, mcp_config.args
+                        );
+                    }
                 }
                 Err(e) => {
-                    // Telemetry: MCP server failed to start (non-fatal)
-                    println!(
-                        "[WARN] mcp.server.start_failed name={} command={} error=\"{}\"",
-                        mcp_config.name, command, e
-                    );
-                    eprintln!(
-                        "Warning: MCP server '{}' not available ({})",
-                        mcp_config.name, command
-                    );
-                    eprintln!("  Agent will continue with reduced capabilities.");
-                    if command == "mcp-filesystem" || command == "mcp-git" {
+                    if debug_mode {
                         eprintln!(
-                            "  To install: npm install -g @modelcontextprotocol/server-{}",
-                            if command == "mcp-filesystem" {
-                                "filesystem"
-                            } else {
-                                "git"
-                            }
+                            "[WARN] mcp.server.start_failed name={} command={} error=\"{}\"",
+                            mcp_config.name, command, e
                         );
                     }
                 }
@@ -741,18 +777,22 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             use crate::mcp_integration::McpConnection;
             match McpConnection::new_external(Some(url.clone())) {
                 Ok(connection) => {
-                    // We need to wrap the connection to implement the trait
                     let wrapped = McpConnectionWrapper::new(connection);
                     mcp_registry
                         .register(mcp_config.name.clone(), Box::new(wrapped))
                         .await;
-                    println!(
-                        "Connected to external MCP server: {} at {}",
-                        mcp_config.name, url
-                    );
+
+                    if debug_mode {
+                        println!(
+                            "Connected to external MCP server: {} at {}",
+                            mcp_config.name, url
+                        );
+                    }
                 }
                 Err(e) => {
-                    eprintln!("Failed to connect to MCP server {}: {}", mcp_config.name, e);
+                    if debug_mode {
+                        eprintln!("Failed to connect to MCP server {}: {}", mcp_config.name, e);
+                    }
                 }
             }
         }
@@ -760,31 +800,31 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let handle = server.start().await?;
 
-    // Give the server a moment to fully initialize
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
     // Start mDNS broadcasting if enabled
     let mdns_thread_handle = if config.mdns_enabled {
-        println!("Starting mDNS broadcasting...");
         let config_clone = config.clone();
         let shutdown_flag_clone = shutdown_flag.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+
         // Use std::thread since zeroconf is not Send
         let handle = std::thread::spawn(move || {
-            println!("mDNS thread spawned");
-            if let Err(e) = broadcast_agent_mdns_sync(&config_clone, shutdown_flag_clone) {
+            if let Err(e) = broadcast_agent_mdns_sync(&config_clone, shutdown_flag_clone, Some(tx))
+            {
                 eprintln!("mDNS broadcast error: {e}");
             }
         });
-        // Give the mDNS thread a moment to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Wait for mDNS to signal it's ready (with timeout)
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(2));
+
         Some(handle)
     } else {
-        println!("mDNS broadcasting disabled");
         None
     };
 
-    println!("Agent server started on {}", config.listen);
-    println!("Press Ctrl+C to stop");
+    if !quiet {
+        println!("Ready at {}", config.listen);
+    }
 
     // Keep the server running
     tokio::signal::ctrl_c().await?;
@@ -826,6 +866,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 fn broadcast_agent_mdns_sync(
     #[allow(unused_variables)] config: &AgentConfig,
     #[allow(unused_variables)] shutdown_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[allow(unused_variables)] ready_signal: Option<std::sync::mpsc::Sender<()>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mdns")]
     {
@@ -834,14 +875,8 @@ fn broadcast_agent_mdns_sync(
         use std::thread;
         use std::time::Duration;
 
-        println!("broadcast_agent_mdns: Starting for agent '{}'", config.name);
-
         let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
-        println!("broadcast_agent_mdns: Parsed port: {port}");
-
-        // Get the actual network IP for advertising instead of 0.0.0.0
         let service_ip = get_service_ip();
-        println!("broadcast_agent_mdns: Using IP address: {service_ip}");
 
         // Create mDNS daemon
         let mdns = ServiceDaemon::new()?;
@@ -925,12 +960,10 @@ fn broadcast_agent_mdns_sync(
         // Register the service
         mdns.register(service_info)?;
 
-        println!("mDNS service registered successfully!");
-        println!("Service name: arkavo-agent-{}", config.name);
-        println!("Service type: _a2a._tcp");
-        println!("Host: {service_ip}");
-        println!("Port: {port}");
-        println!("WebSocket endpoint: ws://{service_ip}:{port}/ws");
+        // Signal that mDNS is ready
+        if let Some(tx) = ready_signal {
+            let _ = tx.send(());
+        }
 
         // Keep the service alive until shutdown
         use std::sync::atomic::Ordering;
@@ -950,8 +983,11 @@ fn broadcast_agent_mdns_sync(
 
     #[cfg(not(feature = "mdns"))]
     {
-        println!("mDNS support not compiled in");
-        println!("Agent will run without mDNS discovery");
+        // Signal ready immediately when mDNS is not compiled
+        if let Some(tx) = ready_signal {
+            let _ = tx.send(());
+        }
+
         // Keep the thread alive until shutdown is signaled
         use std::sync::atomic::Ordering;
         while !shutdown_flag.load(Ordering::Relaxed) {
