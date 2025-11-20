@@ -90,7 +90,12 @@ impl GeminiSseStream {
                                                     } else {
                                                         Some(new_text)
                                                     },
-                                                    function_calls: accumulated_calls.clone(),
+                                                    // Only send function calls in the final chunk to avoid duplicates
+                                                    function_calls: if done {
+                                                        accumulated_calls.clone()
+                                                    } else {
+                                                        Vec::new()
+                                                    },
                                                     done,
                                                 };
 

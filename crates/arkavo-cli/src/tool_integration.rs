@@ -20,7 +20,7 @@ pub struct ToolIntegrationConfig {
 impl Default for ToolIntegrationConfig {
     fn default() -> Self {
         Self {
-            max_tool_iterations: 3,
+            max_tool_iterations: 5,
             show_tool_execution: false,
         }
     }
@@ -67,16 +67,6 @@ pub async fn process_with_tools(
     let mut iteration = 0;
 
     loop {
-        iteration += 1;
-
-        if iteration > config.max_tool_iterations {
-            return Err(format!(
-                "Maximum tool iterations ({}) exceeded",
-                config.max_tool_iterations
-            )
-            .into());
-        }
-
         let response: ProviderResponse = match router
             .route_with_quality_gate(task_description, messages.clone(), Some(&registry_arc), 3)
             .await
@@ -86,6 +76,7 @@ pub async fn process_with_tools(
                 // Check if judge detected missing tool usage
                 let error_msg = e.to_string();
                 if error_msg.starts_with("MISSING_TOOL_USE:") {
+                    // Tool discovery doesn't count as an iteration
                     // Extract keywords from error message
                     let keywords_str = error_msg.strip_prefix("MISSING_TOOL_USE:").unwrap_or("");
                     let keywords: Vec<String> = keywords_str
@@ -152,7 +143,7 @@ pub async fn process_with_tools(
                     };
 
                     messages.push(Message::user(&tool_response));
-                    continue; // Re-route with expanded knowledge
+                    continue; // Re-route with expanded knowledge (doesn't count as iteration)
                 }
 
                 // Not a missing tool error, propagate it
@@ -164,6 +155,7 @@ pub async fn process_with_tools(
         let requested_keywords =
             arkavo_router::tool_request_parser::parse_tool_requests(&response.content);
         if !requested_keywords.is_empty() {
+            // Tool metadata requests don't count as iterations
             tracing::info!("LLM requested tools via keywords: {:?}", requested_keywords);
 
             // Search for tools matching the requested keywords
@@ -209,7 +201,18 @@ pub async fn process_with_tools(
 
             messages.push(Message::assistant(&response.content));
             messages.push(Message::user(&tool_response));
-            continue; // Re-route with expanded knowledge
+            continue; // Re-route with expanded knowledge (doesn't count as iteration)
+        }
+
+        // Now we're doing actual work (executing tools or returning final response)
+        // Increment iteration counter and check limit
+        iteration += 1;
+        if iteration > config.max_tool_iterations {
+            return Err(format!(
+                "Maximum tool iterations ({}) exceeded",
+                config.max_tool_iterations
+            )
+            .into());
         }
 
         if response.tool_calls.is_empty() {
@@ -219,6 +222,10 @@ pub async fn process_with_tools(
                 total_iterations: iteration,
             });
         }
+
+        // Always show concise tool execution info
+        let tool_names: Vec<&str> = response.tool_calls.iter().map(|tc| tc.tool_name.as_str()).collect();
+        println!("→ {}", tool_names.join(", "));
 
         if config.show_tool_execution {
             println!("\n=== Tool Execution (Iteration {iteration}) ===");
