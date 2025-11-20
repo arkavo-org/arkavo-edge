@@ -449,7 +449,7 @@ impl Router {
                             "gemma-3-270m-it-Q4_0.gguf",
                         )
                         .await
-                        .map_err(|e| Error::ModelExecution(e))?;
+                        .map_err(Error::ModelExecution)?;
 
                         let provider = arkavo_llm::LlamaCppProvider::new(
                             "gemma-3-270m-it".to_string(),
@@ -477,7 +477,7 @@ impl Router {
                     "gemma-3-270m-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(|e| Error::ModelExecution(e))?;
+                .map_err(Error::ModelExecution)?;
 
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "gemma-3-270m-it".to_string(),
@@ -495,7 +495,7 @@ impl Router {
                     "gemma-3-4b-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(|e| Error::ModelExecution(e))?;
+                .map_err(Error::ModelExecution)?;
 
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "gemma-3-4b-it".to_string(),
@@ -513,7 +513,7 @@ impl Router {
                     "gemma-3-12b-it-Q4_0.gguf",
                 )
                 .await
-                .map_err(|e| Error::ModelExecution(e))?;
+                .map_err(Error::ModelExecution)?;
 
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "gemma-3-12b-it".to_string(),
@@ -531,7 +531,7 @@ impl Router {
                     "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
                 )
                 .await
-                .map_err(|e| Error::ModelExecution(e))?;
+                .map_err(Error::ModelExecution)?;
 
                 let provider = arkavo_llm::LlamaCppProvider::new(
                     "deepseek-coder-v2-lite-instruct".to_string(),
