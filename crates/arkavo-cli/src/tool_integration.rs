@@ -20,7 +20,7 @@ pub struct ToolIntegrationConfig {
 impl Default for ToolIntegrationConfig {
     fn default() -> Self {
         Self {
-            max_tool_iterations: 5,
+            max_tool_iterations: 10,
             show_tool_execution: false,
         }
     }
@@ -303,7 +303,7 @@ pub async fn complete_with_tools(
     mcp_client: Option<Arc<dyn McpClientTrait>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let config = ToolIntegrationConfig {
-        max_tool_iterations: 3,
+        max_tool_iterations: 10,
         show_tool_execution: false,
     };
 
@@ -326,7 +326,7 @@ pub async fn process_with_tools_interactive(
     mcp_client: Option<Arc<dyn McpClientTrait>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let config = ToolIntegrationConfig {
-        max_tool_iterations: 3,
+        max_tool_iterations: 10,
         show_tool_execution: true,
     };
 

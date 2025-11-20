@@ -28,7 +28,7 @@ The tool execution loop distinguishes between two types of operations:
 **Work Operations (count as iterations):**
 - Actual tool execution
 - Final response generation
-- Maximum: 5 iterations by default
+- Maximum: 10 iterations by default
 
 #### 3. Quality Gate
 
@@ -72,7 +72,7 @@ Step 3: Final Response (iteration 2)
 └─ Return to user
 ```
 
-**Total**: 2 iterations used out of 5 available
+**Total**: 2 iterations used out of 10 available
 
 ### Tool Output
 
@@ -116,12 +116,12 @@ Default configuration in `ToolIntegrationConfig`:
 
 ```rust
 pub struct ToolIntegrationConfig {
-    pub max_tool_iterations: usize,     // Default: 5
+    pub max_tool_iterations: usize,     // Default: 10
     pub show_tool_execution: bool,       // Default: false
 }
 ```
 
 Adjust limits based on workflow complexity:
 - Simple queries: 2-3 iterations
-- Multi-tool workflows: 4-5 iterations
-- Complex automation: Consider increasing limit
+- Multi-tool workflows: 4-8 iterations
+- Complex automation: 10+ iterations (default handles most cases)
