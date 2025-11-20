@@ -1,11 +1,9 @@
 use crate::browser::BrowserTool;
 use crate::filesystem::FileSystemKit;
-use crate::git::{
-    GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit,
-};
+use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
 use crate::github::{
-    GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit,
-    GitHubPrMergeKit, GitHubReleaseCreateKit, GitHubRepoCloneKit,
+    GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit, GitHubPrMergeKit,
+    GitHubReleaseCreateKit, GitHubRepoCloneKit,
 };
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{

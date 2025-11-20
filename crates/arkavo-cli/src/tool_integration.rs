@@ -224,7 +224,11 @@ pub async fn process_with_tools(
         }
 
         // Always show concise tool execution info
-        let tool_names: Vec<&str> = response.tool_calls.iter().map(|tc| tc.tool_name.as_str()).collect();
+        let tool_names: Vec<&str> = response
+            .tool_calls
+            .iter()
+            .map(|tc| tc.tool_name.as_str())
+            .collect();
         println!("→ {}", tool_names.join(", "));
 
         if config.show_tool_execution {

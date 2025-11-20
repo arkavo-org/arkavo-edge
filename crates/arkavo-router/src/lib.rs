@@ -188,7 +188,9 @@ impl Router {
             None => None,
         };
 
-        let provider = self.instantiate_provider(&decision.recommended_model).await?;
+        let provider = self
+            .instantiate_provider(&decision.recommended_model)
+            .await?;
 
         provider
             .complete_with_tools(messages, tools_json, None)
@@ -229,7 +231,9 @@ impl Router {
                 None => None,
             };
 
-            let provider = self.instantiate_provider(&current_decision.recommended_model).await?;
+            let provider = self
+                .instantiate_provider(&current_decision.recommended_model)
+                .await?;
 
             let response = provider
                 .complete_with_tools(messages.clone(), tools_json, None)
@@ -340,7 +344,9 @@ impl Router {
         _max_retries: u8, // API compatibility - streaming cannot retry once started
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let decision = self.route(task_description).await?;
-        let provider = self.instantiate_provider(&decision.recommended_model).await?;
+        let provider = self
+            .instantiate_provider(&decision.recommended_model)
+            .await?;
 
         let stream = provider
             .stream(messages.clone())

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct ModelCommand {
@@ -63,11 +63,10 @@ fn parse_agents_config() -> HashMap<String, Vec<String>> {
 
                 // Look for provider headers (e.g., "## Gemini Models", "## Local Models")
                 if trimmed.starts_with("##") {
-                    current_provider = trimmed
-                        .trim_start_matches("##")
-                        .trim()
-                        .to_string();
-                    models.entry(current_provider.clone()).or_insert_with(Vec::new);
+                    current_provider = trimmed.trim_start_matches("##").trim().to_string();
+                    models
+                        .entry(current_provider.clone())
+                        .or_insert_with(Vec::new);
                 }
                 // Look for API key assignments and set them as environment variables
                 else if trimmed.contains("API_KEY=") {
@@ -96,7 +95,8 @@ fn parse_agents_config() -> HashMap<String, Vec<String>> {
                         .to_string();
 
                     if !model.is_empty() {
-                        models.entry(current_provider.clone())
+                        models
+                            .entry(current_provider.clone())
                             .or_insert_with(Vec::new)
                             .push(model);
                     }
@@ -125,9 +125,7 @@ async fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
-                        let dir_name = path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("");
+                        let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
                         if dir_name.starts_with("models--") {
                             let snapshots_dir = path.join("snapshots");
@@ -145,9 +143,10 @@ async fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
                                                                 .unwrap_or(dir_name)
                                                                 .replace("--", "/");
                                                             let file_path = file.path();
-                                                            let size = std::fs::metadata(&file_path)
-                                                                .map(|m| m.len())
-                                                                .unwrap_or(0);
+                                                            let size =
+                                                                std::fs::metadata(&file_path)
+                                                                    .map(|m| m.len())
+                                                                    .unwrap_or(0);
                                                             found_models.push((
                                                                 model_name,
                                                                 name.to_string(),
@@ -219,7 +218,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 println!("\nDownload models with: hf download <repo> <file.gguf>");
             } else {
                 println!("  No GGUF models found in HuggingFace cache");
-                println!("  Download with: hf download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf");
+                println!(
+                    "  Download with: hf download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf"
+                );
             }
         }
 

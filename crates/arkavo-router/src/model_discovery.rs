@@ -195,11 +195,8 @@ mod tests {
     async fn test_find_gguf_model() {
         // This test will only pass if the model is already cached
         // or if network is available
-        let result = find_gguf_model(
-            "unsloth/gemma-3-270m-it-GGUF",
-            "gemma-3-270m-it-Q4_0.gguf",
-        )
-        .await;
+        let result =
+            find_gguf_model("unsloth/gemma-3-270m-it-GGUF", "gemma-3-270m-it-Q4_0.gguf").await;
 
         match result {
             Ok(path) => {
