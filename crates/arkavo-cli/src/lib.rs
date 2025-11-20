@@ -27,6 +27,9 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .with_file(false)
             .with_line_number(false)
             .init();
+
+        // Load API keys from .arkavo/AGENTS.md if present
+        arkavo_router::model_discovery::load_api_keys_from_config();
     });
 
     if args.is_empty() {
@@ -49,7 +52,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             Err("Test command requires macOS with mcp-tools feature (uses iOS simulator)".into())
         }
         // Hidden commands with async runtime
-        "model" => {
+        "model" | "models" | "ls" => {
             let run_async = async {
                 use clap::Parser;
 
@@ -61,10 +64,18 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     command: commands::model::ModelCommand,
                 }
 
-                let cli = Cli::parse_from(
+                // If called as 'ls' with no args, default to 'list' subcommand
+                let command_name = args[0].as_str();
+                let effective_args = if command_name == "ls" && args.len() == 1 {
+                    vec!["model".to_string(), "list".to_string()]
+                } else {
                     std::iter::once("model")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
-                );
+                        .chain(args[1..].iter().map(std::string::String::as_str))
+                        .map(String::from)
+                        .collect()
+                };
+
+                let cli = Cli::parse_from(effective_args);
                 commands::model::run(&cli.command)
                     .await
                     .map_err(std::convert::Into::into)

@@ -1,5 +1,8 @@
 use crate::browser::BrowserTool;
 use crate::filesystem::FileSystemKit;
+use crate::git::{
+    GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit,
+};
 use crate::github::{GitHubIssueCreateKit, GitHubIssueListKit};
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
@@ -172,6 +175,14 @@ impl ToolRegistry {
         self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
+
+        // Git tools
+        self.register("git_status", Box::new(GitStatusKit::new()));
+        self.register("git_diff", Box::new(GitDiffKit::new()));
+        self.register("git_commit", Box::new(GitCommitKit::new()));
+        self.register("git_branch", Box::new(GitBranchKit::new()));
+        self.register("git_log", Box::new(GitLogKit::new()));
+        self.register("git_remote", Box::new(GitRemoteKit::new()));
 
         // Only register security tools if binaries are installed
         if Self::is_binary_available("osv-scanner") {
