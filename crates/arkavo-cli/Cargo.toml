@@ -51,6 +51,9 @@ arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
+arkavo-device-identity = { path = "../arkavo-device-identity" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-registration = { path = "../arkavo-registration" }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }
@@ -72,6 +75,7 @@ hf-hub = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

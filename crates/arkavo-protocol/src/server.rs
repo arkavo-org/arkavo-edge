@@ -144,6 +144,27 @@ pub trait A2aRpc {
     /// Legacy subscription method (to be deprecated)
     #[subscription(name = "chat_subscribe", unsubscribe = "chat_unsubscribe", item = MessageDelta)]
     async fn chat_subscribe(&self, request: ChatRequest) -> SubscriptionResult;
+
+    /// Create a registration challenge
+    #[method(name = "registration.challenge")]
+    async fn registration_challenge(
+        &self,
+        request: crate::registration::ChallengeRequest,
+    ) -> RpcResult<crate::registration::ChallengeResponse>;
+
+    /// Verify a registration challenge signature
+    #[method(name = "registration.verify")]
+    async fn registration_verify(
+        &self,
+        request: crate::registration::VerifyRequest,
+    ) -> RpcResult<crate::registration::VerifyResponse>;
+
+    /// Get registration status for a device
+    #[method(name = "registration.status")]
+    async fn registration_status(
+        &self,
+        device_id: String,
+    ) -> RpcResult<crate::registration::RegistrationStatus>;
 }
 
 pub struct A2aRpcImpl {
@@ -159,6 +180,7 @@ pub struct A2aRpcImpl {
     session_id: String,
     event_sequence: Arc<tokio::sync::RwLock<u64>>,
     auth_backend: Arc<dyn AuthBackend>,
+    registration_service: Arc<crate::registration::RegistrationService>,
 }
 
 #[derive(Default, Clone)]
@@ -1630,6 +1652,106 @@ impl A2aRpcServer for A2aRpcImpl {
         timer.success();
         Ok(())
     }
+
+    async fn registration_challenge(
+        &self,
+        request: crate::registration::ChallengeRequest,
+    ) -> RpcResult<crate::registration::ChallengeResponse> {
+        let timer = RpcTimer::new("registration_challenge".to_string(), self.metrics.clone());
+
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                429,
+                "Rate limit exceeded",
+                None::<()>,
+            ));
+        }
+
+        match self.registration_service.create_challenge(request).await {
+            Ok(response) => {
+                timer.success();
+                Ok(response)
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32000,
+                    format!("Registration error: {}", e),
+                    None::<()>,
+                ))
+            }
+        }
+    }
+
+    async fn registration_verify(
+        &self,
+        request: crate::registration::VerifyRequest,
+    ) -> RpcResult<crate::registration::VerifyResponse> {
+        let timer = RpcTimer::new("registration_verify".to_string(), self.metrics.clone());
+
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                429,
+                "Rate limit exceeded",
+                None::<()>,
+            ));
+        }
+
+        match self.registration_service.verify_challenge(request).await {
+            Ok(response) => {
+                timer.success();
+                Ok(response)
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32000,
+                    format!("Verification error: {}", e),
+                    None::<()>,
+                ))
+            }
+        }
+    }
+
+    async fn registration_status(
+        &self,
+        device_id: String,
+    ) -> RpcResult<crate::registration::RegistrationStatus> {
+        let timer = RpcTimer::new("registration_status".to_string(), self.metrics.clone());
+
+        if let Err(_e) = self.rate_limiter.check_rate_limit() {
+            self.metrics.record_rate_limit_blocked(None);
+            timer.error();
+            return Err(ErrorObjectOwned::owned(
+                429,
+                "Rate limit exceeded",
+                None::<()>,
+            ));
+        }
+
+        match self
+            .registration_service
+            .get_registration_status(&device_id)
+            .await
+        {
+            Ok(status) => {
+                timer.success();
+                Ok(status)
+            }
+            Err(e) => {
+                timer.error();
+                Err(ErrorObjectOwned::owned(
+                    -32000,
+                    format!("Status error: {}", e),
+                    None::<()>,
+                ))
+            }
+        }
+    }
 }
 
 impl A2aRpcImpl {
@@ -2451,6 +2573,7 @@ impl A2aServer {
             session_id: self.session_id.clone(),
             event_sequence: self.event_sequence.clone(),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
 
         // Start file watcher for hot-reload

@@ -72,6 +72,14 @@ arkavo-observability = { path = "../arkavo-observability" }
 # Events for debugging
 arkavo-events = { path = "../arkavo-events" }
 
+# Crypto for registration
+arkavo-crypto = { path = "../arkavo-crypto" }
+
+# Additional utilities for registration
+rand = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+
 # Schema generation
 schemars = { workspace = true }
 

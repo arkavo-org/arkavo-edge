@@ -822,6 +822,56 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
     let handle = server.start().await?;
 
+    // Generate and display QR code for registration
+    if !quiet {
+        use arkavo_crypto::AgentKeypair;
+        use arkavo_device_identity::{get_or_create_device_id, keypair};
+        use arkavo_registration::{AgentDescriptor, qr::display_qr};
+
+        // Get or create device ID
+        let device_id =
+            get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {}", e))?;
+
+        // Get or create agent keypair
+        let keypair_bytes = match keypair::get_keypair()? {
+            Some(bytes) => bytes,
+            None => {
+                let new_keypair = AgentKeypair::generate();
+                let bytes = new_keypair.to_bytes();
+                keypair::store_keypair(&bytes)?;
+                bytes
+            }
+        };
+
+        let agent_keypair =
+            AgentKeypair::from_bytes(&keypair_bytes).expect("Invalid keypair bytes");
+        let public_key = agent_keypair.public_key();
+
+        // Generate short-sha from device ID
+        let device_id_hex = hex::encode(device_id.as_bytes());
+        let short_sha = &device_id_hex[..7];
+
+        // Create agent descriptor
+        let endpoint = format!("http://{}", config.listen);
+        let mdns_service = if config.mdns_enabled {
+            Some(format!("{}._tcp.local.", config.name))
+        } else {
+            None
+        };
+
+        let descriptor =
+            AgentDescriptor::new(public_key, endpoint, mdns_service, short_sha.to_string());
+
+        // Display QR code
+        println!("\n{}", "=".repeat(60));
+        println!("Agent Registration QR Code");
+        println!("{}", "=".repeat(60));
+        if let Err(e) = display_qr(&descriptor) {
+            eprintln!("Warning: Failed to display QR code: {}", e);
+        }
+        println!("{}", "=".repeat(60));
+    }
+
     // Start mDNS broadcasting if enabled
     let mdns_thread_handle = if config.mdns_enabled {
         let config_clone = config.clone();
