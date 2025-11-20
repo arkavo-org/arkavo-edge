@@ -505,7 +505,8 @@ mod tests {
     #[test]
     fn test_tool_retrieval() {
         let registry = ToolRegistry::new();
-        assert!(registry.get("sec_semgrep").is_some());
+        // Test retrieval with a tool that's always present
+        assert!(registry.get("get_agent_time").is_some());
         assert!(registry.get("nonexistent").is_none());
     }
 
@@ -562,9 +563,10 @@ mod tests {
     #[test]
     fn test_search_tools_name_and_description() {
         let registry = ToolRegistry::new();
-        let results = registry.search_tools("security", DetailLevel::NameAndDescription);
+        // Use "time" which is always available instead of "security" which depends on binaries
+        let results = registry.search_tools("time", DetailLevel::NameAndDescription);
 
-        assert!(!results.is_empty(), "Should find security-related tools");
+        assert!(!results.is_empty(), "Should find time-related tools");
 
         for tool in &results {
             assert!(tool.category.is_some(), "Should include category");
@@ -576,9 +578,10 @@ mod tests {
     #[test]
     fn test_search_tools_full_schema() {
         let registry = ToolRegistry::new();
-        let results = registry.search_tools("semgrep", DetailLevel::FullSchema);
+        // Use "filesystem" which is always available instead of "semgrep" which depends on binaries
+        let results = registry.search_tools("filesystem", DetailLevel::FullSchema);
 
-        assert!(!results.is_empty(), "Should find semgrep tool");
+        assert!(!results.is_empty(), "Should find filesystem tools");
 
         for tool in &results {
             assert!(tool.category.is_some(), "Should include category");

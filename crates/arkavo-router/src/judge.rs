@@ -54,10 +54,10 @@ impl ResponseJudge {
 
             // Return first existing path or default
             for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate) {
-                    if let Some(Ok(path)) = entries.into_iter().next() {
-                        return path.to_string_lossy().to_string();
-                    }
+                if let Ok(entries) = glob::glob(&candidate)
+                    && let Some(Ok(path)) = entries.into_iter().next()
+                {
+                    return path.to_string_lossy().to_string();
                 }
             }
 
@@ -89,10 +89,10 @@ impl ResponseJudge {
 
             // Return first existing path or default
             for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate) {
-                    if let Some(Ok(path)) = entries.into_iter().next() {
-                        return path.to_string_lossy().to_string();
-                    }
+                if let Ok(entries) = glob::glob(&candidate)
+                    && let Some(Ok(path)) = entries.into_iter().next()
+                {
+                    return path.to_string_lossy().to_string();
                 }
             }
 
@@ -213,9 +213,11 @@ impl ResponseJudge {
 
         // Check if AI refused to answer
         let has_refusal = response_lower.contains("i don't know")
+            || response_lower.contains("i do not know")
             || response_lower.contains("i can't")
             || response_lower.contains("i cannot")
             || response_lower.contains("don't have access")
+            || response_lower.contains("do not have access")
             || response_lower.contains("i'm not able")
             || response_lower.contains("unable to");
 
