@@ -3,7 +3,10 @@ use crate::filesystem::FileSystemKit;
 use crate::git::{
     GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit,
 };
-use crate::github::{GitHubIssueCreateKit, GitHubIssueListKit};
+use crate::github::{
+    GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit,
+    GitHubPrMergeKit, GitHubReleaseCreateKit, GitHubRepoCloneKit,
+};
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
@@ -211,6 +214,18 @@ impl ToolRegistry {
         // GitHub Issue Management tools
         self.register("github_issue_create", Box::new(GitHubIssueCreateKit::new()));
         self.register("github_issue_list", Box::new(GitHubIssueListKit::new()));
+
+        // GitHub PR tools
+        self.register("github_pr_create", Box::new(GitHubPrCreateKit::new()));
+        self.register("github_pr_list", Box::new(GitHubPrListKit::new()));
+        self.register("github_pr_merge", Box::new(GitHubPrMergeKit::new()));
+
+        // GitHub Repository tools
+        self.register("github_repo_clone", Box::new(GitHubRepoCloneKit::new()));
+        self.register(
+            "github_release_create",
+            Box::new(GitHubReleaseCreateKit::new()),
+        );
 
         // GitHub Org Knowledge tools
         self.register("github_org_repos", Box::new(GitHubOrgReposTool::new()));

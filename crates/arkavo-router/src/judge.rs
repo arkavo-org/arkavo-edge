@@ -348,6 +348,24 @@ impl ResponseJudge {
             }
         }
 
+        if prompt.contains("pr ")
+            || prompt.contains("pull request")
+            || prompt.contains("github pr")
+            || prompt.contains("create pr")
+            || prompt.contains("merge pr")
+        {
+            for tool in available_tools {
+                let tool_desc = format!("{} {}", tool.name, tool.description).to_lowercase();
+                if tool_desc.contains("pull request")
+                    || tool_desc.contains("pr")
+                    || tool_desc.contains("github")
+                {
+                    keywords.extend(vec!["github".to_string(), "pr".to_string()]);
+                    break;
+                }
+            }
+        }
+
         // Remove duplicates
         keywords.sort();
         keywords.dedup();
