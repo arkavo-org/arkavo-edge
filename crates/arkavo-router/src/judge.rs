@@ -39,35 +39,21 @@ pub struct ResponseJudge {
 
 impl ResponseJudge {
     #[cfg(feature = "llama-cpp")]
-    pub fn new_gemma_270m() -> crate::Result<Self> {
-        let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH").unwrap_or_else(|_| {
-            // Try common locations for Gemma-3 270M GGUF model
-            let hf_path = std::env::var("HF_HOME")
-                .or_else(|_| std::env::var("HOME").map(|h| format!("{h}/.cache/huggingface")))
-                .unwrap_or_else(|_| "~/.cache/huggingface".to_string());
+    pub async fn new_gemma_270m() -> crate::Result<Self> {
+        let model_path = crate::model_discovery::find_gguf_model(
+            "unsloth/gemma-3-270m-it-GGUF",
+            "gemma-3-270m-it-Q4_0.gguf",
+        )
+        .await
+        .map_err(crate::Error::ModelExecution)?;
 
-            // Check multiple possible locations
-            let candidates = vec![
-                format!("{hf_path}/hub/models--unsloth--gemma-3-270m-it-GGUF/snapshots/*/gemma-3-270m-it-Q4_K_M.gguf"),
-                format!("{hf_path}/hub/models--bartowski--gemma-3-270m-it-GGUF/snapshots/*/gemma-3-270m-it-Q4_K_M.gguf"),
-            ];
-
-            // Return first existing path or default
-            for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate)
-                    && let Some(Ok(path)) = entries.into_iter().next()
-                {
-                    return path.to_string_lossy().to_string();
-                }
-            }
-
-            "models/gemma-3-270m-it.gguf".to_string()
-        });
-
-        let provider = arkavo_llm::LlamaCppProvider::new("gemma-3-270m-it".to_string(), model_path)
-            .map_err(|e| {
-                crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
-            })?;
+        let provider = arkavo_llm::LlamaCppProvider::new(
+            "gemma-3-270m-it".to_string(),
+            model_path.to_string_lossy().to_string(),
+        )
+        .map_err(|e| {
+            crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
+        })?;
 
         Ok(Self {
             judge_provider: Arc::new(provider),
@@ -75,32 +61,19 @@ impl ResponseJudge {
     }
 
     #[cfg(feature = "llama-cpp")]
-    pub fn new_gemma_4b() -> crate::Result<Self> {
-        let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH").unwrap_or_else(|_| {
-            // Try common locations for Gemma 4B GGUF model
-            let hf_path = std::env::var("HF_HOME")
-                .or_else(|_| std::env::var("HOME").map(|h| format!("{h}/.cache/huggingface")))
-                .unwrap_or_else(|_| "~/.cache/huggingface".to_string());
+    pub async fn new_gemma_4b() -> crate::Result<Self> {
+        let model_path = crate::model_discovery::find_gguf_model(
+            "unsloth/gemma-3-4b-it-GGUF",
+            "gemma-3-4b-it-Q4_0.gguf",
+        )
+        .await
+        .map_err(crate::Error::ModelExecution)?;
 
-            // Check multiple possible locations
-            let candidates = vec![
-                format!("{hf_path}/hub/models--unsloth--gemma-3-4b-it-GGUF/snapshots/*/gemma-3-4b-it-Q4_K_M.gguf"),
-            ];
-
-            // Return first existing path or default
-            for candidate in candidates {
-                if let Ok(entries) = glob::glob(&candidate)
-                    && let Some(Ok(path)) = entries.into_iter().next()
-                {
-                    return path.to_string_lossy().to_string();
-                }
-            }
-
-            "models/gemma-3-4b-it.gguf".to_string()
-        });
-
-        let provider = arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
-            .map_err(|e| {
+        let provider = arkavo_llm::LlamaCppProvider::new(
+            "gemma-3-4b-it".to_string(),
+            model_path.to_string_lossy().to_string(),
+        )
+        .map_err(|e| {
             crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
         })?;
 
@@ -348,6 +321,46 @@ impl ResponseJudge {
                     || tool_desc.contains("execute")
                 {
                     keywords.extend(vec!["bash".to_string(), "shell".to_string()]);
+                    break;
+                }
+            }
+        }
+
+        if prompt.contains("git")
+            || prompt.contains("branch")
+            || prompt.contains("commit")
+            || prompt.contains("status")
+            || prompt.contains("diff")
+            || prompt.contains("log")
+            || prompt.contains("push")
+            || prompt.contains("pull")
+        {
+            for tool in available_tools {
+                let tool_desc = format!("{} {}", tool.name, tool.description).to_lowercase();
+                if tool_desc.contains("git")
+                    || tool_desc.contains("branch")
+                    || tool_desc.contains("commit")
+                    || tool_desc.contains("repository")
+                {
+                    keywords.extend(vec!["git".to_string(), "branch".to_string()]);
+                    break;
+                }
+            }
+        }
+
+        if prompt.contains("pr ")
+            || prompt.contains("pull request")
+            || prompt.contains("github pr")
+            || prompt.contains("create pr")
+            || prompt.contains("merge pr")
+        {
+            for tool in available_tools {
+                let tool_desc = format!("{} {}", tool.name, tool.description).to_lowercase();
+                if tool_desc.contains("pull request")
+                    || tool_desc.contains("pr")
+                    || tool_desc.contains("github")
+                {
+                    keywords.extend(vec!["github".to_string(), "pr".to_string()]);
                     break;
                 }
             }

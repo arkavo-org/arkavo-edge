@@ -1261,7 +1261,7 @@ async fn process_message_print_with_router(
     let mcp_arc = mcp_client.map(|c| Arc::new(c.clone()) as Arc<dyn arkavo_mcp_tools::McpClient>);
 
     let config = ToolIntegrationConfig {
-        max_tool_iterations: 3,
+        max_tool_iterations: 10,
         show_tool_execution: false,
     };
 

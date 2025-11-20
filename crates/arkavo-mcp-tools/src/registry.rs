@@ -1,6 +1,10 @@
 use crate::browser::BrowserTool;
 use crate::filesystem::FileSystemKit;
-use crate::github::{GitHubIssueCreateKit, GitHubIssueListKit};
+use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
+use crate::github::{
+    GitHubIssueCreateKit, GitHubIssueListKit, GitHubPrCreateKit, GitHubPrListKit, GitHubPrMergeKit,
+    GitHubReleaseCreateKit, GitHubRepoCloneKit,
+};
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
@@ -173,6 +177,14 @@ impl ToolRegistry {
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
 
+        // Git tools
+        self.register("git_status", Box::new(GitStatusKit::new()));
+        self.register("git_diff", Box::new(GitDiffKit::new()));
+        self.register("git_commit", Box::new(GitCommitKit::new()));
+        self.register("git_branch", Box::new(GitBranchKit::new()));
+        self.register("git_log", Box::new(GitLogKit::new()));
+        self.register("git_remote", Box::new(GitRemoteKit::new()));
+
         // Only register security tools if binaries are installed
         if Self::is_binary_available("osv-scanner") {
             self.register("deps_osv", Box::new(OsvTool::new()));
@@ -200,6 +212,18 @@ impl ToolRegistry {
         // GitHub Issue Management tools
         self.register("github_issue_create", Box::new(GitHubIssueCreateKit::new()));
         self.register("github_issue_list", Box::new(GitHubIssueListKit::new()));
+
+        // GitHub PR tools
+        self.register("github_pr_create", Box::new(GitHubPrCreateKit::new()));
+        self.register("github_pr_list", Box::new(GitHubPrListKit::new()));
+        self.register("github_pr_merge", Box::new(GitHubPrMergeKit::new()));
+
+        // GitHub Repository tools
+        self.register("github_repo_clone", Box::new(GitHubRepoCloneKit::new()));
+        self.register(
+            "github_release_create",
+            Box::new(GitHubReleaseCreateKit::new()),
+        );
 
         // GitHub Org Knowledge tools
         self.register("github_org_repos", Box::new(GitHubOrgReposTool::new()));

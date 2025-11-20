@@ -8,6 +8,7 @@ pub mod error;
 pub mod health;
 pub mod judge;
 pub mod metrics;
+pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod selector;
@@ -187,7 +188,9 @@ impl Router {
             None => None,
         };
 
-        let provider = self.instantiate_provider(&decision.recommended_model)?;
+        let provider = self
+            .instantiate_provider(&decision.recommended_model)
+            .await?;
 
         provider
             .complete_with_tools(messages, tools_json, None)
@@ -228,7 +231,9 @@ impl Router {
                 None => None,
             };
 
-            let provider = self.instantiate_provider(&current_decision.recommended_model)?;
+            let provider = self
+                .instantiate_provider(&current_decision.recommended_model)
+                .await?;
 
             let response = provider
                 .complete_with_tools(messages.clone(), tools_json, None)
@@ -264,7 +269,7 @@ impl Router {
                 #[cfg(feature = "llama-cpp")]
                 {
                     // Use local Gemma-3 270M model for cost-free judgment
-                    match judge::ResponseJudge::new_gemma_270m() {
+                    match judge::ResponseJudge::new_gemma_270m().await {
                         Ok(judge) => {
                             let judgment = judge
                                 .evaluate(task_description, &response, &tool_infos)
@@ -339,7 +344,9 @@ impl Router {
         _max_retries: u8, // API compatibility - streaming cannot retry once started
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
         let decision = self.route(task_description).await?;
-        let provider = self.instantiate_provider(&decision.recommended_model)?;
+        let provider = self
+            .instantiate_provider(&decision.recommended_model)
+            .await?;
 
         let stream = provider
             .stream(messages.clone())
@@ -396,7 +403,7 @@ impl Router {
                 // Deep validation with LLM judge (when available)
                 #[cfg(feature = "llama-cpp")]
                 {
-                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b()
+                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b().await
                         && let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await
                         && !judgment.passed
                     {
@@ -426,7 +433,7 @@ impl Router {
         }
     }
 
-    fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
+    async fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         match model {
             #[cfg(feature = "gemini")]
             ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
@@ -437,40 +444,20 @@ impl Router {
                     // Fallback to local model when Gemini API key is not available
                     #[cfg(feature = "llama-cpp")]
                     {
-                        // Try to find model in HuggingFace cache or use env var
-                        let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH")
-                            .or_else(|_| {
-                                // Check HuggingFace cache
-                                let home = std::env::var("HOME")
-                                    .or_else(|_| std::env::var("USERPROFILE"))?;
-                                let hf_cache = std::path::PathBuf::from(home).join(
-                                    ".cache/huggingface/hub/models--unsloth--gemma-3-270m-it-GGUF",
-                                );
-
-                                if hf_cache.exists() {
-                                    // Find the snapshot directory
-                                    let snapshots = hf_cache.join("snapshots");
-                                    if let Ok(entries) = std::fs::read_dir(&snapshots) {
-                                        for entry in entries.flatten() {
-                                            let gguf_path =
-                                                entry.path().join("gemma-3-270m-it-Q4_0.gguf");
-                                            if gguf_path.exists() {
-                                                return Ok(gguf_path.to_string_lossy().to_string());
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(std::env::VarError::NotPresent)
-                            })
-                            .unwrap_or_else(|_| "models/gemma-3-270m-it.gguf".to_string());
+                        let model_path = model_discovery::find_gguf_model(
+                            "unsloth/gemma-3-270m-it-GGUF",
+                            "gemma-3-270m-it-Q4_0.gguf",
+                        )
+                        .await
+                        .map_err(Error::ModelExecution)?;
 
                         let provider = arkavo_llm::LlamaCppProvider::new(
                             "gemma-3-270m-it".to_string(),
-                            model_path,
+                            model_path.to_string_lossy().to_string(),
                         )
                         .map_err(|e| {
                             Error::ModelExecution(format!(
-                                "Failed to create fallback local provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf"
+                                "Failed to create fallback local provider: {e}"
                             ))
                         })?;
                         Ok(Box::new(provider))
@@ -485,117 +472,74 @@ impl Router {
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma270M => {
-                let model_path = std::env::var("ARKAVO_GEMMA_270M_PATH")
-                    .unwrap_or_else(|_| "models/gemma-3-270m-it.gguf".to_string());
-                let provider =
-                    arkavo_llm::LlamaCppProvider::new("gemma-3-270m-it".to_string(), model_path)
-                        .map_err(|e| {
-                            Error::ModelExecution(format!(
-                                "Failed to create LlamaCpp provider: {e}"
-                            ))
-                        })?;
+                let model_path = model_discovery::find_gguf_model(
+                    "unsloth/gemma-3-270m-it-GGUF",
+                    "gemma-3-270m-it-Q4_0.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "gemma-3-270m-it".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma4B => {
-                let model_path = std::env::var("ARKAVO_GEMMA_4B_PATH")
-                    .or_else(|_| {
-                        // Check HuggingFace cache
-                        let home =
-                            std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))?;
+                let model_path = model_discovery::find_gguf_model(
+                    "unsloth/gemma-3-4b-it-GGUF",
+                    "gemma-3-4b-it-Q4_0.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
 
-                        // Check standard locations
-                        let possible_locations = vec![
-                            format!(
-                                "{}/.cache/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF",
-                                home
-                            ),
-                            "/Volumes/SSD/huggingface/hub/models--unsloth--gemma-3-4b-it-GGUF"
-                                .to_string(),
-                        ];
-
-                        for hf_cache in possible_locations {
-                            let cache_path = std::path::PathBuf::from(&hf_cache);
-                            if cache_path.exists() {
-                                // Find the snapshot directory
-                                let snapshots = cache_path.join("snapshots");
-                                if let Ok(entries) = std::fs::read_dir(&snapshots) {
-                                    for entry in entries.flatten() {
-                                        let gguf_path =
-                                            entry.path().join("gemma-3-4b-it-Q4_0.gguf");
-                                        if gguf_path.exists() {
-                                            return Ok(gguf_path.to_string_lossy().to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(std::env::VarError::NotPresent)
-                    })
-                    .unwrap_or_else(|_| "models/gemma-3-4b-it.gguf".to_string());
-
-                let provider =
-                    arkavo_llm::LlamaCppProvider::new("gemma-3-4b-it".to_string(), model_path)
-                        .map_err(|e| {
-                            Error::ModelExecution(format!(
-                                "Failed to create LlamaCpp provider: {e}. Install model with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF gemma-3-4b-it-Q4_0.gguf"
-                            ))
-                        })?;
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "gemma-3-4b-it".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma12B => {
-                let model_path = std::env::var("ARKAVO_GEMMA_12B_PATH")
-                    .unwrap_or_else(|_| "models/gemma-3-12b-it.gguf".to_string());
-                let provider =
-                    arkavo_llm::LlamaCppProvider::new("gemma-3-12b-it".to_string(), model_path)
-                        .map_err(|e| {
-                            Error::ModelExecution(format!(
-                                "Failed to create LlamaCpp provider: {e}"
-                            ))
-                        })?;
+                let model_path = model_discovery::find_gguf_model(
+                    "unsloth/gemma-3-12b-it-GGUF",
+                    "gemma-3-12b-it-Q4_0.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "gemma-3-12b-it".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
                 Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalDeepSeekCoder => {
-                let model_path = std::env::var("ARKAVO_DEEPSEEK_CODER_PATH")
-                    .or_else(|_| {
-                        // Check HuggingFace cache in standard and custom locations
-                        let home = std::env::var("HOME")
-                            .or_else(|_| std::env::var("USERPROFILE"))?;
+                let model_path = model_discovery::find_gguf_model(
+                    "bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF",
+                    "DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
 
-                        let possible_locations = vec![
-                            format!("{home}/.cache/huggingface/hub/models--bartowski--DeepSeek-Coder-V2-Lite-Instruct-GGUF"),
-                            "/Volumes/SSD/huggingface/hub/models--bartowski--DeepSeek-Coder-V2-Lite-Instruct-GGUF".to_string(),
-                        ];
-
-                        for hf_cache in possible_locations {
-                            let cache_path = std::path::PathBuf::from(&hf_cache);
-                            if cache_path.exists() {
-                                // Find the snapshot directory
-                                let snapshots = cache_path.join("snapshots");
-                                if let Ok(entries) = std::fs::read_dir(&snapshots) {
-                                    for entry in entries.flatten() {
-                                        // Try Q4_K_M first (best balance)
-                                        let gguf_path = entry.path().join("DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf");
-                                        if gguf_path.exists() {
-                                            return Ok(gguf_path.to_string_lossy().to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(std::env::VarError::NotPresent)
-                    })
-                    .unwrap_or_else(|_| "models/deepseek-coder-v2-lite-instruct.gguf".to_string());
-
-                let provider =
-                    arkavo_llm::LlamaCppProvider::new("deepseek-coder-v2-lite-instruct".to_string(), model_path)
-                        .map_err(|e| {
-                            Error::ModelExecution(format!(
-                                "Failed to create DeepSeek-Coder provider: {e}. Install model with: huggingface-cli download bartowski/DeepSeek-Coder-V2-Lite-Instruct-GGUF DeepSeek-Coder-V2-Lite-Instruct-Q4_K_M.gguf"
-                            ))
-                        })?;
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "deepseek-coder-v2-lite-instruct".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create DeepSeek-Coder provider: {e}"))
+                })?;
                 Ok(Box::new(provider))
             }
             #[allow(unreachable_patterns)]
