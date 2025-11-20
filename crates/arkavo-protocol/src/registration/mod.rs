@@ -4,8 +4,8 @@ pub use types::{
     ChallengeRequest, ChallengeResponse, RegistrationStatus, VerifyRequest, VerifyResponse,
 };
 
-use base64::{Engine as _, engine::general_purpose};
 use crate::error::{A2aError, Result};
+use base64::{Engine as _, engine::general_purpose};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -105,7 +105,9 @@ impl RegistrationService {
 
         public_key
             .verify(&challenge.data, &signature_bytes)
-            .map_err(|_| A2aError::AuthenticationFailed("Signature verification failed".to_string()))?;
+            .map_err(|_| {
+                A2aError::AuthenticationFailed("Signature verification failed".to_string())
+            })?;
 
         let registration = Registration {
             device_id: request.device_id.clone(),
