@@ -6,7 +6,7 @@ port: 8346
 
 ## Model Configuration
 
-model: gemini-2.5-pro
+model: gemini-3-pro-preview
 # For faster iteration: gemini-flash-latest
 
 ## Capabilities

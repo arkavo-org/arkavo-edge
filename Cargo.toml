@@ -89,13 +89,13 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.41.0"
+version = "0.41.1"
 edition = "2024"
-rust-version = "1.90.0"
-authors = ["Arkavo Edge Contributors"]
+rust-version = "1.91.0"
+authors = ["Arkavo Contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/arkavo/arkavo-edge"
-description = "Developer-centric agentic CLI tool for AI-agent development and framework maintenance"
+description = "Secure, collaborative automation for every day use. An open-source, privacy-first, low-cost platform."
 
 [workspace.dependencies]
 # Core dependencies
@@ -120,10 +120,6 @@ reqwest = { version = "0.12.20", default-features = false, features = ["rustls-t
 regex = "1.11.1"
 uuid = { version = "1.17.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
-itertools = "0.14.0"
-rustix = "1.1.2"
-fancy-regex = "0.16.2"
-compact_str = "0.9.0"
 
 # Common utilities
 log = "0.4"

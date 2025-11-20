@@ -89,14 +89,14 @@ For faster iteration with Flash:
 cargo run --features gemini -p arkavo -- chat --model gemini-flash-latest --prompt "Write a function to check if a number is prime"
 
 # With streaming
-cargo run --features gemini -p arkavo -- chat --model gemini-2.5-pro --prompt "Create a React component for a todo list"
+cargo run --features gemini -p arkavo -- chat --model gemini-3-pro-preview --prompt "Create a React component for a todo list"
 ```
 
 ### 3. Run Benchmarks
 
 ```bash
 # Run SWE-bench subset
-./run_benchmarks.sh --model gemini-2.5-pro --tasks 10
+./run_benchmarks.sh --model gemini-3-pro-preview --tasks 10
 
 # Compare with Claude
 ./run_benchmarks.sh --compare claude-3-7-sonnet
@@ -228,7 +228,7 @@ The agent is configured via `AGENTS.md`:
 ```yaml
 name: gemini-code-agent
 port: 8346
-model: gemini-2.5-pro  # or gemini-flash-latest
+model: gemini-3-pro-preview  # or gemini-flash-latest
 
 capabilities:
   - code_generation
@@ -249,7 +249,7 @@ mcp_tools:
 ### Gemini 2.5 Pro
 Use for production-quality code generation:
 ```bash
-export GEMINI_MODEL="gemini-2.5-pro"
+export GEMINI_MODEL="gemini-3-pro-preview"
 ./launch_agent.sh
 ```
 
@@ -301,7 +301,7 @@ budget:
 echo $GEMINI_API_KEY
 
 # Test API directly
-curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=$GEMINI_API_KEY" \
+curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=$GEMINI_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"contents":[{"parts":[{"text":"Hello"}]}]}'
 ```
@@ -354,7 +354,7 @@ export GEMINI_MODEL="gemini-3.0-flash-beta"
 ./launch_agent.sh
 
 # Benchmark against 2.5 baseline
-./run_benchmarks.sh --compare gemini-2.5-pro
+./run_benchmarks.sh --compare gemini-3-pro-preview
 ```
 
 ## Integration with Other Agents

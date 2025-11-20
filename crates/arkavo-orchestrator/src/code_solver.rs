@@ -180,6 +180,7 @@ impl CodeSolver {
             passed: true,
             reason: Some("Quality gate passed".to_string()),
             issue_type: IssueType::None,
+            suggested_keywords: Vec::new(),
         };
 
         metrics.total_time_ms = start_time.elapsed().as_millis() as u64;
@@ -466,9 +467,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_extract_search_terms() {
-        let router = Arc::new(Router::new(vec![], None, None, None).unwrap());
+    #[tokio::test]
+    async fn test_extract_search_terms() {
+        let router = Arc::new(Router::new().await.unwrap());
         let solver = CodeSolver {
             router,
             enricher: PromptEnricher::default(),
@@ -483,9 +484,9 @@ mod tests {
         assert!(terms.contains(&"password".to_string()));
     }
 
-    #[test]
-    fn test_calculate_relevance() {
-        let router = Arc::new(Router::new(vec![], None, None, None).unwrap());
+    #[tokio::test]
+    async fn test_calculate_relevance() {
+        let router = Arc::new(Router::new().await.unwrap());
         let solver = CodeSolver {
             router,
             enricher: PromptEnricher::default(),

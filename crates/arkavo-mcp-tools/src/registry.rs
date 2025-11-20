@@ -1,5 +1,6 @@
 use crate::browser::BrowserTool;
 use crate::filesystem::FileSystemKit;
+use crate::github::{GitHubIssueCreateKit, GitHubIssueListKit};
 use crate::github_checks::GitHubChecksTool;
 use crate::github_org_knowledge::{
     GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
@@ -87,6 +88,8 @@ pub struct MinimalToolInfo {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aliases: Option<Vec<String>>,
 }
 
 pub struct ToolRegistry {
@@ -108,10 +111,10 @@ impl ToolRegistry {
     pub fn from_mcp_connection(
         mcp_client: Arc<dyn McpClient>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut registry = Self {
-            tools: HashMap::new(),
-        };
+        // Start with all native tools (filesystem, browser, git, time, etc.)
+        let mut registry = Self::new();
 
+        // Add MCP tools on top (they can override native tools if needed)
         let mcp_tools = mcp_client.list_tools()?;
 
         for mcp_tool in mcp_tools {
@@ -169,9 +172,18 @@ impl ToolRegistry {
         self.register("browser_cdp", Box::new(BrowserTool::new()));
         self.register("gh_checks", Box::new(GitHubChecksTool::new()));
         self.register("gh_pr_review", Box::new(GitHubReviewTool::new()));
-        self.register("deps_osv", Box::new(OsvTool::new()));
-        self.register("sec_semgrep", Box::new(SemgrepTool::new()));
-        self.register("sbom_syft", Box::new(SyftTool::new()));
+
+        // Only register security tools if binaries are installed
+        if Self::is_binary_available("osv-scanner") {
+            self.register("deps_osv", Box::new(OsvTool::new()));
+        }
+        if Self::is_binary_available("semgrep") {
+            self.register("sec_semgrep", Box::new(SemgrepTool::new()));
+        }
+        if Self::is_binary_available("syft") {
+            self.register("sbom_syft", Box::new(SyftTool::new()));
+        }
+
         self.register("test_run", Box::new(TestRunnerTool::new()));
         self.register("get_system_health", Box::new(HealthCheckTool::new()));
 
@@ -184,6 +196,10 @@ impl ToolRegistry {
             "get_time_status",
             Box::new(GetTimeStatusTool::new(sync_state)),
         );
+
+        // GitHub Issue Management tools
+        self.register("github_issue_create", Box::new(GitHubIssueCreateKit::new()));
+        self.register("github_issue_list", Box::new(GitHubIssueListKit::new()));
 
         // GitHub Org Knowledge tools
         self.register("github_org_repos", Box::new(GitHubOrgReposTool::new()));
@@ -200,6 +216,15 @@ impl ToolRegistry {
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
         self.tools.insert(name.to_string(), tool);
+    }
+
+    /// Check if a binary is available in PATH
+    fn is_binary_available(name: &str) -> bool {
+        std::process::Command::new(name)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
@@ -271,34 +296,101 @@ impl ToolRegistry {
     /// Only the requested detail level is computed, reducing memory usage and
     /// token consumption by up to 98% compared to loading all tool definitions.
     pub fn search_tools(&self, query: &str, detail: DetailLevel) -> Vec<MinimalToolInfo> {
-        let query_lower = query.to_lowercase();
+        if query.trim().is_empty() {
+            return self
+                .tools
+                .values()
+                .map(|tool| self.build_minimal_info(tool.schema(), detail))
+                .collect();
+        }
 
-        self.tools
+        let query_words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        let results: Vec<MinimalToolInfo> = self
+            .tools
             .values()
             .filter_map(|tool| {
                 let schema = tool.schema();
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
 
-                // Match against name, description, or aliases
+                // Token-based matching: check if any query word appears in name or description
+                let name_words: Vec<&str> = name_lower.split(&['_', '-', ' '][..]).collect();
+                let desc_words: Vec<&str> = desc_lower.split_whitespace().collect();
+
+                let matches = query_words.iter().any(|q_word| {
+                    // Match if query word appears in tool name words
+                    name_words.iter().any(|n_word| n_word.contains(q_word))
+                        // Or in description words
+                        || desc_words.iter().any(|d_word| d_word.contains(q_word))
+                });
+
+                // Also check aliases (using same tokenization as name/description)
                 let alias_match = schema
                     .aliases
                     .as_ref()
                     .map(|aliases| {
-                        aliases
-                            .iter()
-                            .any(|alias| alias.to_lowercase().contains(&query_lower))
+                        query_words.iter().any(|q_word| {
+                            aliases.iter().any(|alias| {
+                                let alias_lower = alias.to_lowercase();
+                                let alias_words: Vec<&str> =
+                                    alias_lower.split(&['_', '-', ' '][..]).collect();
+                                alias_words.iter().any(|a_word| a_word.contains(q_word))
+                            })
+                        })
                     })
                     .unwrap_or(false);
 
-                if name_lower.contains(&query_lower)
-                    || desc_lower.contains(&query_lower)
-                    || alias_match
-                {
+                if matches || alias_match {
                     Some(self.build_minimal_info(schema, detail))
                 } else {
                     None
                 }
+            })
+            .collect();
+
+        // Log if search returned no results (learning opportunity for new aliases)
+        if results.is_empty() && !query.trim().is_empty() {
+            let available_tools: Vec<&str> = self.tools.keys().map(|s| s.as_str()).collect();
+            tracing::debug!(
+                target: "arkavo_tools::search_miss",
+                query = %query,
+                query_words = ?query_words,
+                available_tools = ?available_tools,
+                tool_count = self.tools.len(),
+                "Tool search returned no results"
+            );
+        }
+
+        results
+    }
+
+    /// Get a list of tool names and descriptions for semantic search
+    pub fn get_tool_descriptions(&self) -> Vec<(String, String)> {
+        self.tools
+            .values()
+            .map(|tool| {
+                let schema = tool.schema();
+                (schema.name.clone(), schema.description.clone())
+            })
+            .collect()
+    }
+
+    /// Get tools by names (for semantic search results)
+    pub fn get_tools_by_names(
+        &self,
+        names: &[String],
+        detail: DetailLevel,
+    ) -> Vec<MinimalToolInfo> {
+        names
+            .iter()
+            .filter_map(|name| {
+                self.get(name)
+                    .map(|t| self.build_minimal_info(t.schema(), detail))
             })
             .collect()
     }
@@ -333,18 +425,21 @@ impl ToolRegistry {
                 category: None,
                 description: None,
                 schema: None,
+                aliases: None,
             },
             DetailLevel::NameAndDescription => MinimalToolInfo {
                 name: schema.name.clone(),
                 category: Some(Self::categorize_tool(&schema.name)),
                 description: Some(schema.description.clone()),
                 schema: None,
+                aliases: schema.aliases.clone(),
             },
             DetailLevel::FullSchema => MinimalToolInfo {
                 name: schema.name.clone(),
                 category: Some(Self::categorize_tool(&schema.name)),
                 description: Some(schema.description.clone()),
                 schema: Some(serde_json::to_value(&schema.parameters).unwrap_or_default()),
+                aliases: schema.aliases.clone(),
             },
         }
     }
@@ -410,7 +505,8 @@ mod tests {
     #[test]
     fn test_tool_retrieval() {
         let registry = ToolRegistry::new();
-        assert!(registry.get("sec_semgrep").is_some());
+        // Test retrieval with a tool that's always present
+        assert!(registry.get("get_agent_time").is_some());
         assert!(registry.get("nonexistent").is_none());
     }
 
@@ -425,8 +521,11 @@ mod tests {
     fn test_categorization() {
         let registry = ToolRegistry::new();
         let categories = registry.list_by_category();
-        assert!(categories.contains_key("Security"));
+        // Security tools are only registered if binaries are available
+        // Always check for GitHub tools which are always present
         assert!(categories.contains_key("GitHub"));
+        // Verify we have at least some categories
+        assert!(!categories.is_empty());
     }
 
     #[test]
@@ -464,9 +563,10 @@ mod tests {
     #[test]
     fn test_search_tools_name_and_description() {
         let registry = ToolRegistry::new();
-        let results = registry.search_tools("security", DetailLevel::NameAndDescription);
+        // Use "time" which is always available instead of "security" which depends on binaries
+        let results = registry.search_tools("time", DetailLevel::NameAndDescription);
 
-        assert!(!results.is_empty(), "Should find security-related tools");
+        assert!(!results.is_empty(), "Should find time-related tools");
 
         for tool in &results {
             assert!(tool.category.is_some(), "Should include category");
@@ -478,9 +578,10 @@ mod tests {
     #[test]
     fn test_search_tools_full_schema() {
         let registry = ToolRegistry::new();
-        let results = registry.search_tools("semgrep", DetailLevel::FullSchema);
+        // Use "filesystem" which is always available instead of "semgrep" which depends on binaries
+        let results = registry.search_tools("filesystem", DetailLevel::FullSchema);
 
-        assert!(!results.is_empty(), "Should find semgrep tool");
+        assert!(!results.is_empty(), "Should find filesystem tools");
 
         for tool in &results {
             assert!(tool.category.is_some(), "Should include category");

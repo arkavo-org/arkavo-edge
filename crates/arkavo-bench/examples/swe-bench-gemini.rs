@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let models = vec![
         ("models/gemini-flash-latest", "Gemini Flash Latest"),
-        ("models/gemini-2.5-pro", "Gemini 2.5 Pro"),
+        ("models/gemini-3-pro-preview", "Gemini 2.5 Pro"),
     ];
 
     for (model_id, model_name) in &models {
@@ -248,7 +248,7 @@ async fn generate_solution_streaming(
 fn estimate_cost(model: &str, tokens: usize) -> f64 {
     let (input_cost, output_cost) = match model {
         "models/gemini-flash-latest" => (0.000075, 0.0003),
-        "models/gemini-2.5-pro" => (0.00125, 0.005),
+        "models/gemini-3-pro-preview" => (0.00125, 0.005),
         _ => (0.0001, 0.0004),
     };
 

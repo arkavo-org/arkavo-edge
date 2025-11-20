@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::issue_router::RoutingDecision;
+pub use crate::issue_router::RoutingDecision;
 use crate::types::IssueEvent;
 use arkavo_protocol::agent_registry::AgentRegistry;
 use serde::{Deserialize, Serialize};

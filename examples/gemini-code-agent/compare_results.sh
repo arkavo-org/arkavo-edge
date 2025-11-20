@@ -123,7 +123,7 @@ run_task_with_model() {
 }
 
 run_comparison() {
-    local model1="${1:-gemini-2.5-pro}"
+    local model1="${1:-gemini-3-pro-preview}"
     local model2="${2:-claude-3-7-sonnet}"
     local iterations="${3:-3}"
 
@@ -245,7 +245,7 @@ Based on published pricing:
 
 | Model | Input Cost | Output Cost | Notes |
 |-------|-----------|-------------|-------|
-| gemini-2.5-pro | \$? / 1M tokens | \$? / 1M tokens | High quality |
+| gemini-3-pro-preview | \$? / 1M tokens | \$? / 1M tokens | High quality |
 | gemini-2.5-flash | \$0.30 / 1M tokens | \$2.50 / 1M tokens | Fast iteration |
 | claude-3-7-sonnet | \$? / 1M tokens | \$? / 1M tokens | Best SWE-bench |
 
@@ -328,7 +328,7 @@ Usage: $0 [command] [options]
 
 Commands:
   run <model1> <model2> [iterations]  - Run comparison between two models
-                                        Default: gemini-2.5-pro vs claude-3-7-sonnet
+                                        Default: gemini-3-pro-preview vs claude-3-7-sonnet
                                         iterations: default 3
 
   analyze                              - Analyze existing results in results/
@@ -340,16 +340,16 @@ Options:
 
 Examples:
   # Compare Gemini Pro vs Claude Sonnet
-  $0 run gemini-2.5-pro claude-3-7-sonnet
+  $0 run gemini-3-pro-preview claude-3-7-sonnet
 
   # Compare Gemini Flash vs Gemini Pro
-  $0 run gemini-flash-latest gemini-2.5-pro 5
+  $0 run gemini-flash-latest gemini-3-pro-preview 5
 
   # Analyze all existing results
   $0 analyze
 
   # Generate report from specific comparison
-  $0 report results/comparisons/gemini-2.5-pro_vs_claude-3-7-sonnet_20250107_143022
+  $0 report results/comparisons/gemini-3-pro-preview_vs_claude-3-7-sonnet_20250107_143022
 
 EOF
 }
@@ -357,7 +357,7 @@ EOF
 # Main command handling
 case "${1:-help}" in
     run)
-        run_comparison "${2:-gemini-2.5-pro}" "${3:-claude-3-7-sonnet}" "${4:-3}"
+        run_comparison "${2:-gemini-3-pro-preview}" "${3:-claude-3-7-sonnet}" "${4:-3}"
         ;;
     analyze)
         analyze_existing_results

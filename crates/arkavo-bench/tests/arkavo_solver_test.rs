@@ -67,6 +67,7 @@ fn test_bench_metrics_with_judgment() {
         passed: true,
         reason: Some("Quality gate passed".to_string()),
         issue_type: IssueType::None,
+        suggested_keywords: vec![],
     };
 
     metrics.set_judgment(&judgment, 2);

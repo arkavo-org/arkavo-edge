@@ -16,7 +16,7 @@ NC='\033[0m'
 AGENT_PORT=8346
 RESULTS_DIR="$(cd "$(dirname "$0")" && pwd)/results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BENCHMARK_MODEL="${GEMINI_MODEL:-gemini-2.5-pro}"
+BENCHMARK_MODEL="${GEMINI_MODEL:-gemini-3-pro-preview}"
 
 # Create results directory
 mkdir -p "$RESULTS_DIR"
@@ -285,7 +285,7 @@ Commands:
   compare <model>              - Compare with another model (runs same tasks)
 
 Options:
-  --model <model>              - Override model (default: gemini-2.5-pro)
+  --model <model>              - Override model (default: gemini-3-pro-preview)
 
 Examples:
   $0 swe-bench lite 20                    # 20 instances from SWE-bench Lite

@@ -8,13 +8,11 @@ repository.workspace = true
 description = "GitHub webhook orchestration and issue assignment for Arkavo agents"
 
 [dependencies]
-# Workspace dependencies
 anyhow.workspace = true
 tokio = { workspace = true, features = ["full"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-async-trait.workspace = true
 thiserror.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
@@ -22,11 +20,7 @@ uuid.workspace = true
 axum.workspace = true
 tower-http.workspace = true
 sha2.workspace = true
-bytes.workspace = true
-tower.workspace = true
 jsonwebtoken.workspace = true
-
-# Workspace crates
 arkavo-protocol = { path = "../arkavo-protocol", features = ["metrics"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }
@@ -36,16 +30,9 @@ arkavo-router = { path = "../arkavo-router", features = ["llama-cpp", "gemini"] 
 arkavo-llm = { path = "../arkavo-llm" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 arkavo-context = { path = "../arkavo-context" }
-arkavo-repo = { path = "../arkavo-repo" }
-arkavo-code-search = { path = "../arkavo-code-search" }
 arkavo-git = { path = "../arkavo-git" }
-
-# GitHub-specific dependencies
 hmac = "0.12"
 hex = "0.4"
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [lints]
 workspace = true

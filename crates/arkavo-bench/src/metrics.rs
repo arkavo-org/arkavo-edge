@@ -65,6 +65,7 @@ impl BenchMetrics {
             IssueType::InvalidParams => "invalid_params".to_string(),
             IssueType::Refusal => "refusal".to_string(),
             IssueType::OffTopic => "off_topic".to_string(),
+            IssueType::MissingToolUse => "missing_tool_use".to_string(),
             IssueType::None => "none".to_string(),
         }
     }

@@ -40,9 +40,11 @@ fn print_usage() {
     println!();
     println!("SUBCOMMANDS:");
     println!(
-        "    init [name]         Create a new AGENTS.md configuration file with agent purpose"
+        "    init [name]         Create a new .arkavo/AGENTS.md configuration file with agent purpose"
     );
-    println!("    run [config] [-v]   Run an agent (quiet by default)");
+    println!(
+        "    run [config] [-v]   Run an agent (quiet by default, looks for .arkavo/AGENTS.md)"
+    );
     println!("    help                Print this help message");
     println!();
     println!("OPTIONS:");
@@ -51,7 +53,14 @@ fn print_usage() {
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
 pub fn extract_agent_role() -> Option<String> {
-    if let Ok(content) = fs::read_to_string("AGENTS.md")
+    // Try .arkavo/AGENTS.md first, then fallback to root AGENTS.md
+    let config_path = if Path::new(".arkavo/AGENTS.md").exists() {
+        ".arkavo/AGENTS.md"
+    } else {
+        "AGENTS.md"
+    };
+
+    if let Ok(content) = fs::read_to_string(config_path)
         && let Ok(agents) = parse_agents_config(&content)
         && let Some(first_agent) = agents.first()
     {
@@ -61,13 +70,19 @@ pub fn extract_agent_role() -> Option<String> {
 }
 
 fn init_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let agents_path = Path::new("AGENTS.md");
-
-    if agents_path.exists() {
-        return Err("AGENTS.md already exists. Please rename or remove it first.".into());
+    // Create .arkavo directory if it doesn't exist
+    let arkavo_dir = Path::new(".arkavo");
+    if !arkavo_dir.exists() {
+        fs::create_dir_all(arkavo_dir)?;
     }
 
-    println!("Creating AGENTS.md configuration for agent '{name}'...");
+    let agents_path = arkavo_dir.join("AGENTS.md");
+
+    if agents_path.exists() {
+        return Err(".arkavo/AGENTS.md already exists. Please rename or remove it first.".into());
+    }
+
+    println!("Creating .arkavo/AGENTS.md configuration for agent '{name}'...");
 
     // Create a comprehensive template that matches the expected format
     let template = format!(
@@ -167,11 +182,11 @@ arkavo agent run
 Your agent will start and be available at the configured address."#
     );
 
-    fs::write(agents_path, template)?;
-    println!("✓ Created AGENTS.md template for agent '{name}'");
+    fs::write(&agents_path, template)?;
+    println!("✓ Created .arkavo/AGENTS.md template for agent '{name}'");
     println!();
     println!("Next steps:");
-    println!("1. Edit AGENTS.md to customize your agent's purpose and capabilities");
+    println!("1. Edit .arkavo/AGENTS.md to customize your agent's purpose and capabilities");
     println!("2. Configure the model and listen address as needed");
     println!("3. Add any required API keys");
     println!("4. Run your agent with: arkavo agent run");
@@ -184,21 +199,28 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
 
     // Parse arguments for --verbose flag and config path
-    let mut config_file = "AGENTS.md";
+    let mut config_file_arg: Option<&str> = None;
     let mut verbose = false;
 
     for arg in args {
         if arg == "--verbose" || arg == "-v" {
             verbose = true;
         } else if !arg.starts_with('-') {
-            config_file = arg;
+            config_file_arg = Some(arg);
         }
     }
 
-    let config_path = Path::new(config_file);
+    // Determine config path: explicit arg > .arkavo/AGENTS.md > AGENTS.md
+    let config_path = if let Some(explicit_path) = config_file_arg {
+        Path::new(explicit_path).to_path_buf()
+    } else if Path::new(".arkavo/AGENTS.md").exists() {
+        Path::new(".arkavo/AGENTS.md").to_path_buf()
+    } else {
+        Path::new("AGENTS.md").to_path_buf()
+    };
 
     // If AGENTS.md doesn't exist, use default configuration
-    let agents = if !config_path.exists() && config_file == "AGENTS.md" {
+    let agents = if !config_path.exists() && config_file_arg.is_none() {
         use std::process::Command;
 
         // Get machine hostname

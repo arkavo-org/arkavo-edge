@@ -69,6 +69,10 @@ extern "C" fn llama_log_callback_filtered(
                     {
                         return;
                     }
+                    // Skip context size info messages (we handle this ourselves)
+                    if str_slice.contains("n_ctx_per_seq") || str_slice.contains("n_ctx_train") {
+                        return;
+                    }
                 }
                 eprint!("{}", str_slice);
             }
@@ -97,6 +101,7 @@ pub fn set_debug_logging(enabled: bool) {
 #[cfg(not(target_env = "musl"))]
 pub struct LlamaModel {
     pub(crate) ptr: *mut ffi::llama_model,
+    path: String,
 }
 
 // SAFETY: llama.cpp's model objects are thread-safe for read operations
@@ -136,7 +141,10 @@ impl LlamaModel {
                 if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
                     eprintln!("✓ GPU model loaded successfully");
                 }
-                return Ok(Self { ptr: model });
+                return Ok(Self {
+                    ptr: model,
+                    path: path.to_string(),
+                });
             }
 
             // GPU failed - mark it and fall back to CPU
@@ -155,7 +163,10 @@ impl LlamaModel {
             Err("Failed to load model (CPU attempt failed)".to_string())
         } else {
             eprintln!("✓ CPU-only model loaded successfully");
-            Ok(Self { ptr: cpu_model })
+            Ok(Self {
+                ptr: cpu_model,
+                path: path.to_string(),
+            })
         }
     }
 
@@ -171,6 +182,23 @@ impl LlamaModel {
     pub fn get_bos_token(&self) -> i32 {
         let vocab = self.get_vocab();
         unsafe { ffi::llama_vocab_bos(vocab) }
+    }
+
+    pub fn get_trained_context_size(&self) -> u32 {
+        if self.ptr.is_null() {
+            eprintln!("⚠ Model pointer is null, returning default context size");
+            return 32768;
+        }
+        let ctx = unsafe { ffi::llama_n_ctx_train(self.ptr) };
+        if ctx <= 0 {
+            eprintln!("⚠ Invalid trained context size: {}, returning default", ctx);
+            return 32768;
+        }
+        ctx as u32
+    }
+
+    pub fn model_name(&self) -> &str {
+        self.path.split('/').next_back().unwrap_or(&self.path)
     }
 }
 
@@ -219,6 +247,37 @@ impl LlamaContext {
         // Try to create context, catch Vulkan crashes
         let gpu_status = GPU_STATUS.load(Ordering::Relaxed);
 
+        // Get trained context size from model metadata
+        let trained_ctx = model.get_trained_context_size();
+        let model_name = model.model_name();
+
+        // Scale context based on trained size to prevent memory exhaustion
+        // KV cache memory usage: ~460KB per token for typical small models
+        // On 16GB systems, safe limit is ~16K tokens (~7.5GB KV cache + model + system)
+        let safe_ctx = if !(512..=1048576).contains(&trained_ctx) {
+            eprintln!(
+                "⚠ Model '{}' reported unusual trained context size: {}, using 8192",
+                model_name, trained_ctx
+            );
+            8192
+        } else if trained_ctx <= 8192 {
+            // Small models: use full trained context
+            trained_ctx
+        } else if trained_ctx <= 32768 {
+            // Medium models: use 50% to save memory
+            trained_ctx / 2
+        } else {
+            // Large models: use 25%, capped at 16K to prevent OOM
+            (trained_ctx / 4).min(16384)
+        };
+
+        if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+            eprintln!(
+                "Model '{}': trained_ctx={}, using n_ctx={}",
+                model_name, trained_ctx, safe_ctx
+            );
+        }
+
         // Try GPU if it hasn't failed before
         if gpu_status != 2 {
             let mut gpu_params = unsafe { ffi::llama_context_default_params() };
@@ -237,8 +296,8 @@ impl LlamaContext {
                 gpu_params.n_batch = 512;
                 gpu_params.n_ubatch = 256;
             } else {
-                // Normal desktop/laptop: use larger context
-                gpu_params.n_ctx = 32768;
+                // Use validated model context size
+                gpu_params.n_ctx = safe_ctx;
                 gpu_params.n_batch = 2048;
                 gpu_params.n_ubatch = 512;
             }
@@ -287,8 +346,8 @@ impl LlamaContext {
             cpu_params.n_batch = 512;
             cpu_params.n_ubatch = 256;
         } else {
-            // Normal desktop/laptop: use larger context
-            cpu_params.n_ctx = 32768;
+            // Use validated model context size
+            cpu_params.n_ctx = safe_ctx;
             cpu_params.n_batch = 2048;
             cpu_params.n_ubatch = 512;
         }
