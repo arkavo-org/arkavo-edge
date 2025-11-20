@@ -22,24 +22,24 @@ pub fn load_api_keys_from_config() {
         current_dir = dir.parent().map(|p| p.to_path_buf());
     }
 
-    if let Some(path) = agents_file {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            for line in content.lines() {
-                let trimmed = line.trim();
+    if let Some(path) = agents_file
+        && let Ok(content) = std::fs::read_to_string(path)
+    {
+        for line in content.lines() {
+            let trimmed = line.trim();
 
-                // Look for API key assignments (e.g., GEMINI_API_KEY=...)
-                if trimmed.contains("API_KEY=") {
-                    if let Some((key, value)) = trimmed.split_once('=') {
-                        let key = key.trim();
-                        let value = value.trim();
-                        // Only set if not already set in environment
-                        if std::env::var(key).is_err() {
-                            // SAFETY: We're setting environment variables during initialization
-                            // before any threads are spawned, so this is safe
-                            unsafe {
-                                std::env::set_var(key, value);
-                            }
-                        }
+            // Look for API key assignments (e.g., GEMINI_API_KEY=...)
+            if trimmed.contains("API_KEY=")
+                && let Some((key, value)) = trimmed.split_once('=')
+            {
+                let key = key.trim();
+                let value = value.trim();
+                // Only set if not already set in environment
+                if std::env::var(key).is_err() {
+                    // SAFETY: We're setting environment variables during initialization
+                    // before any threads are spawned, so this is safe
+                    unsafe {
+                        std::env::set_var(key, value);
                     }
                 }
             }
@@ -165,10 +165,10 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     // Check preferred repos first
     for repo_name in &preferred_repos {
         let repo_path = cache.join(repo_name);
-        if repo_path.exists() {
-            if let Some(gguf) = find_gguf_in_dir(&repo_path) {
-                return Some(gguf);
-            }
+        if repo_path.exists()
+            && let Some(gguf) = find_gguf_in_dir(&repo_path)
+        {
+            return Some(gguf);
         }
     }
 
@@ -176,10 +176,10 @@ pub async fn find_any_gguf() -> Option<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && path.file_name()?.to_str()?.starts_with("models--") {
-                if let Some(gguf) = find_gguf_in_dir(&path) {
-                    return Some(gguf);
-                }
+            if path.is_dir() && path.file_name()?.to_str()?.starts_with("models--")
+                && let Some(gguf) = find_gguf_in_dir(&path)
+            {
+                return Some(gguf);
             }
         }
     }
