@@ -140,7 +140,7 @@ pub mod mdns {
 
             // Auto-connect to discovered agent
             let agent_id_clone = agent_id.clone();
-            let endpoint = format!("ws://{}:{}/ws", final_host, port);
+            let endpoint = format!("{}:{}", final_host, port);
             let telemetry_tx_clone = telemetry_tx.clone();
             let agent_connections_clone = agent_connections.clone();
 

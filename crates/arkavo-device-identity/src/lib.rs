@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+pub mod keypair;
 pub mod storage;
 
 #[derive(Debug, thiserror::Error)]

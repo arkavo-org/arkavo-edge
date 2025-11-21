@@ -23,6 +23,7 @@ pub mod oauth2;
 pub mod openrpc;
 pub mod push_notifications;
 pub mod rate_limit;
+pub mod registration;
 pub mod security;
 pub mod server;
 pub mod session_persistence;
@@ -49,6 +50,10 @@ pub use network::{NetworkError, get_service_ip};
 pub use openrpc::{generate_openrpc_schema, openrpc_to_json};
 pub use rate_limit::{
     IpRateLimiter, RateLimitConfig, RateLimitStatus, RateLimiter, spawn_cleanup_task,
+};
+pub use registration::{
+    ChallengeRequest, ChallengeResponse, RegistrationService, RegistrationStatus, VerifyRequest,
+    VerifyResponse,
 };
 pub use security::{AuthMethod, SecurityConfig, TlsSettings, TlsVersion};
 pub use server::A2aServer;
