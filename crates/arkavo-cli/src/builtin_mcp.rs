@@ -1,6 +1,7 @@
 use arkavo_mcp_core::Tool;
 use arkavo_mcp_runtime::tools::{HealthTool, OllamaConfigTool};
 use arkavo_protocol::mcp_registry::{McpConnectionTrait, Tool as RegistryTool};
+use log::{error, info};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,11 +52,11 @@ impl BuiltinMcpConnection {
         let test_connection =
             match crate::mcp_integration::McpConnection::new_in_process_async().await {
                 Ok(conn) => {
-                    eprintln!("Registered MCP test tools from arkavo-mcp-macos");
+                    info!("Registered MCP test tools from arkavo-mcp-macos");
                     Some(conn)
                 }
                 Err(e) => {
-                    eprintln!("Could not initialize MCP test tools: {e}");
+                    error!("Could not initialize MCP test tools: {e}");
                     None
                 }
             };

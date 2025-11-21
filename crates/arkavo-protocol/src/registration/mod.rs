@@ -243,7 +243,7 @@ mod tests {
             challenge_id: "nonexistent".to_string(),
             device_id: "test-device".to_string(),
             public_key: keypair.public_key().to_base64(),
-            signature: base64::encode(&[0u8; 64]),
+            signature: general_purpose::STANDARD.encode(&[0u8; 64]),
         };
 
         let result = service.verify_challenge(verify_request).await;

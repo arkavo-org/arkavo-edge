@@ -223,24 +223,21 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let agents = if !config_path.exists() && config_file_arg.is_none() {
         use std::process::Command;
 
-        // Get machine hostname
+        // Get machine hostname (strip .local suffix if present)
         let hostname = Command::new("hostname")
             .output()
             .ok()
             .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().trim_end_matches(".local").to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
-        // Get short git SHA if in a git repo
-        let short_sha = Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .output()
+        // Get current folder name
+        let folder_name = std::env::current_dir()
             .ok()
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|| "nogit".to_string());
+            .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "unknown".to_string());
 
-        let agent_name = format!("{hostname}-{short_sha}");
+        let agent_name = format!("{hostname}-{folder_name}");
 
         // Use random high port (49152-65535 range)
         use std::net::TcpListener;
@@ -261,54 +258,62 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             quiet: true,
         }]
     } else {
-        let config_content = fs::read_to_string(config_path)?;
-        let agents = agent::parse_agents_config(&config_content)?;
+        let config_content = fs::read_to_string(&config_path)?;
+        match agent::parse_agents_config(&config_content) {
+            Ok(agents) if !agents.is_empty() => agents,
+            _ => {
+                if verbose {
+                    eprintln!(
+                        "Warning: Could not parse {}, using default configuration",
+                        config_path.display()
+                    );
+                }
 
-        if agents.is_empty() {
-            return Err("No agent configurations found in file".into());
-        }
+                // Fall back to default config
+                use std::process::Command;
 
-        agents
-    };
+                // Get machine hostname (strip .local suffix if present)
+                let hostname = Command::new("hostname")
+                    .output()
+                    .ok()
+                    .and_then(|output| String::from_utf8(output.stdout).ok())
+                    .map(|s| s.trim().trim_end_matches(".local").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
 
-    // If multiple agents are defined, let user select which one to run
-    let mut agent_config = if agents.len() == 1 {
-        agents[0].clone()
-    } else {
-        if verbose {
-            println!("Multiple agents found in configuration:");
-            for (i, agent) in agents.iter().enumerate() {
-                println!("  {}: {} - {}", i + 1, agent.name, agent.purpose);
+                // Get current folder name
+                let folder_name = std::env::current_dir()
+                    .ok()
+                    .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                let agent_name = format!("{hostname}-{folder_name}");
+
+                use std::net::TcpListener;
+                let port = TcpListener::bind("127.0.0.1:0")
+                    .ok()
+                    .and_then(|listener| listener.local_addr().ok())
+                    .map(|addr| addr.port())
+                    .unwrap_or(8342);
+
+                vec![AgentConfig {
+                    name: agent_name,
+                    purpose: "A general-purpose AI agent".to_string(),
+                    model: String::new(),
+                    listen: format!("0.0.0.0:{port}"),
+                    mdns_enabled: true,
+                    mcp_servers: Vec::new(),
+                    api_keys: std::collections::HashMap::new(),
+                    quiet: true,
+                }]
             }
-            print!("Select agent to run (1-{}): ", agents.len());
         }
-
-        // Read user input
-        use std::io::{self, Write};
-        if verbose {
-            print!("Enter selection: ");
-            io::stdout().flush().unwrap();
-        }
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        let selection: usize = input
-            .trim()
-            .parse()
-            .map_err(|_| "Invalid selection. Please enter a number.")?;
-
-        if selection == 0 || selection > agents.len() {
-            return Err(format!(
-                "Selection {} is out of range. Please select 1-{}",
-                selection,
-                agents.len()
-            )
-            .into());
-        }
-
-        agents[selection - 1].clone()
     };
+
+    // Run the first agent (or fall back to single agent if only one)
+    let mut agent_config = agents
+        .into_iter()
+        .next()
+        .ok_or("No agent configuration available")?;
 
     // Set verbose mode - default is quiet (verbose = false)
     agent_config.quiet = !verbose;
@@ -318,17 +323,76 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Start the A2A server with the agent configuration
-    // Check if we're already in a runtime context
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            // Already in a runtime, use the existing handle
-            handle.block_on(async { agent::start_agent_server(&agent_config).await })
-        }
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(async { agent::start_agent_server(&agent_config).await }),
         Err(_) => {
-            // Not in a runtime, create one
             let runtime = tokio::runtime::Runtime::new()?;
             runtime.block_on(async { agent::start_agent_server(&agent_config).await })
         }
+    };
+
+    // If we get an "Invalid listen address" error, fall back to default config
+    if let Err(e) = result {
+        let err_msg = e.to_string();
+        if err_msg.contains("Invalid listen address") {
+            if verbose {
+                eprintln!("Warning: {}, using default configuration", err_msg);
+            }
+
+            // Create default config
+            use std::process::Command;
+
+            // Get machine hostname (strip .local suffix if present)
+            let hostname = Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|output| String::from_utf8(output.stdout).ok())
+                .map(|s| s.trim().trim_end_matches(".local").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            // Get current folder name
+            let folder_name = std::env::current_dir()
+                .ok()
+                .and_then(|path| path.file_name().map(|s| s.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "unknown".to_string());
+
+            use std::net::TcpListener;
+            let port = TcpListener::bind("127.0.0.1:0")
+                .ok()
+                .and_then(|listener| listener.local_addr().ok())
+                .map(|addr| addr.port())
+                .unwrap_or(8342);
+
+            let default_config = AgentConfig {
+                name: format!("{hostname}-{folder_name}"),
+                purpose: "A general-purpose AI agent".to_string(),
+                model: String::new(),
+                listen: format!("0.0.0.0:{port}"),
+                mdns_enabled: true,
+                mcp_servers: Vec::new(),
+                api_keys: std::collections::HashMap::new(),
+                quiet: !verbose,
+            };
+
+            if verbose {
+                println!("Starting default agent: {}", default_config.name);
+            }
+
+            // Try again with default config
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    handle.block_on(async { agent::start_agent_server(&default_config).await })
+                }
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(async { agent::start_agent_server(&default_config).await })
+                }
+            }
+        } else {
+            Err(e)
+        }
+    } else {
+        result
     }
 }
 
@@ -828,8 +892,8 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         use arkavo_device_identity::{get_or_create_device_id, keypair};
         use arkavo_registration::{AgentDescriptor, qr::display_qr};
 
-        // Get or create device ID
-        let device_id =
+        // Get or create device ID (needed for system initialization)
+        let _device_id =
             get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {}", e))?;
 
         // Get or create agent keypair
@@ -847,20 +911,23 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
             AgentKeypair::from_bytes(&keypair_bytes).expect("Invalid keypair bytes");
         let public_key = agent_keypair.public_key();
 
-        // Generate short-sha from device ID
-        let device_id_hex = hex::encode(device_id.as_bytes());
-        let short_sha = &device_id_hex[..7];
+        // Extract folder name (last part of agent name) for display
+        let folder_id = config
+            .name
+            .rsplit('-')
+            .next()
+            .unwrap_or("unknown")
+            .to_string();
 
         // Create agent descriptor
         let endpoint = format!("http://{}", config.listen);
         let mdns_service = if config.mdns_enabled {
-            Some(format!("{}._tcp.local.", config.name))
+            Some(format!("{}._a2a._tcp.local.", config.name))
         } else {
             None
         };
 
-        let descriptor =
-            AgentDescriptor::new(public_key, endpoint, mdns_service, short_sha.to_string());
+        let descriptor = AgentDescriptor::new(public_key, endpoint, mdns_service, folder_id);
 
         // Display QR code
         println!("\n{}", "=".repeat(60));
@@ -959,6 +1026,9 @@ fn broadcast_agent_mdns_sync(
         // Clone shutdown flag for discovery thread
         let shutdown_flag_discovery = shutdown_flag.clone();
 
+        // Clone our agent name to filter out self-discovery
+        let our_agent_name = config.name.clone();
+
         // Spawn a thread to handle discovered services
         let discovery_thread = thread::spawn(move || {
             use mdns_sd::ServiceEvent;
@@ -968,15 +1038,22 @@ fn broadcast_agent_mdns_sync(
                 match receiver.recv_timeout(Duration::from_secs(1)) {
                     Ok(event) => match event {
                         ServiceEvent::ServiceResolved(info) => {
-                            println!("Agent discovered: {}", info.get_fullname());
+                            // Filter out self-discovery
                             if let Some(agent_id) = info.get_property_val_str("agent_id") {
+                                if agent_id == our_agent_name {
+                                    // Skip - this is our own service
+                                    continue;
+                                }
+
+                                println!("Agent discovered: {}", info.get_fullname());
                                 println!("  - Agent ID: {agent_id}");
-                            }
-                            if let Some(purpose) = info.get_property_val_str("purpose") {
-                                println!("  - Purpose: {purpose}");
-                            }
-                            if let Some(addr) = info.get_addresses().iter().next() {
-                                println!("  - Address: {}:{}", addr, info.get_port());
+
+                                if let Some(purpose) = info.get_property_val_str("purpose") {
+                                    println!("  - Purpose: {purpose}");
+                                }
+                                if let Some(addr) = info.get_addresses().iter().next() {
+                                    println!("  - Address: {}:{}", addr, info.get_port());
+                                }
                             }
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
@@ -1017,7 +1094,7 @@ fn broadcast_agent_mdns_sync(
 
         // Create service info
         let service_type = "_a2a._tcp.local.";
-        let instance_name = format!("arkavo-agent-{}", config.name);
+        let instance_name = config.name.clone();
         let host_name = format!("{}.local.", config.name);
 
         let service_info = ServiceInfo::new(

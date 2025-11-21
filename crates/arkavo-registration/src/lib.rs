@@ -37,6 +37,16 @@ impl AgentDescriptor {
         }
     }
 
+    pub fn to_url(&self) -> String {
+        let mut url = format!("arkavo://agent?public_key={}", self.public_key);
+
+        if let Some(mdns) = &self.mdns_service {
+            url.push_str(&format!("&mdns_service={}", urlencoding::encode(mdns)));
+        }
+
+        url
+    }
+
     pub fn to_json(&self) -> Result<String, RegistrationError> {
         serde_json::to_string(self).map_err(|e| RegistrationError::InvalidPayload(e.to_string()))
     }
@@ -122,5 +132,38 @@ mod tests {
 
         let extracted_key = descriptor.public_key().unwrap();
         assert_eq!(public_key.to_bytes(), extracted_key.to_bytes());
+    }
+
+    #[test]
+    fn test_to_url() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let descriptor = AgentDescriptor::new(
+            public_key.clone(),
+            "http://localhost:8342".to_string(),
+            Some("agent-name._tcp.local.".to_string()),
+            "abc1234".to_string(),
+        );
+
+        let url = descriptor.to_url();
+        assert!(url.starts_with("arkavo://agent?public_key="));
+        assert!(url.contains("&mdns_service="));
+        assert!(url.contains("agent-name._tcp.local."));
+    }
+
+    #[test]
+    fn test_to_url_without_mdns() {
+        let keypair = AgentKeypair::generate();
+        let public_key = keypair.public_key();
+        let descriptor = AgentDescriptor::new(
+            public_key,
+            "http://localhost:8342".to_string(),
+            None,
+            "abc1234".to_string(),
+        );
+
+        let url = descriptor.to_url();
+        assert!(url.starts_with("arkavo://agent?public_key="));
+        assert!(!url.contains("&mdns_service="));
     }
 }

@@ -3,8 +3,8 @@ use qrcode::render::unicode;
 use qrcode::QrCode;
 
 pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
-    let json = descriptor.to_json()?;
-    let code = QrCode::new(json.as_bytes())
+    let url = descriptor.to_url();
+    let code = QrCode::new(url.as_bytes())
         .map_err(|e| RegistrationError::QrCodeGeneration(e.to_string()))?;
 
     let short_sha = &descriptor.agent_id_short_sha;
@@ -22,14 +22,18 @@ pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, Regist
 
     let lines: Vec<&str> = image.lines().collect();
     let height = lines.len();
-    let width = if height > 0 { lines[0].len() } else { 0 };
+    let width_chars = if height > 0 {
+        lines[0].chars().count()
+    } else {
+        0
+    };
 
-    if height < 5 || width < overlay.len() {
+    if height < 5 || width_chars < overlay.len() {
         return Ok(image);
     }
 
     let center_row = height / 2;
-    let center_col = (width - overlay.len()) / 2;
+    let center_col = (width_chars - overlay.len()) / 2;
 
     let mut modified_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 
@@ -80,7 +84,12 @@ mod tests {
 
         let qr_string = generate_qr_string(&descriptor).unwrap();
         assert!(!qr_string.is_empty());
+        // Short-SHA should be embedded in the visual QR code
         assert!(qr_string.contains("abc1234"));
+        // URL should be encoded in the QR code data
+        let url = descriptor.to_url();
+        assert!(url.contains("arkavo://agent?public_key="));
+        assert!(url.contains("arkavo._tcp.local."));
     }
 
     #[test]

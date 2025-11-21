@@ -2631,6 +2631,7 @@ mod tests {
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
         let result = impl_instance
             .task_request(
@@ -2683,6 +2684,7 @@ mod tests {
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
         let result = impl_instance
             .task_declare(
@@ -2738,6 +2740,7 @@ mod tests {
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
         let result = impl_instance.rpc_discover().await.unwrap();
 
@@ -2785,6 +2788,7 @@ mod tests {
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
         let result = impl_instance
             .agent_discover(Some(AgentDiscoverFilter {
@@ -2829,6 +2833,7 @@ mod tests {
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
             auth_backend: Arc::new(NoOpAuthBackend),
+            registration_service: Arc::new(crate::registration::RegistrationService::new()),
         };
 
         // First request should succeed
