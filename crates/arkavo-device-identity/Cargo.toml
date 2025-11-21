@@ -22,6 +22,8 @@ dirs = "5.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = ["Security_Credentials"], optional = true }
+hex = "0.4"
+dirs = "5.0"
 
 [features]
 default = []
