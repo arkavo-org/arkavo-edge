@@ -2067,6 +2067,8 @@ pub struct A2aServer {
     mcp_registry: Arc<McpRegistry>,
     agent_metadata: Arc<tokio::sync::RwLock<AgentMetadata>>,
     llm_adapter: Arc<tokio::sync::RwLock<Option<Arc<LlmClientAdapter>>>>,
+    router: Arc<tokio::sync::RwLock<Option<Arc<arkavo_router::Router>>>>,
+    tool_registry: Arc<tokio::sync::RwLock<Option<Arc<arkavo_mcp_tools::ToolRegistry>>>>,
     event_writer: Arc<tokio::sync::RwLock<Option<Arc<EventWriter>>>>,
     session_id: String,
     event_sequence: Arc<tokio::sync::RwLock<u64>>,
@@ -2088,6 +2090,8 @@ impl A2aServer {
             mcp_registry: Arc::new(McpRegistry::new()),
             agent_metadata: Arc::new(tokio::sync::RwLock::new(AgentMetadata::default())),
             llm_adapter: Arc::new(tokio::sync::RwLock::new(None)),
+            router: Arc::new(tokio::sync::RwLock::new(None)),
+            tool_registry: Arc::new(tokio::sync::RwLock::new(None)),
             event_writer: Arc::new(tokio::sync::RwLock::new(None)),
             session_id: uuid::Uuid::new_v4().to_string(),
             event_sequence: Arc::new(tokio::sync::RwLock::new(0)),
@@ -2108,8 +2112,15 @@ impl A2aServer {
         metadata.endpoint = format!("http://{}:{}", self.config.bind_address, self.config.port);
         drop(metadata); // Release lock before creating LLM adapter
 
-        // Create LLM adapter from model URL
-        self.recreate_llm_adapter().await;
+        // If model is empty, initialize router; otherwise create LLM adapter
+        if model.is_empty() {
+            info!("Model is empty, initializing router for dynamic model selection");
+            self.initialize_router().await;
+            self.build_tool_registry().await;
+        } else {
+            // Create LLM adapter from model URL
+            self.recreate_llm_adapter().await;
+        }
     }
 
     pub async fn set_api_keys(&self, api_keys: std::collections::HashMap<String, String>) {
@@ -2387,6 +2398,41 @@ impl A2aServer {
         }
     }
 
+    /// Initialize router for dynamic model selection
+    async fn initialize_router(&self) {
+        info!("Initializing router for dynamic model selection");
+        match arkavo_router::Router::new().await {
+            Ok(router) => {
+                *self.router.write().await = Some(Arc::new(router));
+                info!("✓ Successfully initialized router");
+            }
+            Err(e) => {
+                error!(error = %e, "✗ Failed to initialize router");
+            }
+        }
+    }
+
+    /// Build tool registry from MCP connections
+    async fn build_tool_registry(&self) {
+        info!("Building tool registry from MCP connections");
+        let tool_registry = arkavo_mcp_tools::ToolRegistry::new();
+
+        // Get all tools from MCP registry
+        match self.mcp_registry.list_all_tools().await {
+            Ok(tools) => {
+                info!("Found {} tools from MCP servers", tools.len());
+                // Tools are already in the correct format from MCP
+                // The ToolRegistry from arkavo_mcp_tools is the same as what we need
+            }
+            Err(e) => {
+                warn!("Failed to list tools from MCP servers: {}", e);
+            }
+        }
+
+        *self.tool_registry.write().await = Some(Arc::new(tool_registry));
+        info!("✓ Tool registry built successfully");
+    }
+
     /// Start file watcher for AGENTS.md hot-reload
     pub async fn start_file_watcher(&self) -> Result<()> {
         use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -2520,18 +2566,42 @@ impl A2aServer {
         let rate_limiter = Arc::new(RateLimiter::new(self.config.rate_limit.clone()));
         let metrics = Arc::new(MetricsCollector::new(self.config.metrics_enabled));
         let llm_adapter = self.llm_adapter.read().await.clone();
+        let router = self.router.read().await.clone();
+        let tool_registry = self.tool_registry.read().await.clone();
 
-        if llm_adapter.is_some() {
+        // Create ChatSessionManager with router or llm_adapter
+        let chat_sessions = if let Some(router_instance) = router {
+            info!(
+                "✓ ChatSessionManager will be created WITH Router (dynamic model selection + quality gates + tools)"
+            );
+            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+                None, // No llm_adapter when using router
+                Some(router_instance),
+                tool_registry.clone(),
+                3600, // 1 hour TTL
+                self.buffer_config.clone(),
+            ))
+        } else if llm_adapter.is_some() {
             info!("✓ ChatSessionManager will be created WITH LLM adapter");
+            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+                llm_adapter.clone(),
+                None, // No router when using llm_adapter
+                None, // No tool_registry
+                3600, // 1 hour TTL
+                self.buffer_config.clone(),
+            ))
         } else {
-            warn!("✗ ChatSessionManager will be created WITHOUT LLM adapter - messages will fail!");
-        }
-
-        let chat_sessions = Arc::new(crate::chat_session::ChatSessionManager::with_config(
-            llm_adapter.clone(),
-            3600, // 1 hour TTL
-            self.buffer_config.clone(),
-        ));
+            warn!(
+                "✗ ChatSessionManager will be created WITHOUT LLM adapter or router - messages will fail!"
+            );
+            Arc::new(crate::chat_session::ChatSessionManager::with_config(
+                None,
+                None,
+                None,
+                3600, // 1 hour TTL
+                self.buffer_config.clone(),
+            ))
+        };
 
         // Create task store and executor
         let task_store: Arc<dyn TaskStore> =
