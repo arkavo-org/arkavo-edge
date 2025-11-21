@@ -1678,7 +1678,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32000,
-                    format!("Registration error: {}", e),
+                    format!("Registration error: {e}"),
                     None::<()>,
                 ))
             }
@@ -1710,7 +1710,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32000,
-                    format!("Verification error: {}", e),
+                    format!("Verification error: {e}"),
                     None::<()>,
                 ))
             }
@@ -1746,7 +1746,7 @@ impl A2aRpcServer for A2aRpcImpl {
                 timer.error();
                 Err(ErrorObjectOwned::owned(
                     -32000,
-                    format!("Status error: {}", e),
+                    format!("Status error: {e}"),
                     None::<()>,
                 ))
             }

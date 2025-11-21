@@ -177,7 +177,6 @@ impl ChatSessionManager {
             let sessions = self.sessions.clone();
             let session_metrics = self.session_metrics.clone();
             let metrics_collector = self.metrics_collector.clone();
-            let buffer_config = self.buffer_config.clone();
 
             self.task_tracker
                 .spawn_named("session-handler-router", async move {
@@ -190,9 +189,6 @@ impl ChatSessionManager {
                         sessions,
                         session_metrics,
                         metrics_collector,
-                        inflight_deltas,
-                        backpressure_notify,
-                        buffer_config,
                     )
                     .await;
                 });
@@ -727,9 +723,6 @@ impl ChatSessionManager {
         sessions: Arc<RwLock<HashMap<String, ChatSessionState>>>,
         session_metrics: Arc<RwLock<HashMap<String, SessionMetrics>>>,
         metrics_collector: MetricsCollector,
-        _inflight_deltas: Arc<AtomicU64>,
-        _backpressure_notify: Arc<Notify>,
-        _buffer_config: BufferConfig,
     ) {
         let mut conversation_context: Vec<Message> = Vec::new();
         info!("Router-based session handler started");
@@ -756,103 +749,86 @@ impl ChatSessionManager {
                     let message_id = Uuid::new_v4().to_string();
                     session_observability::log_stream_start(&session_id, None);
 
-                    // Use router with quality gate (similar to process_with_tools)
-                    let max_iterations = 10; // Prevent infinite tool loops
-                    let mut iteration = 0;
-                    let mut final_response = String::new();
+                    let final_response;
 
-                    while iteration < max_iterations {
-                        iteration += 1;
+                    // Route with quality gate (max 3 retries with model escalation)
+                    match router
+                        .route_with_quality_gate(
+                            &user_message.content,
+                            conversation_context.clone(),
+                            tool_registry.as_deref(),
+                            3, // max_retries
+                        )
+                        .await
+                    {
+                        Ok(response) => {
+                            final_response = response.content.clone();
 
-                        // Route with quality gate (max 3 retries with model escalation)
-                        match router
-                            .route_with_quality_gate(
-                                &user_message.content,
-                                conversation_context.clone(),
-                                tool_registry.as_deref(),
-                                3, // max_retries
-                            )
-                            .await
-                        {
-                            Ok(response) => {
-                                final_response = response.content.clone();
+                            // Send text delta
+                            let text_delta = MessageDelta {
+                                session_id: session_id.clone(),
+                                message_id: message_id.clone(),
+                                sequence: 0,
+                                delta: MessageDeltaContent::Text {
+                                    text: response.content.clone(),
+                                },
+                                timestamp: chrono::Utc::now(),
+                            };
+                            let _ = delta_tx.send(text_delta);
 
-                                // Send text delta
-                                let text_delta = MessageDelta {
-                                    session_id: session_id.clone(),
-                                    message_id: message_id.clone(),
-                                    sequence: (iteration - 1) as u64,
-                                    delta: MessageDeltaContent::Text {
-                                        text: response.content.clone(),
-                                    },
-                                    timestamp: chrono::Utc::now(),
-                                };
-                                let _ = delta_tx.send(text_delta);
-
-                                // Check for tool calls
-                                if !response.tool_calls.is_empty() {
-                                    // Send tool call deltas
-                                    for (idx, tool_call) in response.tool_calls.iter().enumerate() {
-                                        let tool_delta = MessageDelta {
-                                            session_id: session_id.clone(),
-                                            message_id: message_id.clone(),
-                                            sequence: (iteration - 1) as u64 + idx as u64 + 1,
-                                            delta: MessageDeltaContent::ToolCall {
-                                                tool_call_id: tool_call.call_id.clone().unwrap_or_else(|| format!("call_{}", idx)),
-                                                name: Some(tool_call.tool_name.clone()),
-                                                args_json_fragment: tool_call.arguments.to_string(),
-                                                done: true,
-                                            },
-                                            timestamp: chrono::Utc::now(),
-                                        };
-                                        let _ = delta_tx.send(tool_delta);
-                                    }
-
-                                    // Add assistant message with tool calls to context
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content.clone(),
-                                        images: None,
-                                    });
-
-                                    // TODO: Execute tools and add results to context
-                                    // For now, we break to avoid infinite loops
-                                    warn!("Tool execution not yet implemented in router mode");
-                                    break;
-                                } else {
-                                    // No more tool calls, we're done
-                                    conversation_context.push(Message {
-                                        role: Role::Assistant,
-                                        content: response.content,
-                                        images: None,
-                                    });
-                                    break;
+                            // Check for tool calls
+                            if !response.tool_calls.is_empty() {
+                                // Send tool call deltas
+                                for (idx, tool_call) in response.tool_calls.iter().enumerate() {
+                                    let tool_delta = MessageDelta {
+                                        session_id: session_id.clone(),
+                                        message_id: message_id.clone(),
+                                        sequence: idx as u64 + 1,
+                                        delta: MessageDeltaContent::ToolCall {
+                                            tool_call_id: tool_call.call_id.clone().unwrap_or_else(|| format!("call_{idx}")),
+                                            name: Some(tool_call.tool_name.clone()),
+                                            args_json_fragment: tool_call.arguments.to_string(),
+                                            done: true,
+                                        },
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    let _ = delta_tx.send(tool_delta);
                                 }
-                            }
-                            Err(e) => {
-                                error!(error = %e, "Failed to route message with quality gate");
 
-                                // Record error metrics
-                                if let Some(metrics) = session_metrics.read().await.get(&session_id) {
-                                    metrics.record_error("router", &e.to_string());
-                                }
-                                metrics_collector.record_error("router");
-                                session_observability::log_session_error(&session_id, &e.to_string(), Some("ROUTER_ERROR"));
-
-                                // Send error delta
-                                let error_delta = MessageDelta {
-                                    session_id: session_id.clone(),
-                                    message_id: message_id.clone(),
-                                    sequence: iteration as u64,
-                                    delta: MessageDeltaContent::Error {
-                                        code: "ROUTER_ERROR".to_string(),
-                                        message: format!("Failed to route message: {e}"),
-                                    },
-                                    timestamp: chrono::Utc::now(),
-                                };
-                                let _ = delta_tx.send(error_delta);
-                                break;
+                                // TODO: Execute tools and add results to context
+                                warn!("Tool execution not yet implemented in router mode");
                             }
+
+                            // Add assistant message to context
+                            conversation_context.push(Message {
+                                role: Role::Assistant,
+                                content: response.content,
+                                images: None,
+                            });
+                        }
+                        Err(e) => {
+                            final_response = String::new();
+                            error!(error = %e, "Failed to route message with quality gate");
+
+                            // Record error metrics
+                            if let Some(metrics) = session_metrics.read().await.get(&session_id) {
+                                metrics.record_error("router", &e.to_string());
+                            }
+                            metrics_collector.record_error("router");
+                            session_observability::log_session_error(&session_id, &e.to_string(), Some("ROUTER_ERROR"));
+
+                            // Send error delta
+                            let error_delta = MessageDelta {
+                                session_id: session_id.clone(),
+                                message_id: message_id.clone(),
+                                sequence: 0,
+                                delta: MessageDeltaContent::Error {
+                                    code: "ROUTER_ERROR".to_string(),
+                                    message: format!("Failed to route message: {e}"),
+                                },
+                                timestamp: chrono::Utc::now(),
+                            };
+                            let _ = delta_tx.send(error_delta);
                         }
                     }
 
@@ -864,7 +840,7 @@ impl ChatSessionManager {
                     let end_delta = MessageDelta {
                         session_id: session_id.clone(),
                         message_id: message_id.clone(),
-                        sequence: iteration as u64 + 1,
+                        sequence: 1,
                         delta: MessageDeltaContent::StreamEnd {
                             reason: StreamEndReason::Complete,
                         },
@@ -881,11 +857,10 @@ impl ChatSessionManager {
                 // Check if session should be closed
                 else => {
                     // Channel closed, check if session is being closed
-                    if let Some(session_state) = sessions.read().await.get(&session_id) {
-                        if session_state.state == SessionState::Closing {
-                            info!("Router session handler exiting due to closure request");
-                            break;
-                        }
+                    if let Some(session_state) = sessions.read().await.get(&session_id)
+                        && session_state.state == SessionState::Closing {
+                        info!("Router session handler exiting due to closure request");
+                        break;
                     }
                     warn!("Message channel closed unexpectedly");
                     break;

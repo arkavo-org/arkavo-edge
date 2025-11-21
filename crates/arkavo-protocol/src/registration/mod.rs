@@ -43,6 +43,8 @@ impl RegistrationService {
         }
     }
 
+    /// # Panics
+    /// Panics if system time is before UNIX_EPOCH.
     pub async fn create_challenge(&self, request: ChallengeRequest) -> Result<ChallengeResponse> {
         let mut challenge_data = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut challenge_data);
@@ -63,8 +65,7 @@ impl RegistrationService {
         let mut challenges = self.challenges.write().await;
         challenges.insert(challenge_id.clone(), challenge);
 
-        self.cleanup_expired_challenges(&mut challenges, timestamp)
-            .await;
+        self.cleanup_expired_challenges(&mut challenges, timestamp);
 
         Ok(ChallengeResponse {
             challenge_id,
@@ -73,6 +74,8 @@ impl RegistrationService {
         })
     }
 
+    /// # Panics
+    /// Panics if system time is before UNIX_EPOCH.
     pub async fn verify_challenge(&self, request: VerifyRequest) -> Result<VerifyResponse> {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -94,14 +97,14 @@ impl RegistrationService {
 
         let public_key_bytes = general_purpose::STANDARD
             .decode(&request.public_key)
-            .map_err(|e| A2aError::InvalidRequest(format!("Invalid public key: {}", e)))?;
+            .map_err(|e| A2aError::InvalidRequest(format!("Invalid public key: {e}")))?;
 
         let signature_bytes = general_purpose::STANDARD
             .decode(&request.signature)
-            .map_err(|e| A2aError::InvalidRequest(format!("Invalid signature: {}", e)))?;
+            .map_err(|e| A2aError::InvalidRequest(format!("Invalid signature: {e}")))?;
 
         let public_key = arkavo_crypto::AgentPublicKey::from_bytes(&public_key_bytes)
-            .map_err(|e| A2aError::InvalidRequest(format!("Invalid public key format: {}", e)))?;
+            .map_err(|e| A2aError::InvalidRequest(format!("Invalid public key format: {e}")))?;
 
         public_key
             .verify(&challenge.data, &signature_bytes)
@@ -143,7 +146,7 @@ impl RegistrationService {
         }
     }
 
-    async fn cleanup_expired_challenges(
+    fn cleanup_expired_challenges(
         &self,
         challenges: &mut HashMap<String, Challenge>,
         current_time: u64,
