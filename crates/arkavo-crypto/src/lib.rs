@@ -76,7 +76,7 @@ impl AgentPublicKey {
     }
 
     pub fn to_base64(&self) -> String {
-        general_purpose::STANDARD.encode(&self.to_bytes())
+        general_purpose::STANDARD.encode(self.to_bytes())
     }
 
     pub fn from_base64(s: &str) -> Result<Self, CryptoError> {
