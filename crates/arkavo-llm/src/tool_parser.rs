@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -214,6 +215,125 @@ impl ToolParser {
 
         Ok(xml[start..end].trim().to_string())
     }
+
+    /// Parse fence-based tool calls from local model text responses
+    /// Format: ```tool_name\nkey: value\nkey2: value2\n```
+    /// Also handles: ```\ntool_name\nkey: value\n```
+    pub fn parse_fence(text: &str) -> Result<Vec<ParsedToolCall>, ToolParseError> {
+        let mut calls = Vec::new();
+
+        // Primary pattern: ```tool_name\n...content...\n```
+        // Tool names are lowercase with underscores, no spaces
+        let primary_pattern = Regex::new(r"```([a-z][a-z0-9_]*)\s*\n([\s\S]*?)```")
+            .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
+
+        for cap in primary_pattern.captures_iter(text) {
+            if let (Some(name), Some(content)) = (cap.get(1), cap.get(2)) {
+                let arguments = Self::parse_key_value_content(content.as_str())?;
+                calls.push(ParsedToolCall {
+                    tool_name: name.as_str().to_string(),
+                    arguments,
+                    call_id: None,
+                });
+            }
+        }
+
+        // Fallback pattern: ```\ntool_name\nkey: value\n```
+        // Some models put empty fence then tool name on next line
+        if calls.is_empty() {
+            let fallback_pattern = Regex::new(r"```\s*\n([a-z][a-z0-9_]*)\s*\n([\s\S]*?)```")
+                .map_err(|e| ToolParseError::InvalidFormat(format!("Regex error: {e}")))?;
+
+            for cap in fallback_pattern.captures_iter(text) {
+                if let (Some(name), Some(content)) = (cap.get(1), cap.get(2)) {
+                    let arguments = Self::parse_key_value_content(content.as_str())?;
+                    calls.push(ParsedToolCall {
+                        tool_name: name.as_str().to_string(),
+                        arguments,
+                        call_id: None,
+                    });
+                }
+            }
+        }
+
+        if calls.is_empty() {
+            return Err(ToolParseError::NoToolCalls);
+        }
+
+        Ok(calls)
+    }
+
+    /// Parse key: value pairs from fence content into JSON Value
+    fn parse_key_value_content(content: &str) -> Result<Value, ToolParseError> {
+        let mut map = Map::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            // Find first colon to split key: value
+            if let Some(colon_pos) = line.find(':') {
+                let key = line[..colon_pos].trim().to_string();
+                let value = line[colon_pos + 1..].trim();
+
+                // Skip empty keys
+                if key.is_empty() {
+                    continue;
+                }
+
+                // Try to parse as JSON value, fall back to string
+                let json_value = Self::infer_value_type(value);
+                map.insert(key, json_value);
+            }
+        }
+
+        Ok(Value::Object(map))
+    }
+
+    /// Infer JSON type from string value
+    fn infer_value_type(s: &str) -> Value {
+        // Empty string
+        if s.is_empty() {
+            return Value::String(String::new());
+        }
+
+        // Boolean
+        if s.eq_ignore_ascii_case("true") {
+            return Value::Bool(true);
+        }
+        if s.eq_ignore_ascii_case("false") {
+            return Value::Bool(false);
+        }
+
+        // Null
+        if s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("none") {
+            return Value::Null;
+        }
+
+        // Integer
+        if let Ok(n) = s.parse::<i64>() {
+            return Value::Number(n.into());
+        }
+
+        // Float
+        if let Ok(n) = s.parse::<f64>()
+            && let Some(num) = serde_json::Number::from_f64(n)
+        {
+            return Value::Number(num);
+        }
+
+        // JSON array or object (for complex values)
+        if ((s.starts_with('[') && s.ends_with(']')) || (s.starts_with('{') && s.ends_with('}')))
+            && let Ok(v) = serde_json::from_str(s)
+        {
+            return v;
+        }
+
+        // Default: string
+        Value::String(s.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -317,5 +437,147 @@ Some text after
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].tool_name, "tool1");
         assert_eq!(calls[1].tool_name, "tool2");
+    }
+
+    #[test]
+    fn test_parse_fence_simple() {
+        let text = r#"
+Let me check the weather for you.
+
+```get_weather
+location: Columbia, MD
+unit: fahrenheit
+```
+
+I'll get that information now.
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_weather");
+        assert_eq!(calls[0].arguments["location"], "Columbia, MD");
+        assert_eq!(calls[0].arguments["unit"], "fahrenheit");
+    }
+
+    #[test]
+    fn test_parse_fence_multiple_tools() {
+        let text = r#"
+```read_file
+path: /src/main.rs
+```
+
+```write_file
+path: /src/output.txt
+content: Hello World
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].tool_name, "read_file");
+        assert_eq!(calls[0].arguments["path"], "/src/main.rs");
+        assert_eq!(calls[1].tool_name, "write_file");
+        assert_eq!(calls[1].arguments["path"], "/src/output.txt");
+    }
+
+    #[test]
+    fn test_parse_fence_type_inference() {
+        let text = r#"
+```calculate
+x: 42
+y: 3.14
+enabled: true
+disabled: false
+nothing: null
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls[0].arguments["x"], 42);
+        assert_eq!(calls[0].arguments["y"], 3.14);
+        assert_eq!(calls[0].arguments["enabled"], true);
+        assert_eq!(calls[0].arguments["disabled"], false);
+        assert!(calls[0].arguments["nothing"].is_null());
+    }
+
+    #[test]
+    fn test_parse_fence_no_tools() {
+        let text = "Just a regular response without any tool calls.";
+        let result = ToolParser::parse_fence(text);
+        assert!(matches!(result, Err(ToolParseError::NoToolCalls)));
+    }
+
+    #[test]
+    fn test_parse_fence_with_json_array() {
+        let text = r#"
+```search_files
+patterns: ["*.rs", "*.toml"]
+path: /src
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls[0].tool_name, "search_files");
+        let patterns = calls[0].arguments["patterns"].as_array().unwrap();
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0], "*.rs");
+    }
+
+    #[test]
+    fn test_parse_fence_windows_path() {
+        // Windows paths have colons which could confuse the parser
+        let text = r#"
+```read_file
+path: C:\Users\test\file.txt
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        // First colon splits key, rest is value
+        assert_eq!(calls[0].arguments["path"], "C:\\Users\\test\\file.txt");
+    }
+
+    #[test]
+    fn test_infer_value_type() {
+        assert_eq!(ToolParser::infer_value_type("true"), Value::Bool(true));
+        assert_eq!(ToolParser::infer_value_type("TRUE"), Value::Bool(true));
+        assert_eq!(ToolParser::infer_value_type("false"), Value::Bool(false));
+        assert_eq!(ToolParser::infer_value_type("42"), json!(42));
+        assert_eq!(ToolParser::infer_value_type("3.14"), json!(3.14));
+        assert_eq!(ToolParser::infer_value_type("hello world"), json!("hello world"));
+        assert_eq!(ToolParser::infer_value_type("null"), Value::Null);
+        assert_eq!(ToolParser::infer_value_type("none"), Value::Null);
+    }
+
+    #[test]
+    fn test_parse_fence_fallback_pattern() {
+        // Model output where tool name is on separate line
+        let text = r#"
+```
+get_weather
+location: New York
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_weather");
+        assert_eq!(calls[0].arguments["location"], "New York");
+    }
+
+    #[test]
+    fn test_parse_fence_with_empty_first_fence() {
+        // Model output with empty fence before actual content
+        let text = r#"
+```
+```
+get_weather
+location: New York
+```
+"#;
+
+        let calls = ToolParser::parse_fence(text).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].tool_name, "get_weather");
     }
 }

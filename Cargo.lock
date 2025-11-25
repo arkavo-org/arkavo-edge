@@ -636,6 +636,7 @@ dependencies = [
  "intel-mkl-src",
  "log",
  "rand 0.8.5",
+ "regex",
  "reqwest",
  "scopeguard",
  "serde",

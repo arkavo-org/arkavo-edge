@@ -120,6 +120,7 @@ impl LlmClient {
                 max_tokens,
                 seed,
                 debug: false,
+                ..Default::default()
             };
             let provider = LlamaCppProvider::new_with_config(
                 model_name.to_string(),
