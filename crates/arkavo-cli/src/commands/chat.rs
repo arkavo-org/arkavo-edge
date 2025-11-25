@@ -1767,7 +1767,25 @@ fn handle_tool_calls_in_response(
                             .unwrap_or_else(|_e| tool_result.to_string())
                     };
 
-                    tool_results.push((tool_name.to_string(), result_text));
+                    // Truncate large results to prevent exceeding LLM token limits
+                    const MAX_RESULT_CHARS: usize = 200_000;
+                    let final_result = if result_text.len() > MAX_RESULT_CHARS {
+                        let truncated = &result_text[..MAX_RESULT_CHARS];
+                        let break_point = truncated
+                            .rfind('\n')
+                            .or_else(|| truncated.rfind(' '))
+                            .unwrap_or(MAX_RESULT_CHARS);
+                        format!(
+                            "{}...\n[OUTPUT TRUNCATED - {} chars total, showing first {}]",
+                            &result_text[..break_point],
+                            result_text.len(),
+                            break_point
+                        )
+                    } else {
+                        result_text
+                    };
+
+                    tool_results.push((tool_name.to_string(), final_result));
                 }
                 Err(e) => {
                     tool_results.push((tool_name.to_string(), format!("Error: {e}")));

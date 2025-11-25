@@ -11,19 +11,15 @@ fn main() {
         std::fs::write(out_path.join("bindings.rs"), "// Dummy bindings for musl\n").unwrap();
         return;
     }
-    // Track the actual header file locations (relative to crate root)
+    // Track only key files that indicate real source changes
+    // Avoid tracking directories as CMake build artifacts trigger false rebuilds
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/CMakeLists.txt");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/mtmd.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/clip.h");
-
-    // Track key source directories
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/src");
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/ggml");
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd");
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/CMakeLists.txt");
-
-    // Track this build script itself
-    println!("cargo:rerun-if-changed=build.rs");
+    // Track git HEAD to detect submodule updates
+    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/.git/HEAD");
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
 
