@@ -2,6 +2,18 @@ use arkavo_mcp_tools::registry::{MinimalToolInfo, ToolInfo};
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 
+/// Tool call format for local models
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LocalToolFormat {
+    /// XML format: <tool_call><name>...</name><arguments>...</arguments></tool_call>
+    Xml,
+    /// JSON format: {"tool_call": {"name": "...", "arguments": {...}}}
+    Json,
+    /// Fence format: ```tool_name\nkey: value\n``` (most reliable for small models)
+    #[default]
+    Fence,
+}
+
 /// Tool definition in provider-agnostic format
 /// Can be serialized to any provider's specific format
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -237,6 +249,69 @@ impl McpConverter {
             .replace('"', "&quot;")
             .replace('\'', "&apos;")
     }
+
+    /// Convert MCP ToolInfo to fence-based prompt format for small models
+    /// Uses markdown code fence with tool name as language tag and simple key: value pairs
+    pub fn to_fence_prompt(tools: &[ToolInfo]) -> String {
+        if tools.is_empty() {
+            return String::new();
+        }
+
+        let mut prompt = String::new();
+
+        // Be very direct and imperative for small models
+        prompt.push_str("\n\nYou have tools. Call them using code fences.\n\n");
+        prompt.push_str("Tools:\n");
+
+        for tool in tools {
+            let _ = writeln!(prompt, "- {}: {}", tool.name, tool.description);
+        }
+
+        prompt.push_str("\nFormat:\n```<tool>\n<param>: <value>\n```\n\n");
+
+        // Add concrete examples for each tool
+        prompt.push_str("Examples:\n");
+        for tool in tools.iter().take(2) {
+            let _ = writeln!(prompt, "```{}", tool.name);
+            if let Some(props) = tool.schema.get("properties").and_then(|p| p.as_object()) {
+                let required: Vec<&str> = tool
+                    .schema
+                    .get("required")
+                    .and_then(|r| r.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                    .unwrap_or_default();
+
+                // Show required params with realistic example values
+                for (name, _prop) in props.iter() {
+                    if required.contains(&name.as_str()) {
+                        let example = match name.as_str() {
+                            "location" => "Tokyo",
+                            "path" | "file_path" => "/tmp/file.txt",
+                            "query" => "search term",
+                            "url" => "https://example.com",
+                            "command" => "ls -la",
+                            _ => "value",
+                        };
+                        let _ = writeln!(prompt, "{name}: {example}");
+                    }
+                }
+            }
+            prompt.push_str("```\n");
+        }
+
+        prompt.push_str("\nRespond with ONLY the code fence when using a tool.\n");
+
+        prompt
+    }
+
+    /// Convert MCP ToolInfo to prompt format based on specified format
+    pub fn to_local_prompt(tools: &[ToolInfo], format: LocalToolFormat) -> String {
+        match format {
+            LocalToolFormat::Xml => Self::to_xml_prompt(tools),
+            LocalToolFormat::Json => Self::to_json_prompt(tools),
+            LocalToolFormat::Fence => Self::to_fence_prompt(tools),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -366,5 +441,61 @@ mod tests {
 
         let xml = McpConverter::to_xml_prompt(&[tool]);
         assert!(xml.contains("&lt;special&gt; &amp; &quot;chars&quot;"));
+    }
+
+    #[test]
+    fn test_to_fence_prompt() {
+        let tools = vec![create_test_tool()];
+        let prompt = McpConverter::to_fence_prompt(&tools);
+
+        assert!(prompt.contains("- test_tool:"));
+        assert!(prompt.contains("A test tool for unit tests"));
+        assert!(prompt.contains("```<tool>"));
+        assert!(prompt.contains("Examples:"));
+        assert!(prompt.contains("```test_tool"));
+    }
+
+    #[test]
+    fn test_to_fence_prompt_empty() {
+        let tools: Vec<ToolInfo> = vec![];
+        assert!(McpConverter::to_fence_prompt(&tools).is_empty());
+    }
+
+    #[test]
+    fn test_to_fence_prompt_shows_example() {
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Test tool".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "A location param"},
+                    "optional_param": {"type": "string", "description": "An optional param"}
+                },
+                "required": ["location"]
+            }),
+        };
+
+        let prompt = McpConverter::to_fence_prompt(&[tool]);
+        // Should contain the tool name as example
+        assert!(prompt.contains("```test"));
+        // Should contain realistic example value for location
+        assert!(prompt.contains("location: Tokyo"));
+    }
+
+    #[test]
+    fn test_to_local_prompt_format_selection() {
+        let tools = vec![create_test_tool()];
+
+        let xml_prompt = McpConverter::to_local_prompt(&tools, LocalToolFormat::Xml);
+        assert!(xml_prompt.contains("<tools>"));
+
+        let fence_prompt = McpConverter::to_local_prompt(&tools, LocalToolFormat::Fence);
+        assert!(fence_prompt.contains("```<tool>"));
+        assert!(fence_prompt.contains("Examples:"));
+
+        let json_prompt = McpConverter::to_local_prompt(&tools, LocalToolFormat::Json);
+        assert!(json_prompt.contains("tool_call"));
     }
 }

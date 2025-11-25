@@ -15,7 +15,7 @@ use tokio_stream::{Stream, wrappers::UnboundedReceiverStream};
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use crate::llamacpp_streaming::{StreamingConfig, generate_tokens};
-use crate::mcp_converter::McpConverter;
+use crate::mcp_converter::{LocalToolFormat, McpConverter};
 
 #[derive(Debug, Clone)]
 pub struct SamplingConfig {
@@ -25,6 +25,8 @@ pub struct SamplingConfig {
     pub max_tokens: u32,
     pub seed: u32,
     pub debug: bool,
+    /// Tool call format for local models (default: Fence for best small model reliability)
+    pub tool_format: LocalToolFormat,
 }
 
 impl Default for SamplingConfig {
@@ -36,6 +38,7 @@ impl Default for SamplingConfig {
             max_tokens: 4096,
             seed: 42,
             debug: false,
+            tool_format: LocalToolFormat::Fence,
         }
     }
 }
@@ -332,7 +335,7 @@ impl Provider for LlamaCppProvider {
                 })
                 .collect();
 
-            McpConverter::to_xml_prompt(&tool_infos)
+            McpConverter::to_local_prompt(&tool_infos, self.config.tool_format)
         } else {
             String::new()
         };
@@ -366,7 +369,18 @@ impl Provider for LlamaCppProvider {
             .await?;
 
         let tool_calls = if tools.is_some() {
-            ToolParser::parse_xml(&content).unwrap_or_default()
+            // Try configured format first, then fallback chain
+            match self.config.tool_format {
+                LocalToolFormat::Fence => ToolParser::parse_fence(&content)
+                    .or_else(|_| ToolParser::parse_xml(&content))
+                    .unwrap_or_default(),
+                LocalToolFormat::Xml => ToolParser::parse_xml(&content)
+                    .or_else(|_| ToolParser::parse_fence(&content))
+                    .unwrap_or_default(),
+                LocalToolFormat::Json => ToolParser::parse_json(&content)
+                    .or_else(|_| ToolParser::parse_fence(&content))
+                    .unwrap_or_default(),
+            }
         } else {
             Vec::new()
         };
