@@ -53,8 +53,7 @@ mod tests {
                                     return Some(gguf_path.to_string_lossy().to_string());
                                 }
                                 // Also try Q4_K_M variant
-                                let gguf_path =
-                                    snapshot.path().join("gemma-3-270m-it-Q4_K_M.gguf");
+                                let gguf_path = snapshot.path().join("gemma-3-270m-it-Q4_K_M.gguf");
                                 if gguf_path.exists() {
                                     return Some(gguf_path.to_string_lossy().to_string());
                                 }
@@ -89,13 +88,9 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new_with_config(
-            "gemma-3-270m".to_string(),
-            model_path,
-            None,
-            config,
-        )
-        .expect("Failed to load model");
+        let provider =
+            LlamaCppProvider::new_with_config("gemma-3-270m".to_string(), model_path, None, config)
+                .expect("Failed to load model");
 
         let tools: serde_json::Value = serde_json::from_str(TEST_TOOLS).unwrap();
 
@@ -152,13 +147,9 @@ mod tests {
             ..Default::default()
         };
 
-        let provider = LlamaCppProvider::new_with_config(
-            "gemma-3-270m".to_string(),
-            model_path,
-            None,
-            config,
-        )
-        .expect("Failed to load model");
+        let provider =
+            LlamaCppProvider::new_with_config("gemma-3-270m".to_string(), model_path, None, config)
+                .expect("Failed to load model");
 
         let tools: serde_json::Value = serde_json::from_str(TEST_TOOLS).unwrap();
 

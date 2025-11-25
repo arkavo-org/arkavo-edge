@@ -544,7 +544,10 @@ path: C:\Users\test\file.txt
         assert_eq!(ToolParser::infer_value_type("false"), Value::Bool(false));
         assert_eq!(ToolParser::infer_value_type("42"), json!(42));
         assert_eq!(ToolParser::infer_value_type("3.14"), json!(3.14));
-        assert_eq!(ToolParser::infer_value_type("hello world"), json!("hello world"));
+        assert_eq!(
+            ToolParser::infer_value_type("hello world"),
+            json!("hello world")
+        );
         assert_eq!(ToolParser::infer_value_type("null"), Value::Null);
         assert_eq!(ToolParser::infer_value_type("none"), Value::Null);
     }
