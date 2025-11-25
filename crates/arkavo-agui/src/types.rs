@@ -353,6 +353,13 @@ pub enum MessageDeltaContent {
         args_json_fragment: String,
         done: bool,
     },
+    ToolResult {
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+        content: String,
+        #[serde(rename = "isError")]
+        is_error: bool,
+    },
 }
 
 /// JSON Patch operation as per RFC 6902

@@ -4,7 +4,9 @@ use crate::error::{A2aError, Result};
 use crate::types::{
     ChatCapabilities, ChatSession, MessageDelta, MessageDeltaContent, StreamEndReason, UserMessage,
 };
-use arkavo_llm::{DeltaType, LlmClientAdapter, Message, Role, StreamLlmModel};
+use arkavo_llm::{
+    DeltaType, LlmClientAdapter, Message, Role, StreamLlmModel, ToolExecutionResult, ToolExecutor,
+};
 use arkavo_mcp_tools::ToolRegistry;
 use arkavo_observability::{
     metrics::MetricsCollector,
@@ -299,6 +301,7 @@ impl ChatSessionManager {
                         let delta_type = match &delta.delta {
                             MessageDeltaContent::Text { .. } => "text",
                             MessageDeltaContent::ToolCall { .. } => "tool_call",
+                            MessageDeltaContent::ToolResult { .. } => "tool_result",
                             MessageDeltaContent::Error { .. } => "error",
                             MessageDeltaContent::StreamEnd { .. } => "stream_end",
                         };
@@ -749,7 +752,7 @@ impl ChatSessionManager {
                     let message_id = Uuid::new_v4().to_string();
                     session_observability::log_stream_start(&session_id, None);
 
-                    let final_response;
+                    let mut final_response;
 
                     // Route with quality gate (max 3 retries with model escalation)
                     match router
@@ -776,7 +779,7 @@ impl ChatSessionManager {
                             };
                             let _ = delta_tx.send(text_delta);
 
-                            // Check for tool calls
+                            // Check for tool calls and execute them
                             if !response.tool_calls.is_empty() {
                                 // Send tool call deltas
                                 for (idx, tool_call) in response.tool_calls.iter().enumerate() {
@@ -795,16 +798,96 @@ impl ChatSessionManager {
                                     let _ = delta_tx.send(tool_delta);
                                 }
 
-                                // TODO: Execute tools and add results to context
-                                warn!("Tool execution not yet implemented in router mode");
-                            }
+                                // Execute tools if we have a registry
+                                if let Some(ref registry) = tool_registry {
+                                    let executor = ToolExecutor::with_registry(registry.clone());
+                                    let tool_results = executor.execute_batch(&response.tool_calls).await;
 
-                            // Add assistant message to context
-                            conversation_context.push(Message {
-                                role: Role::Assistant,
-                                content: response.content,
-                                images: None,
-                            });
+                                    // Add assistant message with tool calls to context
+                                    conversation_context.push(Message {
+                                        role: Role::Assistant,
+                                        content: response.content.clone(),
+                                        images: None,
+                                    });
+
+                                    // Format and add tool results to context as user message
+                                    let results_message = format_tool_results(&tool_results);
+                                    conversation_context.push(Message {
+                                        role: Role::User,
+                                        content: results_message,
+                                        images: None,
+                                    });
+
+                                    // Send tool result deltas
+                                    for (idx, result) in tool_results.iter().enumerate() {
+                                        let result_delta = MessageDelta {
+                                            session_id: session_id.clone(),
+                                            message_id: message_id.clone(),
+                                            sequence: (response.tool_calls.len() + idx + 1) as u64,
+                                            delta: MessageDeltaContent::ToolResult {
+                                                tool_call_id: result.call_id.clone().unwrap_or_else(|| format!("call_{idx}")),
+                                                content: serde_json::to_string(&result.result).unwrap_or_default(),
+                                                is_error: !result.success,
+                                            },
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = delta_tx.send(result_delta);
+                                    }
+
+                                    // Route again to get final response with tool results
+                                    match router
+                                        .route_with_quality_gate(
+                                            &user_message.content,
+                                            conversation_context.clone(),
+                                            tool_registry.as_deref(),
+                                            3,
+                                        )
+                                        .await
+                                    {
+                                        Ok(final_resp) => {
+                                            final_response = final_resp.content.clone();
+
+                                            // Send final text delta
+                                            let final_delta = MessageDelta {
+                                                session_id: session_id.clone(),
+                                                message_id: message_id.clone(),
+                                                sequence: (response.tool_calls.len() + tool_results.len() + 1) as u64,
+                                                delta: MessageDeltaContent::Text {
+                                                    text: final_resp.content.clone(),
+                                                },
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            let _ = delta_tx.send(final_delta);
+
+                                            // Add final assistant response to context
+                                            conversation_context.push(Message {
+                                                role: Role::Assistant,
+                                                content: final_resp.content,
+                                                images: None,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            error!(error = %e, "Failed to get final response after tool execution");
+                                            // Keep the original response as final
+                                        }
+                                    }
+                                } else {
+                                    warn!("Tool calls received but no tool registry available");
+                                    // Add assistant message to context without tool execution
+                                    conversation_context.push(Message {
+                                        role: Role::Assistant,
+                                        content: response.content,
+                                        images: None,
+                                    });
+                                }
+                            } else {
+                                // No tool calls - add assistant message to context
+                                conversation_context.push(Message {
+                                    role: Role::Assistant,
+                                    content: response.content,
+                                    images: None,
+                                });
+                            }
                         }
                         Err(e) => {
                             final_response = String::new();
@@ -918,6 +1001,48 @@ impl ChatSessionManager {
 
         info!("Chat session manager shutdown complete");
     }
+}
+
+/// Maximum characters per tool result to prevent exceeding LLM token limits
+const MAX_TOOL_RESULT_CHARS: usize = 200_000;
+
+/// Format tool execution results for adding to conversation context
+fn format_tool_results(results: &[ToolExecutionResult]) -> String {
+    use std::fmt::Write;
+
+    let mut formatted = String::from("Tool execution results:\n\n");
+
+    for result in results {
+        let _ = writeln!(formatted, "Tool: {}", result.tool_name);
+        if result.success {
+            let result_json =
+                serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
+
+            // Truncate large results to prevent exceeding LLM token limits
+            if result_json.len() > MAX_TOOL_RESULT_CHARS {
+                let truncated = &result_json[..MAX_TOOL_RESULT_CHARS];
+                let break_point = truncated
+                    .rfind('\n')
+                    .or_else(|| truncated.rfind(' '))
+                    .unwrap_or(MAX_TOOL_RESULT_CHARS);
+                let _ = writeln!(
+                    formatted,
+                    "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED]",
+                    result_json.len(),
+                    break_point,
+                    &result_json[..break_point]
+                );
+            } else {
+                let _ = writeln!(formatted, "Result: {result_json}");
+            }
+        } else {
+            let error_msg = result.error.as_deref().unwrap_or("Unknown error");
+            let _ = writeln!(formatted, "Error: {error_msg}");
+        }
+        formatted.push('\n');
+    }
+
+    formatted
 }
 
 #[cfg(test)]

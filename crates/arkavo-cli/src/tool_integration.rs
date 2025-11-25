@@ -277,6 +277,10 @@ pub async fn process_with_tools(
     }
 }
 
+/// Maximum characters per tool result to prevent exceeding LLM token limits
+/// Gemini has 1M token limit (~4 chars/token), so 200K chars is ~50K tokens per result
+const MAX_TOOL_RESULT_CHARS: usize = 200_000;
+
 #[cfg(all(unix, feature = "mcp-tools"))]
 fn format_tool_results(results: &[ToolExecutionResult]) -> String {
     use std::fmt::Write;
@@ -288,7 +292,25 @@ fn format_tool_results(results: &[ToolExecutionResult]) -> String {
         if result.success {
             let result_json =
                 serde_json::to_string_pretty(&result.result).unwrap_or_else(|_| "{}".to_string());
-            let _ = writeln!(formatted, "Result: {result_json}");
+
+            // Truncate large results to prevent exceeding LLM token limits
+            if result_json.len() > MAX_TOOL_RESULT_CHARS {
+                let truncated = &result_json[..MAX_TOOL_RESULT_CHARS];
+                // Find a good break point (newline or space)
+                let break_point = truncated
+                    .rfind('\n')
+                    .or_else(|| truncated.rfind(' '))
+                    .unwrap_or(MAX_TOOL_RESULT_CHARS);
+                let _ = writeln!(
+                    formatted,
+                    "Result (truncated from {} to {} chars):\n{}...\n[OUTPUT TRUNCATED - result too large for LLM context]",
+                    result_json.len(),
+                    break_point,
+                    &result_json[..break_point]
+                );
+            } else {
+                let _ = writeln!(formatted, "Result: {result_json}");
+            }
         } else {
             let error_msg = result.error.as_deref().unwrap_or("Unknown error");
             let _ = writeln!(formatted, "Error: {error_msg}");

@@ -560,6 +560,15 @@ pub enum MessageDeltaContent {
         /// Whether this completes the tool call
         done: bool,
     },
+    /// Tool execution result
+    ToolResult {
+        /// Tool call ID this result corresponds to
+        tool_call_id: String,
+        /// JSON content of the result
+        content: String,
+        /// Whether the tool execution resulted in an error
+        is_error: bool,
+    },
     /// Stream ended
     StreamEnd {
         /// Reason for ending

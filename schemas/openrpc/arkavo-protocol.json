@@ -393,6 +393,36 @@
                 "type": "object"
               },
               {
+                "description": "Tool execution result",
+                "properties": {
+                  "content": {
+                    "description": "JSON content of the result",
+                    "type": "string"
+                  },
+                  "is_error": {
+                    "description": "Whether the tool execution resulted in an error",
+                    "type": "boolean"
+                  },
+                  "tool_call_id": {
+                    "description": "Tool call ID this result corresponds to",
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "toolResult"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "is_error",
+                  "tool_call_id",
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
                 "description": "Stream ended",
                 "properties": {
                   "reason": {
@@ -622,6 +652,36 @@
             "required": [
               "args_json_fragment",
               "done",
+              "tool_call_id",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Tool execution result",
+            "properties": {
+              "content": {
+                "description": "JSON content of the result",
+                "type": "string"
+              },
+              "is_error": {
+                "description": "Whether the tool execution resulted in an error",
+                "type": "boolean"
+              },
+              "tool_call_id": {
+                "description": "Tool call ID this result corresponds to",
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "toolResult"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "content",
+              "is_error",
               "tool_call_id",
               "type"
             ],
@@ -1844,7 +1904,7 @@
       "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     "title": "Arkavo A2A Transport Protocol",
-    "version": "0.37.0"
+    "version": "0.41.5"
   },
   "methods": [
     {

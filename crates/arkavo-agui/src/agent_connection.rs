@@ -539,6 +539,15 @@ impl AgentConnection {
                                 text: format!("[Error {code}] {message}"),
                             }
                         }
+                        MessageDeltaContent::ToolResult {
+                            tool_call_id,
+                            content,
+                            is_error,
+                        } => crate::types::MessageDeltaContent::ToolResult {
+                            tool_call_id,
+                            content,
+                            is_error,
+                        },
                     },
                 };
 
