@@ -301,6 +301,176 @@ impl Tool for TdfHelpTool {
     }
 }
 
+// Iroh P2P transport tools (feature-gated)
+#[cfg(feature = "iroh")]
+mod iroh_tools {
+    use super::*;
+    use arkavo_tdf_iroh::{IrohTicket, IrohTransport};
+
+    /// MCP tool for staging data to Iroh P2P network.
+    pub struct TdfStageTool {
+        schema: ToolSchema,
+    }
+
+    impl TdfStageTool {
+        pub fn new() -> Self {
+            Self {
+                schema: ToolSchema {
+                    name: "tdf_stage".to_string(),
+                    aliases: Some(vec!["iroh_stage".to_string()]),
+                    description: "Stage a file to the Iroh P2P network. \
+                        Returns a ticket that can be used to fetch the data from any Iroh node."
+                        .to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "input_path": {
+                                "type": "string",
+                                "description": "Path to the file to stage"
+                            }
+                        },
+                        "required": ["input_path"]
+                    }),
+                },
+            }
+        }
+    }
+
+    impl Default for TdfStageTool {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[async_trait]
+    impl Tool for TdfStageTool {
+        fn schema(&self) -> &ToolSchema {
+            &self.schema
+        }
+
+        async fn execute(&self, args: Value) -> crate::Result<Value> {
+            let input_path = args["input_path"]
+                .as_str()
+                .ok_or_else(|| crate::ToolError::InvalidParams("Missing input_path".to_string()))?;
+
+            // Read file
+            let data = tokio::fs::read(input_path)
+                .await
+                .map_err(crate::ToolError::Io)?;
+
+            // Create Iroh transport and stage
+            let transport = IrohTransport::new()
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to create transport: {e}")))?;
+
+            let ticket = transport
+                .stage_bytes(&data)
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to stage: {e}")))?;
+
+            // Get hash from inner BlobTicket
+            let hash = ticket.inner().hash().to_string();
+
+            Ok(json!({
+                "success": true,
+                "input_path": input_path,
+                "size_bytes": data.len(),
+                "hash": hash,
+                "ticket": ticket.to_string()
+            }))
+        }
+    }
+
+    /// MCP tool for fetching data from Iroh P2P network.
+    pub struct TdfFetchTool {
+        schema: ToolSchema,
+    }
+
+    impl TdfFetchTool {
+        pub fn new() -> Self {
+            Self {
+                schema: ToolSchema {
+                    name: "tdf_fetch".to_string(),
+                    aliases: Some(vec!["iroh_fetch".to_string()]),
+                    description: "Fetch data from the Iroh P2P network using a ticket. \
+                        The ticket contains the content hash and node addresses for retrieval."
+                        .to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "ticket": {
+                                "type": "string",
+                                "description": "Iroh blob ticket for the data to fetch"
+                            },
+                            "output_path": {
+                                "type": "string",
+                                "description": "Path to write the fetched data"
+                            }
+                        },
+                        "required": ["ticket", "output_path"]
+                    }),
+                },
+            }
+        }
+    }
+
+    impl Default for TdfFetchTool {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[async_trait]
+    impl Tool for TdfFetchTool {
+        fn schema(&self) -> &ToolSchema {
+            &self.schema
+        }
+
+        async fn execute(&self, args: Value) -> crate::Result<Value> {
+            let ticket_str = args["ticket"]
+                .as_str()
+                .ok_or_else(|| crate::ToolError::InvalidParams("Missing ticket".to_string()))?;
+
+            let output_path = args["output_path"]
+                .as_str()
+                .ok_or_else(|| crate::ToolError::InvalidParams("Missing output_path".to_string()))?;
+
+            // Parse ticket
+            let ticket: IrohTicket = ticket_str
+                .parse()
+                .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid ticket: {e}")))?;
+
+            // Create Iroh transport and fetch
+            let transport = IrohTransport::new()
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to create transport: {e}")))?;
+
+            let data = transport
+                .fetch_bytes(&ticket)
+                .await
+                .map_err(|e| crate::ToolError::Execution(format!("Failed to fetch: {e}")))?;
+
+            // Write to output
+            tokio::fs::write(output_path, &data)
+                .await
+                .map_err(crate::ToolError::Io)?;
+
+            // Get hash from inner BlobTicket
+            let hash = ticket.inner().hash().to_string();
+
+            Ok(json!({
+                "success": true,
+                "output_path": output_path,
+                "size_bytes": data.len(),
+                "hash": hash
+            }))
+        }
+    }
+}
+
+#[cfg(feature = "iroh")]
+pub use iroh_tools::{TdfFetchTool, TdfStageTool};
+
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
@@ -388,5 +558,54 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    #[cfg(feature = "iroh")]
+    mod iroh_tests {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_stage_tool_schema() {
+            let tool = TdfStageTool::new();
+            let schema = tool.schema();
+
+            assert_eq!(schema.name, "tdf_stage");
+            assert!(schema.description.contains("Iroh"));
+            assert!(schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"iroh_stage".to_string()));
+        }
+
+        #[tokio::test]
+        async fn test_fetch_tool_schema() {
+            let tool = TdfFetchTool::new();
+            let schema = tool.schema();
+
+            assert_eq!(schema.name, "tdf_fetch");
+            assert!(schema.description.contains("Iroh"));
+            assert!(schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"iroh_fetch".to_string()));
+        }
+
+        #[tokio::test]
+        async fn test_stage_missing_input() {
+            let tool = TdfStageTool::new();
+            let result = tool.execute(json!({})).await;
+
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn test_fetch_missing_ticket() {
+            let tool = TdfFetchTool::new();
+            let result = tool.execute(json!({})).await;
+
+            assert!(result.is_err());
+        }
     }
 }

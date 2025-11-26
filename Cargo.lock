@@ -788,6 +788,8 @@ dependencies = [
  "arkavo-git",
  "arkavo-mcp",
  "arkavo-observability",
+ "arkavo-tdf",
+ "arkavo-tdf-iroh",
  "async-trait",
  "base64 0.22.1",
  "chrono",

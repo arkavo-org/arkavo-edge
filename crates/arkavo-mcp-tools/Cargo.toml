@@ -35,6 +35,7 @@ chrono-tz = "0.9"
 
 # For TDF tools
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf"] }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -43,6 +44,7 @@ criterion = { workspace = true }
 [features]
 default = []
 ntp-server = []
+iroh = ["dep:arkavo-tdf-iroh"]
 
 [lints]
 workspace = true
