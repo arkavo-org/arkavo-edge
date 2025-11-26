@@ -43,6 +43,8 @@ members = [
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
+    "crates/arkavo-tdf",
+    "crates/arkavo-tdf-iroh",
     ".cargo/xtask",
 ]
 default-members = [
