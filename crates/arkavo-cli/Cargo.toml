@@ -30,6 +30,7 @@ llama-cpp = ["arkavo-llm/llama-cpp", "arkavo-agui/llama-cpp", "arkavo-ui-core/ll
 snpe = ["arkavo-llm/snpe"]
 cef-ui = ["dep:arkavo-cef", "arkavo-agui/cef-ui", "arkavo-ui-core/cef-ui"]
 web-ui = ["arkavo-agui/web-ui", "arkavo-ui-core/web-ui"]
+iroh = ["dep:arkavo-tdf-iroh"]
 
 [dependencies]
 arkavo-terminal = { path = "../arkavo-terminal", features = ["llm-remote"] }
@@ -54,6 +55,8 @@ arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }
 arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-registration = { path = "../arkavo-registration" }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }

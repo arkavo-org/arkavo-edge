@@ -413,6 +413,8 @@ dependencies = [
  "arkavo-registration",
  "arkavo-repo",
  "arkavo-router",
+ "arkavo-tdf",
+ "arkavo-tdf-iroh",
  "arkavo-terminal",
  "arkavo-ui-core",
  "async-trait",
