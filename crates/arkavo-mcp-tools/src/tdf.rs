@@ -97,7 +97,7 @@ impl Tool for TdfEncryptTool {
         // Read input file
         let plaintext = tokio::fs::read(input_path)
             .await
-            .map_err(|e| crate::ToolError::Io(e))?;
+            .map_err(crate::ToolError::Io)?;
 
         // Create service and policy
         let service = OpenTdfService::with_kas_url(kas_url);
@@ -116,7 +116,7 @@ impl Tool for TdfEncryptTool {
         let json = serde_json::to_string_pretty(&manifest)?;
         tokio::fs::write(&output_path, &json)
             .await
-            .map_err(|e| crate::ToolError::Io(e))?;
+            .map_err(crate::ToolError::Io)?;
 
         Ok(json!({
             "success": true,
@@ -180,7 +180,7 @@ impl Tool for TdfInfoTool {
         // Read and parse manifest
         let json_str = tokio::fs::read_to_string(input_path)
             .await
-            .map_err(|e| crate::ToolError::Io(e))?;
+            .map_err(crate::ToolError::Io)?;
 
         let manifest: TdfManifest = serde_json::from_str(&json_str)
             .map_err(|e| crate::ToolError::Execution(format!("Invalid TDF manifest: {e}")))?;
@@ -304,8 +304,11 @@ impl Tool for TdfHelpTool {
 // Iroh P2P transport tools (feature-gated)
 #[cfg(feature = "iroh")]
 mod iroh_tools {
-    use super::*;
+    use crate::server::Tool;
+    use arkavo_mcp::ToolSchema;
     use arkavo_tdf_iroh::{IrohTicket, IrohTransport};
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
 
     /// MCP tool for staging data to Iroh P2P network.
     pub struct TdfStageTool {
