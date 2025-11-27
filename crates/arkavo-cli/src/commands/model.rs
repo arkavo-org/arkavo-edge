@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::collections::HashMap;
@@ -109,7 +111,7 @@ fn parse_agents_config() -> HashMap<String, Vec<String>> {
 }
 
 /// List all available GGUF models using the model_discovery module
-async fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
+fn list_local_gguf_models() -> Vec<(String, String, PathBuf, u64)> {
     let mut found_models = Vec::new();
 
     // Get HF cache directory
@@ -184,9 +186,9 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             if !agents_config.is_empty() {
                 println!("Preferred Models (from .arkavo/AGENTS.md):");
                 for (provider, models) in &agents_config {
-                    println!("\n  {}:", provider);
+                    println!("\n  {provider}:");
                     for model in models {
-                        println!("    • {}", model);
+                        println!("    • {model}");
                     }
                 }
                 println!();
@@ -205,12 +207,12 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
 
             // Show local GGUF models
             println!("Local Models (GGUF via llama.cpp):");
-            let found_models = list_local_gguf_models().await;
+            let found_models = list_local_gguf_models();
 
             if !found_models.is_empty() {
                 for (model_name, file_name, path, size) in &found_models {
                     let size_gb = *size as f64 / (1024.0 * 1024.0 * 1024.0);
-                    println!("  ✓ {}/{} ({:.1} GB)", model_name, file_name, size_gb);
+                    println!("  ✓ {model_name}/{file_name} ({size_gb:.1} GB)");
                     if std::env::var("ARKAVO_DEBUG").is_ok() {
                         println!("    Path: {}", path.display());
                     }

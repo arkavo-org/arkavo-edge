@@ -1,0 +1,36 @@
+[package]
+name = "arkavo-tdf-iroh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Iroh P2P data plane for TDF blob transport - implements BlobTransport trait"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["iroh", "p2p", "tdf", "blob", "transport"]
+categories = ["network-programming", "asynchronous"]
+
+[dependencies]
+arkavo-tdf = { path = "../arkavo-tdf" }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "io-util"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Iroh dependencies
+iroh = { version = "0.95", default-features = false }
+iroh-base = { version = "0.95", default-features = false }
+iroh-blobs = { version = "0.97", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+futures = { workspace = true }
+arkavo-tdf = { path = "../arkavo-tdf", features = ["testing", "opentdf"] }
+
+[features]
+default = []
+fs-store = ["iroh-blobs/fs-store"]  # Enable filesystem-backed storage
+
+[lints]
+workspace = true

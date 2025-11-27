@@ -15,6 +15,9 @@ use crate::osv::OsvTool;
 use crate::semgrep::SemgrepTool;
 use crate::server::Tool;
 use crate::syft::SyftTool;
+use crate::tdf::{TdfEncryptTool, TdfHelpTool, TdfInfoTool};
+#[cfg(feature = "iroh")]
+use crate::tdf::{TdfFetchTool, TdfStageTool};
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
 use arkavo_mcp::ToolSchema;
@@ -236,6 +239,18 @@ impl ToolRegistry {
             "github_org_overview",
             Box::new(GitHubOrgOverviewTool::new()),
         );
+
+        // TDF (Trusted Data Format) tools
+        self.register("tdf_encrypt", Box::new(TdfEncryptTool::new()));
+        self.register("tdf_info", Box::new(TdfInfoTool::new()));
+        self.register("tdf_help", Box::new(TdfHelpTool::new()));
+
+        // TDF Iroh P2P transport tools (feature-gated)
+        #[cfg(feature = "iroh")]
+        {
+            self.register("tdf_stage", Box::new(TdfStageTool::new()));
+            self.register("tdf_fetch", Box::new(TdfFetchTool::new()));
+        }
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {

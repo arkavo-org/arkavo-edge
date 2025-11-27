@@ -43,6 +43,8 @@ members = [
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
+    "crates/arkavo-tdf",
+    "crates/arkavo-tdf-iroh",
     ".cargo/xtask",
 ]
 default-members = [
@@ -93,7 +95,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.41.5"
+version = "0.42.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
