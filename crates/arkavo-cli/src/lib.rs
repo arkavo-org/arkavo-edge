@@ -171,8 +171,7 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let cli = Cli::parse_from(
-                    std::iter::once("tdf")
-                        .chain(args[1..].iter().map(std::string::String::as_str)),
+                    std::iter::once("tdf").chain(args[1..].iter().map(std::string::String::as_str)),
                 );
                 commands::tdf::handle_tdf_command(cli.command)
                     .await

@@ -18,7 +18,11 @@ pub enum TdfCommand {
         output: Option<PathBuf>,
 
         /// Attribute namespace (e.g., "https://arkavo.net/attr/classification")
-        #[arg(short = 'n', long, default_value = "https://arkavo.net/attr/sensitivity")]
+        #[arg(
+            short = 'n',
+            long,
+            default_value = "https://arkavo.net/attr/sensitivity"
+        )]
         namespace: String,
 
         /// Attribute values (can specify multiple)
@@ -223,7 +227,9 @@ async fn handle_stage(input: PathBuf, quiet: bool) -> Result<()> {
         .await
         .with_context(|| format!("Failed to read {}", input.display()))?;
 
-    let node = IrohNode::memory().await.context("Failed to create Iroh node")?;
+    let node = IrohNode::memory()
+        .await
+        .context("Failed to create Iroh node")?;
     let transport = IrohTransport::new(node);
 
     let ticket = transport
@@ -252,7 +258,9 @@ async fn handle_fetch(ticket_str: String, output: PathBuf) -> Result<()> {
 
     let ticket: IrohTicket = ticket_str.parse().context("Invalid Iroh ticket")?;
 
-    let node = IrohNode::memory().await.context("Failed to create Iroh node")?;
+    let node = IrohNode::memory()
+        .await
+        .context("Failed to create Iroh node")?;
     let transport = IrohTransport::new(node);
 
     let data = transport
@@ -288,16 +296,10 @@ async fn handle_info(input: PathBuf) -> Result<()> {
     println!("  Type: {}", manifest.payload.payload_type);
     println!("  MIME: {}", manifest.payload.mime_type);
     println!("  Protocol: {}", manifest.payload.protocol);
-    println!(
-        "  Size: {} bytes (base64)",
-        manifest.payload.value.len()
-    );
+    println!("  Size: {} bytes (base64)", manifest.payload.value.len());
     println!();
     println!("Encryption:");
-    println!(
-        "  Type: {}",
-        manifest.encryption_information.key_type
-    );
+    println!("  Type: {}", manifest.encryption_information.key_type);
     println!(
         "  Algorithm: {}",
         manifest.encryption_information.method.algorithm
@@ -308,13 +310,21 @@ async fn handle_info(input: PathBuf) -> Result<()> {
     );
     println!();
     println!("Key Access:");
-    for (i, ka) in manifest.encryption_information.key_access.iter().enumerate() {
+    for (i, ka) in manifest
+        .encryption_information
+        .key_access
+        .iter()
+        .enumerate()
+    {
         println!("  [{}] Type: {}", i, ka.access_type);
         println!("      URL: {}", ka.url);
         println!("      Protocol: {}", ka.protocol);
     }
     println!();
-    println!("Policy (base64): {}", manifest.encryption_information.policy);
+    println!(
+        "Policy (base64): {}",
+        manifest.encryption_information.policy
+    );
 
     Ok(())
 }

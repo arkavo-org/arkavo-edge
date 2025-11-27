@@ -56,11 +56,10 @@ pub use types::{
 
 // Re-export opentdf implementation when feature is enabled
 #[cfg(feature = "opentdf")]
-pub use opentdf_impl::{OpenTdfService, OpenTdfConfig};
+pub use opentdf_impl::{OpenTdfConfig, OpenTdfService};
 
 // Re-export KAS client when feature is enabled
 #[cfg(feature = "kas")]
 pub use kas_client::{
-    ArkavoKasClient, ArkavoKasConfig, KasPublicKey,
-    ARKAVO_KAS_URL, ARKAVO_OAUTH_URL,
+    ARKAVO_KAS_URL, ARKAVO_OAUTH_URL, ArkavoKasClient, ArkavoKasConfig, KasPublicKey,
 };

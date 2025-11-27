@@ -90,7 +90,10 @@ impl OpenTdfService {
             .collect();
 
         opentdf::Policy::new(
-            policy.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            policy
+                .id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             body,
             policy.dissemination.clone(),
         )
@@ -118,7 +121,11 @@ impl TdfEncryptor for OpenTdfService {
         // Convert to arkavo-tdf format
         Ok(TdfManifest {
             encryption_information: EncryptionInformation {
-                key_type: envelope.manifest.encryption_information.encryption_type.clone(),
+                key_type: envelope
+                    .manifest
+                    .encryption_information
+                    .encryption_type
+                    .clone(),
                 key_access: envelope
                     .manifest
                     .encryption_information

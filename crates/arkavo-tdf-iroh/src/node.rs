@@ -2,11 +2,11 @@
 //!
 //! Manages an embedded Iroh endpoint with blob protocol support.
 
-use iroh::protocol::Router;
 use iroh::Endpoint;
+use iroh::protocol::Router;
 use iroh_base::EndpointId;
-use iroh_blobs::store::mem::MemStore;
 use iroh_blobs::BlobsProtocol;
+use iroh_blobs::store::mem::MemStore;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};

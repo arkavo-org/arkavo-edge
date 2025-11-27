@@ -81,7 +81,10 @@ mod tests {
     fn iroh_error_to_transport_error() {
         let iroh_err = IrohError::StoreAdd("disk full".to_string());
         let transport_err: arkavo_tdf::TransportError = iroh_err.into();
-        assert!(matches!(transport_err, arkavo_tdf::TransportError::Stage(_)));
+        assert!(matches!(
+            transport_err,
+            arkavo_tdf::TransportError::Stage(_)
+        ));
 
         let iroh_err = IrohError::InvalidTicket("bad format".to_string());
         let transport_err: arkavo_tdf::TransportError = iroh_err.into();

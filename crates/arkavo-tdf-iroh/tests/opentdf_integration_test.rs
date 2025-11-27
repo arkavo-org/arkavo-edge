@@ -49,8 +49,7 @@ async fn opentdf_encrypt_iroh_transport() {
     let fetched_json = transport.fetch(&ticket).await.unwrap();
 
     // Deserialize and verify
-    let fetched_manifest: arkavo_tdf::TdfManifest =
-        serde_json::from_slice(&fetched_json).unwrap();
+    let fetched_manifest: arkavo_tdf::TdfManifest = serde_json::from_slice(&fetched_json).unwrap();
 
     assert_eq!(fetched_manifest.version, manifest.version);
     assert_eq!(fetched_manifest.payload.value, manifest.payload.value);

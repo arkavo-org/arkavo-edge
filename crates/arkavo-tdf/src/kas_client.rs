@@ -214,8 +214,8 @@ impl ArkavoKasClient {
 
         // Cache the token
         let expires_in = token_response.expires_in.unwrap_or(3600);
-        let expires_at =
-            std::time::Instant::now() + std::time::Duration::from_secs(expires_in.saturating_sub(60));
+        let expires_at = std::time::Instant::now()
+            + std::time::Duration::from_secs(expires_in.saturating_sub(60));
 
         {
             let mut cache = self.access_token.write().unwrap();
@@ -417,7 +417,9 @@ impl ArkavoKasClient {
 impl KasClient for ArkavoKasClient {
     async fn rewrap(&self, wrapped_key: &str, policy: &str) -> Result<Vec<u8>, TdfError> {
         // This is a simplified interface - for full manifest rewrap use rewrap_manifest
-        warn!("Using simplified rewrap interface - consider using rewrap_manifest for full TDF support");
+        warn!(
+            "Using simplified rewrap interface - consider using rewrap_manifest for full TDF support"
+        );
 
         // Build a minimal manifest for rewrap
         let manifest = TdfManifest {

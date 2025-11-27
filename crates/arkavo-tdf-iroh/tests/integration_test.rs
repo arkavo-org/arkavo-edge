@@ -179,8 +179,7 @@ async fn full_encrypt_transport_decrypt_workflow() {
 
     // Later: fetch and decrypt
     let fetched_json = transport.fetch(&ticket).await.unwrap();
-    let fetched_manifest: arkavo_tdf::TdfManifest =
-        serde_json::from_slice(&fetched_json).unwrap();
+    let fetched_manifest: arkavo_tdf::TdfManifest = serde_json::from_slice(&fetched_json).unwrap();
 
     let decrypted = tdf_service.decrypt(&fetched_manifest).await.unwrap();
 
