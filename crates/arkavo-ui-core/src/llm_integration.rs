@@ -50,6 +50,14 @@ impl LlmIntegration {
                     anyhow::bail!("Gemini feature not enabled")
                 }
             }
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+                use arkavo_llm::providers::anthropic::AnthropicProvider;
+                if let Ok(provider) = AnthropicProvider::from_env() {
+                    Ok(LlmClient::new(Box::new(provider)))
+                } else {
+                    anyhow::bail!("ANTHROPIC_API_KEY not set")
+                }
+            }
             ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B

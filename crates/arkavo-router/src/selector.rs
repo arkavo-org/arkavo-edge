@@ -2,19 +2,55 @@ use crate::Result;
 use crate::classifier::{Classification, TaskCategory};
 use crate::decision::{ModelChoice, RoutingDecision};
 
+/// Provider availability status
+#[derive(Debug, Clone, Default)]
+pub struct ProviderAvailability {
+    pub gemini: bool,
+    pub anthropic: bool,
+}
+
+impl ProviderAvailability {
+    /// Check environment variables for API keys
+    pub fn from_env() -> Self {
+        Self {
+            gemini: std::env::var("GEMINI_API_KEY").is_ok(),
+            anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
+        }
+    }
+
+    /// Check if any cloud provider is available
+    pub fn has_cloud(&self) -> bool {
+        self.gemini || self.anthropic
+    }
+}
+
 pub struct ModelSelector {
     budget_threshold: f64,
+    availability: ProviderAvailability,
 }
 
 impl ModelSelector {
     pub fn new() -> Self {
         Self {
             budget_threshold: 0.80,
+            availability: ProviderAvailability::from_env(),
         }
     }
 
     pub fn with_budget_threshold(budget_threshold: f64) -> Self {
-        Self { budget_threshold }
+        Self {
+            budget_threshold,
+            availability: ProviderAvailability::from_env(),
+        }
+    }
+
+    /// Create selector with explicit provider availability (for testing)
+    #[cfg(test)]
+    pub fn with_availability(availability: ProviderAvailability) -> Self {
+        Self {
+            budget_threshold: 0.80,
+            availability,
+        }
     }
 
     pub fn select(
@@ -34,55 +70,105 @@ impl ModelSelector {
         ))
     }
 
+    /// Select the best available cloud model, preferring Anthropic > Gemini
+    fn best_cloud_model(&self, prefer_pro: bool) -> ModelChoice {
+        if self.availability.anthropic {
+            if prefer_pro {
+                ModelChoice::ClaudeOpus
+            } else {
+                ModelChoice::ClaudeSonnet
+            }
+        } else if self.availability.gemini {
+            if prefer_pro {
+                ModelChoice::GeminiPro
+            } else {
+                ModelChoice::GeminiFlash
+            }
+        } else {
+            // No cloud available, use local
+            if prefer_pro {
+                ModelChoice::LocalGemma12B
+            } else {
+                ModelChoice::LocalGemma4B
+            }
+        }
+    }
+
     fn select_model_by_category(&self, classification: &Classification) -> ModelChoice {
         match classification.category {
             TaskCategory::FrontendUI if classification.confidence > 0.75 => {
-                ModelChoice::GeminiFlash
+                self.best_cloud_model(false)
             }
 
-            TaskCategory::BackendAPI if classification.confidence > 0.70 => ModelChoice::GeminiPro,
+            TaskCategory::BackendAPI if classification.confidence > 0.70 => {
+                self.best_cloud_model(true)
+            }
 
             TaskCategory::CodeSearch => ModelChoice::LocalGemma4B,
 
             TaskCategory::SecurityScan => ModelChoice::LocalGemma4B,
 
             TaskCategory::TestGeneration if classification.confidence > 0.70 => {
-                ModelChoice::GeminiPro
+                self.best_cloud_model(true)
             }
 
             TaskCategory::Documentation => ModelChoice::LocalGemma4B,
 
             TaskCategory::Refactoring if classification.confidence > 0.75 => {
-                ModelChoice::GeminiFlash
+                self.best_cloud_model(false)
             }
 
             TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
 
-            TaskCategory::VisionAnalysis => ModelChoice::GeminiFlash,
+            TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
-            _ => ModelChoice::GeminiFlash,
+            _ => self.best_cloud_model(false),
         }
     }
 
     fn explain_selection(&self, model: &ModelChoice, classification: &Classification) -> String {
-        let category_reason = match classification.category {
-            TaskCategory::FrontendUI => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
-            TaskCategory::BackendAPI => "Backend API: Gemini Pro provides highest quality",
-            TaskCategory::CodeSearch => "Code search: Local Gemma 4B is fast and free",
-            TaskCategory::SecurityScan => "Security scan: Local Gemma 4B for privacy",
-            TaskCategory::TestGeneration => "Test generation: Gemini Pro for comprehensive tests",
-            TaskCategory::Documentation => "Documentation: Local Gemma 4B sufficient",
-            TaskCategory::Refactoring => "Refactoring: Gemini Flash for quick iterations",
-            TaskCategory::CodeGeneration => {
+        let category_reason = match (classification.category, model) {
+            (TaskCategory::FrontendUI, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
+                "Frontend task: Claude Sonnet excellent for UI development"
+            }
+            (TaskCategory::FrontendUI, _) => "Frontend task: Gemini Flash ranks #1 on WebDev Arena",
+            (TaskCategory::BackendAPI, ModelChoice::ClaudeOpus) => {
+                "Backend API: Claude Opus for highest quality code"
+            }
+            (TaskCategory::BackendAPI, ModelChoice::ClaudeSonnet) => {
+                "Backend API: Claude Sonnet for fast, high-quality code"
+            }
+            (TaskCategory::BackendAPI, _) => "Backend API: Gemini Pro provides highest quality",
+            (TaskCategory::CodeSearch, _) => "Code search: Local Gemma 4B is fast and free",
+            (TaskCategory::SecurityScan, _) => "Security scan: Local Gemma 4B for privacy",
+            (TaskCategory::TestGeneration, ModelChoice::ClaudeOpus) => {
+                "Test generation: Claude Opus for comprehensive tests"
+            }
+            (TaskCategory::TestGeneration, _) => {
+                "Test generation: Gemini Pro for comprehensive tests"
+            }
+            (TaskCategory::Documentation, _) => "Documentation: Local Gemma 4B sufficient",
+            (TaskCategory::Refactoring, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
+                "Refactoring: Claude for excellent code transformations"
+            }
+            (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
+            (TaskCategory::CodeGeneration, _) => {
                 "Code generation: DeepSeek-Coder V2 Lite optimized for code/patch generation"
             }
-            TaskCategory::VisionAnalysis => "Vision analysis: Gemini Flash with multimodal support",
-            TaskCategory::General => "General task: Gemini Flash as balanced default",
+            (TaskCategory::VisionAnalysis, _) => {
+                "Vision analysis: Gemini Flash with multimodal support"
+            }
+            (TaskCategory::General, ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus) => {
+                "General task: Claude as balanced default"
+            }
+            (TaskCategory::General, _) => "General task: Gemini Flash as balanced default",
         };
 
         let model_benefit = match model {
             ModelChoice::GeminiFlash => "Fast (3s), cost-effective ($0.003-0.006)",
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
+            ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
+            ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -142,9 +228,23 @@ impl Default for ModelSelector {
 mod tests {
     use super::*;
 
+    fn gemini_only() -> ProviderAvailability {
+        ProviderAvailability {
+            gemini: true,
+            anthropic: false,
+        }
+    }
+
+    fn anthropic_only() -> ProviderAvailability {
+        ProviderAvailability {
+            gemini: false,
+            anthropic: true,
+        }
+    }
+
     #[tokio::test]
-    async fn test_frontend_routing() {
-        let selector = ModelSelector::new();
+    async fn test_frontend_routing_gemini() {
+        let selector = ModelSelector::with_availability(gemini_only());
 
         let classification = Classification {
             category: TaskCategory::FrontendUI,
@@ -161,8 +261,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_frontend_routing_anthropic() {
+        let selector = ModelSelector::with_availability(anthropic_only());
+
+        let classification = Classification {
+            category: TaskCategory::FrontendUI,
+            confidence: 0.90,
+            reasoning: "Frontend task".to_string(),
+        };
+
+        let decision = selector
+            .select(&classification, "Build a React component")
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::ClaudeSonnet);
+        assert!(decision.reasoning.contains("Claude"));
+    }
+
+    #[tokio::test]
     async fn test_code_search_routing() {
-        let selector = ModelSelector::new();
+        let selector = ModelSelector::with_availability(gemini_only());
 
         let classification = Classification {
             category: TaskCategory::CodeSearch,
@@ -180,7 +298,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_budget_constraint() {
-        let selector = ModelSelector::new();
+        let selector = ModelSelector::with_availability(gemini_only());
 
         let classification = Classification {
             category: TaskCategory::FrontendUI,
@@ -198,8 +316,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_backend_api_routing() {
-        let selector = ModelSelector::new();
+    async fn test_backend_api_routing_gemini() {
+        let selector = ModelSelector::with_availability(gemini_only());
 
         let classification = Classification {
             category: TaskCategory::BackendAPI,
@@ -212,5 +330,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(decision.recommended_model, ModelChoice::GeminiPro);
+    }
+
+    #[tokio::test]
+    async fn test_backend_api_routing_anthropic() {
+        let selector = ModelSelector::with_availability(anthropic_only());
+
+        let classification = Classification {
+            category: TaskCategory::BackendAPI,
+            confidence: 0.85,
+            reasoning: "Backend API".to_string(),
+        };
+
+        let decision = selector
+            .select(&classification, "Create a REST API endpoint")
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::ClaudeOpus);
+        assert!(decision.reasoning.contains("Claude Opus"));
+    }
+
+    #[tokio::test]
+    async fn test_no_cloud_falls_back_to_local() {
+        let selector = ModelSelector::with_availability(ProviderAvailability::default());
+
+        let classification = Classification {
+            category: TaskCategory::FrontendUI,
+            confidence: 0.90,
+            reasoning: "Frontend task".to_string(),
+        };
+
+        let decision = selector
+            .select(&classification, "Build a React component")
+            .unwrap();
+
+        // When no cloud is available, should fall back to local
+        assert!(decision.recommended_model.is_local());
     }
 }

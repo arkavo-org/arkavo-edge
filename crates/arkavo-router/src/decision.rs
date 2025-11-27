@@ -6,6 +6,8 @@ use std::time::Duration;
 pub enum ModelChoice {
     GeminiFlash,
     GeminiPro,
+    ClaudeSonnet,
+    ClaudeOpus,
     LocalGemma270M,
     LocalGemma4B,
     LocalGemma12B,
@@ -17,6 +19,8 @@ impl ModelChoice {
         match self {
             Self::GeminiFlash => "gemini-flash-latest",
             Self::GeminiPro => "gemini-3-pro-preview",
+            Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
+            Self::ClaudeOpus => "claude-opus-4-5-20251101",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
@@ -36,6 +40,14 @@ impl ModelChoice {
 
     pub fn is_cloud(&self) -> bool {
         !self.is_local()
+    }
+
+    pub fn is_anthropic(&self) -> bool {
+        matches!(self, Self::ClaudeSonnet | Self::ClaudeOpus)
+    }
+
+    pub fn is_gemini(&self) -> bool {
+        matches!(self, Self::GeminiFlash | Self::GeminiPro)
     }
 }
 
@@ -94,10 +106,32 @@ impl RoutingDecision {
     fn default_fallback_chain(model: &ModelChoice, category: TaskCategory) -> Vec<ModelChoice> {
         match (model, category) {
             (ModelChoice::GeminiFlash, TaskCategory::FrontendUI) => {
-                vec![ModelChoice::GeminiPro, ModelChoice::LocalGemma4B]
+                vec![
+                    ModelChoice::GeminiPro,
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::LocalGemma4B,
+                ]
             }
             (ModelChoice::GeminiPro, _) => {
-                vec![ModelChoice::GeminiFlash, ModelChoice::LocalGemma12B]
+                vec![
+                    ModelChoice::ClaudeOpus,
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::LocalGemma12B,
+                ]
+            }
+            (ModelChoice::ClaudeSonnet, _) => {
+                vec![
+                    ModelChoice::GeminiFlash,
+                    ModelChoice::ClaudeOpus,
+                    ModelChoice::LocalGemma4B,
+                ]
+            }
+            (ModelChoice::ClaudeOpus, _) => {
+                vec![
+                    ModelChoice::GeminiPro,
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::LocalGemma12B,
+                ]
             }
             (ModelChoice::LocalGemma4B, _) => vec![ModelChoice::LocalGemma12B],
             (ModelChoice::LocalGemma270M, _) => {
@@ -121,6 +155,18 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 5.00;
                 input_cost + output_cost
             }
+            ModelChoice::ClaudeSonnet => {
+                // Claude Sonnet 4.5: $3/1M input, $15/1M output
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 3.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 15.00;
+                input_cost + output_cost
+            }
+            ModelChoice::ClaudeOpus => {
+                // Claude Opus 4.5: $15/1M input, $75/1M output
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 15.00;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 75.00;
+                input_cost + output_cost
+            }
             ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
@@ -132,6 +178,8 @@ impl RoutingDecision {
         match model {
             ModelChoice::GeminiFlash => Duration::from_secs(3),
             ModelChoice::GeminiPro => Duration::from_secs(10),
+            ModelChoice::ClaudeSonnet => Duration::from_secs(5),
+            ModelChoice::ClaudeOpus => Duration::from_secs(15),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),

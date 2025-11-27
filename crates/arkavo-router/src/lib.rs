@@ -26,7 +26,7 @@ pub use orchestrator::{
     CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
-pub use selector::ModelSelector;
+pub use selector::{ModelSelector, ProviderAvailability};
 pub use validator::{ResponseValidator, ValidationError};
 
 use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
@@ -137,9 +137,33 @@ impl Router {
         std::env::var("GEMINI_API_KEY").is_ok()
     }
 
+    /// Check if Anthropic API is available
+    pub fn is_anthropic_available(&self) -> bool {
+        std::env::var("ANTHROPIC_API_KEY").is_ok()
+    }
+
+    /// Get Anthropic provider if configured
+    pub fn get_anthropic_provider(
+        &self,
+    ) -> Option<arkavo_llm::providers::anthropic::AnthropicProvider> {
+        arkavo_llm::providers::anthropic::AnthropicProvider::from_env().ok()
+    }
+
     /// Get the list of available LLMs for status reporting
     pub fn get_available_llms(&self) -> Vec<LlmInfo> {
         let mut llms = Vec::new();
+
+        // Check for Anthropic Claude
+        if self.is_anthropic_available() {
+            let model = std::env::var("ANTHROPIC_MODEL")
+                .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
+            llms.push(LlmInfo {
+                name: "Claude".to_string(),
+                provider: "Anthropic".to_string(),
+                model,
+                available: true,
+            });
+        }
 
         // Check for Gemini
         if self.is_gemini_available() {
@@ -428,13 +452,30 @@ impl Router {
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
             ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
             ModelChoice::LocalDeepSeekCoder => ModelChoice::GeminiFlash,
-            ModelChoice::GeminiFlash => ModelChoice::GeminiPro,
-            ModelChoice::GeminiPro => ModelChoice::GeminiPro,
+            ModelChoice::GeminiFlash => ModelChoice::ClaudeSonnet,
+            ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
+            ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
+            ModelChoice::ClaudeOpus => ModelChoice::ClaudeOpus,
         }
     }
 
     async fn instantiate_provider(&self, model: &ModelChoice) -> Result<Box<dyn Provider>> {
         match model {
+            ModelChoice::ClaudeSonnet | ModelChoice::ClaudeOpus => {
+                use arkavo_llm::providers::anthropic::AnthropicProvider;
+                if let Ok(provider) = AnthropicProvider::from_env() {
+                    Ok(Box::new(provider))
+                } else {
+                    // Fallback to Gemini if available
+                    #[cfg(feature = "gemini")]
+                    if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
+                        return Ok(Box::new(provider));
+                    }
+                    Err(Error::ModelExecution(
+                        "ANTHROPIC_API_KEY not set and no fallback available".to_string(),
+                    ))
+                }
+            }
             #[cfg(feature = "gemini")]
             ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
                 // Try to create Gemini provider, fallback to local if API key not available
@@ -574,9 +615,10 @@ impl Router {
             ModelChoice::LocalGemma12B | ModelChoice::LocalDeepSeekCoder => {
                 arkavo_mcp_tools::DetailLevel::NameAndDescription
             }
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
-                arkavo_mcp_tools::DetailLevel::FullSchema
-            }
+            ModelChoice::GeminiFlash
+            | ModelChoice::GeminiPro
+            | ModelChoice::ClaudeSonnet
+            | ModelChoice::ClaudeOpus => arkavo_mcp_tools::DetailLevel::FullSchema,
         }
     }
 

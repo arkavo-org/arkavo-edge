@@ -1,9 +1,13 @@
 use crate::common::{HttpClientBuilder, HttpClientConfig, RetryableHttpClient};
 use crate::common::{ProviderError, ProviderResult};
+use crate::provider::ProviderResponse;
+use crate::tool_parser::ParsedToolCall;
 use crate::{Message, Provider, Role, StreamResponse};
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::env;
 use std::sync::Arc;
 
 /// Anthropic API configuration
@@ -24,10 +28,18 @@ impl Default for AnthropicConfig {
         Self {
             api_key: String::new(),
             base_url: "https://api.anthropic.com".to_string(),
-            model: "claude-3-opus-20240229".to_string(),
+            model: "claude-sonnet-4-5-20250929".to_string(),
             api_version: "2023-06-01".to_string(),
         }
     }
+}
+
+/// Tool definition for Anthropic API
+#[derive(Debug, Clone, Serialize)]
+struct ToolDefinition {
+    name: String,
+    description: String,
+    input_schema: Value,
 }
 
 /// Anthropic API request structures
@@ -43,6 +55,8 @@ struct CreateMessageRequest {
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ToolDefinition>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,17 +69,24 @@ struct ApiMessage {
 #[allow(dead_code)]
 struct MessageResponse {
     id: String,
-    content: Vec<ContentBlock>,
+    content: Vec<ResponseContentBlock>,
     model: String,
+    stop_reason: Option<String>,
     usage: Usage,
 }
 
+/// Content block in response - can be text or tool_use
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ContentBlock {
-    #[serde(rename = "type")]
-    content_type: String,
-    text: Option<String>,
+#[serde(tag = "type")]
+enum ResponseContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +106,7 @@ enum StreamEvent {
     #[serde(rename = "content_block_start")]
     ContentBlockStart {
         index: usize,
-        content_block: ContentBlockData,
+        content_block: ContentBlockStartData,
     },
     #[serde(rename = "content_block_delta")]
     ContentBlockDelta { index: usize, delta: DeltaData },
@@ -98,6 +119,8 @@ enum StreamEvent {
     },
     #[serde(rename = "message_stop")]
     MessageStop,
+    #[serde(rename = "ping")]
+    Ping,
     #[serde(rename = "error")]
     Error { error: ErrorData },
 }
@@ -110,20 +133,26 @@ struct MessageStartData {
     usage: Usage,
 }
 
+/// Content block start data for streaming
 #[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
 #[allow(dead_code)]
-struct ContentBlockData {
-    #[serde(rename = "type")]
-    content_type: String,
-    text: Option<String>,
+enum ContentBlockStartData {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse { id: String, name: String },
 }
 
+/// Delta data for streaming content blocks
 #[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
 #[allow(dead_code)]
-struct DeltaData {
-    #[serde(rename = "type")]
-    delta_type: String,
-    text: Option<String>,
+enum DeltaData {
+    #[serde(rename = "text_delta")]
+    TextDelta { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJsonDelta { partial_json: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +192,28 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
+    /// Create provider from environment variables
+    pub fn from_env() -> ProviderResult<Self> {
+        let api_key = env::var("ANTHROPIC_API_KEY")
+            .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY environment variable not set"))?;
+
+        let model = env::var("ANTHROPIC_MODEL")
+            .unwrap_or_else(|_| "claude-sonnet-4-5-20250929".to_string());
+
+        let config = AnthropicConfig {
+            api_key,
+            model,
+            ..Default::default()
+        };
+
+        Self::new(config)
+    }
+
+    /// Try to create provider from env, returning None if not configured
+    pub fn try_from_env() -> Option<Self> {
+        Self::from_env().ok()
+    }
+
     pub fn new(config: AnthropicConfig) -> ProviderResult<Self> {
         // Validate base URL
         url::Url::parse(&config.base_url)
@@ -192,28 +243,39 @@ impl AnthropicProvider {
         let mut api_messages = Vec::new();
 
         for msg in messages {
+            // Skip empty messages (except we'll handle final assistant specially later)
+            let content = msg.content.trim();
+
             match msg.role {
                 Role::System => {
                     // Anthropic handles system messages separately
-                    if system_content.is_none() {
-                        system_content = Some(msg.content);
-                    } else {
-                        // If multiple system messages, concatenate them
-                        system_content =
-                            Some(format!("{}\n\n{}", system_content.unwrap(), msg.content));
+                    if !content.is_empty() {
+                        if system_content.is_none() {
+                            system_content = Some(content.to_string());
+                        } else {
+                            // If multiple system messages, concatenate them
+                            system_content =
+                                Some(format!("{}\n\n{}", system_content.unwrap(), content));
+                        }
                     }
                 }
                 Role::User => {
-                    api_messages.push(ApiMessage {
-                        role: "user".to_string(),
-                        content: msg.content,
-                    });
+                    // Skip empty user messages
+                    if !content.is_empty() {
+                        api_messages.push(ApiMessage {
+                            role: "user".to_string(),
+                            content: content.to_string(),
+                        });
+                    }
                 }
                 Role::Assistant => {
-                    api_messages.push(ApiMessage {
-                        role: "assistant".to_string(),
-                        content: msg.content,
-                    });
+                    // Skip empty assistant messages (unless it's the last one)
+                    if !content.is_empty() {
+                        api_messages.push(ApiMessage {
+                            role: "assistant".to_string(),
+                            content: content.to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -246,6 +308,62 @@ impl AnthropicProvider {
         }
 
         (system_content, cleaned_messages)
+    }
+
+    /// Convert tools JSON to Anthropic format
+    fn convert_tools_to_definitions(
+        tools_json: &Value,
+    ) -> Result<Vec<ToolDefinition>, crate::Error> {
+        let tools_array = tools_json
+            .as_array()
+            .ok_or_else(|| crate::Error::Provider("Tools must be an array".into()))?;
+
+        let mut definitions = Vec::new();
+
+        for tool in tools_array {
+            // Handle both direct tool format and Gemini-style functionDeclarations wrapper
+            if let Some(func_decls) = tool.get("functionDeclarations") {
+                // Gemini format: [{functionDeclarations: [...]}]
+                let decls = func_decls.as_array().ok_or_else(|| {
+                    crate::Error::Provider("functionDeclarations must be array".into())
+                })?;
+                for decl in decls {
+                    definitions.push(Self::parse_tool_definition(decl)?);
+                }
+            } else {
+                // Direct format: [{name, description, input_schema/parameters}]
+                definitions.push(Self::parse_tool_definition(tool)?);
+            }
+        }
+
+        Ok(definitions)
+    }
+
+    fn parse_tool_definition(tool: &Value) -> Result<ToolDefinition, crate::Error> {
+        let name = tool
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| crate::Error::Provider("Tool missing name".into()))?
+            .to_string();
+
+        let description = tool
+            .get("description")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| crate::Error::Provider("Tool missing description".into()))?
+            .to_string();
+
+        // Anthropic uses input_schema, but accept parameters as fallback
+        let input_schema = tool
+            .get("input_schema")
+            .or_else(|| tool.get("parameters"))
+            .cloned()
+            .ok_or_else(|| crate::Error::Provider("Tool missing input_schema/parameters".into()))?;
+
+        Ok(ToolDefinition {
+            name,
+            description,
+            input_schema,
+        })
     }
 
     /// Handle API errors
@@ -321,6 +439,7 @@ impl Provider for AnthropicProvider {
             temperature: Some(0.7),
             system: system_content,
             stream: Some(false),
+            tools: None,
         };
 
         let url = format!("{}/v1/messages", self.config.base_url);
@@ -347,7 +466,10 @@ impl Provider for AnthropicProvider {
                         let content = message
                             .content
                             .iter()
-                            .filter_map(|block| block.text.clone())
+                            .filter_map(|block| match block {
+                                ResponseContentBlock::Text { text } => Some(text.clone()),
+                                ResponseContentBlock::ToolUse { .. } => None,
+                            })
                             .collect::<Vec<_>>()
                             .join("\n");
 
@@ -387,6 +509,7 @@ impl Provider for AnthropicProvider {
             temperature: Some(0.7),
             system: system_content,
             stream: Some(true),
+            tools: None,
         };
 
         let url = format!("{}/v1/messages", self.config.base_url);
@@ -432,18 +555,26 @@ impl Provider for AnthropicProvider {
                                 && let Ok(event) = serde_json::from_str::<StreamEvent>(data)
                             {
                                 match event {
-                                    StreamEvent::ContentBlockDelta { delta, .. } => {
-                                        if let Some(text) = delta.text
-                                            && tx
-                                                .send(Ok(StreamResponse {
-                                                    content: text,
-                                                    done: false,
-                                                }))
-                                                .await
-                                                .is_err()
+                                    StreamEvent::ContentBlockDelta {
+                                        delta: DeltaData::TextDelta { text },
+                                        ..
+                                    } => {
+                                        if tx
+                                            .send(Ok(StreamResponse {
+                                                content: text,
+                                                done: false,
+                                            }))
+                                            .await
+                                            .is_err()
                                         {
                                             break; // Receiver dropped
                                         }
+                                    }
+                                    StreamEvent::ContentBlockDelta {
+                                        delta: DeltaData::InputJsonDelta { .. },
+                                        ..
+                                    } => {
+                                        // InputJsonDelta is ignored in basic stream()
                                     }
                                     StreamEvent::MessageStop => {
                                         if tx
@@ -489,6 +620,86 @@ impl Provider for AnthropicProvider {
 
     fn name(&self) -> &'static str {
         "anthropic"
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Value>,
+        max_tokens: Option<usize>,
+    ) -> Result<ProviderResponse, crate::Error> {
+        let (system_content, api_messages) = self.convert_messages(messages);
+
+        let tool_definitions = tools
+            .as_ref()
+            .map(Self::convert_tools_to_definitions)
+            .transpose()?;
+
+        let request = CreateMessageRequest {
+            model: self.config.model.clone(),
+            messages: api_messages,
+            max_tokens: Some(max_tokens.unwrap_or(4096) as u32),
+            temperature: Some(0.7),
+            system: system_content,
+            stream: Some(false),
+            tools: tool_definitions,
+        };
+
+        let url = format!("{}/v1/messages", self.config.base_url);
+
+        let response = self
+            .client
+            .client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", &self.config.api_version)
+            .header("content-type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| crate::Error::Provider(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let error = self.handle_error_response(response).await;
+            return Err(crate::Error::Provider(error.to_string()));
+        }
+
+        let message: MessageResponse = response
+            .json()
+            .await
+            .map_err(|e| crate::Error::Provider(format!("Failed to parse response: {e}")))?;
+
+        // Extract text content and tool calls from response
+        let mut text_content = String::new();
+        let mut tool_calls = Vec::new();
+
+        for block in message.content {
+            match block {
+                ResponseContentBlock::Text { text } => {
+                    if !text_content.is_empty() {
+                        text_content.push('\n');
+                    }
+                    text_content.push_str(&text);
+                }
+                ResponseContentBlock::ToolUse { id, name, input } => {
+                    tool_calls.push(ParsedToolCall {
+                        tool_name: name,
+                        arguments: input,
+                        call_id: Some(id),
+                    });
+                }
+            }
+        }
+
+        Ok(ProviderResponse {
+            content: text_content,
+            tool_calls,
+            finish_reason: message.stop_reason,
+        })
     }
 }
 
@@ -561,5 +772,71 @@ mod tests {
         assert_eq!(api_messages.len(), 2);
         assert_eq!(api_messages[0].content, "First message\n\nSecond message");
         assert_eq!(api_messages[1].role, "assistant");
+    }
+
+    #[test]
+    fn test_tool_conversion_direct_format() {
+        use serde_json::json;
+
+        let tools = json!([
+            {
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string"}
+                    },
+                    "required": ["location"]
+                }
+            }
+        ]);
+
+        let definitions = AnthropicProvider::convert_tools_to_definitions(&tools).unwrap();
+
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].name, "get_weather");
+        assert_eq!(definitions[0].description, "Get weather for a location");
+    }
+
+    #[test]
+    fn test_tool_conversion_gemini_format() {
+        use serde_json::json;
+
+        // Gemini format with functionDeclarations wrapper
+        let tools = json!([
+            {
+                "functionDeclarations": [
+                    {
+                        "name": "search_files",
+                        "description": "Search for files",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string"}
+                            }
+                        }
+                    }
+                ]
+            }
+        ]);
+
+        let definitions = AnthropicProvider::convert_tools_to_definitions(&tools).unwrap();
+
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].name, "search_files");
+    }
+
+    #[test]
+    fn test_default_model_is_sonnet() {
+        let config = AnthropicConfig::default();
+        assert_eq!(config.model, "claude-sonnet-4-5-20250929");
+    }
+
+    #[test]
+    fn test_supports_tools() {
+        let config = AnthropicConfig::default();
+        let provider = AnthropicProvider::new(config).unwrap();
+        assert!(provider.supports_tools());
     }
 }
