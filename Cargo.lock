@@ -6760,6 +6760,7 @@ dependencies = [
 [[package]]
 name = "opentdf"
 version = "0.6.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#dc781b29e75687d012e00afe7249acb96db7d3a2"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -6779,6 +6780,7 @@ dependencies = [
 [[package]]
 name = "opentdf-crypto"
 version = "0.6.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#dc781b29e75687d012e00afe7249acb96db7d3a2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -6807,6 +6809,7 @@ dependencies = [
 [[package]]
 name = "opentdf-protocol"
 version = "0.6.0"
+source = "git+https://github.com/arkavo-org/opentdf-rs#dc781b29e75687d012e00afe7249acb96db7d3a2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
