@@ -23,7 +23,7 @@ url = { workspace = true }
 tracing = { workspace = true }
 
 # opentdf-rs for real TDF encryption (optional)
-opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, optional = true }
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", default-features = false, features = ["rustls-tls"], optional = true }
 
 # HTTP client for KAS (optional)
 reqwest = { workspace = true, optional = true }
