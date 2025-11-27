@@ -78,16 +78,10 @@ impl Tool for TdfEncryptTool {
 
         let values: Vec<&str> = args["values"]
             .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_else(|| vec!["internal"]);
 
-        let kas_url = args["kas_url"]
-            .as_str()
-            .unwrap_or("https://100.arkavo.net");
+        let kas_url = args["kas_url"].as_str().unwrap_or("https://100.arkavo.net");
 
         let output_path = args["output_path"]
             .as_str()
@@ -308,7 +302,7 @@ mod iroh_tools {
     use arkavo_mcp::ToolSchema;
     use arkavo_tdf_iroh::{IrohTicket, IrohTransport};
     use async_trait::async_trait;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     /// MCP tool for staging data to Iroh P2P network.
     pub struct TdfStageTool {
@@ -362,9 +356,9 @@ mod iroh_tools {
                 .map_err(crate::ToolError::Io)?;
 
             // Create Iroh transport and stage
-            let transport = IrohTransport::new()
-                .await
-                .map_err(|e| crate::ToolError::Execution(format!("Failed to create transport: {e}")))?;
+            let transport = IrohTransport::new().await.map_err(|e| {
+                crate::ToolError::Execution(format!("Failed to create transport: {e}"))
+            })?;
 
             let ticket = transport
                 .stage_bytes(&data)
@@ -434,9 +428,9 @@ mod iroh_tools {
                 .as_str()
                 .ok_or_else(|| crate::ToolError::InvalidParams("Missing ticket".to_string()))?;
 
-            let output_path = args["output_path"]
-                .as_str()
-                .ok_or_else(|| crate::ToolError::InvalidParams("Missing output_path".to_string()))?;
+            let output_path = args["output_path"].as_str().ok_or_else(|| {
+                crate::ToolError::InvalidParams("Missing output_path".to_string())
+            })?;
 
             // Parse ticket
             let ticket: IrohTicket = ticket_str
@@ -444,9 +438,9 @@ mod iroh_tools {
                 .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid ticket: {e}")))?;
 
             // Create Iroh transport and fetch
-            let transport = IrohTransport::new()
-                .await
-                .map_err(|e| crate::ToolError::Execution(format!("Failed to create transport: {e}")))?;
+            let transport = IrohTransport::new().await.map_err(|e| {
+                crate::ToolError::Execution(format!("Failed to create transport: {e}"))
+            })?;
 
             let data = transport
                 .fetch_bytes(&ticket)
@@ -487,7 +481,13 @@ mod tests {
 
         assert_eq!(schema.name, "tdf_encrypt");
         assert!(schema.description.contains("OpenTDF"));
-        assert!(schema.aliases.as_ref().unwrap().contains(&"encrypt_tdf".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"encrypt_tdf".to_string())
+        );
     }
 
     #[tokio::test]
@@ -515,7 +515,9 @@ mod tests {
         let output_path = temp_dir.path().join("test.txt.tdf.json");
 
         // Create test file
-        tokio::fs::write(&input_path, b"Hello, TDF MCP!").await.unwrap();
+        tokio::fs::write(&input_path, b"Hello, TDF MCP!")
+            .await
+            .unwrap();
 
         // Encrypt
         let encrypt_tool = TdfEncryptTool::new();
@@ -574,11 +576,13 @@ mod tests {
 
             assert_eq!(schema.name, "tdf_stage");
             assert!(schema.description.contains("Iroh"));
-            assert!(schema
-                .aliases
-                .as_ref()
-                .unwrap()
-                .contains(&"iroh_stage".to_string()));
+            assert!(
+                schema
+                    .aliases
+                    .as_ref()
+                    .unwrap()
+                    .contains(&"iroh_stage".to_string())
+            );
         }
 
         #[tokio::test]
@@ -588,11 +592,13 @@ mod tests {
 
             assert_eq!(schema.name, "tdf_fetch");
             assert!(schema.description.contains("Iroh"));
-            assert!(schema
-                .aliases
-                .as_ref()
-                .unwrap()
-                .contains(&"iroh_fetch".to_string()));
+            assert!(
+                schema
+                    .aliases
+                    .as_ref()
+                    .unwrap()
+                    .contains(&"iroh_fetch".to_string())
+            );
         }
 
         #[tokio::test]

@@ -336,7 +336,7 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let err_msg = e.to_string();
         if err_msg.contains("Invalid listen address") {
             if verbose {
-                eprintln!("Warning: {}, using default configuration", err_msg);
+                eprintln!("Warning: {err_msg}, using default configuration");
             }
 
             // Create default config
@@ -747,6 +747,7 @@ fn parse_yaml_properties(
 }
 
 #[allow(clippy::future_not_send)]
+#[allow(clippy::missing_panics_doc)]
 pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
     use crate::mcp_spawner::McpProcessManager;
     use arkavo_protocol::{config::ServerConfig, rate_limit::RateLimitConfig, server::A2aServer};
@@ -894,7 +895,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
 
         // Get or create device ID (needed for system initialization)
         let _device_id =
-            get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {}", e))?;
+            get_or_create_device_id().map_err(|e| format!("Failed to get device ID: {e}"))?;
 
         // Get or create agent keypair
         let keypair_bytes = match keypair::get_keypair()? {
@@ -934,7 +935,7 @@ pub async fn start_agent_server(config: &AgentConfig) -> Result<(), Box<dyn std:
         println!("Agent Registration QR Code");
         println!("{}", "=".repeat(60));
         if let Err(e) = display_qr(&descriptor) {
-            eprintln!("Warning: Failed to display QR code: {}", e);
+            eprintln!("Warning: Failed to display QR code: {e}");
         }
         println!("{}", "=".repeat(60));
     }
