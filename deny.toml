@@ -67,6 +67,7 @@ allow = [
     "BSL-1.0",
     "Unlicense",
     "CDLA-Permissive-2.0",
+    "NCSA",
 ]
 confidence-threshold = 0.8
 
@@ -99,6 +100,12 @@ license-files = []
 [[licenses.clarify]]
 crate = "xtask"
 expression = "Apache-2.0"
+license-files = []
+
+# Intel MKL uses Intel Simplified Software License (permissive, allows redistribution)
+[[licenses.clarify]]
+crate = "intel-mkl-src"
+expression = "LicenseRef-Intel-Simplified"
 license-files = []
 
 # Ring uses custom license that is ISC + OpenSSL compatible

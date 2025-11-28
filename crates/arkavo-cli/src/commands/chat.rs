@@ -1,6 +1,8 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
+#[cfg(not(all(unix, feature = "mcp-tools")))]
+use tokio_stream::StreamExt;
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -1124,8 +1126,6 @@ async fn process_message(
     mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    use tokio_stream::StreamExt;
-
     // Debug output if enabled
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
         eprintln!(
