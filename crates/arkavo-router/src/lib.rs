@@ -628,8 +628,7 @@ impl Router {
         query: &str,
         detail: arkavo_mcp_tools::DetailLevel,
     ) -> Vec<arkavo_mcp_tools::MinimalToolInfo> {
-        // For now, just use token search
-        // TODO: Add semantic search with local model when llama-cpp feature is enabled
+        // See #383: Add semantic search with local model when llama-cpp feature is enabled
         registry.search_tools(query, detail)
     }
 }

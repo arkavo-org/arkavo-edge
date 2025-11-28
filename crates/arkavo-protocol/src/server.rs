@@ -2188,8 +2188,7 @@ impl A2aServer {
             info!("Model changed, LLM adapter recreated");
         }
 
-        // TODO: Handle MCP server updates in Phase 3
-        // This will require access to McpProcessManager and careful state management
+        // See #381: MCP server hot-reload requires McpProcessManager and careful state management
         if !new_config.mcp_servers.is_empty() {
             warn!(
                 "MCP server configuration changes detected. Full hot-reload for MCP servers will be implemented in Phase 3."
@@ -2197,8 +2196,7 @@ impl A2aServer {
             warn!("For now, MCP server changes require agent restart to take effect.");
         }
 
-        // TODO: Handle listen address changes
-        // Changing the listen address would require rebinding the server socket
+        // See #382: Listen address changes require rebinding the server socket
         let current_listen = format!("{}:{}", self.config.bind_address, self.config.port);
         if new_config.listen != current_listen && new_config.listen != "0.0.0.0:0" {
             warn!(

@@ -258,6 +258,26 @@ jobs:
             exit 1
           fi
 
+  # Dependency audit with cargo-deny
+  # Uses EmbarkStudios action with matrix strategy for optimal CI behavior
+  cargo-deny:
+    name: Dependency Audit (${{ matrix.checks }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}
+          # Advisories run separately so new RustSec entries don't break unrelated PRs
+          # bans, licenses, sources run together as they're deterministic
+
   build-linux:
     name: Build Linux (${{ matrix.target || matrix.device }})
     runs-on: ${{ matrix.os }}
@@ -1157,7 +1177,7 @@ jobs:
   # Final check that depends on all critical jobs
   release-readiness:
     name: Release Readiness
-    needs: [version-check, format, test-and-lint, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
+    needs: [version-check, format, test-and-lint, cargo-deny, smoke-test-linux, smoke-test-macos, binary-smoke-test, performance-check, validate-openrpc, validate-doc-snippets, zero-config-check, validate-xtask-schema, no-openssl-check]
     runs-on: ubuntu-22.04
     if: always()
     steps:
@@ -1166,6 +1186,7 @@ jobs:
           if [[ "${{ needs.version-check.result }}" != "success" || \
                 "${{ needs.format.result }}" != "success" || \
                 "${{ needs.test-and-lint.result }}" != "success" || \
+                "${{ needs.cargo-deny.result }}" != "success" || \
                 "${{ needs.smoke-test-linux.result }}" != "success" || \
                 "${{ needs.smoke-test-macos.result }}" != "success" || \
                 "${{ needs.binary-smoke-test.result }}" != "success" || \

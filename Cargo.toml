@@ -95,7 +95,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.42.2"
+version = "0.42.4"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -136,7 +136,7 @@ tower = "0.5"
 semver = { version = "1.0", features = ["serde"] }
 bytemuck = "1.20"
 cfg-if = "1.0"
-notify = "7.0"
+notify = "8.0"
 sha2 = "0.10"
 dirs = "6.0"
 toml = "0.8"
@@ -154,7 +154,7 @@ handlebars = "6.2"
 ratatui = "0.29.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Git and filesystem
 git2 = { version = "0.20.2", default-features = false }
@@ -179,7 +179,7 @@ jsonwebtoken = "9.3"
 urlencoding = "2.1"
 schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 gethostname = "0.5"
-get_if_addrs = "0.5"
+if-addrs = "0.14"
 metrics = "0.23"
 metrics-exporter-prometheus = "0.15"
 axum = { version = "0.7", features = ["ws"] }
@@ -188,7 +188,7 @@ mdns-sd = "0.14"
 
 # LLM and ML
 tokenizers = { version = "0.22.1", default-features = false, features = ["fancy-regex"] }
-hf-hub = { version = "0.4.3", default-features = false, features = ["tokio", "rustls-tls"] }
+hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = false, features = ["tokio", "rustls-tls"] }
 candle-core = { version = "0.9.1", default-features = false }
 candle-nn = { version = "0.9.1", default-features = false }
 candle-transformers = { version = "0.9.1", default-features = false }

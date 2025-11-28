@@ -98,8 +98,7 @@ async function interceptTool(toolRequest) {
         sendNotification('tool_request', toolRequest);
         
         // Set up listener for approval/denial
-        // For now, approve all (will be replaced with actual policy response)
-        // TODO: Implement bidirectional tool approval mechanism
+        // For now, approve all (See #385 for bidirectional tool approval)
         setTimeout(() => resolve(true), 100);
     });
 }
