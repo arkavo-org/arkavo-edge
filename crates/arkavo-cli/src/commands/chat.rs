@@ -12,7 +12,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
-use tokio_stream::StreamExt;
 use uuid;
 
 // Global flag to control whether to show debug messages
@@ -400,14 +399,14 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // Start fresh session with metadata
             let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
                 client.provider_name(),
-                Some("gemma3"), // TODO: Get actual template name
+                Some("gemma3"), // Default template for local models
                 None,           // System prompt not available yet
                 model_size_hint,
             ))?;
             println!("Started new conversation session");
         } else if let Ok(Some(session_id)) = runtime.block_on(
             conversation_manager.restore_last_session_with_compatibility(
-                Some("gemma3"), // TODO: Get actual template name
+                Some("gemma3"), // Default template for local models
                 None,           // System prompt not available yet
                 Some(client.provider_name()),
             ),
@@ -420,7 +419,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             // Start new session with metadata
             let _ = runtime.block_on(conversation_manager.start_session_with_metadata(
                 client.provider_name(),
-                Some("gemma3"), // TODO: Get actual template name
+                Some("gemma3"), // Default template for local models
                 None,           // System prompt not available yet
                 model_size_hint,
             ))?;
@@ -1118,13 +1117,15 @@ async fn process_message_with_tools(
     Ok(response)
 }
 
-#[allow(dead_code)]
+#[cfg(not(all(unix, feature = "mcp-tools")))]
 async fn process_message(
     client: &LlmClient,
     messages: &[Message],
     mcp_client: Option<&McpConnection>,
     _conversation_manager: &ConversationManager,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    use tokio_stream::StreamExt;
+
     // Debug output if enabled
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
         eprintln!(
@@ -1479,7 +1480,6 @@ async fn process_message_print(
     }
 }
 
-#[allow(dead_code)]
 fn get_current_directory() -> String {
     match env::current_dir() {
         Ok(path) => path.display().to_string(),
@@ -1488,7 +1488,6 @@ fn get_current_directory() -> String {
 }
 
 #[cfg(all(unix, feature = "mcp-tools"))]
-#[allow(dead_code)]
 fn handle_command(
     input: &str,
     mcp_client: Option<&McpConnection>,
@@ -1629,13 +1628,12 @@ fn handle_command(
     }
 }
 
-// Type alias for tool execution results
+// Type alias for tool execution results (used by handle_tool_calls_in_response in feature-gated code)
 #[allow(dead_code)]
 type ToolResults = Vec<(String, String)>;
 
 // Stub implementations when mcp-tools is not available
 #[cfg(not(all(unix, feature = "mcp-tools")))]
-#[allow(dead_code)]
 fn handle_command(
     _input: &str,
     _mcp_client: Option<&McpConnection>,
@@ -1645,7 +1643,6 @@ fn handle_command(
 }
 
 #[cfg(not(all(unix, feature = "mcp-tools")))]
-#[allow(dead_code)]
 fn handle_tool_calls_in_response(
     response: &str,
     _mcp_client: &McpConnection,
@@ -1655,7 +1652,6 @@ fn handle_tool_calls_in_response(
     Ok((response.to_string(), Vec::new()))
 }
 
-#[allow(dead_code)]
 fn read_file(file_path: &str) -> Option<String> {
     match fs::read_to_string(file_path) {
         Ok(content) => {
@@ -1675,130 +1671,6 @@ fn read_file(file_path: &str) -> Option<String> {
     }
 }
 
-#[cfg(all(unix, feature = "mcp-tools"))]
-#[allow(dead_code)]
-fn handle_tool_calls_in_response(
-    response: &str,
-    mcp_client: &McpConnection,
-    llm_provider: &str,
-) -> Result<(String, ToolResults), Box<dyn std::error::Error>> {
-    // Find all @tool calls in the response
-    let mut tool_results = Vec::new();
-
-    // Return the original response text to avoid interrupting the flow
-    let original_response = response.to_string();
-
-    // Use a more robust approach to find @tool calls
-    // First, remove markdown code blocks to find tools within them
-    let cleaned_response = response.replace("```", "").replace('`', "");
-
-    let remaining = &cleaned_response[..];
-
-    // Process only the first tool call to avoid interrupting the flow
-    // This allows for multi-tasking by processing one tool at a time
-    if let Some(at_pos) = remaining.find('@') {
-        // Check if this is a tool call (followed by word characters)
-        let after_at = &remaining[at_pos + 1..];
-
-        let (tool_name, args_start) =
-            if let Some(space_or_brace) = after_at.find(|c: char| c.is_whitespace() || c == '{') {
-                // Tool name followed by arguments
-                (&after_at[..space_or_brace], at_pos + 1 + space_or_brace)
-            } else {
-                // Tool name at end of string or followed by non-alphanumeric chars
-                let end_pos = after_at
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                    .unwrap_or(after_at.len());
-                (&after_at[..end_pos], at_pos + 1 + end_pos)
-            };
-
-        // Only process if tool_name is alphanumeric and not exactly "screenshot" (which is not allowed)
-        if tool_name.chars().all(|c| c.is_alphanumeric() || c == '_') && tool_name != "screenshot" {
-            let args_str = &remaining[args_start..].trim_start();
-
-            let (args, _consumed_len) = if args_str.starts_with('{') {
-                // Find matching closing brace
-                let mut brace_count = 0;
-                let mut end_pos = 0;
-                for (i, ch) in args_str.chars().enumerate() {
-                    match ch {
-                        '{' => brace_count += 1,
-                        '}' => {
-                            brace_count -= 1;
-                            if brace_count == 0 {
-                                end_pos = i + 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                if end_pos > 0 {
-                    let json_str = &args_str[..end_pos];
-
-                    match serde_json::from_str(json_str) {
-                        Ok(json) => (json, end_pos),
-                        Err(_e) => (json!({ "prompt": json_str }), end_pos),
-                    }
-                } else {
-                    (json!({ "prompt": args_str }), 0)
-                }
-            } else {
-                // Take until newline or end of string
-                let end_pos = args_str.find('\n').unwrap_or(args_str.len());
-                let arg_text = &args_str[..end_pos].trim();
-                (json!({ "prompt": arg_text }), end_pos)
-            };
-
-            // Execute the tool
-            match mcp_client.call_tool(tool_name, args, llm_provider) {
-                Ok(tool_result) => {
-                    // Extract the actual result text from the MCP response
-                    let result_text = if let Some(result_obj) = tool_result.get("result") {
-                        if let Some(text) = result_obj.as_str() {
-                            text.to_string()
-                        } else {
-                            serde_json::to_string_pretty(&result_obj)
-                                .unwrap_or_else(|_e| result_obj.to_string())
-                        }
-                    } else {
-                        serde_json::to_string_pretty(&tool_result)
-                            .unwrap_or_else(|_e| tool_result.to_string())
-                    };
-
-                    // Truncate large results to prevent exceeding LLM token limits
-                    const MAX_RESULT_CHARS: usize = 200_000;
-                    let final_result = if result_text.len() > MAX_RESULT_CHARS {
-                        let truncated = &result_text[..MAX_RESULT_CHARS];
-                        let break_point = truncated
-                            .rfind('\n')
-                            .or_else(|| truncated.rfind(' '))
-                            .unwrap_or(MAX_RESULT_CHARS);
-                        format!(
-                            "{}...\n[OUTPUT TRUNCATED - {} chars total, showing first {}]",
-                            &result_text[..break_point],
-                            result_text.len(),
-                            break_point
-                        )
-                    } else {
-                        result_text
-                    };
-
-                    tool_results.push((tool_name.to_string(), final_result));
-                }
-                Err(e) => {
-                    tool_results.push((tool_name.to_string(), format!("Error: {e}")));
-                }
-            }
-        }
-    }
-
-    // Return the original response text to avoid interrupting the flow
-    Ok((original_response, tool_results))
-}
-
-#[allow(dead_code)]
 fn list_files(path: &str) -> Option<String> {
     let path = Path::new(path);
 

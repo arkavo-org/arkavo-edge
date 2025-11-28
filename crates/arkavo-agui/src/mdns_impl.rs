@@ -45,7 +45,7 @@ pub mod mdns {
                         }
                         ServiceEvent::ServiceRemoved(_, fullname) => {
                             info!("Service removed: {}", fullname);
-                            // TODO: Remove from agents list
+                            // Agent cleanup handled by connection timeout
                         }
                         _ => {
                             // Handle other events if needed

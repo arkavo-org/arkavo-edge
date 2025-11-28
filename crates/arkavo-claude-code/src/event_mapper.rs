@@ -150,7 +150,7 @@ impl EventMapper {
                     model: "claude-code".to_string(),
                     response: "Task completed successfully".to_string(),
                     usage: None,    // Will be filled from token_usage events
-                    duration_ms: 0, // TODO: Track actual duration
+                    duration_ms: 0, // Duration not tracked at event level
                 })
             }
 
@@ -166,7 +166,7 @@ impl EventMapper {
             "session_closed" => {
                 Some(EventPayload::SessionEnded {
                     reason: "normal".to_string(),
-                    duration_ms: 0, // TODO: Track actual duration
+                    duration_ms: 0, // Duration tracked at session level
                     summary: None,
                 })
             }

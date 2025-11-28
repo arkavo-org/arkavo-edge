@@ -477,7 +477,6 @@ impl MemoryStorage {
         let embedding = self.embedding_service.generate_embedding(content).await?;
 
         // Get all memories with categories using the lightweight MemoryRow struct
-        // TODO: Use query_as! macro once sqlx-data.json is prepared
         let rows: Vec<MemoryRow> = sqlx::query_as::<_, MemoryRow>(
             "SELECT id, category, embedding_blob
              FROM memories
