@@ -1,4 +1,5 @@
 use crate::browser::BrowserTool;
+use crate::code_review::CodeReviewTool;
 use crate::filesystem::FileSystemKit;
 use crate::git::{GitBranchKit, GitCommitKit, GitDiffKit, GitLogKit, GitRemoteKit, GitStatusKit};
 use crate::github::{
@@ -14,12 +15,14 @@ use crate::health_check::HealthCheckTool;
 use crate::osv::OsvTool;
 use crate::semgrep::SemgrepTool;
 use crate::server::Tool;
+use crate::shell_exec::ShellExecTool;
 use crate::syft::SyftTool;
 use crate::tdf::{TdfEncryptTool, TdfHelpTool, TdfInfoTool};
 #[cfg(feature = "iroh")]
 use crate::tdf::{TdfFetchTool, TdfStageTool};
 use crate::test_runner::TestRunnerTool;
 use crate::time_sync::{GetAgentTimeTool, GetTimeStatusTool, SyncAgentTimeTool};
+use crate::web_search::WebSearchTool;
 use arkavo_mcp::ToolSchema;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -251,6 +254,15 @@ impl ToolRegistry {
             self.register("tdf_stage", Box::new(TdfStageTool::new()));
             self.register("tdf_fetch", Box::new(TdfFetchTool::new()));
         }
+
+        // Shell command execution tool
+        self.register("shell_exec", Box::new(ShellExecTool::new()));
+
+        // Web search tool
+        self.register("web_search", Box::new(WebSearchTool::new()));
+
+        // Code review tool
+        self.register("code_review", Box::new(CodeReviewTool::new()));
     }
 
     pub fn register(&mut self, name: &str, tool: Box<dyn Tool>) {
@@ -495,6 +507,8 @@ impl ToolRegistry {
             n if n.starts_with("git") => "Git".to_string(),
             n if n.starts_with("code_") => "Code Analysis".to_string(),
             n if n.starts_with("filesystem") => "File System".to_string(),
+            n if n.starts_with("shell_") || n == "bash" || n == "exec" => "Shell".to_string(),
+            n if n.starts_with("web_") || n == "search" => "Web".to_string(),
             n if n.contains("time") || n.contains("sync") => "System".to_string(),
             _ => "General".to_string(),
         }

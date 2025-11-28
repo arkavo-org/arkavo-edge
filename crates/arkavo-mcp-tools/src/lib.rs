@@ -2,6 +2,7 @@
 
 pub mod browser;
 pub mod code_analysis;
+pub mod code_review;
 pub mod filesystem;
 pub mod git;
 pub mod github;
@@ -14,6 +15,7 @@ pub mod osv;
 pub mod registry;
 pub mod semgrep;
 pub mod server;
+pub mod shell_exec;
 pub mod state;
 pub mod state_store;
 pub mod syft;
@@ -21,6 +23,7 @@ pub mod tdf;
 pub mod test_runner;
 pub mod time_sync;
 pub mod tui;
+pub mod web_search;
 
 #[cfg(feature = "ntp-server")]
 pub mod ntp_server;

@@ -136,6 +136,8 @@ jobs:
 
       - name: Install CMake, mold linker, and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib mold
 
@@ -215,13 +217,15 @@ jobs:
       
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
-      
+
       - uses: dtolnay/rust-toolchain@stable
-      
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "v1-${{ runner.os }}"
@@ -319,6 +323,8 @@ jobs:
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
 
           echo "DEBUG: matrix.device = '${{ matrix.device }}'"
@@ -357,6 +363,8 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
             # Install musl tools for static build
+            # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+            sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
             sudo apt-get update
             sudo apt-get install -y musl-tools musl-dev
           fi
@@ -826,6 +834,8 @@ jobs:
 
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
@@ -840,6 +850,8 @@ jobs:
       - name: Install validation tools
         run: |
           # Install jq for JSON validation
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y jq
 
@@ -935,6 +947,8 @@ jobs:
 
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
@@ -948,6 +962,8 @@ jobs:
 
       - name: Install jq for JSON comparison
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y jq
 
@@ -1018,6 +1034,8 @@ jobs:
           submodules: recursive
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
@@ -1060,6 +1078,8 @@ jobs:
           echo "llama.cpp cloned at commit $(git rev-parse --short HEAD)"
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           # Install both runtime and static OpenMP libraries for static linking
           # Use gcc-multilib which includes static libgomp.a
@@ -1122,6 +1142,8 @@ jobs:
           submodules: recursive
       - name: Install CMake and build dependencies
         run: |
+          # Remove Microsoft apt sources that cause 403 errors on GitHub runners
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/azure-cli.list 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev libgomp1 gcc-multilib g++-multilib
       - uses: dtolnay/rust-toolchain@stable
