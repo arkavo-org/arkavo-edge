@@ -1,8 +1,6 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, Message, encode_image_file};
-#[cfg(not(all(unix, feature = "mcp-tools")))]
-use tokio_stream::StreamExt;
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -14,6 +12,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::runtime::Runtime;
+#[cfg(not(all(unix, feature = "mcp-tools")))]
+use tokio_stream::StreamExt;
 use uuid;
 
 // Global flag to control whether to show debug messages

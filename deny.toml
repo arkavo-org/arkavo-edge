@@ -68,6 +68,7 @@ allow = [
     "Unlicense",
     "CDLA-Permissive-2.0",
     "NCSA",
+    "LicenseRef-Intel-Simplified",
 ]
 confidence-threshold = 0.8
 
