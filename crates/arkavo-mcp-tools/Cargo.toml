@@ -29,6 +29,10 @@ base64 = { workspace = true }
 # For Git tools
 git2 = { workspace = true }
 
+# For web search tool
+reqwest = { workspace = true }
+urlencoding = "2.1"
+
 # For time synchronization
 sntpc = "0.6"
 chrono-tz = "0.9"
