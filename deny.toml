@@ -4,7 +4,19 @@
 
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+ignore = [
+    # External dependencies requiring upstream fixes
+    # opentdf transitive - tracked in arkavo-org/opentdf-rs#51
+    { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in opentdf" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in opentdf" },
+    { id = "RUSTSEC-2023-0071", reason = "rsa timing in opentdf" },
+    # candle/gemm ecosystem - feature-gated behind llm-local
+    { id = "RUSTSEC-2024-0436", reason = "paste in gemm via candle" },
+    # iroh P2P library
+    { id = "RUSTSEC-2024-0384", reason = "instant in iroh" },
+    # syntect syntax highlighting - tracked in #388
+    { id = "RUSTSEC-2024-0320", reason = "yaml-rust in syntect" },
+]
 
 [bans]
 # Multiple versions of the same crate
@@ -139,6 +151,7 @@ unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/arkavo-org/opentdf-rs",
+    "https://github.com/huggingface/hf-hub",
 ]
 
 [sources.allow-org]

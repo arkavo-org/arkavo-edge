@@ -23,10 +23,8 @@ pub enum NetworkError {
 /// 3. Non-zero addresses (not 0.0.0.0)
 #[cfg(feature = "mdns")]
 pub fn get_network_ip() -> Result<Ipv4Addr, NetworkError> {
-    use get_if_addrs::get_if_addrs;
-
     let interfaces =
-        get_if_addrs().map_err(|e| NetworkError::InterfaceEnumeration(e.to_string()))?;
+        if_addrs::get_if_addrs().map_err(|e| NetworkError::InterfaceEnumeration(e.to_string()))?;
 
     debug!("Found {} network interfaces", interfaces.len());
 
