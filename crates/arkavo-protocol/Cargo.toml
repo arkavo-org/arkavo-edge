@@ -91,7 +91,7 @@ tracing-subscriber = { workspace = true, optional = true }
 gethostname = { workspace = true, optional = true }
 
 # Network interface detection
-get_if_addrs = { workspace = true, optional = true }
+if-addrs = { workspace = true, optional = true }
 
 # Metrics dependencies
 metrics = { workspace = true, optional = true }
@@ -100,7 +100,7 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 [features]
 demo = ["clap", "tracing-subscriber"]
 stub_handlers = []
-mdns = ["gethostname", "get_if_addrs"]
+mdns = ["gethostname", "if-addrs"]
 metrics = ["dep:metrics", "metrics-exporter-prometheus"]
 
 [dev-dependencies]
