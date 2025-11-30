@@ -123,6 +123,93 @@ pub struct Classification {
     pub category: TaskCategory,
     pub confidence: f32,
     pub reasoning: String,
+    /// Whether this task appears to be multi-step (triggers architect mode consideration)
+    pub is_multi_step: bool,
+    /// Estimated number of subtasks if this is a complex task
+    pub estimated_subtasks: u8,
+}
+
+impl Classification {
+    /// Create a new classification with default complexity fields
+    pub fn new(category: TaskCategory, confidence: f32, reasoning: String) -> Self {
+        Self {
+            category,
+            confidence,
+            reasoning,
+            is_multi_step: false,
+            estimated_subtasks: 1,
+        }
+    }
+
+    /// Create a classification with complexity analysis
+    pub fn with_complexity(
+        category: TaskCategory,
+        confidence: f32,
+        reasoning: String,
+        task: &str,
+    ) -> Self {
+        let (is_multi_step, estimated_subtasks) = Self::detect_complexity(task);
+        Self {
+            category,
+            confidence,
+            reasoning,
+            is_multi_step,
+            estimated_subtasks,
+        }
+    }
+
+    /// Detect complexity indicators in a task description
+    fn detect_complexity(task: &str) -> (bool, u8) {
+        let task_lower = task.to_lowercase();
+
+        // Multi-step indicators
+        let multi_step_patterns = [
+            "and then", "after that", "first", "second", "third", "finally",
+            "next", ". then", "step 1", "step 2",
+        ];
+
+        let mut step_count = 0u8;
+        for pattern in multi_step_patterns {
+            if task_lower.contains(pattern) {
+                step_count = step_count.saturating_add(1);
+            }
+        }
+
+        // Complexity keywords
+        let complexity_keywords = [
+            "refactor", "migration", "redesign", "multi-step", "comprehensive",
+            "complete", "full implementation", "end-to-end", "entire",
+        ];
+
+        let has_complexity_keyword = complexity_keywords.iter().any(|k| task_lower.contains(k));
+
+        // Count action verbs
+        let action_verbs = [
+            "create", "build", "implement", "add", "update", "fix", "write",
+            "generate", "test", "refactor", "migrate", "deploy",
+        ];
+        let verb_count = action_verbs.iter().filter(|v| task_lower.contains(*v)).count();
+
+        // Sentence count
+        let sentence_count = task.matches(". ").count() + task.matches("? ").count() + 1;
+
+        // Determine if multi-step
+        let is_multi_step = step_count >= 2
+            || has_complexity_keyword
+            || (verb_count >= 3 && sentence_count >= 3)
+            || task.len() > 300;
+
+        // Estimate subtasks
+        let estimated_subtasks = if is_multi_step {
+            let base = step_count.max(1);
+            let verb_bonus = (verb_count / 2).min(3) as u8;
+            (base + verb_bonus).clamp(2, 10)
+        } else {
+            1
+        };
+
+        (is_multi_step, estimated_subtasks)
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -178,11 +265,11 @@ impl TaskClassifier {
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
-            return Ok(Classification {
-                category: TaskCategory::General,
-                confidence: 0.5,
-                reasoning: "Task description too short for accurate classification".to_string(),
-            });
+            return Ok(Classification::new(
+                TaskCategory::General,
+                0.5,
+                "Task description too short for accurate classification".to_string(),
+            ));
         }
 
         let rule_based = self.try_rule_based_classification(task_description);
@@ -311,11 +398,7 @@ impl TaskClassifier {
             )
         };
 
-        Classification {
-            category,
-            confidence,
-            reasoning,
-        }
+        Classification::with_complexity(category, confidence, reasoning, task)
     }
 
     async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
@@ -382,11 +465,11 @@ Confidence: [0-100]"#
             }
         }
 
-        Ok(Classification {
+        Ok(Classification::new(
             category,
             confidence,
-            reasoning: format!("LLM classification: {}", category.as_str()),
-        })
+            format!("LLM classification: {}", category.as_str()),
+        ))
     }
 }
 
@@ -411,11 +494,11 @@ impl TaskClassifier {
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
-            return Ok(Classification {
-                category: TaskCategory::General,
-                confidence: 0.5,
-                reasoning: "Task description too short for accurate classification".to_string(),
-            });
+            return Ok(Classification::new(
+                TaskCategory::General,
+                0.5,
+                "Task description too short for accurate classification".to_string(),
+            ));
         }
 
         let rule_based = self.try_rule_based_classification(task_description);
@@ -542,11 +625,7 @@ impl TaskClassifier {
             )
         };
 
-        Classification {
-            category,
-            confidence,
-            reasoning,
-        }
+        Classification::with_complexity(category, confidence, reasoning, task)
     }
 
     async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
@@ -613,11 +692,11 @@ Confidence: [0-100]"#
             }
         }
 
-        Ok(Classification {
+        Ok(Classification::new(
             category,
             confidence,
-            reasoning: format!("LLM classification: {}", category.as_str()),
-        })
+            format!("LLM classification: {}", category.as_str()),
+        ))
     }
 }
 

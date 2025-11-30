@@ -30,11 +30,11 @@ arkavo-context = { path = "../arkavo-context", default-features = false }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-mcp = { path = "../arkavo-mcp" }
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
 default = ["llama-cpp", "gemini"]
-llama-cpp = ["arkavo-llm/llama-cpp", "llm-local"]
-llm-local = ["arkavo-llm/llm-local", "arkavo-context/llm-local"]
+llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 # Windows compatible features (no C++ dependencies)

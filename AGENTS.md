@@ -78,3 +78,4 @@ cargo run -p arkavo -- chat --prompt "Hello"
 ## 7. Environment Variables
 - `ARKAVO_DEBUG=1`: General debug logging.
 - `ARKAVO_DEBUG_CHAT=1`: Chat/Template/Token debug.
+- ccache must be installed for development builds

@@ -10,8 +10,6 @@ ignore = [
     { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill in opentdf" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error in opentdf" },
     { id = "RUSTSEC-2023-0071", reason = "rsa timing in opentdf" },
-    # candle/gemm ecosystem - feature-gated behind llm-local
-    { id = "RUSTSEC-2024-0436", reason = "paste in gemm via candle" },
     # iroh P2P library
     { id = "RUSTSEC-2024-0384", reason = "instant in iroh" },
     # syntect syntax highlighting - tracked in #388
@@ -30,9 +28,6 @@ deny = []
 
 # Skip expected duplicates that cannot be easily resolved
 skip = [
-    # C++ dependencies (candle, llama-cpp) - Feature-gated, expected duplicates
-    { crate = "thiserror@1.0.69", reason = "candle ecosystem uses v1.x" },
-
     # Dev/build dependencies - Different contexts (acceptable)
     { crate = "itertools@0.10.5", reason = "criterion dev-dependency" },
     { crate = "itertools@0.12.1", reason = "bindgen build-dependency" },
@@ -45,7 +40,6 @@ skip = [
     { crate = "tungstenite@0.23.0", reason = "chromiumoxide v0.7.0" },
 
     # Minor duplicates with low impact
-    { crate = "fancy-regex@0.13.0", reason = "candle-transformers dependency" },
     { crate = "fancy-regex@0.14.0", reason = "tokenizers older version" },
     { crate = "compact_str@0.8.1", reason = "ratatui dependency" },
     { crate = "bit-set@0.5.3", reason = "old syntect dependency" },
@@ -54,10 +48,6 @@ skip = [
 
 # skip-tree entries ignore entire dependency trees
 skip-tree = [
-    # Candle and llama-cpp C++ ecosystems - feature-gated behind llm-local
-    { crate = "candle-core@0.9.1", reason = "C++ ecosystem, feature-gated" },
-    { crate = "candle-nn@0.9.1", reason = "C++ ecosystem, feature-gated" },
-    { crate = "candle-transformers@0.9.1", reason = "C++ ecosystem, feature-gated" },
 ]
 
 [licenses]

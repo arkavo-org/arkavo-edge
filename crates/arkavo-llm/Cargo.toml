@@ -13,15 +13,12 @@ categories = ["command-line-utilities", "development-tools"]
 [features]
 default = ["llm-remote"]
 llm-remote = ["dep:reqwest", "dep:url", "dep:bytes", "dep:log"]
-llm-local = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:hf-hub", "dep:tokenizers", "dep:tracing", "dep:bytemuck", "dep:cfg-if", "dep:sha2", "dep:indicatif", "dep:dirs", "dep:toml"]
 kimi = ["dep:arkavo-kimi", "dep:reqwest", "dep:log"]
 deepseek = ["dep:arkavo-deepseek", "dep:reqwest", "dep:log"]
 qwen = ["dep:arkavo-qwen", "dep:reqwest", "dep:log"]
 gemini = ["dep:arkavo-gemini", "dep:log"]
 llama-cpp = ["dep:arkavo-llama-cpp", "dep:tracing", "dep:scopeguard", "dep:tokio-util"]
 snpe = ["dep:arkavo-snpe", "dep:log"]
-local = ["llm-local"]
-metal = ["candle-core/metal", "candle-transformers/metal"]
 
 [dependencies]
 # Core dependencies - always needed for public API
@@ -45,19 +42,6 @@ log = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 
-# Local inference dependencies (optional)
-# Note: Metal support is handled via the metal feature, not here
-candle-core = { workspace = true, optional = true }
-candle-nn = { workspace = true, optional = true }
-candle-transformers = { workspace = true, optional = true }
-hf-hub = { workspace = true, optional = true }
-tokenizers = { workspace = true, optional = true }
-bytemuck = { workspace = true, optional = true }
-cfg-if = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-indicatif = { workspace = true, optional = true }
-dirs = { workspace = true, optional = true }
-toml = { workspace = true, optional = true }
 rand = { workspace = true }
 
 # Provider integrations
@@ -75,11 +59,6 @@ tokio-util = { workspace = true, optional = true }
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
 arkavo-snpe = { path = "../arkavo-snpe", optional = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-accelerate-src = { version = "0.3.0", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-intel-mkl-src = { version = "0.8.1", features = ["mkl-static-lp64-iomp"], optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

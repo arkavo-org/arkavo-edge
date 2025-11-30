@@ -4,8 +4,6 @@ pub mod client;
 pub mod common;
 pub mod error;
 pub mod image;
-#[cfg(feature = "llm-local")]
-pub mod local;
 pub mod mcp_converter;
 pub mod message;
 #[cfg(feature = "llm-remote")]

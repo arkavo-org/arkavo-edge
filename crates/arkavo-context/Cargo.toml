@@ -9,7 +9,6 @@ repository.workspace = true
 
 [features]
 default = []
-llm-local = ["arkavo-llm/llm-local"]
 llm-remote = ["arkavo-llm/llm-remote"]
 
 [dependencies]

@@ -20,8 +20,6 @@ mcp-tools = ["dep:arkavo-mcp-macos", "dep:arkavo-mcp-tools", "arkavo-router/gemi
 memory = []
 embeddings = ["memory", "arkavo-memory/embeddings"]
 mdns = ["mdns-sd", "arkavo-agui/mdns", "arkavo-protocol/mdns"]
-local = ["arkavo-llm/local", "arkavo-dataflow/llm-local", "arkavo-terminal/llm-local"]
-metal = ["arkavo-llm/metal"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-dataflow/llm-remote", "arkavo-terminal/llm-remote", "arkavo-router/llm-remote"]
 kimi = ["arkavo-llm/kimi"]
 deepseek = ["arkavo-llm/deepseek"]
@@ -98,9 +96,6 @@ arkavo-mcp-macos = { path = "../arkavo-mcp-macos", optional = true }
 [target.'cfg(unix)'.dependencies]
 arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
 
-# Automatically enable metal feature on macOS
-[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
-arkavo-llm = { path = "../arkavo-llm", optional = true, features = ["metal"] }
 
 [lints]
 workspace = true

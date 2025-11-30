@@ -1,6 +1,7 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::unused_async)]
 
+pub mod architect;
 pub mod classifier;
 pub mod connectivity;
 pub mod decision;
@@ -16,6 +17,10 @@ pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
 
+pub use architect::{
+    ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
+    ComplexityScorer, Subtask, SubtaskResult,
+};
 pub use classifier::{TaskCategory, TaskClassifier};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
@@ -444,6 +449,86 @@ impl Router {
         });
 
         Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    }
+
+    /// Route complex tasks through architect mode
+    ///
+    /// Auto-detects complex multi-step tasks and:
+    /// 1. Uses Opus to create a decomposed plan
+    /// 2. Auto-classifies each subtask
+    /// 3. Routes subtasks to appropriate models (cheaper for frontend, premium for backend)
+    /// 4. Aggregates results and tracks cost savings
+    pub async fn route_architect(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<architect::ArchitectResult> {
+        use architect::{ArchitectExecutor, ArchitectPlanner, ComplexityScorer};
+
+        // Step 1: Analyze complexity
+        let scorer = ComplexityScorer::new();
+        let complexity = scorer.analyze(task_description);
+
+        // Step 2: Check if architect mode should activate
+        if !complexity.architect_recommended {
+            tracing::debug!(
+                "Architect mode not recommended: {} subtasks, {} tokens",
+                complexity.estimated_subtasks,
+                complexity.estimated_output_tokens
+            );
+
+            // Fall back to normal quality-gated routing
+            let response = self
+                .route_with_quality_gate(task_description, messages, tool_registry, 3)
+                .await?;
+
+            return Ok(architect::ArchitectResult::single_task(
+                response.content,
+                0.0, // Would need actual cost from provider
+            ));
+        }
+
+        tracing::info!(
+            "Architect mode activated: {} estimated subtasks, {:.1}% estimated savings",
+            complexity.estimated_subtasks,
+            complexity.estimated_savings_percent
+        );
+
+        // Step 3: Generate plan using Opus
+        let planner = ArchitectPlanner::new();
+        let plan = planner.create_plan(task_description, complexity).await?;
+
+        tracing::info!(
+            "Created plan with {} subtasks, estimated ${:.4} (saves ${:.4})",
+            plan.subtasks.len(),
+            plan.architect_estimate_usd,
+            plan.opus_only_estimate_usd - plan.architect_estimate_usd
+        );
+
+        // Step 4: Execute the plan
+        let executor = ArchitectExecutor::new(Arc::new(self.clone_for_executor().await?));
+        let result = executor.execute(&plan, messages, tool_registry).await?;
+
+        tracing::info!(
+            "Architect mode complete: actual cost ${:.4}, savings ${:.4} ({:.1}%)",
+            result.actual_cost_usd,
+            result.actual_savings_usd,
+            result.savings_percent()
+        );
+
+        Ok(result)
+    }
+
+    /// Create a clone of Router for use in executor
+    async fn clone_for_executor(&self) -> Result<Self> {
+        Ok(Self {
+            classifier: self.classifier.clone(),
+            selector: self.selector.clone(),
+            metrics: self.metrics.clone(),
+            connectivity: self.connectivity.clone(),
+            offline_mode: self.offline_mode,
+        })
     }
 
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {

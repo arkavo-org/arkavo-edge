@@ -12,8 +12,6 @@ default = ["nl", "sandbox", "llm-remote"]
 nl = []
 sandbox = []
 llm-remote = ["dep:arkavo-llm", "arkavo-llm?/llm-remote"]
-llm-local = ["dep:arkavo-llm", "arkavo-llm?/llm-local"]
-local = ["llm-local"]
 
 [dependencies]
 anyhow = { workspace = true }
