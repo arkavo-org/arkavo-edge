@@ -1,29 +1,30 @@
 use crate::{Error, Result};
-#[cfg(feature = "llm-local")]
-use arkavo_llm::local::LocalProvider;
-#[cfg(feature = "llm-local")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+use arkavo_llm::LlamaCppProvider;
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::{Message, Provider, Role};
-#[cfg(feature = "llm-local")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
-#[cfg(feature = "llm-local")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use tokio::sync::Mutex;
 
-#[cfg(feature = "llm-local")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 pub struct ContextCompressor {
-    provider: Arc<Mutex<LocalProvider>>,
+    provider: Arc<Mutex<LlamaCppProvider>>,
     model_name: String,
 }
 
-#[cfg(not(feature = "llm-local"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 pub struct ContextCompressor {
     _phantom: std::marker::PhantomData<()>,
 }
 
-#[cfg(feature = "llm-local")]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl ContextCompressor {
     pub async fn new(model_name: String, model_path: Option<String>) -> Result<Self> {
-        let provider = LocalProvider::new(model_name.clone(), model_path)?;
-        provider.initialize().await?;
+        let path = model_path.ok_or_else(|| Error::Model("model_path is required".to_string()))?;
+        let provider = LlamaCppProvider::new(model_name.clone(), path)
+            .map_err(|e| Error::Model(format!("Failed to create provider: {e}")))?;
 
         Ok(Self {
             provider: Arc::new(Mutex::new(provider)),
@@ -96,23 +97,23 @@ impl ContextCompressor {
     }
 }
 
-#[cfg(not(feature = "llm-local"))]
+#[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
 impl ContextCompressor {
     pub async fn new(_model_name: String, _model_path: Option<String>) -> Result<Self> {
         Err(Error::Model(
-            "ContextCompressor requires llm-local feature".to_string(),
+            "ContextCompressor requires llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn compress(&self, _text: &str, _target_ratio: f64) -> Result<String> {
         Err(Error::Model(
-            "ContextCompressor requires llm-local feature".to_string(),
+            "ContextCompressor requires llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn compress_to_tokens(&self, _text: &str, _target_tokens: u32) -> Result<String> {
         Err(Error::Model(
-            "ContextCompressor requires llm-local feature".to_string(),
+            "ContextCompressor requires llama-cpp feature".to_string(),
         ))
     }
 
@@ -146,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "llm-local")]
+    #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
     fn test_compression_prompt_format() {
         let compressor_result = tokio::runtime::Runtime::new().unwrap().block_on(async {
             ContextCompressor::new(

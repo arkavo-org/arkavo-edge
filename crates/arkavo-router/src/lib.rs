@@ -1,6 +1,7 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::unused_async)]
 
+pub mod architect;
 pub mod classifier;
 pub mod connectivity;
 pub mod decision;
@@ -12,10 +13,15 @@ pub mod model_discovery;
 pub mod orchestrator;
 pub mod prediction;
 pub mod selector;
+pub mod stream;
 pub mod tool_request_parser;
 pub mod tools;
 pub mod validator;
 
+pub use architect::{
+    ArchitectExecutor, ArchitectPlan, ArchitectPlanner, ArchitectResult, ComplexityScore,
+    ComplexityScorer, Subtask, SubtaskResult,
+};
 pub use classifier::{TaskCategory, TaskClassifier};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
@@ -23,10 +29,12 @@ pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use metrics::RoutingMetrics;
 pub use orchestrator::{
-    CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision,
+    ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
+    ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use selector::{ModelSelector, ProviderAvailability};
+pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
 
 use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
@@ -78,7 +86,8 @@ impl Router {
         self.connectivity.is_online().await
     }
 
-    pub async fn route(&self, task_description: &str) -> Result<RoutingDecision> {
+    /// Get routing decision without executing (for callers that just need model selection)
+    pub async fn classify(&self, task_description: &str) -> Result<RoutingDecision> {
         let classification = self.classifier.classify(task_description).await?;
 
         let mut decision = self.selector.select(&classification, task_description)?;
@@ -105,6 +114,80 @@ impl Router {
             .record_routing(&classification, &decision);
 
         Ok(decision)
+    }
+
+    /// Unified routing function - routes task and returns a stream
+    ///
+    /// This is the main entry point for all routing operations. It:
+    /// - Auto-detects task complexity and uses architect mode when beneficial
+    /// - Handles quality validation and model escalation internally
+    /// - Always returns a stream that can be iterated or awaited
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Streaming (real-time UI)
+    /// let stream = router.route(task, messages, Some(&tools)).await?;
+    /// while let Some(chunk) = stream.next().await {
+    ///     print!("{}", chunk?.content);
+    /// }
+    ///
+    /// // Await full response
+    /// let response = router.route(task, messages, None).await?.complete().await?;
+    /// ```
+    #[allow(deprecated)] // Uses deprecated route_architect and route_with_quality_gate internally
+    pub async fn route(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<RouteStream> {
+        use crate::stream::{RouteResponse, RouteStream};
+
+        // Check complexity for architect mode
+        let scorer = ComplexityScorer::new();
+        let complexity = scorer.analyze(task_description);
+
+        if complexity.architect_recommended {
+            // Use architect mode for complex tasks
+            tracing::info!(
+                "Architect mode activated: {} estimated subtasks",
+                complexity.estimated_subtasks
+            );
+
+            let result = self
+                .route_architect(task_description, messages, tool_registry)
+                .await?;
+
+            let response = RouteResponse {
+                content: result.final_response,
+                tool_calls: Vec::new(),
+                model: ModelChoice::ClaudeOpus,
+                cost_usd: result.actual_cost_usd,
+                used_architect_mode: true,
+                architect_savings: Some(result.actual_savings_usd),
+            };
+
+            return Ok(RouteStream::from_response(response));
+        }
+
+        // Simple task - use quality-gated routing
+        let provider_response = self
+            .route_with_quality_gate(task_description, messages, tool_registry, 3)
+            .await?;
+
+        let decision = self.classify(task_description).await?;
+
+        let response = RouteResponse {
+            content: provider_response.content,
+            tool_calls: provider_response.tool_calls,
+            model: decision.recommended_model,
+            cost_usd: decision.estimated_cost_usd,
+            used_architect_mode: false,
+            architect_savings: None,
+        };
+
+        Ok(RouteStream::from_response(response))
     }
 
     fn get_local_fallback(&self, category: TaskCategory) -> ModelChoice {
@@ -189,13 +272,14 @@ impl Router {
     }
 
     /// Route a request with MCP tool support
+    #[deprecated(since = "0.44.0", note = "Use route() instead")]
     pub async fn route_with_tools(
         &self,
         task_description: &str,
         messages: Vec<Message>,
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<ProviderResponse> {
-        let decision = self.route(task_description).await?;
+        let decision = self.classify(task_description).await?;
 
         let tools_json = match tool_registry {
             Some(registry) => {
@@ -223,6 +307,7 @@ impl Router {
     }
 
     /// Route with automatic quality evaluation and model escalation
+    #[deprecated(since = "0.44.0", note = "Use route() instead")]
     pub async fn route_with_quality_gate(
         &self,
         task_description: &str,
@@ -230,7 +315,7 @@ impl Router {
         tool_registry: Option<&ToolRegistry>,
         max_retries: u8,
     ) -> Result<ProviderResponse> {
-        let mut current_decision = self.route(task_description).await?;
+        let mut current_decision = self.classify(task_description).await?;
 
         for attempt in 0..max_retries {
             let tools_json = match tool_registry {
@@ -360,6 +445,7 @@ impl Router {
     ///
     /// Note: Streaming mode cannot retry on failure - use route_with_quality_gate() for retry capability.
     /// The _max_retries parameter is kept for API compatibility with non-streaming version.
+    #[deprecated(since = "0.44.0", note = "Use route() instead for streaming")]
     pub async fn route_with_quality_gate_stream(
         &self,
         task_description: &str,
@@ -367,7 +453,7 @@ impl Router {
         tool_registry: Option<&ToolRegistry>,
         _max_retries: u8, // API compatibility - streaming cannot retry once started
     ) -> Result<Box<dyn Stream<Item = Result<StreamResponse>> + Send + Unpin>> {
-        let decision = self.route(task_description).await?;
+        let decision = self.classify(task_description).await?;
         let provider = self
             .instantiate_provider(&decision.recommended_model)
             .await?;
@@ -444,6 +530,91 @@ impl Router {
         });
 
         Ok(Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+    }
+
+    /// Route complex tasks through architect mode
+    ///
+    /// Auto-detects complex multi-step tasks and:
+    /// 1. Uses Opus to create a decomposed plan
+    /// 2. Auto-classifies each subtask
+    /// 3. Routes subtasks to appropriate models (cheaper for frontend, premium for backend)
+    /// 4. Aggregates results and tracks cost savings
+    #[deprecated(
+        since = "0.44.0",
+        note = "Use route() instead - it auto-detects architect mode"
+    )]
+    #[allow(deprecated)] // Uses route_with_quality_gate internally
+    pub async fn route_architect(
+        &self,
+        task_description: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<architect::ArchitectResult> {
+        use architect::{ArchitectExecutor, ArchitectPlanner, ComplexityScorer};
+
+        // Step 1: Analyze complexity
+        let scorer = ComplexityScorer::new();
+        let complexity = scorer.analyze(task_description);
+
+        // Step 2: Check if architect mode should activate
+        if !complexity.architect_recommended {
+            tracing::debug!(
+                "Architect mode not recommended: {} subtasks, {} tokens",
+                complexity.estimated_subtasks,
+                complexity.estimated_output_tokens
+            );
+
+            // Fall back to normal quality-gated routing
+            let response = self
+                .route_with_quality_gate(task_description, messages, tool_registry, 3)
+                .await?;
+
+            return Ok(architect::ArchitectResult::single_task(
+                response.content,
+                0.0, // Would need actual cost from provider
+            ));
+        }
+
+        tracing::info!(
+            "Architect mode activated: {} estimated subtasks, {:.1}% estimated savings",
+            complexity.estimated_subtasks,
+            complexity.estimated_savings_percent
+        );
+
+        // Step 3: Generate plan using Opus
+        let planner = ArchitectPlanner::new();
+        let plan = planner.create_plan(task_description, complexity).await?;
+
+        tracing::info!(
+            "Created plan with {} subtasks, estimated ${:.4} (saves ${:.4})",
+            plan.subtasks.len(),
+            plan.architect_estimate_usd,
+            plan.opus_only_estimate_usd - plan.architect_estimate_usd
+        );
+
+        // Step 4: Execute the plan
+        let executor = ArchitectExecutor::new(Arc::new(self.clone_for_executor().await?));
+        let result = executor.execute(&plan, messages, tool_registry).await?;
+
+        tracing::info!(
+            "Architect mode complete: actual cost ${:.4}, savings ${:.4} ({:.1}%)",
+            result.actual_cost_usd,
+            result.actual_savings_usd,
+            result.savings_percent()
+        );
+
+        Ok(result)
+    }
+
+    /// Create a clone of Router for use in executor
+    async fn clone_for_executor(&self) -> Result<Self> {
+        Ok(Self {
+            classifier: self.classifier.clone(),
+            selector: self.selector.clone(),
+            metrics: self.metrics.clone(),
+            connectivity: self.connectivity.clone(),
+            offline_mode: self.offline_mode,
+        })
     }
 
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {

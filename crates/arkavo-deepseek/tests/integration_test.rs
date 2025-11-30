@@ -418,9 +418,9 @@ async fn test_reasoner_tools_fallback() {
 async fn test_streaming() {
     let mock_server = MockServer::start().await;
 
-    let stream_data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1_234_567_890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+    let stream_data = r#"data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
-data: {"id":"1","object":"chat.completion.chunk","created":1_234_567_890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}
+data: {"id":"1","object":"chat.completion.chunk","created":1234567890,"model":"deepseek-chat","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}
 
 data: [DONE]
 "#;

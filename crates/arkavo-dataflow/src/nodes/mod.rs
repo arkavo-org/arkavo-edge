@@ -4,13 +4,13 @@ pub mod auth_manager;
 #[allow(clippy::collection_is_never_read)]
 #[allow(clippy::needless_collect)]
 mod auth_manager_test;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 pub mod llm;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 pub mod llm_config;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 pub mod llm_discovery;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 pub mod model_registry;
 pub mod sink;
 pub mod source;
@@ -55,7 +55,7 @@ impl NodeRegistry {
         // Transforms
         self.register("json_transform", Box::new(transform::JsonTransform));
         self.register("filter_transform", Box::new(transform::FilterTransform));
-        #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+        #[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
         self.register("llm_transform", Box::new(llm::LlmTransform::new()));
 
         // Sinks

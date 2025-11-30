@@ -11,6 +11,7 @@ mod tests {
     use tokio::time::timeout;
 
     #[tokio::test]
+    #[ignore = "Requires a booted iOS simulator"]
     async fn test_xctest_socket_connection() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("\n=== XCTest Socket Connection Test ===\n");
 

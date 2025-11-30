@@ -1,10 +1,13 @@
+use crate::architect::{ArchitectExecutor, ArchitectPlanner, ArchitectResult, ComplexityScorer};
 use crate::classifier::TaskClassifier;
 use crate::decision::RoutingDecision;
 use crate::metrics::RoutingMetrics;
 use crate::selector::ModelSelector;
-use crate::{Error, Result};
+use crate::{Error, Result, Router};
 use arkavo_budget::TokenCost;
-use arkavo_budget::tracker::{BudgetTracker, SpendingRecord};
+use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
+use arkavo_llm::Message;
+use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -40,6 +43,13 @@ pub struct OrchestratorMetrics {
     pub recommendations_generated: u64,
     pub auto_scaling_decisions: u64,
     pub total_budget_saved: f64,
+    /// Architect mode metrics
+    pub architect_plans_executed: u64,
+    pub architect_subtasks_completed: u64,
+    pub architect_subtasks_failed: u64,
+    pub architect_total_savings: f64,
+    /// Provider error tracking
+    pub provider_errors: std::collections::HashMap<String, u64>,
 }
 
 impl Default for OrchestratorMetrics {
@@ -56,7 +66,18 @@ impl OrchestratorMetrics {
             recommendations_generated: 0,
             auto_scaling_decisions: 0,
             total_budget_saved: 0.0,
+            architect_plans_executed: 0,
+            architect_subtasks_completed: 0,
+            architect_subtasks_failed: 0,
+            architect_total_savings: 0.0,
+            provider_errors: std::collections::HashMap::new(),
         }
+    }
+
+    /// Record a provider error for tracking
+    pub fn record_provider_error(&mut self, provider: &str, error_type: &str) {
+        let key = format!("{provider}:{error_type}");
+        *self.provider_errors.entry(key).or_insert(0) += 1;
     }
 }
 
@@ -265,6 +286,206 @@ impl CostOrchestrator {
     pub fn with_budget_threshold(mut self, threshold: f64) -> Self {
         self.budget_threshold = threshold.clamp(0.0, 1.0);
         self
+    }
+
+    /// Check if a task should use architect mode based on complexity
+    pub fn should_use_architect(&self, task: &str) -> bool {
+        let scorer = ComplexityScorer::new();
+        let complexity = scorer.analyze(task);
+        complexity.architect_recommended
+    }
+
+    /// Route a task using architect mode for complex multi-step tasks
+    /// This will auto-detect complexity and use architect mode when beneficial
+    pub async fn route_with_architect(
+        &self,
+        task: &str,
+        agent_id: &str,
+        messages: Vec<Message>,
+        tool_registry: Option<&ToolRegistry>,
+    ) -> Result<ArchitectRoutingResult> {
+        // Check complexity
+        let scorer = ComplexityScorer::new();
+        let complexity = scorer.analyze(task);
+
+        if !complexity.architect_recommended {
+            // Use standard routing for simple tasks
+            let decision = self.route_with_budget(task, agent_id).await?;
+            return Ok(ArchitectRoutingResult::Simple(decision));
+        }
+
+        // Check budget before starting architect mode
+        let budget_usage = self.calculate_budget_usage().await?;
+        if budget_usage > 0.95 {
+            return Err(Error::BudgetExceeded(
+                "Budget too low for architect mode. Use standard routing.".to_string(),
+            ));
+        }
+
+        // Create architect plan
+        let planner = ArchitectPlanner::new();
+        let plan = planner
+            .create_plan(task, complexity.clone())
+            .await
+            .map_err(|e| Error::ArchitectError(e.to_string()))?;
+
+        // Record planning cost (estimate ~10% of total architect cost for planning)
+        let planning_cost_usd = plan.architect_estimate_usd * 0.1;
+        let planning_cost_metadata = ArchitectCostMetadata {
+            plan_id: plan.id,
+            phase: "planning".to_string(),
+            subtask_index: None,
+            subtask_id: None,
+            opus_only_estimate: plan.opus_only_estimate_usd,
+        };
+
+        let planning_cost = TokenCost::from_dollars(planning_cost_usd);
+        let input_tokens = complexity.estimated_output_tokens;
+        let output_tokens = complexity.estimated_output_tokens / 2;
+        let _ = self
+            .budget_tracker
+            .record_architect_spending(
+                agent_id.to_string(),
+                "anthropic".to_string(),
+                "claude-opus".to_string(),
+                arkavo_budget::cost::TokenUsage::new(input_tokens, output_tokens),
+                planning_cost,
+                planning_cost_metadata,
+            )
+            .await;
+
+        // Execute the plan
+        let router = self.create_router_for_executor().await?;
+        let executor = ArchitectExecutor::new(Arc::new(router));
+        let result = executor
+            .execute(&plan, messages, tool_registry)
+            .await
+            .map_err(|e| Error::ArchitectError(e.to_string()))?;
+
+        // Record execution costs for each subtask
+        for subtask_result in &result.subtask_results {
+            let opus_per_subtask = if !plan.subtasks.is_empty() {
+                plan.opus_only_estimate_usd / plan.subtasks.len() as f64
+            } else {
+                0.0
+            };
+
+            let exec_metadata = ArchitectCostMetadata {
+                plan_id: plan.id,
+                phase: "execution".to_string(),
+                subtask_index: Some(subtask_result.index),
+                subtask_id: Some(subtask_result.subtask_id),
+                opus_only_estimate: opus_per_subtask,
+            };
+
+            let subtask_cost = TokenCost::from_dollars(subtask_result.actual_cost_usd);
+            let _ = self
+                .budget_tracker
+                .record_architect_spending(
+                    agent_id.to_string(),
+                    subtask_result.model_used.provider().to_string(),
+                    subtask_result.model_used.name().to_string(),
+                    arkavo_budget::cost::TokenUsage::new(0, 0),
+                    subtask_cost,
+                    exec_metadata,
+                )
+                .await;
+        }
+
+        // Update metrics
+        let mut metrics = self.orchestrator_metrics.write().await;
+        metrics.architect_plans_executed += 1;
+
+        // Count successful vs failed subtasks
+        let (completed, failed): (Vec<_>, Vec<_>) =
+            result.subtask_results.iter().partition(|r| r.success);
+        metrics.architect_subtasks_completed += completed.len() as u64;
+        metrics.architect_subtasks_failed += failed.len() as u64;
+
+        // Track provider errors from failed subtasks
+        for failed_subtask in &failed {
+            if let Some(error) = &failed_subtask.error {
+                let error_type = categorize_provider_error(error);
+                metrics.record_provider_error(failed_subtask.model_used.provider(), &error_type);
+            }
+        }
+
+        metrics.architect_total_savings += result.actual_savings_usd;
+        drop(metrics);
+
+        Ok(ArchitectRoutingResult::Architect(result))
+    }
+
+    /// Create a minimal router for the executor
+    async fn create_router_for_executor(&self) -> Result<Router> {
+        Router::new().await
+    }
+
+    /// Get architect savings summary from budget tracker
+    pub async fn get_architect_savings_summary(
+        &self,
+    ) -> arkavo_budget::tracker::ArchitectUsageSummary {
+        self.budget_tracker.get_architect_summary().await
+    }
+}
+
+/// Categorize provider errors for metrics tracking
+fn categorize_provider_error(error: &str) -> String {
+    let error_lower = error.to_lowercase();
+
+    if error_lower.contains("rate limit") || error_lower.contains("429") {
+        "rate_limit".to_string()
+    } else if error_lower.contains("timeout") || error_lower.contains("timed out") {
+        "timeout".to_string()
+    } else if error_lower.contains("unauthorized")
+        || error_lower.contains("401")
+        || error_lower.contains("api key")
+    {
+        "auth_error".to_string()
+    } else if error_lower.contains("500")
+        || error_lower.contains("502")
+        || error_lower.contains("503")
+        || error_lower.contains("internal")
+    {
+        "server_error".to_string()
+    } else if error_lower.contains("context")
+        || error_lower.contains("token")
+        || error_lower.contains("too long")
+    {
+        "context_limit".to_string()
+    } else if error_lower.contains("connection")
+        || error_lower.contains("network")
+        || error_lower.contains("dns")
+    {
+        "network_error".to_string()
+    } else if error_lower.contains("invalid") || error_lower.contains("malformed") {
+        "invalid_request".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+/// Result of routing with architect support
+#[derive(Debug)]
+pub enum ArchitectRoutingResult {
+    /// Simple routing decision for non-complex tasks
+    Simple(RoutingDecision),
+    /// Full architect result for complex multi-step tasks
+    Architect(ArchitectResult),
+}
+
+impl ArchitectRoutingResult {
+    /// Check if architect mode was used
+    pub fn is_architect(&self) -> bool {
+        matches!(self, Self::Architect(_))
+    }
+
+    /// Get estimated or actual total cost
+    pub fn total_cost(&self) -> f64 {
+        match self {
+            Self::Simple(decision) => decision.estimated_cost_usd,
+            Self::Architect(result) => result.actual_cost_usd,
+        }
     }
 }
 

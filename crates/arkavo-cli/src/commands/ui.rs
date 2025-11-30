@@ -422,7 +422,7 @@ async fn handle_prompt_async(
     renderer.render(&thinking_html, "", "").await?;
 
     // Route the request to determine which model to use
-    let routing_decision = router.route(&enhanced_prompt).await?;
+    let routing_decision = router.classify(&enhanced_prompt).await?;
 
     let response_text = if use_tools {
         // Use router with native tool calling

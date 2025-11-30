@@ -22,7 +22,7 @@ pub enum ProviderType {
     Gemini,
     #[cfg(feature = "deepseek")]
     DeepSeek,
-    #[cfg(feature = "llm-local")]
+    #[cfg(feature = "llama-cpp")]
     Local,
     Custom(String),
 }
@@ -54,7 +54,7 @@ impl ProviderType {
             }
         }
 
-        #[cfg(feature = "llm-local")]
+        #[cfg(feature = "llama-cpp")]
         {
             if name_lower.contains("local") {
                 return ProviderType::Local;
@@ -157,7 +157,7 @@ impl ProviderFactoryRegistry {
         }
         #[cfg(feature = "deepseek")]
         registry.register(Arc::new(DeepSeekProviderFactory));
-        #[cfg(feature = "llm-local")]
+        #[cfg(feature = "llama-cpp")]
         registry.register(Arc::new(LocalProviderFactory));
 
         registry
@@ -442,10 +442,10 @@ impl ProviderFactory for DeepSeekProviderFactory {
 }
 
 /// Factory for creating Local provider instances
-#[cfg(feature = "llm-local")]
+#[cfg(feature = "llama-cpp")]
 pub struct LocalProviderFactory;
 
-#[cfg(feature = "llm-local")]
+#[cfg(feature = "llama-cpp")]
 #[async_trait]
 impl ProviderFactory for LocalProviderFactory {
     async fn create_provider(&self, config: &ProviderConfig) -> Result<Box<dyn Provider>> {
@@ -465,14 +465,12 @@ impl ProviderFactory for LocalProviderFactory {
             .and_then(|v| v.as_str())
             .map(std::string::ToString::to_string);
 
-        // Create local provider
-        let provider = crate::local::LocalProvider::new(model_name, model_path)?;
-
-        // Initialize the provider (load model)
-        provider
-            .initialize()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize local provider: {e}"))?;
+        // Create llama-cpp provider
+        let provider = crate::LlamaCppProvider::new(
+            model_name,
+            model_path
+                .ok_or_else(|| anyhow::anyhow!("model_path is required for local provider"))?,
+        )?;
 
         Ok(Box::new(provider))
     }
@@ -517,7 +515,7 @@ mod tests {
             );
             assert_eq!(ProviderType::from_name("openai"), ProviderType::OpenAI);
         }
-        #[cfg(feature = "llm-local")]
+        #[cfg(feature = "llama-cpp")]
         {
             assert_eq!(ProviderType::from_name("local"), ProviderType::Local);
             assert_eq!(ProviderType::from_name("local-gemma"), ProviderType::Local);
@@ -580,7 +578,7 @@ mod tests {
             assert!(types.contains(&ProviderType::OpenAI));
             assert!(types.contains(&ProviderType::Anthropic));
         }
-        #[cfg(feature = "llm-local")]
+        #[cfg(feature = "llama-cpp")]
         assert!(types.contains(&ProviderType::Local));
 
         // Get factory
@@ -590,7 +588,7 @@ mod tests {
             assert!(registry.get_factory(&ProviderType::OpenAI).is_some());
             assert!(registry.get_factory(&ProviderType::Anthropic).is_some());
         }
-        #[cfg(feature = "llm-local")]
+        #[cfg(feature = "llama-cpp")]
         assert!(registry.get_factory(&ProviderType::Local).is_some());
     }
 }

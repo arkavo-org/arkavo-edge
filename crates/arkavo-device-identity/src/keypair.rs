@@ -184,14 +184,21 @@ pub fn delete_keypair() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that access the system keychain
+    static KEYCHAIN_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     fn test_keypair_storage() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete_keypair();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let test_data = vec![1u8, 2, 3, 4, 5];
         store_keypair(&test_data).expect("Failed to store keypair");
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let retrieved = get_keypair()
             .expect("Failed to get keypair")
@@ -205,7 +212,9 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     fn test_keypair_nonexistent() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete_keypair();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let result = get_keypair().expect("get_keypair should not fail");
         assert!(result.is_none());
@@ -216,10 +225,13 @@ mod tests {
     fn test_keypair_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete_keypair();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let test_data = vec![1u8, 2, 3, 4];
         store_keypair(&test_data).expect("Failed to store keypair");
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let path = if cfg!(target_os = "macos") {
             let mut p = dirs::home_dir().unwrap();

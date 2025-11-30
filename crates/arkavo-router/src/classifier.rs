@@ -3,29 +3,15 @@ use crate::{Error, Result};
 use arkavo_llm::Message;
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::{Provider, Role};
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use tokio::sync::Mutex;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(all(
-    not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
-))]
-use arkavo_llm::local::LocalProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum TaskCategory {
@@ -123,6 +109,121 @@ pub struct Classification {
     pub category: TaskCategory,
     pub confidence: f32,
     pub reasoning: String,
+    /// Whether this task appears to be multi-step (triggers architect mode consideration)
+    pub is_multi_step: bool,
+    /// Estimated number of subtasks if this is a complex task
+    pub estimated_subtasks: u8,
+}
+
+impl Classification {
+    /// Create a new classification with default complexity fields
+    pub fn new(category: TaskCategory, confidence: f32, reasoning: String) -> Self {
+        Self {
+            category,
+            confidence,
+            reasoning,
+            is_multi_step: false,
+            estimated_subtasks: 1,
+        }
+    }
+
+    /// Create a classification with complexity analysis
+    pub fn with_complexity(
+        category: TaskCategory,
+        confidence: f32,
+        reasoning: String,
+        task: &str,
+    ) -> Self {
+        let (is_multi_step, estimated_subtasks) = Self::detect_complexity(task);
+        Self {
+            category,
+            confidence,
+            reasoning,
+            is_multi_step,
+            estimated_subtasks,
+        }
+    }
+
+    /// Detect complexity indicators in a task description
+    fn detect_complexity(task: &str) -> (bool, u8) {
+        let task_lower = task.to_lowercase();
+
+        // Multi-step indicators
+        let multi_step_patterns = [
+            "and then",
+            "after that",
+            "first",
+            "second",
+            "third",
+            "finally",
+            "next",
+            ". then",
+            "step 1",
+            "step 2",
+        ];
+
+        let mut step_count = 0u8;
+        for pattern in multi_step_patterns {
+            if task_lower.contains(pattern) {
+                step_count = step_count.saturating_add(1);
+            }
+        }
+
+        // Complexity keywords
+        let complexity_keywords = [
+            "refactor",
+            "migration",
+            "redesign",
+            "multi-step",
+            "comprehensive",
+            "complete",
+            "full implementation",
+            "end-to-end",
+            "entire",
+        ];
+
+        let has_complexity_keyword = complexity_keywords.iter().any(|k| task_lower.contains(k));
+
+        // Count action verbs
+        let action_verbs = [
+            "create",
+            "build",
+            "implement",
+            "add",
+            "update",
+            "fix",
+            "write",
+            "generate",
+            "test",
+            "refactor",
+            "migrate",
+            "deploy",
+        ];
+        let verb_count = action_verbs
+            .iter()
+            .filter(|v| task_lower.contains(*v))
+            .count();
+
+        // Sentence count
+        let sentence_count = task.matches(". ").count() + task.matches("? ").count() + 1;
+
+        // Determine if multi-step
+        let is_multi_step = step_count >= 2
+            || has_complexity_keyword
+            || (verb_count >= 3 && sentence_count >= 3)
+            || task.len() > 300;
+
+        // Estimate subtasks
+        let estimated_subtasks = if is_multi_step {
+            let base = step_count.max(1);
+            let verb_bonus = (verb_count / 2).min(3) as u8;
+            (base + verb_bonus).clamp(2, 10)
+        } else {
+            1
+        };
+
+        (is_multi_step, estimated_subtasks)
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -132,15 +233,13 @@ pub struct TaskClassifier {
 
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
-pub struct TaskClassifier {
-    provider: Arc<Mutex<LocalProvider>>,
-}
+pub struct TaskClassifier;
 
 #[cfg(not(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 )))]
 pub struct TaskClassifier {
     _phantom: std::marker::PhantomData<()>,
@@ -178,11 +277,11 @@ impl TaskClassifier {
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
-            return Ok(Classification {
-                category: TaskCategory::General,
-                confidence: 0.5,
-                reasoning: "Task description too short for accurate classification".to_string(),
-            });
+            return Ok(Classification::new(
+                TaskCategory::General,
+                0.5,
+                "Task description too short for accurate classification".to_string(),
+            ));
         }
 
         let rule_based = self.try_rule_based_classification(task_description);
@@ -311,11 +410,7 @@ impl TaskClassifier {
             )
         };
 
-        Classification {
-            category,
-            confidence,
-            reasoning,
-        }
+        Classification::with_complexity(category, confidence, reasoning, task)
     }
 
     async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
@@ -382,40 +477,30 @@ Confidence: [0-100]"#
             }
         }
 
-        Ok(Classification {
+        Ok(Classification::new(
             category,
             confidence,
-            reasoning: format!("LLM classification: {}", category.as_str()),
-        })
+            format!("LLM classification: {}", category.as_str()),
+        ))
     }
 }
 
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        let provider = LocalProvider::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
-        )
-        .map_err(Error::Provider)?;
-
-        provider.initialize().await.map_err(Error::Provider)?;
-
-        Ok(Self {
-            provider: Arc::new(Mutex::new(provider)),
-        })
+        Ok(Self)
     }
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
-            return Ok(Classification {
-                category: TaskCategory::General,
-                confidence: 0.5,
-                reasoning: "Task description too short for accurate classification".to_string(),
-            });
+            return Ok(Classification::new(
+                TaskCategory::General,
+                0.5,
+                "Task description too short for accurate classification".to_string(),
+            ));
         }
 
         let rule_based = self.try_rule_based_classification(task_description);
@@ -431,20 +516,20 @@ impl TaskClassifier {
         Ok(llm_classification)
     }
 
-    pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        self.complete_with_options(messages, None).await
+    pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
+        Err(Error::Classification(
+            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
+        ))
     }
 
     pub async fn complete_with_options(
         &self,
-        messages: Vec<Message>,
-        max_tokens: Option<usize>,
+        _messages: Vec<Message>,
+        _max_tokens: Option<usize>,
     ) -> Result<String> {
-        let provider = self.provider.lock().await;
-        provider
-            .complete_with_options(messages, max_tokens)
-            .await
-            .map_err(|e| Error::Classification(format!("LLM completion failed: {e}")))
+        Err(Error::Classification(
+            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
+        ))
     }
 
     fn try_rule_based_classification(&self, task: &str) -> Classification {
@@ -542,105 +627,37 @@ impl TaskClassifier {
             )
         };
 
-        Classification {
-            category,
-            confidence,
-            reasoning,
-        }
+        Classification::with_complexity(category, confidence, reasoning, task)
     }
 
-    async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
-        let prompt = self.build_classification_prompt(task);
-
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
-
-        let provider = self.provider.lock().await;
-        let response = provider
-            .complete(messages)
-            .await
-            .map_err(|e| Error::Classification(format!("LLM classification failed: {e}")))?;
-
-        self.parse_classification_response(&response)
-    }
-
-    fn build_classification_prompt(&self, task: &str) -> String {
-        format!(
-            r#"Classify this coding task into ONE category:
-
-Categories:
-- frontend_ui: React/Vue/Svelte components, Tailwind CSS, web UI
-- backend_api: REST APIs, authentication, databases, server logic
-- code_search: Finding code, grep, repository search, AST analysis
-- security_scan: Vulnerabilities, security audit, code scanning
-- test_generation: Unit tests, integration tests, test suites
-- documentation: README, API docs, comments, guides
-- refactoring: Code cleanup, optimization, restructuring
-- general: Other coding tasks
-
-Task: {task}
-
-Reply with ONLY the category name and confidence (0-100):
-Category: [category]
-Confidence: [0-100]"#
-        )
-    }
-
-    fn parse_classification_response(&self, response: &str) -> Result<Classification> {
-        let lines: Vec<&str> = response.lines().collect();
-
-        let mut category = TaskCategory::General;
-        let mut confidence = 0.5;
-
-        for line in lines {
-            let line = line.trim();
-
-            if line.starts_with("Category:") {
-                let cat_str = line
-                    .strip_prefix("Category:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
-                category = TaskCategory::from_string(&cat_str);
-            } else if line.starts_with("Confidence:")
-                && let Some(conf_str) = line.strip_prefix("Confidence:")
-                && let Ok(conf) = conf_str.trim().parse::<f32>()
-            {
-                confidence = (conf / 100.0).clamp(0.0, 1.0);
-            }
-        }
-
-        Ok(Classification {
-            category,
-            confidence,
-            reasoning: format!("LLM classification: {}", category.as_str()),
-        })
+    async fn classify_with_llm(&self, _task: &str) -> Result<Classification> {
+        // LLM classification not available on musl target
+        Err(Error::Classification(
+            "LLM classification not available on musl target".to_string(),
+        ))
     }
 }
 
 #[cfg(not(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 )))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn classify(&self, _task_description: &str) -> Result<Classification> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
@@ -650,7 +667,7 @@ impl TaskClassifier {
         _max_tokens: Option<usize>,
     ) -> Result<String> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 }
@@ -682,7 +699,7 @@ mod tests {
     #[tokio::test]
     #[cfg(any(
         all(feature = "llama-cpp", not(target_env = "musl")),
-        feature = "llm-local"
+        feature = "llama-cpp"
     ))]
     async fn test_rule_based_classification() {
         let classifier = TaskClassifier::new().await;

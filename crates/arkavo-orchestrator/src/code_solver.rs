@@ -119,6 +119,7 @@ impl CodeSolver {
 
         // Always try local model first (cost optimization goal)
         info!("Attempting code generation with local model");
+        #[allow(deprecated)]
         let response = self
             .router
             .route_with_quality_gate(
@@ -153,6 +154,7 @@ impl CodeSolver {
             metrics.escalated_to_cloud = true;
 
             info!("Escalating to Gemini for complete patch generation");
+            #[allow(deprecated)]
             self.router
                 .route_with_quality_gate(
                     "code_generation: Generate a complete unified git diff patch with full context",

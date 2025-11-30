@@ -266,16 +266,8 @@ mod tests {
         let predictor = WorkflowCostPredictor::new();
 
         let tasks = vec![
-            Classification {
-                category: TaskCategory::FrontendUI,
-                confidence: 0.90,
-                reasoning: "Test".to_string(),
-            },
-            Classification {
-                category: TaskCategory::CodeSearch,
-                confidence: 0.85,
-                reasoning: "Test".to_string(),
-            },
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Test".to_string()),
+            Classification::new(TaskCategory::CodeSearch, 0.85, "Test".to_string()),
         ];
 
         let prediction = predictor.predict(&tasks);
@@ -289,11 +281,11 @@ mod tests {
     fn test_cost_range_variance() {
         let predictor = WorkflowCostPredictor::new();
 
-        let tasks = vec![Classification {
-            category: TaskCategory::BackendAPI,
-            confidence: 0.80,
-            reasoning: "Test".to_string(),
-        }];
+        let tasks = vec![Classification::new(
+            TaskCategory::BackendAPI,
+            0.80,
+            "Test".to_string(),
+        )];
 
         let prediction = predictor.predict(&tasks);
 
@@ -309,11 +301,11 @@ mod tests {
 
         let mut tasks = vec![];
         for _ in 0..5 {
-            tasks.push(Classification {
-                category: TaskCategory::CodeSearch,
-                confidence: 0.90,
-                reasoning: "Test".to_string(),
-            });
+            tasks.push(Classification::new(
+                TaskCategory::CodeSearch,
+                0.90,
+                "Test".to_string(),
+            ));
         }
 
         let prediction = predictor.predict(&tasks);

@@ -34,6 +34,9 @@ pub enum Error {
 
     #[error("Max retries exceeded after {attempts} attempts")]
     MaxRetriesExceeded { attempts: u8 },
+
+    #[error("Architect mode error: {0}")]
+    ArchitectError(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

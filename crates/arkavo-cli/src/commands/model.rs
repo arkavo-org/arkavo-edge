@@ -235,40 +235,12 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
         }
 
         ModelSubcommand::Download { name } => {
-            // Check if 'local' feature is enabled
-            #[cfg(not(feature = "local"))]
-            {
-                let _ = name; // Suppress unused warning
-                anyhow::bail!("Model downloading requires the 'local' feature to be enabled");
-            }
-
-            #[cfg(feature = "local")]
-            {
-                use arkavo_llm::local::{ModelDownloader, ModelManifest};
-
-                // Default to gemma3-1b-it-qat if no name provided
-                let model_name = name.as_deref().unwrap_or("gemma3-1b-it-qat");
-
-                // Load model manifest
-                let manifest = ModelManifest::load()?;
-
-                // Find the model spec
-                let spec = manifest.find(model_name).ok_or_else(|| {
-                    anyhow::anyhow!("Model '{}' not found in manifest", model_name)
-                })?;
-
-                // Create downloader
-                let downloader = ModelDownloader::new()?;
-
-                println!("Downloading model '{model_name}'...");
-
-                // Download the model (or get from cache if already downloaded)
-                let model_path = downloader.download(spec).await?;
-
-                println!("Model '{model_name}' ready at: {}", model_path.display());
-
-                // Model is now available in HF cache
-            }
+            // Model downloading was removed with the local feature
+            // Users should download models manually from HuggingFace
+            let _ = name; // Suppress unused warning
+            anyhow::bail!(
+                "Model downloading has been removed. Please download GGUF models manually from HuggingFace."
+            );
         }
 
         ModelSubcommand::Add { path, name } => {

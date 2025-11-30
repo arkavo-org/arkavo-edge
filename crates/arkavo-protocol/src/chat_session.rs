@@ -755,6 +755,7 @@ impl ChatSessionManager {
                     let mut final_response;
 
                     // Route with quality gate (max 3 retries with model escalation)
+                    #[allow(deprecated)]
                     match router
                         .route_with_quality_gate(
                             &user_message.content,
@@ -835,6 +836,7 @@ impl ChatSessionManager {
                                     }
 
                                     // Route again to get final response with tool results
+                                    #[allow(deprecated)]
                                     match router
                                         .route_with_quality_gate(
                                             &user_message.content,

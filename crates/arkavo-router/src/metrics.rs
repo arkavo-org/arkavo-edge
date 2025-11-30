@@ -144,11 +144,8 @@ mod tests {
     fn test_metrics_recording() {
         let mut metrics = RoutingMetrics::new();
 
-        let classification = Classification {
-            category: TaskCategory::CodeSearch,
-            confidence: 0.85,
-            reasoning: "Test".to_string(),
-        };
+        let classification =
+            Classification::new(TaskCategory::CodeSearch, 0.85, "Test".to_string());
 
         let decision = RoutingDecision::new(
             ModelChoice::LocalGemma4B,
@@ -168,11 +165,8 @@ mod tests {
     fn test_cost_savings() {
         let mut metrics = RoutingMetrics::new();
 
-        let classification = Classification {
-            category: TaskCategory::CodeSearch,
-            confidence: 0.90,
-            reasoning: "Test".to_string(),
-        };
+        let classification =
+            Classification::new(TaskCategory::CodeSearch, 0.90, "Test".to_string());
 
         let decision = RoutingDecision::new(
             ModelChoice::LocalGemma4B,
@@ -205,11 +199,8 @@ mod tests {
             "Cloud".to_string(),
         );
 
-        let classification = Classification {
-            category: TaskCategory::CodeSearch,
-            confidence: 0.90,
-            reasoning: "Test".to_string(),
-        };
+        let classification =
+            Classification::new(TaskCategory::CodeSearch, 0.90, "Test".to_string());
 
         metrics.record_routing(&classification, &local_decision);
         metrics.record_routing(&classification, &cloud_decision);

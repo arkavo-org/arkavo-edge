@@ -326,13 +326,22 @@ pub fn delete() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that access the system keychain
+    static KEYCHAIN_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_or_create() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        // Small delay to ensure keychain operations complete
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let id1 = get_or_create().expect("Failed to create device ID");
+        // Small delay between create and retrieve
+        std::thread::sleep(std::time::Duration::from_millis(50));
         let id2 = get_or_create().expect("Failed to retrieve device ID");
 
         assert_eq!(id1, id2);
@@ -343,10 +352,13 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_store_and_retrieve() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let original = DeviceId::new();
         store(original).expect("Failed to store device ID");
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let retrieved = get()
             .expect("Failed to get device ID")
@@ -362,7 +374,9 @@ mod tests {
     fn test_malformed_device_id() {
         use std::fs;
 
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         #[cfg(target_os = "macos")]
         let storage_path = {
@@ -395,7 +409,9 @@ mod tests {
     fn test_wrong_size_device_id() {
         use std::fs;
 
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         #[cfg(target_os = "macos")]
         let storage_path = {
@@ -426,7 +442,9 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_delete_nonexistent() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let result = delete();
         assert!(result.is_ok());
@@ -435,7 +453,9 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn test_get_nonexistent() {
+        let _guard = KEYCHAIN_MUTEX.lock().unwrap();
         let _ = delete();
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         let result = get().expect("get() should not fail");
         assert!(result.is_none());

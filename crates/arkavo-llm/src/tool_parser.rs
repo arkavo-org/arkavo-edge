@@ -15,7 +15,7 @@ pub enum ToolParseError {
 }
 
 /// Unified tool call representation from any provider
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ParsedToolCall {
     pub tool_name: String,
     pub arguments: Value,

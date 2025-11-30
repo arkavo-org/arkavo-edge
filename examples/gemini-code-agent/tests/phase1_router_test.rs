@@ -16,7 +16,7 @@ async fn test_frontend_task_routing() {
     let router = Router::new().await.expect("Failed to create router");
 
     let decision = router
-        .route("Create a responsive React card component with Tailwind CSS that displays a user profile")
+        .classify("Create a responsive React card component with Tailwind CSS that displays a user profile")
         .await
         .expect("Routing failed");
 
@@ -39,7 +39,7 @@ async fn test_backend_task_routing() {
     let router = Router::new().await.expect("Failed to create router");
 
     let decision = router
-        .route("Write a Node.js Express REST API endpoint for user authentication with JWT tokens")
+        .classify("Write a Node.js Express REST API endpoint for user authentication with JWT tokens")
         .await
         .expect("Routing failed");
 
@@ -61,7 +61,7 @@ async fn test_code_search_routing() {
     let router = Router::new().await.expect("Failed to create router");
 
     let decision = router
-        .route("Find all uses of the authenticate function in the codebase")
+        .classify("Find all uses of the authenticate function in the codebase")
         .await
         .expect("Routing failed");
 
@@ -83,7 +83,7 @@ async fn test_security_task_routing() {
     let router = Router::new().await.expect("Failed to create router");
 
     let decision = router
-        .route("Scan the authentication module for security vulnerabilities")
+        .classify("Scan the authentication module for security vulnerabilities")
         .await
         .expect("Routing failed");
 
@@ -105,7 +105,7 @@ async fn test_test_generation_routing() {
     let router = Router::new().await.expect("Failed to create router");
 
     let decision = router
-        .route("Generate comprehensive Jest tests for a TodoList React component")
+        .classify("Generate comprehensive Jest tests for a TodoList React component")
         .await
         .expect("Routing failed");
 
@@ -138,7 +138,7 @@ async fn test_routing_metrics() {
     ];
 
     for task in tasks {
-        router.route(task).await.expect("Routing failed");
+        router.classify(task).await.expect("Routing failed");
     }
 
     let metrics = router.get_metrics().await;

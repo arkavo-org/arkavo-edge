@@ -13,7 +13,7 @@ readme = "CLAUDE.md"
 [features]
 default = ["llm-remote"]
 llm-remote = ["dep:arkavo-llm", "arkavo-dataflow/llm-remote"]
-llm-local = ["dep:arkavo-llm", "arkavo-dataflow/llm-local"]
+llama-cpp = ["dep:arkavo-llm", "arkavo-llm?/llama-cpp", "arkavo-dataflow/llama-cpp"]
 
 [dependencies]
 ratatui = { workspace = true }

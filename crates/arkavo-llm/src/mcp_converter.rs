@@ -88,15 +88,120 @@ impl McpConverter {
         }
     }
 
+    /// Make JSON Schema compatible with Anthropic Claude API
+    /// Anthropic doesn't support oneOf, allOf, anyOf at the top level of input_schema
+    /// This function flattens these constructs to simple types
+    fn make_anthropic_compatible(schema: &Value) -> Value {
+        match schema {
+            Value::Object(map) => {
+                // Check for oneOf/anyOf/allOf at this level
+                if let Some(one_of) = map.get("oneOf").and_then(|v| v.as_array()) {
+                    // Pick the first option that has a type (prefer string/number over complex)
+                    return Self::pick_best_from_union(one_of);
+                }
+                if let Some(any_of) = map.get("anyOf").and_then(|v| v.as_array()) {
+                    return Self::pick_best_from_union(any_of);
+                }
+                if let Some(all_of) = map.get("allOf").and_then(|v| v.as_array()) {
+                    // For allOf, merge all schemas together
+                    return Self::merge_all_of(all_of);
+                }
+
+                // No union types, recursively process properties
+                let mut new_map = serde_json::Map::new();
+                for (key, value) in map {
+                    // Skip keys that are union type keywords - we already handled them
+                    if key == "oneOf" || key == "anyOf" || key == "allOf" {
+                        continue;
+                    }
+                    // Recursively sanitize nested objects
+                    new_map.insert(key.clone(), Self::make_anthropic_compatible(value));
+                }
+                Value::Object(new_map)
+            }
+            Value::Array(arr) => {
+                Value::Array(arr.iter().map(Self::make_anthropic_compatible).collect())
+            }
+            _ => schema.clone(),
+        }
+    }
+
+    /// Pick the best schema from a oneOf/anyOf union
+    /// Prefers simple types (string, number, integer) over complex objects
+    fn pick_best_from_union(options: &[Value]) -> Value {
+        // Priority: string > number > integer > boolean > object > first
+        let priority_types = ["string", "number", "integer", "boolean"];
+
+        for ptype in priority_types {
+            for opt in options {
+                if let Some(t) = opt.get("type").and_then(|v| v.as_str())
+                    && t == ptype
+                {
+                    return Self::make_anthropic_compatible(opt);
+                }
+            }
+        }
+
+        // No simple type found, use first option
+        if let Some(first) = options.first() {
+            Self::make_anthropic_compatible(first)
+        } else {
+            json!({"type": "string"})
+        }
+    }
+
+    /// Merge allOf schemas into a single schema
+    fn merge_all_of(schemas: &[Value]) -> Value {
+        let mut merged = serde_json::Map::new();
+        let mut merged_props = serde_json::Map::new();
+        let mut merged_required: Vec<Value> = Vec::new();
+
+        for schema in schemas {
+            if let Some(obj) = schema.as_object() {
+                for (key, value) in obj {
+                    match key.as_str() {
+                        "properties" => {
+                            if let Some(props) = value.as_object() {
+                                for (pk, pv) in props {
+                                    merged_props.insert(pk.clone(), pv.clone());
+                                }
+                            }
+                        }
+                        "required" => {
+                            if let Some(req) = value.as_array() {
+                                merged_required.extend(req.iter().cloned());
+                            }
+                        }
+                        _ => {
+                            merged.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        if !merged_props.is_empty() {
+            merged.insert("properties".to_string(), Value::Object(merged_props));
+        }
+        if !merged_required.is_empty() {
+            merged.insert("required".to_string(), Value::Array(merged_required));
+        }
+
+        Self::make_anthropic_compatible(&Value::Object(merged))
+    }
+
     /// Convert to DeepSeek/Anthropic JSON format (runtime, no feature gate)
+    /// Sanitizes schemas to remove oneOf/anyOf/allOf which Anthropic doesn't support
     pub fn to_anthropic_format(tools: &[ToolInfo]) -> Value {
         let tool_defs: Vec<Value> = tools
             .iter()
             .map(|tool| {
+                // Sanitize schema for Anthropic compatibility
+                let sanitized_schema = Self::make_anthropic_compatible(&tool.schema);
                 json!({
                     "name": tool.name,
                     "description": tool.description,
-                    "input_schema": tool.schema,
+                    "input_schema": sanitized_schema,
                 })
             })
             .collect();
@@ -105,6 +210,7 @@ impl McpConverter {
     }
 
     /// Convert MinimalToolInfo to Anthropic format (for progressive disclosure)
+    /// Sanitizes schemas to remove oneOf/anyOf/allOf which Anthropic doesn't support
     pub fn to_anthropic_format_minimal(tools: &[MinimalToolInfo]) -> Value {
         let tool_defs: Vec<Value> = tools
             .iter()
@@ -113,10 +219,12 @@ impl McpConverter {
                     .schema
                     .clone()
                     .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+                // Sanitize schema for Anthropic compatibility
+                let sanitized_schema = Self::make_anthropic_compatible(&schema);
                 json!({
                     "name": tool.name,
                     "description": tool.description.clone().unwrap_or_default(),
-                    "input_schema": schema,
+                    "input_schema": sanitized_schema,
                 })
             })
             .collect();
@@ -497,5 +605,125 @@ mod tests {
 
         let json_prompt = McpConverter::to_local_prompt(&tools, LocalToolFormat::Json);
         assert!(json_prompt.contains("tool_call"));
+    }
+
+    #[test]
+    fn test_anthropic_schema_sanitization_oneof() {
+        // Test that oneOf is converted to a simple type (picks string over number)
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Tool with oneOf".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "number"}
+                        ]
+                    }
+                }
+            }),
+        };
+
+        let result = McpConverter::to_anthropic_format(&[tool]);
+        let schema = &result[0]["input_schema"];
+
+        // Should not contain oneOf
+        assert!(!schema.to_string().contains("oneOf"));
+        // The id property should be converted to string type
+        assert_eq!(schema["properties"]["id"]["type"], "string");
+    }
+
+    #[test]
+    fn test_anthropic_schema_sanitization_anyof() {
+        // Test that anyOf is also converted
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Tool with anyOf".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "anyOf": [
+                            {"type": "integer"},
+                            {"type": "string"}
+                        ]
+                    }
+                }
+            }),
+        };
+
+        let result = McpConverter::to_anthropic_format(&[tool]);
+        let schema = &result[0]["input_schema"];
+
+        // Should not contain anyOf
+        assert!(!schema.to_string().contains("anyOf"));
+        // The value property should be converted to string type (preferred over integer)
+        assert_eq!(schema["properties"]["value"]["type"], "string");
+    }
+
+    #[test]
+    fn test_anthropic_schema_sanitization_nested() {
+        // Test that nested oneOf is also handled
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Tool with nested oneOf".to_string(),
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "number"}
+                                ]
+                            }
+                        }
+                    }
+                }
+            }),
+        };
+
+        let result = McpConverter::to_anthropic_format(&[tool]);
+        let schema_str = result[0]["input_schema"].to_string();
+
+        // Should not contain oneOf anywhere in the schema
+        assert!(!schema_str.contains("oneOf"));
+    }
+
+    #[test]
+    fn test_anthropic_schema_sanitization_top_level_oneof() {
+        // Test that top-level oneOf (the actual error case) is handled
+        let tool = ToolInfo {
+            name: "test".to_string(),
+            category: "Test".to_string(),
+            description: "Tool with top-level oneOf".to_string(),
+            schema: json!({
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {"a": {"type": "string"}}
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"b": {"type": "number"}}
+                    }
+                ]
+            }),
+        };
+
+        let result = McpConverter::to_anthropic_format(&[tool]);
+        let schema = &result[0]["input_schema"];
+
+        // Should not contain oneOf
+        assert!(!schema.to_string().contains("oneOf"));
+        // Should have picked the first object option
+        assert_eq!(schema["type"], "object");
     }
 }

@@ -24,16 +24,20 @@ fn main() {
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
 
     // Determine build type based on profile
+    // Debug builds use RelWithDebInfo for reasonable speed with debug symbols
+    // Release builds use Release for maximum optimization
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     let build_type = if profile == "release" {
-        "Release" // Full optimizations, no debug info
+        "Release"
     } else {
-        "MinSizeRel" // Optimize for size in debug builds, much faster to compile
+        "RelWithDebInfo" // Faster than MinSizeRel, includes debug info
     };
 
     config
         .define("BUILD_SHARED_LIBS", "OFF")
-        .define("CMAKE_BUILD_TYPE", build_type);
+        .define("CMAKE_BUILD_TYPE", build_type)
+        // Disable Unity builds - incompatible with Objective-C (Metal backend)
+        .define("CMAKE_UNITY_BUILD", "OFF");
 
     // Enable parallel compilation (skip -j for Windows/MSBuild)
     if !target.contains("windows") {
@@ -56,13 +60,8 @@ fn main() {
             .define("GGML_METAL_EMBED_LIBRARY", "ON") // Embed Metal shaders for GPU acceleration
             .define("GGML_ACCELERATE", "ON") // use Apple Accelerate
             .define("GGML_NATIVE", "OFF") // Disable native CPU feature detection to ensure compatibility
-            .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16"); // Use baseline ARM arch without i8mm
-
-        // Disable Metal debug overhead in release builds
-        let is_release = env::var("PROFILE").unwrap_or_default() == "release";
-        if is_release {
-            config.define("GGML_METAL_NDEBUG", "ON");
-        }
+            .define("GGML_CPU_ARM_ARCH", "armv8.2-a+fp16") // Use baseline ARM arch without i8mm
+            .define("GGML_METAL_NDEBUG", "ON"); // Always disable Metal debug for faster builds
     } else if cfg!(target_os = "windows") {
         // Windows can use Vulkan or CUDA if available
         config
@@ -112,12 +111,17 @@ fn main() {
         .define("LLAMA_BUILD_EXAMPLES", "OFF") // Don't build examples
         .define("LLAMA_BUILD_SERVER", "OFF"); // Don't build server
 
-    // Use ccache if available for faster rebuilds
+    // Use ccache or sccache if available for faster rebuilds
     if let Ok(ccache) = which::which("ccache") {
         config
             .define("CMAKE_C_COMPILER_LAUNCHER", ccache.to_str().unwrap())
             .define("CMAKE_CXX_COMPILER_LAUNCHER", ccache.to_str().unwrap());
         eprintln!("Using ccache for faster C++ compilation");
+    } else if let Ok(sccache) = which::which("sccache") {
+        config
+            .define("CMAKE_C_COMPILER_LAUNCHER", sccache.to_str().unwrap())
+            .define("CMAKE_CXX_COMPILER_LAUNCHER", sccache.to_str().unwrap());
+        eprintln!("Using sccache for faster C++ compilation");
     }
 
     let dst = config.build();
