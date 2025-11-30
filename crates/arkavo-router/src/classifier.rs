@@ -3,20 +3,11 @@ use crate::{Error, Result};
 use arkavo_llm::Message;
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llama-cpp"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::{Provider, Role};
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llama-cpp"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use std::sync::Arc;
-#[cfg(any(
-    all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llama-cpp"
-))]
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use tokio::sync::Mutex;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -639,74 +630,10 @@ impl TaskClassifier {
         Classification::with_complexity(category, confidence, reasoning, task)
     }
 
-    async fn classify_with_llm(&self, task: &str) -> Result<Classification> {
-        let prompt = self.build_classification_prompt(task);
-
-        let messages = vec![Message {
-            role: Role::User,
-            content: prompt,
-            images: None,
-        }];
-
-        let provider = self.provider.lock().await;
-        let response = provider
-            .complete(messages)
-            .await
-            .map_err(|e| Error::Classification(format!("LLM classification failed: {e}")))?;
-
-        self.parse_classification_response(&response)
-    }
-
-    fn build_classification_prompt(&self, task: &str) -> String {
-        format!(
-            r#"Classify this coding task into ONE category:
-
-Categories:
-- frontend_ui: React/Vue/Svelte components, Tailwind CSS, web UI
-- backend_api: REST APIs, authentication, databases, server logic
-- code_search: Finding code, grep, repository search, AST analysis
-- security_scan: Vulnerabilities, security audit, code scanning
-- test_generation: Unit tests, integration tests, test suites
-- documentation: README, API docs, comments, guides
-- refactoring: Code cleanup, optimization, restructuring
-- general: Other coding tasks
-
-Task: {task}
-
-Reply with ONLY the category name and confidence (0-100):
-Category: [category]
-Confidence: [0-100]"#
-        )
-    }
-
-    fn parse_classification_response(&self, response: &str) -> Result<Classification> {
-        let lines: Vec<&str> = response.lines().collect();
-
-        let mut category = TaskCategory::General;
-        let mut confidence = 0.5;
-
-        for line in lines {
-            let line = line.trim();
-
-            if line.starts_with("Category:") {
-                let cat_str = line
-                    .strip_prefix("Category:")
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
-                category = TaskCategory::from_string(&cat_str);
-            } else if line.starts_with("Confidence:")
-                && let Some(conf_str) = line.strip_prefix("Confidence:")
-                && let Ok(conf) = conf_str.trim().parse::<f32>()
-            {
-                confidence = (conf / 100.0).clamp(0.0, 1.0);
-            }
-        }
-
-        Ok(Classification::new(
-            category,
-            confidence,
-            format!("LLM classification: {}", category.as_str()),
+    async fn classify_with_llm(&self, _task: &str) -> Result<Classification> {
+        // LLM classification not available on musl target
+        Err(Error::Classification(
+            "LLM classification not available on musl target".to_string(),
         ))
     }
 }
