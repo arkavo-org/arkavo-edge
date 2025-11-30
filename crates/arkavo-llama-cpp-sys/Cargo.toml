@@ -1,5 +1,6 @@
 [package]
 name = "arkavo-llama-cpp-sys"
+version.workspace = true
 edition = "2021"
 
 [build-dependencies]
