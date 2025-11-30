@@ -1,0 +1,32 @@
+[package]
+name = "arkavo-mesh-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MCP tools for agent mesh orchestration - discovery, routing, and task delegation"
+repository.workspace = true
+keywords = ["mcp", "tools", "mesh", "agent", "orchestration"]
+categories = ["development-tools"]
+
+[dependencies]
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+arkavo-protocol = { path = "../arkavo-protocol" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+chrono = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+# For agent discovery
+mdns-sd = { version = "0.11", optional = true }
+
+[features]
+default = ["mdns"]
+mdns = ["dep:mdns-sd"]
+
+[lints]
+workspace = true

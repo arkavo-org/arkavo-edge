@@ -355,10 +355,23 @@ impl ToolRegistry {
                 .collect();
         }
 
+        // Split query by whitespace, then also split each word by underscores/hyphens
+        // This ensures "list_agents" matches tool name "list_agents" (exact or tokenized)
         let query_words: Vec<String> = query
             .to_lowercase()
             .split_whitespace()
-            .map(|s| s.to_string())
+            .flat_map(|s| {
+                // Keep the original word AND its tokenized parts
+                let parts: Vec<String> = s.split(&['_', '-'][..]).map(|p| p.to_string()).collect();
+                if parts.len() > 1 {
+                    // Include both the full word and its parts
+                    let mut result = vec![s.to_string()];
+                    result.extend(parts);
+                    result
+                } else {
+                    vec![s.to_string()]
+                }
+            })
             .collect();
 
         let results: Vec<MinimalToolInfo> = self
@@ -369,18 +382,21 @@ impl ToolRegistry {
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
 
+                // Exact name match (highest priority)
+                let exact_name_match = query_words.iter().any(|q| q == &name_lower);
+
                 // Token-based matching: check if any query word appears in name or description
                 let name_words: Vec<&str> = name_lower.split(&['_', '-', ' '][..]).collect();
                 let desc_words: Vec<&str> = desc_lower.split_whitespace().collect();
 
-                let matches = query_words.iter().any(|q_word| {
+                let token_matches = query_words.iter().any(|q_word| {
                     // Match if query word appears in tool name words
-                    name_words.iter().any(|n_word| n_word.contains(q_word))
+                    name_words.iter().any(|n_word| n_word.contains(q_word.as_str()))
                         // Or in description words
-                        || desc_words.iter().any(|d_word| d_word.contains(q_word))
+                        || desc_words.iter().any(|d_word| d_word.contains(q_word.as_str()))
                 });
 
-                // Also check aliases (using same tokenization as name/description)
+                // Also check aliases (exact match and tokenized)
                 let alias_match = schema
                     .aliases
                     .as_ref()
@@ -388,15 +404,22 @@ impl ToolRegistry {
                         query_words.iter().any(|q_word| {
                             aliases.iter().any(|alias| {
                                 let alias_lower = alias.to_lowercase();
+                                // Exact alias match
+                                if q_word == &alias_lower {
+                                    return true;
+                                }
+                                // Tokenized alias match
                                 let alias_words: Vec<&str> =
                                     alias_lower.split(&['_', '-', ' '][..]).collect();
-                                alias_words.iter().any(|a_word| a_word.contains(q_word))
+                                alias_words
+                                    .iter()
+                                    .any(|a_word| a_word.contains(q_word.as_str()))
                             })
                         })
                     })
                     .unwrap_or(false);
 
-                if matches || alias_match {
+                if exact_name_match || token_matches || alias_match {
                     Some(self.build_minimal_info(schema, detail))
                 } else {
                     None
@@ -666,9 +689,33 @@ mod tests {
     #[test]
     fn test_search_tools_no_matches() {
         let registry = ToolRegistry::new();
-        let results = registry.search_tools("nonexistent_tool_xyz", DetailLevel::NameOnly);
+        // Use a truly non-matching query (no common words like "tool")
+        let results = registry.search_tools("zzqxvwkj_foobar_blorp", DetailLevel::NameOnly);
 
         assert!(results.is_empty(), "Should return empty vec for no matches");
+    }
+
+    #[test]
+    fn test_search_tools_exact_name_with_underscore() {
+        let registry = ToolRegistry::new();
+        // Search for exact tool name containing underscore (e.g., "shell_exec")
+        let results = registry.search_tools("shell_exec", DetailLevel::NameOnly);
+
+        assert!(
+            !results.is_empty(),
+            "Should find tool by exact name with underscore"
+        );
+        assert!(
+            results.iter().any(|t| t.name == "shell_exec"),
+            "Should include shell_exec in results"
+        );
+
+        // Also verify tokenized search still works
+        let results_shell = registry.search_tools("shell", DetailLevel::NameOnly);
+        assert!(
+            results_shell.iter().any(|t| t.name == "shell_exec"),
+            "Should find shell_exec when searching for 'shell'"
+        );
     }
 
     #[test]

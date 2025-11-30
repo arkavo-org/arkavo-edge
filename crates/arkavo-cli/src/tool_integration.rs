@@ -58,6 +58,10 @@ pub async fn process_with_tools(
     // Register tools from each crate
     arkavo_router::tools::register_tools(&mut tool_registry, router.clone());
 
+    // Register mesh orchestration tools for agent coordination
+    let mesh_state = std::sync::Arc::new(arkavo_mesh_tools::MeshToolsState::new());
+    arkavo_mesh_tools::register_tools(&mut tool_registry, mesh_state);
+
     // Wrap registry in Arc for shared access
     let registry_arc = Arc::new(tool_registry);
 

@@ -14,6 +14,8 @@ pub struct RouteStream {
     inner: Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>,
     metadata: RouteMetadata,
     accumulated: String,
+    /// Tool calls from the response (populated when created from_response)
+    tool_calls: Vec<ParsedToolCall>,
 }
 
 /// A single chunk in the response stream.
@@ -63,12 +65,14 @@ impl RouteStream {
             inner,
             metadata,
             accumulated: String::new(),
+            tool_calls: Vec::new(),
         }
     }
 
     /// Create a RouteStream from a completed response (no streaming).
     pub fn from_response(response: RouteResponse) -> Self {
         let content = response.content.clone();
+        let tool_calls = response.tool_calls.clone();
         let metadata = RouteMetadata {
             model: response.model.clone(),
             used_architect_mode: response.used_architect_mode,
@@ -86,6 +90,7 @@ impl RouteStream {
             inner: Box::pin(stream),
             metadata,
             accumulated: String::new(),
+            tool_calls,
         }
     }
 
@@ -102,8 +107,6 @@ impl RouteStream {
     pub async fn complete(mut self) -> Result<RouteResponse> {
         use futures::StreamExt;
 
-        let tool_calls = Vec::new();
-
         while let Some(chunk_result) = self.inner.next().await {
             let chunk = chunk_result?;
             self.accumulated.push_str(&chunk.content);
@@ -111,7 +114,7 @@ impl RouteStream {
 
         Ok(RouteResponse {
             content: self.accumulated,
-            tool_calls,
+            tool_calls: self.tool_calls,
             model: self.metadata.model,
             cost_usd: self.metadata.estimated_cost_usd,
             used_architect_mode: self.metadata.used_architect_mode,
