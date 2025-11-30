@@ -57,9 +57,10 @@ impl ArchitectPlanner {
 
         // Fallback to Gemini Pro
         if self.availability.gemini
-            && let Ok(provider) = arkavo_llm::GeminiProvider::new() {
-                return Ok(Box::new(provider));
-            }
+            && let Ok(provider) = arkavo_llm::GeminiProvider::new()
+        {
+            return Ok(Box::new(provider));
+        }
 
         Err(Error::ModelExecution(
             "No planning model available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.".to_string(),
@@ -148,9 +149,10 @@ Guidelines:
     fn extract_json(&self, response: &str) -> Result<String> {
         // Try to find JSON object in the response
         if let Some(start) = response.find('{')
-            && let Some(end) = response.rfind('}') {
-                return Ok(response[start..=end].to_string());
-            }
+            && let Some(end) = response.rfind('}')
+        {
+            return Ok(response[start..=end].to_string());
+        }
 
         // If no JSON found, return error
         Err(Error::Classification(

@@ -468,7 +468,8 @@ impl ProviderFactory for LocalProviderFactory {
         // Create llama-cpp provider
         let provider = crate::LlamaCppProvider::new(
             model_name,
-            model_path.ok_or_else(|| anyhow::anyhow!("model_path is required for local provider"))?,
+            model_path
+                .ok_or_else(|| anyhow::anyhow!("model_path is required for local provider"))?,
         )?;
 
         Ok(Box::new(provider))

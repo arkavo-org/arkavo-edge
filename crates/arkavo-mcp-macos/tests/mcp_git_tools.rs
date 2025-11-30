@@ -108,7 +108,12 @@ async fn test_git_commit_tool() {
 
     assert_eq!(result["success"], true);
     // Message may include footer, so check it starts with the expected text
-    assert!(result["message"].as_str().unwrap().starts_with("Add test file"));
+    assert!(
+        result["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Add test file")
+    );
 
     // Verify the commit was created
     let log = repo.reflog("HEAD").unwrap();
