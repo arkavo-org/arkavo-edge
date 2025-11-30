@@ -10,7 +10,10 @@ pub use config::{BudgetConfig, BudgetLimits, BudgetThresholds};
 pub use cost::TokenCost;
 pub use middleware::{BudgetMiddleware, BudgetProviderBuilder};
 pub use policy::{ModelSelectionPolicy, SelectionCriteria};
-pub use tracker::{BudgetStatusWithLimits, BudgetTracker};
+pub use tracker::{
+    ArchitectCostMetadata, ArchitectSavingsReport, ArchitectUsageSummary, BudgetStatusWithLimits,
+    BudgetTracker,
+};
 
 use anyhow::Result;
 use std::sync::Arc;

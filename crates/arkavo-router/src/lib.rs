@@ -28,7 +28,8 @@ pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use metrics::RoutingMetrics;
 pub use orchestrator::{
-    CostOrchestrator, CostRecommendation, OrchestratorMetrics, ScalingDecision,
+    ArchitectRoutingResult, CostOrchestrator, CostRecommendation, OrchestratorMetrics,
+    ScalingDecision,
 };
 pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor};
 pub use selector::{ModelSelector, ProviderAvailability};

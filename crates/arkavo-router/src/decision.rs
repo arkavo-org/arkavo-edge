@@ -49,6 +49,15 @@ impl ModelChoice {
     pub fn is_gemini(&self) -> bool {
         matches!(self, Self::GeminiFlash | Self::GeminiPro)
     }
+
+    pub fn provider(&self) -> &str {
+        match self {
+            Self::GeminiFlash | Self::GeminiPro => "google",
+            Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
+            Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
+            Self::LocalDeepSeekCoder => "local-deepseek",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
