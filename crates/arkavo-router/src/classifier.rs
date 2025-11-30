@@ -499,7 +499,9 @@ Confidence: [0-100]"#
     feature = "llama-cpp"
 ))]
 impl TaskClassifier {
-    pub async fn new() -> Result<Self> { Ok(Self) }
+    pub async fn new() -> Result<Self> {
+        Ok(Self)
+    }
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
@@ -523,13 +525,21 @@ impl TaskClassifier {
         Ok(llm_classification)
     }
 
-    pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> { Err(Error::Classification("LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string())) }
+    pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
+        Err(Error::Classification(
+            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
+        ))
+    }
 
     pub async fn complete_with_options(
         &self,
         _messages: Vec<Message>,
         _max_tokens: Option<usize>,
-    ) -> Result<String> { Err(Error::Classification("LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string())) }
+    ) -> Result<String> {
+        Err(Error::Classification(
+            "LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string(),
+        ))
+    }
 
     fn try_rule_based_classification(&self, task: &str) -> Classification {
         let task_lower = task.to_lowercase();
