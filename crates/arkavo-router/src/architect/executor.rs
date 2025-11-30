@@ -32,14 +32,14 @@ pub struct SubtaskResult {
 
 /// Executes architect plans by routing subtasks to appropriate models
 pub struct ArchitectExecutor {
-    router: Arc<Router>,
+    _router: Arc<Router>,
     max_retries: u8,
 }
 
 impl ArchitectExecutor {
     pub fn new(router: Arc<Router>) -> Self {
         Self {
-            router,
+            _router: router,
             max_retries: 2,
         }
     }
@@ -124,7 +124,7 @@ impl ArchitectExecutor {
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<SubtaskResult> {
         let mut retry_count = 0;
-        let mut last_error = None;
+        let mut last_error: Option<String> = None;
         let mut current_model = subtask.assigned_model.clone();
 
         loop {
