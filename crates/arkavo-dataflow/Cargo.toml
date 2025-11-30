@@ -12,6 +12,7 @@ default = ["nl", "sandbox", "llm-remote"]
 nl = []
 sandbox = []
 llm-remote = ["dep:arkavo-llm", "arkavo-llm?/llm-remote"]
+llama-cpp = ["dep:arkavo-llm", "arkavo-llm?/llama-cpp"]
 
 [dependencies]
 anyhow = { workspace = true }

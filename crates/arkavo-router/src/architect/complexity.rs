@@ -139,7 +139,7 @@ impl ComplexityScorer {
         let sentence_count = task.matches(". ").count() + task.matches("? ").count();
         if sentence_count >= 3 {
             count = count.saturating_add((sentence_count / 2) as u8);
-            triggers.push(format!("{} sentences", sentence_count));
+            triggers.push(format!("{sentence_count} sentences"));
         }
 
         count
@@ -178,8 +178,18 @@ impl ComplexityScorer {
 
         // Adjust based on action verbs
         let action_verbs = [
-            "create", "build", "implement", "add", "update", "fix", "write", "generate", "test",
-            "refactor", "migrate", "deploy",
+            "create",
+            "build",
+            "implement",
+            "add",
+            "update",
+            "fix",
+            "write",
+            "generate",
+            "test",
+            "refactor",
+            "migrate",
+            "deploy",
         ];
 
         let verb_count = action_verbs
@@ -189,7 +199,7 @@ impl ComplexityScorer {
             .min(10) as u8;
 
         // Combine signals
-        let estimated = (base_count + verb_count / 2).max(1).min(10);
+        let estimated = (base_count + verb_count / 2).clamp(1, 10);
 
         // Boost if task is long (complex tasks tend to have longer descriptions)
         if task.len() > 300 && estimated < 3 {
@@ -214,7 +224,8 @@ impl ComplexityScorer {
             1.0
         };
 
-        let base_estimate = (subtask_count as u32 * base_per_subtask) as f64 * complexity_multiplier;
+        let base_estimate =
+            (subtask_count as u32 * base_per_subtask) as f64 * complexity_multiplier;
 
         // Also factor in task description length (longer descriptions = more complex output)
         let length_factor = (task.len() as f64 / 100.0).min(3.0);
@@ -232,9 +243,15 @@ impl ComplexityScorer {
                 vec!["api", "endpoint", "backend", "database", "server"],
                 "backend",
             ),
-            (vec!["test", "jest", "pytest", "unit", "integration"], "test"),
+            (
+                vec!["test", "jest", "pytest", "unit", "integration"],
+                "test",
+            ),
             (vec!["doc", "readme", "comment", "documentation"], "docs"),
-            (vec!["security", "auth", "vulnerability", "scan"], "security"),
+            (
+                vec!["security", "auth", "vulnerability", "scan"],
+                "security",
+            ),
         ];
 
         let mut found_categories = 0u8;
@@ -280,7 +297,7 @@ impl ComplexityScorer {
         // Planning overhead penalty
         let planning_penalty = 0.05; // ~5% for planning phase
 
-        let savings = (routing_savings + spread_bonus) * scale_factor - planning_penalty;
+        let savings = (routing_savings + spread_bonus).mul_add(scale_factor, -planning_penalty);
         (savings * 100.0).clamp(0.0, 80.0) // Cap at 80% savings
     }
 }

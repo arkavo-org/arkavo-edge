@@ -13,7 +13,7 @@ pub mod vim;
 mod tests;
 
 use anyhow::Result;
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -67,18 +67,18 @@ pub struct TerminalContext {
 /// Panics if the MCP client is Some but becomes None unexpectedly
 pub async fn run() -> Result<()> {
     // Create channels for LLM communication
-    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+    #[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
     let (ui_tx, ui_rx) = mpsc::channel::<LlmRequest>(100);
-    #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
+    #[cfg(not(any(feature = "llm-remote", feature = "llama-cpp")))]
     let (ui_tx, _ui_rx) = mpsc::channel::<LlmRequest>(100);
 
-    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+    #[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
     let (llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
-    #[cfg(not(any(feature = "llm-remote", feature = "llm-local")))]
+    #[cfg(not(any(feature = "llm-remote", feature = "llama-cpp")))]
     let (_llm_tx, llm_rx) = mpsc::channel::<LlmResponse>(100);
 
     // Spawn LLM handler task with proper Ollama integration
-    #[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+    #[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
     {
         let mut ui_rx = ui_rx;
         let llm_tx = llm_tx.clone();
@@ -523,7 +523,7 @@ pub async fn run() -> Result<()> {
     run_with_channels(ui_tx, llm_rx).await
 }
 
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     use arkavo_llm::{LlmClient, Message};
     use arkavo_memory::storage::MemoryStorage;
@@ -578,7 +578,7 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     }
 }
 
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 async fn prompt_for_ollama_config(
     storage: Arc<arkavo_memory::storage::MemoryStorage>,
 ) -> Result<arkavo_llm::LlmClient> {
@@ -829,7 +829,7 @@ pub async fn run_with_string_channels(
     run_with_channels(new_ui_tx, new_llm_rx).await
 }
 
-#[cfg(any(feature = "llm-remote", feature = "llm-local"))]
+#[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 fn extract_tool_calls(response: &str) -> Vec<(String, String)> {
     let mut tool_calls = Vec::new();
 

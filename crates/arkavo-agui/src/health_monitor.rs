@@ -109,7 +109,7 @@ impl HealthMonitor {
         // The task description hints that this needs structured output generation
         let task_description = "Analyze system health data and generate structured JSON response with actionable insights";
 
-        let _decision = self.router.route(task_description).await?;
+        let _decision = self.router.classify(task_description).await?;
 
         // Get the appropriate provider from router
         let provider = self.router.get_local_provider();

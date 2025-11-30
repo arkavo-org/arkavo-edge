@@ -238,6 +238,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             > = match (router.as_ref(), &client_clone) {
                 (Some(router), _) => {
                     let task_desc = user_input.clone();
+                    #[allow(deprecated)]
                     match router
                         .route_with_quality_gate_stream(
                             &task_desc,

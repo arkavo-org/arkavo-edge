@@ -21,7 +21,7 @@ async fn test_orc_01_router_logic() {
     // Test 1: Math-heavy task should route to reasoning model
     let math_task = "Calculate the 500th Fibonacci number using dynamic programming";
     let math_decision = router
-        .route(math_task)
+        .classify(math_task)
         .await
         .expect("Failed to route math task");
 
@@ -40,7 +40,7 @@ async fn test_orc_01_router_logic() {
     // Test 2: Creative task should route to flash model or local
     let creative_task = "Write a beautiful poem about the elegance of Rust programming";
     let creative_decision = router
-        .route(creative_task)
+        .classify(creative_task)
         .await
         .expect("Failed to route creative task");
 
@@ -98,7 +98,7 @@ async fn test_orc_01b_router_multiple_categories() {
     let mut categories_seen = std::collections::HashSet::new();
 
     for (task, expected_domain) in test_cases {
-        let decision = router.route(task).await.expect("Failed to route task");
+        let decision = router.classify(task).await.expect("Failed to route task");
 
         println!(
             "{}: {:?} (category: {:?})",
@@ -131,7 +131,7 @@ async fn test_orc_01c_router_fallback() {
     router.set_offline_mode(true);
 
     let task = "Generate a REST API endpoint for user authentication";
-    let decision = router.route(task).await.expect("Failed to route task");
+    let decision = router.classify(task).await.expect("Failed to route task");
 
     println!("Offline mode routed to: {:?}", decision.recommended_model);
 

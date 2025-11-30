@@ -273,6 +273,7 @@ impl CognitiveEngine {
                 images: None,
             }];
 
+            #[allow(deprecated)]
             let response = self
                 .router
                 .route_with_quality_gate(command, messages, Some(&self.tool_registry), 3)

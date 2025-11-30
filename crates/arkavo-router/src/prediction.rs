@@ -266,16 +266,8 @@ mod tests {
         let predictor = WorkflowCostPredictor::new();
 
         let tasks = vec![
-            Classification::new(
-                TaskCategory::FrontendUI,
-                0.90,
-                "Test".to_string(),
-            ),
-            Classification::new(
-                TaskCategory::CodeSearch,
-                0.85,
-                "Test".to_string(),
-            ),
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Test".to_string()),
+            Classification::new(TaskCategory::CodeSearch, 0.85, "Test".to_string()),
         ];
 
         let prediction = predictor.predict(&tasks);

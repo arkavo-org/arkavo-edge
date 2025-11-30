@@ -4,9 +4,6 @@ use crate::ollama::OllamaClient;
 use crate::{Error, Message, Provider, Result, StreamResponse};
 use tokio_stream::Stream;
 
-#[cfg(feature = "llm-local")]
-use crate::local::LocalProvider;
-
 pub struct LlmClient {
     provider: Box<dyn Provider>,
 }
@@ -59,26 +56,25 @@ impl LlmClient {
 
                 #[cfg(not(any(feature = "llm-remote", feature = "kimi", feature = "deepseek", feature = "gemini")))]
                 return Err(Error::Config(
-                    "No LLM providers available. Build with 'llm-remote', 'kimi', 'deepseek', 'gemini', or 'llm-local' feature enabled.".to_string()
+                    "No LLM providers available. Build with 'llm-remote', 'kimi', 'deepseek', 'gemini', or 'llama-cpp' feature enabled.".to_string()
                 ));
             }
         }
     }
 
-    #[cfg_attr(not(feature = "llm-local"), allow(clippy::unused_async))]
+    #[allow(clippy::unused_async)]
     pub async fn from_local_model(model_name: &str, model_path: String) -> Result<Self> {
-        #[cfg(feature = "llm-local")]
+        #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
         {
-            let provider = LocalProvider::new(model_name.to_string(), Some(model_path))?;
-            // Initialize the provider to load the model
-            provider.initialize().await?;
+            use crate::LlamaCppProvider;
+            let provider = LlamaCppProvider::new(model_name.to_string(), model_path)?;
             Ok(Self::new(Box::new(provider)))
         }
-        #[cfg(not(feature = "llm-local"))]
+        #[cfg(not(all(feature = "llama-cpp", not(target_env = "musl"))))]
         {
             let _ = (model_name, model_path); // Suppress unused variable warnings
             Err(Error::Config(
-                "Local models require the 'llm-local' feature to be enabled".to_string(),
+                "Local models require the 'llama-cpp' feature to be enabled".to_string(),
             ))
         }
     }

@@ -10,6 +10,7 @@ repository.workspace = true
 [features]
 default = []
 llm-remote = ["arkavo-llm/llm-remote"]
+llama-cpp = ["arkavo-llm/llama-cpp"]
 
 [dependencies]
 arkavo-llm = { path = "../arkavo-llm", default-features = false }

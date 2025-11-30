@@ -50,7 +50,7 @@ impl Planner {
 
         let decision = self
             .router
-            .route(&planning_prompt)
+            .classify(&planning_prompt)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Routing failed: {e}")))?;
 
@@ -257,7 +257,7 @@ impl Planner {
 
         let decision = self
             .router
-            .route(&adjustment_prompt)
+            .classify(&adjustment_prompt)
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("Routing failed: {e}")))?;
 

@@ -200,7 +200,9 @@ impl ModelSelector {
             }
 
             // Backend/Security/Tests: Use more capable models
-            TaskCategory::BackendAPI | TaskCategory::SecurityScan | TaskCategory::TestGeneration => {
+            TaskCategory::BackendAPI
+            | TaskCategory::SecurityScan
+            | TaskCategory::TestGeneration => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeOpus
                 } else if self.availability.gemini {
@@ -318,11 +320,8 @@ mod tests {
     async fn test_frontend_routing_gemini() {
         let selector = ModelSelector::with_availability(gemini_only());
 
-        let classification = Classification::new(
-            TaskCategory::FrontendUI,
-            0.90,
-            "Frontend task".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
 
         let decision = selector
             .select(&classification, "Build a React component")
@@ -336,11 +335,8 @@ mod tests {
     async fn test_frontend_routing_anthropic() {
         let selector = ModelSelector::with_availability(anthropic_only());
 
-        let classification = Classification::new(
-            TaskCategory::FrontendUI,
-            0.90,
-            "Frontend task".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
 
         let decision = selector
             .select(&classification, "Build a React component")
@@ -372,11 +368,8 @@ mod tests {
     async fn test_budget_constraint() {
         let selector = ModelSelector::with_availability(gemini_only());
 
-        let classification = Classification::new(
-            TaskCategory::FrontendUI,
-            0.90,
-            "Frontend task".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
 
         let decision = selector
             .select_with_budget_constraint(&classification, "Build a React component", 0.90)
@@ -391,11 +384,8 @@ mod tests {
     async fn test_backend_api_routing_gemini() {
         let selector = ModelSelector::with_availability(gemini_only());
 
-        let classification = Classification::new(
-            TaskCategory::BackendAPI,
-            0.85,
-            "Backend API".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::BackendAPI, 0.85, "Backend API".to_string());
 
         let decision = selector
             .select(&classification, "Create a REST API endpoint")
@@ -408,11 +398,8 @@ mod tests {
     async fn test_backend_api_routing_anthropic() {
         let selector = ModelSelector::with_availability(anthropic_only());
 
-        let classification = Classification::new(
-            TaskCategory::BackendAPI,
-            0.85,
-            "Backend API".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::BackendAPI, 0.85, "Backend API".to_string());
 
         let decision = selector
             .select(&classification, "Create a REST API endpoint")
@@ -426,11 +413,8 @@ mod tests {
     async fn test_no_cloud_falls_back_to_local() {
         let selector = ModelSelector::with_availability(ProviderAvailability::default());
 
-        let classification = Classification::new(
-            TaskCategory::FrontendUI,
-            0.90,
-            "Frontend task".to_string(),
-        );
+        let classification =
+            Classification::new(TaskCategory::FrontendUI, 0.90, "Frontend task".to_string());
 
         let decision = selector
             .select(&classification, "Build a React component")

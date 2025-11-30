@@ -124,7 +124,8 @@ impl ArchitectExecutor {
         tool_registry: Option<&ToolRegistry>,
     ) -> Result<SubtaskResult> {
         let mut retry_count = 0;
-        let mut last_error: Option<String> = None;
+        #[allow(unused_assignments)]
+        let mut last_error = None;
         let mut current_model = subtask.assigned_model.clone();
 
         loop {
@@ -152,11 +153,14 @@ impl ArchitectExecutor {
                     .complete_with_tools(messages, tools_json, None)
                     .await
             } else {
-                provider.complete(messages).await.map(|content| ProviderResponse {
-                    content,
-                    tool_calls: Vec::new(),
-                    finish_reason: Some("stop".to_string()),
-                })
+                provider
+                    .complete(messages)
+                    .await
+                    .map(|content| ProviderResponse {
+                        content,
+                        tool_calls: Vec::new(),
+                        finish_reason: Some("stop".to_string()),
+                    })
             };
 
             match response {
@@ -179,19 +183,36 @@ impl ArchitectExecutor {
                     });
                 }
                 Err(e) => {
-                    last_error = Some(e.to_string());
+                    let error_msg = e.to_string();
+                    last_error = Some(error_msg.clone());
                     retry_count += 1;
 
+                    // Log the actual error for debugging
+                    tracing::error!(
+                        subtask_index = subtask.index,
+                        model = ?current_model,
+                        error = %error_msg,
+                        retry_count = retry_count,
+                        "Subtask execution failed"
+                    );
+
                     if retry_count > self.max_retries {
+                        tracing::error!(
+                            subtask_index = subtask.index,
+                            total_retries = retry_count,
+                            last_error = %error_msg,
+                            "Subtask failed after max retries exhausted"
+                        );
                         break;
                     }
 
                     // Escalate to more capable model
                     current_model = self.escalate_model(&current_model);
                     tracing::warn!(
-                        "Subtask {} failed, retrying with {:?}",
-                        subtask.index,
-                        current_model
+                        subtask_index = subtask.index,
+                        new_model = ?current_model,
+                        previous_error = %error_msg,
+                        "Escalating to more capable model after failure"
                     );
                 }
             }
@@ -221,21 +242,18 @@ impl ArchitectExecutor {
                         Error::ModelExecution(format!("Failed to create Anthropic provider: {e}"))
                     })
             }
-            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => {
-                arkavo_llm::GeminiProvider::new()
-                    .map(|p| Box::new(p) as Box<dyn Provider>)
-                    .map_err(|e| {
-                        Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
-                    })
-            }
+            ModelChoice::GeminiFlash | ModelChoice::GeminiPro => arkavo_llm::GeminiProvider::new()
+                .map(|p| Box::new(p) as Box<dyn Provider>)
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create Gemini provider: {e}"))
+                }),
             _ => {
                 // For local models, use Gemini as fallback if available
                 if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
                     return Ok(Box::new(provider));
                 }
                 Err(Error::ModelExecution(format!(
-                    "Model {:?} not available",
-                    model
+                    "Model {model:?} not available"
                 )))
             }
         }
@@ -262,16 +280,16 @@ impl ArchitectExecutor {
 
         match model {
             ModelChoice::GeminiFlash => {
-                (input_tokens / 1_000_000.0) * 0.30 + (output_tokens / 1_000_000.0) * 2.50
+                (input_tokens / 1_000_000.0).mul_add(0.30, (output_tokens / 1_000_000.0) * 2.50)
             }
             ModelChoice::GeminiPro => {
-                (input_tokens / 1_000_000.0) * 1.25 + (output_tokens / 1_000_000.0) * 5.00
+                (input_tokens / 1_000_000.0).mul_add(1.25, (output_tokens / 1_000_000.0) * 5.00)
             }
             ModelChoice::ClaudeSonnet => {
-                (input_tokens / 1_000_000.0) * 3.00 + (output_tokens / 1_000_000.0) * 15.00
+                (input_tokens / 1_000_000.0).mul_add(3.00, (output_tokens / 1_000_000.0) * 15.00)
             }
             ModelChoice::ClaudeOpus => {
-                (input_tokens / 1_000_000.0) * 15.00 + (output_tokens / 1_000_000.0) * 75.00
+                (input_tokens / 1_000_000.0).mul_add(15.00, (output_tokens / 1_000_000.0) * 75.00)
             }
             _ => 0.0,
         }
@@ -287,22 +305,22 @@ impl ArchitectExecutor {
             results.iter().filter(|r| r.success).collect();
 
         if successful_results.is_empty() {
-            return Err(Error::ModelExecution(
-                "All subtasks failed".to_string(),
-            ));
+            return Err(Error::ModelExecution("All subtasks failed".to_string()));
         }
 
         // Build summary
         let mut summary = format!("## Completed: {}\n\n", plan.original_task);
 
+        use std::fmt::Write;
         for (i, result) in successful_results.iter().enumerate() {
             let subtask = &plan.subtasks[result.index];
-            summary.push_str(&format!(
+            let _ = write!(
+                summary,
                 "### Step {} - {}\n{}\n\n",
                 i + 1,
                 subtask.description,
                 result.response
-            ));
+            );
         }
 
         // Add cost summary
@@ -314,10 +332,10 @@ impl ArchitectExecutor {
             0.0
         };
 
-        summary.push_str(&format!(
-            "---\n**Cost**: ${:.4} (saved ${:.4}, {:.1}% vs Opus-only)\n",
-            total_cost, savings, savings_pct
-        ));
+        let _ = write!(
+            summary,
+            "---\n**Cost**: ${total_cost:.4} (saved ${savings:.4}, {savings_pct:.1}% vs Opus-only)\n"
+        );
 
         Ok(summary)
     }
@@ -329,9 +347,7 @@ mod tests {
 
     #[test]
     fn test_model_escalation() {
-        let router = futures::executor::block_on(async {
-            Router::new().await.ok()
-        });
+        let router = futures::executor::block_on(async { Router::new().await.ok() });
 
         if let Some(router) = router {
             let executor = ArchitectExecutor::new(Arc::new(router));

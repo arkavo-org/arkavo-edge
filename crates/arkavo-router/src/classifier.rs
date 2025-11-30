@@ -5,17 +5,17 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 use arkavo_llm::{Provider, Role};
 #[cfg(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 use std::sync::Arc;
 #[cfg(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 use tokio::sync::Mutex;
 
@@ -23,7 +23,7 @@ use tokio::sync::Mutex;
 use arkavo_llm::LlamaCppProvider;
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 use arkavo_llm::local::LocalProvider;
 
@@ -164,8 +164,16 @@ impl Classification {
 
         // Multi-step indicators
         let multi_step_patterns = [
-            "and then", "after that", "first", "second", "third", "finally",
-            "next", ". then", "step 1", "step 2",
+            "and then",
+            "after that",
+            "first",
+            "second",
+            "third",
+            "finally",
+            "next",
+            ". then",
+            "step 1",
+            "step 2",
         ];
 
         let mut step_count = 0u8;
@@ -177,18 +185,38 @@ impl Classification {
 
         // Complexity keywords
         let complexity_keywords = [
-            "refactor", "migration", "redesign", "multi-step", "comprehensive",
-            "complete", "full implementation", "end-to-end", "entire",
+            "refactor",
+            "migration",
+            "redesign",
+            "multi-step",
+            "comprehensive",
+            "complete",
+            "full implementation",
+            "end-to-end",
+            "entire",
         ];
 
         let has_complexity_keyword = complexity_keywords.iter().any(|k| task_lower.contains(k));
 
         // Count action verbs
         let action_verbs = [
-            "create", "build", "implement", "add", "update", "fix", "write",
-            "generate", "test", "refactor", "migrate", "deploy",
+            "create",
+            "build",
+            "implement",
+            "add",
+            "update",
+            "fix",
+            "write",
+            "generate",
+            "test",
+            "refactor",
+            "migrate",
+            "deploy",
         ];
-        let verb_count = action_verbs.iter().filter(|v| task_lower.contains(*v)).count();
+        let verb_count = action_verbs
+            .iter()
+            .filter(|v| task_lower.contains(*v))
+            .count();
 
         // Sentence count
         let sentence_count = task.matches(". ").count() + task.matches("? ").count() + 1;
@@ -219,7 +247,7 @@ pub struct TaskClassifier {
 
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 pub struct TaskClassifier {
     provider: Arc<Mutex<LocalProvider>>,
@@ -227,7 +255,7 @@ pub struct TaskClassifier {
 
 #[cfg(not(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 )))]
 pub struct TaskClassifier {
     _phantom: std::marker::PhantomData<()>,
@@ -475,7 +503,7 @@ Confidence: [0-100]"#
 
 #[cfg(all(
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llm-local"
+    feature = "llama-cpp"
 ))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
@@ -702,24 +730,24 @@ Confidence: [0-100]"#
 
 #[cfg(not(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
-    feature = "llm-local"
+    feature = "llama-cpp"
 )))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn classify(&self, _task_description: &str) -> Result<Classification> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
     pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 
@@ -729,7 +757,7 @@ impl TaskClassifier {
         _max_tokens: Option<usize>,
     ) -> Result<String> {
         Err(Error::Classification(
-            "TaskClassifier requires llm-local or llama-cpp feature".to_string(),
+            "TaskClassifier requires llama-cpp or llama-cpp feature".to_string(),
         ))
     }
 }
@@ -761,7 +789,7 @@ mod tests {
     #[tokio::test]
     #[cfg(any(
         all(feature = "llama-cpp", not(target_env = "musl")),
-        feature = "llm-local"
+        feature = "llama-cpp"
     ))]
     async fn test_rule_based_classification() {
         let classifier = TaskClassifier::new().await;

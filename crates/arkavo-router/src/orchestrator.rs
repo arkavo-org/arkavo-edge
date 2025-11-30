@@ -4,8 +4,8 @@ use crate::decision::RoutingDecision;
 use crate::metrics::RoutingMetrics;
 use crate::selector::ModelSelector;
 use crate::{Error, Result, Router};
-use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
 use arkavo_budget::TokenCost;
+use arkavo_budget::tracker::{ArchitectCostMetadata, BudgetTracker, SpendingRecord};
 use arkavo_llm::Message;
 use arkavo_mcp_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,10 @@ pub struct OrchestratorMetrics {
     /// Architect mode metrics
     pub architect_plans_executed: u64,
     pub architect_subtasks_completed: u64,
+    pub architect_subtasks_failed: u64,
     pub architect_total_savings: f64,
+    /// Provider error tracking
+    pub provider_errors: std::collections::HashMap<String, u64>,
 }
 
 impl Default for OrchestratorMetrics {
@@ -65,8 +68,16 @@ impl OrchestratorMetrics {
             total_budget_saved: 0.0,
             architect_plans_executed: 0,
             architect_subtasks_completed: 0,
+            architect_subtasks_failed: 0,
             architect_total_savings: 0.0,
+            provider_errors: std::collections::HashMap::new(),
         }
+    }
+
+    /// Record a provider error for tracking
+    pub fn record_provider_error(&mut self, provider: &str, error_type: &str) {
+        let key = format!("{provider}:{error_type}");
+        *self.provider_errors.entry(key).or_insert(0) += 1;
     }
 }
 
@@ -329,8 +340,8 @@ impl CostOrchestrator {
         };
 
         let planning_cost = TokenCost::from_dollars(planning_cost_usd);
-        let input_tokens = complexity.estimated_output_tokens as u32;
-        let output_tokens = (complexity.estimated_output_tokens / 2) as u32;
+        let input_tokens = complexity.estimated_output_tokens;
+        let output_tokens = complexity.estimated_output_tokens / 2;
         let _ = self
             .budget_tracker
             .record_architect_spending(
@@ -384,7 +395,21 @@ impl CostOrchestrator {
         // Update metrics
         let mut metrics = self.orchestrator_metrics.write().await;
         metrics.architect_plans_executed += 1;
-        metrics.architect_subtasks_completed += result.subtask_results.len() as u64;
+
+        // Count successful vs failed subtasks
+        let (completed, failed): (Vec<_>, Vec<_>) =
+            result.subtask_results.iter().partition(|r| r.success);
+        metrics.architect_subtasks_completed += completed.len() as u64;
+        metrics.architect_subtasks_failed += failed.len() as u64;
+
+        // Track provider errors from failed subtasks
+        for failed_subtask in &failed {
+            if let Some(error) = &failed_subtask.error {
+                let error_type = categorize_provider_error(error);
+                metrics.record_provider_error(failed_subtask.model_used.provider(), &error_type);
+            }
+        }
+
         metrics.architect_total_savings += result.actual_savings_usd;
         drop(metrics);
 
@@ -401,6 +426,42 @@ impl CostOrchestrator {
         &self,
     ) -> arkavo_budget::tracker::ArchitectUsageSummary {
         self.budget_tracker.get_architect_summary().await
+    }
+}
+
+/// Categorize provider errors for metrics tracking
+fn categorize_provider_error(error: &str) -> String {
+    let error_lower = error.to_lowercase();
+
+    if error_lower.contains("rate limit") || error_lower.contains("429") {
+        "rate_limit".to_string()
+    } else if error_lower.contains("timeout") || error_lower.contains("timed out") {
+        "timeout".to_string()
+    } else if error_lower.contains("unauthorized")
+        || error_lower.contains("401")
+        || error_lower.contains("api key")
+    {
+        "auth_error".to_string()
+    } else if error_lower.contains("500")
+        || error_lower.contains("502")
+        || error_lower.contains("503")
+        || error_lower.contains("internal")
+    {
+        "server_error".to_string()
+    } else if error_lower.contains("context")
+        || error_lower.contains("token")
+        || error_lower.contains("too long")
+    {
+        "context_limit".to_string()
+    } else if error_lower.contains("connection")
+        || error_lower.contains("network")
+        || error_lower.contains("dns")
+    {
+        "network_error".to_string()
+    } else if error_lower.contains("invalid") || error_lower.contains("malformed") {
+        "invalid_request".to_string()
+    } else {
+        "unknown".to_string()
     }
 }
 

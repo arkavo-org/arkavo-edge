@@ -130,7 +130,7 @@ async fn test_router_compression_flags() {
     let router = router_result.unwrap();
 
     let decision = router
-        .route("Create a React component with complex state management and multiple hooks")
+        .classify("Create a React component with complex state management and multiple hooks")
         .await
         .expect("Routing failed");
 

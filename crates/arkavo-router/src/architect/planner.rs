@@ -33,9 +33,10 @@ impl ArchitectPlanner {
             images: None,
         }];
 
-        let response = provider.complete(messages).await.map_err(|e| {
-            Error::ModelExecution(format!("Planning phase failed: {e}"))
-        })?;
+        let response = provider
+            .complete(messages)
+            .await
+            .map_err(|e| Error::ModelExecution(format!("Planning phase failed: {e}")))?;
 
         let mut plan = self.parse_plan_response(task, &response, complexity)?;
 
@@ -55,11 +56,10 @@ impl ArchitectPlanner {
         }
 
         // Fallback to Gemini Pro
-        if self.availability.gemini {
-            if let Ok(provider) = arkavo_llm::GeminiProvider::new() {
+        if self.availability.gemini
+            && let Ok(provider) = arkavo_llm::GeminiProvider::new() {
                 return Ok(Box::new(provider));
             }
-        }
 
         Err(Error::ModelExecution(
             "No planning model available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.".to_string(),
@@ -119,9 +119,8 @@ Guidelines:
             dependencies: Vec<usize>,
         }
 
-        let parsed: PlanResponse = serde_json::from_str(&json_str).map_err(|e| {
-            Error::Classification(format!("Failed to parse plan JSON: {e}"))
-        })?;
+        let parsed: PlanResponse = serde_json::from_str(&json_str)
+            .map_err(|e| Error::Classification(format!("Failed to parse plan JSON: {e}")))?;
 
         if parsed.subtasks.is_empty() {
             return Err(Error::Classification(
@@ -148,11 +147,10 @@ Guidelines:
 
     fn extract_json(&self, response: &str) -> Result<String> {
         // Try to find JSON object in the response
-        if let Some(start) = response.find('{') {
-            if let Some(end) = response.rfind('}') {
+        if let Some(start) = response.find('{')
+            && let Some(end) = response.rfind('}') {
                 return Ok(response[start..=end].to_string());
             }
-        }
 
         // If no JSON found, return error
         Err(Error::Classification(
@@ -175,7 +173,9 @@ Guidelines:
             }
 
             // Backend/Security/Tests: Use more capable models
-            TaskCategory::BackendAPI | TaskCategory::SecurityScan | TaskCategory::TestGeneration => {
+            TaskCategory::BackendAPI
+            | TaskCategory::SecurityScan
+            | TaskCategory::TestGeneration => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeOpus
                 } else if self.availability.gemini {

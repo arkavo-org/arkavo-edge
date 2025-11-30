@@ -464,7 +464,7 @@ if !response.tool_calls.is_empty() {
 cargo test -p arkavo-router
 
 # Run with local models (requires Gemma models)
-cargo test -p arkavo-router --features llm-local
+cargo test -p arkavo-router --features llama-cpp
 
 # Run benchmarks
 cargo bench -p arkavo-router

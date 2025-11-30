@@ -33,9 +33,9 @@ mod tests {
             assert_eq!(client.provider_name(), "ollama");
         }
 
-        // When only llm-local feature is enabled, from_env() will fail
+        // When only llama-cpp feature is enabled, from_env() will fail
         // because it defaults to ollama which requires llm-remote
-        #[cfg(all(not(feature = "llm-remote"), feature = "llm-local"))]
+        #[cfg(all(not(feature = "llm-remote"), feature = "llama-cpp"))]
         {
             let result = LlmClient::from_env();
             assert!(

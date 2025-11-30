@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_models_schema() {
-        // Router::new() requires llm-local or llama-cpp feature
+        // Router::new() requires llama-cpp or llama-cpp feature
         if let Ok(router) = Router::new().await {
             let router = Arc::new(router);
             let tool = ListModelsTool::new(router);
@@ -83,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_models_execute() {
-        // Router::new() requires llm-local or llama-cpp feature
+        // Router::new() requires llama-cpp or llama-cpp feature
         if let Ok(router) = Router::new().await {
             let router = Arc::new(router);
             let tool = ListModelsTool::new(router);
@@ -99,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_models_includes_local() {
-        // Router::new() requires llm-local or llama-cpp feature
+        // Router::new() requires llama-cpp or llama-cpp feature
         if let Ok(router) = Router::new().await {
             let router = Arc::new(router);
             let tool = ListModelsTool::new(router);

@@ -28,7 +28,7 @@ impl LlmIntegration {
 
     pub async fn route_prompt(&self, prompt: &str) -> Result<RoutingDecision> {
         self.router
-            .route(prompt)
+            .classify(prompt)
             .await
             .map_err(|e| anyhow::anyhow!("Router error: {}", e))
     }

@@ -91,7 +91,7 @@ impl UiGenerator {
             request.context.available_agents.len()
         );
 
-        let routing_decision = self.router.route(&task_description).await?;
+        let routing_decision = self.router.classify(&task_description).await?;
 
         let prompt = self.prompt_builder.build(&request, &routing_decision)?;
 

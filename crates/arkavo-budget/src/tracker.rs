@@ -503,27 +503,24 @@ impl BudgetTracker {
         let mut subtask_ids = std::collections::HashSet::new();
 
         for record in history.iter() {
-            if let Some(metadata) = &record.metadata {
-                if let Some(architect_value) = metadata.get("architect") {
-                    if let Ok(arch_meta) =
-                        serde_json::from_value::<ArchitectCostMetadata>(architect_value.clone())
-                    {
-                        if arch_meta.plan_id == plan_id {
-                            let cost_usd = record.cost.as_dollars();
-                            actual_cost += cost_usd;
-                            opus_only_estimate += arch_meta.opus_only_estimate;
+            if let Some(metadata) = &record.metadata
+                && let Some(architect_value) = metadata.get("architect")
+                && let Ok(arch_meta) =
+                    serde_json::from_value::<ArchitectCostMetadata>(architect_value.clone())
+                && arch_meta.plan_id == plan_id
+            {
+                let cost_usd = record.cost.as_dollars();
+                actual_cost += cost_usd;
+                opus_only_estimate += arch_meta.opus_only_estimate;
 
-                            if arch_meta.phase == "planning" {
-                                planning_cost += cost_usd;
-                            } else {
-                                execution_cost += cost_usd;
-                            }
+                if arch_meta.phase == "planning" {
+                    planning_cost += cost_usd;
+                } else {
+                    execution_cost += cost_usd;
+                }
 
-                            if let Some(subtask_id) = arch_meta.subtask_id {
-                                subtask_ids.insert(subtask_id);
-                            }
-                        }
-                    }
+                if let Some(subtask_id) = arch_meta.subtask_id {
+                    subtask_ids.insert(subtask_id);
                 }
             }
         }
@@ -558,14 +555,12 @@ impl BudgetTracker {
         // Collect all unique plan IDs
         let mut plan_ids = std::collections::HashSet::new();
         for record in history.iter() {
-            if let Some(metadata) = &record.metadata {
-                if let Some(architect_value) = metadata.get("architect") {
-                    if let Ok(arch_meta) =
-                        serde_json::from_value::<ArchitectCostMetadata>(architect_value.clone())
-                    {
-                        plan_ids.insert(arch_meta.plan_id);
-                    }
-                }
+            if let Some(metadata) = &record.metadata
+                && let Some(architect_value) = metadata.get("architect")
+                && let Ok(arch_meta) =
+                    serde_json::from_value::<ArchitectCostMetadata>(architect_value.clone())
+            {
+                plan_ids.insert(arch_meta.plan_id);
             }
         }
         drop(history);
