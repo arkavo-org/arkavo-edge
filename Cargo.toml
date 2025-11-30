@@ -45,6 +45,7 @@ members = [
     "crates/arkavo-registration",
     "crates/arkavo-tdf",
     "crates/arkavo-tdf-iroh",
+    "crates/arkavo-mesh-tools",
     ".cargo/xtask",
 ]
 default-members = [

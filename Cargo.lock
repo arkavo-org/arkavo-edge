@@ -257,7 +257,7 @@ dependencies = [
  "chrono",
  "futures",
  "jsonrpsee",
- "mdns-sd",
+ "mdns-sd 0.14.1",
  "rand 0.8.5",
  "regex",
  "reqwest",
@@ -410,6 +410,7 @@ dependencies = [
  "arkavo-mcp-runtime",
  "arkavo-mcp-tools",
  "arkavo-memory",
+ "arkavo-mesh-tools",
  "arkavo-observability",
  "arkavo-orchestrator",
  "arkavo-protocol",
@@ -431,7 +432,7 @@ dependencies = [
  "indicatif 0.18.3",
  "jsonschema",
  "log",
- "mdns-sd",
+ "mdns-sd 0.14.1",
  "reqwest",
  "serde",
  "serde_json",
@@ -821,6 +822,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-mesh-tools"
+version = "0.43.1"
+dependencies = [
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
+ "arkavo-protocol",
+ "async-trait",
+ "chrono",
+ "mdns-sd 0.11.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-observability"
 version = "0.43.1"
 dependencies = [
@@ -891,7 +909,7 @@ dependencies = [
  "gethostname",
  "governor",
  "hex",
- "if-addrs",
+ "if-addrs 0.14.0",
  "jsonrpsee",
  "jsonwebtoken",
  "metrics",
@@ -4183,6 +4201,16 @@ dependencies = [
 
 [[package]]
 name = "if-addrs"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "if-addrs"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf39cc0423ee66021dc5eccface85580e4a001e0c5288bae8bea7ecb69225e90"
@@ -5403,13 +5431,26 @@ dependencies = [
 
 [[package]]
 name = "mdns-sd"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe7c11a1eb3cfbfcf702d1601c1f5f4c102cdc8665b8a557783ef634741676e"
+dependencies = [
+ "flume",
+ "if-addrs 0.13.4",
+ "log",
+ "polling",
+ "socket2 0.5.10",
+]
+
+[[package]]
+name = "mdns-sd"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e0a59b04e17a195b0674198b3182931801c4759d00f36acad51b5a97210a692"
 dependencies = [
  "fastrand",
  "flume",
- "if-addrs",
+ "if-addrs 0.14.0",
  "log",
  "mio",
  "socket-pktinfo",
@@ -6701,6 +6742,22 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
+]
+
+[[package]]
+name = "polling"
+version = "2.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b2d323e8ca7996b3e23126511a523f7e62924d93ecd5ae73b333815b0eb3dce"
+dependencies = [
+ "autocfg",
+ "bitflags 1.3.2",
+ "cfg-if",
+ "concurrent-queue",
+ "libc",
+ "log",
+ "pin-project-lite",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
