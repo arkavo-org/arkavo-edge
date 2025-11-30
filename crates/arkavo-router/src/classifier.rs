@@ -21,11 +21,6 @@ use tokio::sync::Mutex;
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llm::LlamaCppProvider;
-#[cfg(all(
-    not(all(feature = "llama-cpp", not(target_env = "musl"))),
-    feature = "llama-cpp"
-))]
-use arkavo_llm::local::LocalProvider;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum TaskCategory {
@@ -249,9 +244,7 @@ pub struct TaskClassifier {
     not(all(feature = "llama-cpp", not(target_env = "musl"))),
     feature = "llama-cpp"
 ))]
-pub struct TaskClassifier {
-    provider: Arc<Mutex<LocalProvider>>,
-}
+pub struct TaskClassifier;
 
 #[cfg(not(any(
     all(feature = "llama-cpp", not(target_env = "musl")),
@@ -506,19 +499,7 @@ Confidence: [0-100]"#
     feature = "llama-cpp"
 ))]
 impl TaskClassifier {
-    pub async fn new() -> Result<Self> {
-        let provider = LocalProvider::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
-        )
-        .map_err(Error::Provider)?;
-
-        provider.initialize().await.map_err(Error::Provider)?;
-
-        Ok(Self {
-            provider: Arc::new(Mutex::new(provider)),
-        })
-    }
+    pub async fn new() -> Result<Self> { Ok(Self) }
 
     pub async fn classify(&self, task_description: &str) -> Result<Classification> {
         if task_description.len() < 10 {
@@ -542,21 +523,13 @@ impl TaskClassifier {
         Ok(llm_classification)
     }
 
-    pub async fn complete(&self, messages: Vec<Message>) -> Result<String> {
-        self.complete_with_options(messages, None).await
-    }
+    pub async fn complete(&self, _messages: Vec<Message>) -> Result<String> { Err(Error::Classification("LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string())) }
 
     pub async fn complete_with_options(
         &self,
-        messages: Vec<Message>,
-        max_tokens: Option<usize>,
-    ) -> Result<String> {
-        let provider = self.provider.lock().await;
-        provider
-            .complete_with_options(messages, max_tokens)
-            .await
-            .map_err(|e| Error::Classification(format!("LLM completion failed: {e}")))
-    }
+        _messages: Vec<Message>,
+        _max_tokens: Option<usize>,
+    ) -> Result<String> { Err(Error::Classification("LocalProvider (llama-cpp on MUSL) is not supported in this build".to_string())) }
 
     fn try_rule_based_classification(&self, task: &str) -> Classification {
         let task_lower = task.to_lowercase();
