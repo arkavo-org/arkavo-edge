@@ -31,9 +31,11 @@ use arkavo_protocol::types::{
     Message, MessagePart, MessageSendRequest, MessageSendResponse, TaskGetRequest, TaskGetResponse,
     TaskStatus,
 };
-use arkavo_protocol::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig};
+use arkavo_protocol::{
+    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, HttpTransport, TransportConfig,
+};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -203,9 +205,8 @@ impl Tool for AgentQueryTool {
 
         let mut matching_agents = Vec::new();
         for agent in all_agents {
-            let cap_matches = capability.is_none_or(|cap| {
-                agent.capabilities.iter().any(|c| c.contains(cap))
-            });
+            let cap_matches =
+                capability.is_none_or(|cap| agent.capabilities.iter().any(|c| c.contains(cap)));
 
             let purpose_matches = purpose_contains.is_none_or(|purpose_text| {
                 agent
@@ -325,10 +326,10 @@ impl Tool for SendTaskTool {
             ..Default::default()
         };
 
-        let transport = Arc::new(
-            HttpTransport::new(transport_config)
-                .map_err(|e| MeshToolError::Execution(format!("Failed to create transport: {e}")))?,
-        );
+        let transport =
+            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+                MeshToolError::Execution(format!("Failed to create transport: {e}"))
+            })?);
 
         let endpoint = A2aEndpoint {
             url: address.clone(),
@@ -337,9 +338,10 @@ impl Tool for SendTaskTool {
         };
 
         // Connect
-        transport.connect(&endpoint).await.map_err(|e| {
-            MeshToolError::Execution(format!("Failed to connect to agent: {e}"))
-        })?;
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
 
         // Build message
         let message = Message {
@@ -362,16 +364,19 @@ impl Tool for SendTaskTool {
         // Send task
         let rpc_request = A2aRequest::new("message/send", json!([send_request]));
 
-        let response = transport.send_request(rpc_request).await.map_err(|e| {
-            MeshToolError::Execution(format!("Failed to send task: {e}"))
-        })?;
+        let response = transport
+            .send_request(rpc_request)
+            .await
+            .map_err(|e| MeshToolError::Execution(format!("Failed to send task: {e}")))?;
 
         let _ = transport.close().await;
 
         match response {
             A2aResponse::Success { result, .. } => {
-                let send_response: MessageSendResponse = serde_json::from_value(result)
-                    .map_err(|e| MeshToolError::Execution(format!("Failed to parse response: {e}")))?;
+                let send_response: MessageSendResponse =
+                    serde_json::from_value(result).map_err(|e| {
+                        MeshToolError::Execution(format!("Failed to parse response: {e}"))
+                    })?;
 
                 Ok(json!({
                     "success": true,
@@ -401,7 +406,8 @@ impl GetTaskStatusTool {
             schema: ToolSchema {
                 name: "get_task_status".to_string(),
                 aliases: Some(vec!["task_status".to_string()]),
-                description: "Get the current status of a task that was sent to an agent.".to_string(),
+                description: "Get the current status of a task that was sent to an agent."
+                    .to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -443,9 +449,7 @@ impl Tool for GetTaskStatusTool {
         let addresses = self.state.agent_addresses.read().await;
         let address = addresses
             .get(agent_id)
-            .ok_or_else(|| {
-                MeshToolError::Execution(format!("Agent '{agent_id}' not found"))
-            })?
+            .ok_or_else(|| MeshToolError::Execution(format!("Agent '{agent_id}' not found")))?
             .clone();
         drop(addresses);
 
@@ -460,10 +464,10 @@ impl Tool for GetTaskStatusTool {
             ..Default::default()
         };
 
-        let transport = Arc::new(
-            HttpTransport::new(transport_config)
-                .map_err(|e| MeshToolError::Execution(format!("Failed to create transport: {e}")))?,
-        );
+        let transport =
+            Arc::new(HttpTransport::new(transport_config).map_err(|e| {
+                MeshToolError::Execution(format!("Failed to create transport: {e}"))
+            })?);
 
         let endpoint = A2aEndpoint {
             url: address.clone(),
@@ -471,9 +475,10 @@ impl Tool for GetTaskStatusTool {
             public_key: None,
         };
 
-        transport.connect(&endpoint).await.map_err(|e| {
-            MeshToolError::Execution(format!("Failed to connect to agent: {e}"))
-        })?;
+        transport
+            .connect(&endpoint)
+            .await
+            .map_err(|e| MeshToolError::Execution(format!("Failed to connect to agent: {e}")))?;
 
         // Get task status
         let get_request = TaskGetRequest {
@@ -482,16 +487,19 @@ impl Tool for GetTaskStatusTool {
 
         let rpc_request = A2aRequest::new("tasks/get", json!([get_request]));
 
-        let response = transport.send_request(rpc_request).await.map_err(|e| {
-            MeshToolError::Execution(format!("Failed to get task status: {e}"))
-        })?;
+        let response = transport
+            .send_request(rpc_request)
+            .await
+            .map_err(|e| MeshToolError::Execution(format!("Failed to get task status: {e}")))?;
 
         let _ = transport.close().await;
 
         match response {
             A2aResponse::Success { result, .. } => {
-                let task_response: TaskGetResponse = serde_json::from_value(result)
-                    .map_err(|e| MeshToolError::Execution(format!("Failed to parse response: {e}")))?;
+                let task_response: TaskGetResponse =
+                    serde_json::from_value(result).map_err(|e| {
+                        MeshToolError::Execution(format!("Failed to parse response: {e}"))
+                    })?;
 
                 let mut result_json = json!({
                     "success": true,
@@ -630,8 +638,14 @@ async fn discover_and_register_agents(
 /// This function follows the arkavo tool registration pattern where each crate
 /// exports a `register_tools` function to avoid circular dependencies.
 pub fn register_tools(registry: &mut ToolRegistry, state: Arc<MeshToolsState>) {
-    registry.register("list_agents", Box::new(ListAgentsTool::new(Arc::clone(&state))));
-    registry.register("agent_query", Box::new(AgentQueryTool::new(Arc::clone(&state))));
+    registry.register(
+        "list_agents",
+        Box::new(ListAgentsTool::new(Arc::clone(&state))),
+    );
+    registry.register(
+        "agent_query",
+        Box::new(AgentQueryTool::new(Arc::clone(&state))),
+    );
     registry.register("send_task", Box::new(SendTaskTool::new(Arc::clone(&state))));
     registry.register("get_task_status", Box::new(GetTaskStatusTool::new(state)));
 }
