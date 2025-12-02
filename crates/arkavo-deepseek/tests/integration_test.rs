@@ -657,3 +657,39 @@ async fn test_live_api_streaming() {
         assert!(collected.contains(&i.to_string()));
     }
 }
+
+/// Live API test for V3.2-Speciale with thinking mode
+#[tokio::test]
+#[ignore = "requires DEEPSEEK_API_KEY environment variable"]
+async fn test_live_api_v32_speciale_thinking() {
+    let config = DeepSeekConfig {
+        api_key: std::env::var("DEEPSEEK_API_KEY").expect("DEEPSEEK_API_KEY must be set"),
+        base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+        model: "deepseek-chat".to_string(),
+        thinking_mode: true,
+        ..Default::default()
+    };
+
+    let client = DeepSeekClient::new(config).unwrap();
+
+    let messages = vec![ChatMessage {
+        role: Role::User,
+        content: MessageContent::Text {
+            content: "What is 15 + 27? Reply with just the number.".to_string(),
+        },
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    }];
+
+    let response = client.complete(messages, None, None, None).await.unwrap();
+
+    // V3.2-Speciale should return reasoning_content (thinking) and content
+    let choice = response.choices.first().unwrap();
+    let content = choice.message.content.as_ref().unwrap();
+    assert!(
+        content.contains("42"),
+        "Expected 42 in response: {}",
+        content
+    );
+}

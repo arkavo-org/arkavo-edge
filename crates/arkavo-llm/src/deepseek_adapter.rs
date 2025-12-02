@@ -91,6 +91,7 @@ impl DeepSeekProvider {
             api_key,
             base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
             model: "deepseek-chat".to_string(),
+            thinking_mode: true, // V3.2-Speciale requires thinking mode
             ..Default::default()
         };
 

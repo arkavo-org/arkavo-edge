@@ -28,6 +28,8 @@ pub struct DeepSeekConfig {
     pub use_strict_mode: bool,
     /// Use Anthropic compatibility mode
     pub anthropic_compat: bool,
+    /// Enable thinking mode (required for V3.2-Speciale)
+    pub thinking_mode: bool,
     /// Maximum tokens to generate
     pub max_tokens: Option<u32>,
     /// Temperature for generation
@@ -48,6 +50,7 @@ impl Default for DeepSeekConfig {
             model: "deepseek-chat".to_string(),
             use_strict_mode: false,
             anthropic_compat: false,
+            thinking_mode: false,
             max_tokens: Some(4096),
             temperature: Some(0.7),
             top_p: None,
@@ -227,6 +230,13 @@ impl DeepSeekClient {
         // Add JSON instruction if needed
         add_json_instruction_if_needed(&mut messages, &response_format);
 
+        // Enable thinking mode if configured (required for V3.2-Speciale)
+        let thinking = if self.config.thinking_mode {
+            Some(crate::types::ThinkingConfig::enabled())
+        } else {
+            None
+        };
+
         Ok(ChatCompletionRequest {
             model: actual_model,
             messages,
@@ -240,6 +250,7 @@ impl DeepSeekClient {
             response_format,
             logprobs: None,
             n: None,
+            thinking,
         })
     }
 

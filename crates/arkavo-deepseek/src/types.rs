@@ -156,6 +156,22 @@ pub enum ResponseFormat {
     JsonObject,
 }
 
+/// Thinking mode configuration for V3.2 models
+#[derive(Debug, Clone, Serialize)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub thinking_type: String,
+}
+
+impl ThinkingConfig {
+    /// Create enabled thinking mode config
+    pub fn enabled() -> Self {
+        Self {
+            thinking_type: "enabled".to_string(),
+        }
+    }
+}
+
 /// Chat completion request (OpenAI-style)
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatCompletionRequest {
@@ -181,6 +197,9 @@ pub struct ChatCompletionRequest {
     pub logprobs: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
+    /// Thinking mode for V3.2 models (required for V3.2-Speciale)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 /// Chat completion response

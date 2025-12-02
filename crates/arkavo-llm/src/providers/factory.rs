@@ -394,6 +394,12 @@ impl ProviderFactory for DeepSeekProviderFactory {
                 .unwrap_or_else(|| "deepseek-chat".to_string()),
             use_strict_mode,
             anthropic_compat,
+            thinking_mode: config
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("thinking_mode"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             max_tokens: config
                 .metadata
                 .as_ref()
