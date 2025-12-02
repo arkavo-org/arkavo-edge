@@ -75,11 +75,20 @@ impl DeepSeekClient {
     const MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
     /// Create a new DeepSeek client
-    pub fn new(config: DeepSeekConfig) -> Result<Self> {
+    pub fn new(mut config: DeepSeekConfig) -> Result<Self> {
         // Validate base URL
         url::Url::parse(&config.base_url).map_err(|e| DeepSeekError::ConfigError {
             message: format!("Invalid base URL '{}': {}", config.base_url, e),
         })?;
+
+        // Auto-enable thinking mode for V3.2-Speciale endpoint
+        if config.base_url.contains("speciale") && !config.thinking_mode {
+            debug!(
+                "Auto-enabling thinking mode for V3.2-Speciale endpoint: {}",
+                config.base_url
+            );
+            config.thinking_mode = true;
+        }
 
         let client = Client::builder()
             .timeout(config.timeout)
@@ -123,7 +132,8 @@ impl DeepSeekClient {
         if !self.is_endpoint_usable() {
             return Err(DeepSeekError::EndpointUnavailable {
                 message: format!(
-                    "Endpoint {} is disabled after {} consecutive failures",
+                    "DeepSeek endpoint {} disabled after {} consecutive failures. \
+                     The endpoint may be experiencing issues. Try again later or use a different model.",
                     self.config.base_url,
                     Self::MAX_CONSECUTIVE_FAILURES
                 ),
@@ -269,6 +279,9 @@ impl DeepSeekClient {
 
         let mut retries = 0;
         loop {
+            // Check circuit breaker on each retry attempt (not just the first)
+            self.check_endpoint()?;
+
             let response = self
                 .client
                 .post(self.get_endpoint())
@@ -432,5 +445,93 @@ impl DeepSeekClient {
         tool_name: &str,
     ) -> Result<Value> {
         validate_tool_arguments(arguments, schema, tool_name)
+    }
+
+    /// Get the current configuration (for testing)
+    #[cfg(test)]
+    pub fn config(&self) -> &DeepSeekConfig {
+        &self.config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auto_enable_thinking_mode_for_speciale_url() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+            thinking_mode: false, // Explicitly set to false
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            client.config().thinking_mode,
+            "thinking_mode should be auto-enabled for speciale URL"
+        );
+    }
+
+    #[test]
+    fn test_standard_url_does_not_auto_enable_thinking() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com".to_string(),
+            thinking_mode: false,
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            !client.config().thinking_mode,
+            "thinking_mode should remain false for standard URL"
+        );
+    }
+
+    #[test]
+    fn test_thinking_mode_preserved_if_already_true() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+            thinking_mode: true, // Already enabled
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(client.config().thinking_mode);
+    }
+
+    #[test]
+    fn test_invalid_base_url_returns_error() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "not a valid url".to_string(),
+            ..Default::default()
+        };
+
+        let result = DeepSeekClient::new(config);
+        assert!(result.is_err());
+        match result {
+            Err(DeepSeekError::ConfigError { message }) => {
+                assert!(message.contains("Invalid base URL"));
+            }
+            _ => panic!("Expected ConfigError"),
+        }
+    }
+
+    #[test]
+    fn test_circuit_breaker_initially_open() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            client.is_endpoint_usable(),
+            "Circuit breaker should be closed initially"
+        );
     }
 }
