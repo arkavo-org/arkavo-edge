@@ -66,6 +66,7 @@ fn convert_messages_to_kimi(messages: Vec<Message>) -> Vec<arkavo_kimi::Message>
 fn convert_stream_response(resp: arkavo_kimi::StreamResponse) -> StreamResponse {
     StreamResponse {
         content: resp.content,
+        reasoning_content: None,
         done: resp.done,
     }
 }

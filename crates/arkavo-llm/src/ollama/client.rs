@@ -236,6 +236,7 @@ impl Provider for OllamaClient {
                                 Ok(resp) => {
                                     responses.push(Ok(StreamResponse {
                                         content: resp.message.content,
+                                        reasoning_content: None,
                                         done: resp.done,
                                     }));
                                 }
@@ -252,6 +253,7 @@ impl Provider for OllamaClient {
                                     {
                                         responses.push(Ok(StreamResponse {
                                             content: stream_resp.response.unwrap_or_default(),
+                                            reasoning_content: None,
                                             done: stream_resp.done,
                                         }));
                                     } else {

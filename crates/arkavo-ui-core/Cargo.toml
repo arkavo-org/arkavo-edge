@@ -13,6 +13,7 @@ cef-ui = ["arkavo-agui/cef-ui"]
 web-ui = ["arkavo-agui/web-ui"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini"]
+deepseek = ["arkavo-llm/deepseek"]
 
 [dependencies]
 # Core async runtime

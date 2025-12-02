@@ -33,12 +33,13 @@ arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 uuid = { version = "1.18.1", features = ["v4"] }
 
 [features]
-default = ["llama-cpp", "gemini"]
+default = ["llama-cpp", "gemini", "deepseek"]
 llama-cpp = ["arkavo-llm/llama-cpp"]
 gemini = ["arkavo-llm/gemini", "arkavo-gemini"]
+deepseek = ["arkavo-llm/deepseek"]
 llm-remote = ["arkavo-llm/llm-remote", "arkavo-context/llm-remote"]
 # Windows compatible features (no C++ dependencies)
-windows = ["gemini", "llm-remote"]
+windows = ["gemini", "llm-remote", "deepseek"]
 
 [lints]
 workspace = true

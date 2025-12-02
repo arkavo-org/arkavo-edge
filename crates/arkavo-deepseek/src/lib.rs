@@ -15,4 +15,5 @@ pub use types::{
     AnthropicMessage, AnthropicMessageRequest, AnthropicTool, AnthropicToolChoice,
     ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart, FunctionCall,
     MessageContent, Model, ResponseFormat, Role, Tool, ToolCall, ToolChoice, ToolFunction,
+    V32_SPECIALE_BASE_URL, V32_SPECIALE_EXPIRATION,
 };

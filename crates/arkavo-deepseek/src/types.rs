@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// V3.2-Speciale endpoint expiration date (year, month, day)
+pub const V32_SPECIALE_EXPIRATION: (i32, u32, u32) = (2025, 12, 15);
+
+/// V3.2-Speciale endpoint base URL
+pub const V32_SPECIALE_BASE_URL: &str =
+    "https://api.deepseek.com/v3.2_speciale_expires_on_20251215";
+
 /// Message role in a conversation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -18,6 +25,10 @@ pub enum Model {
     DeepSeekChat,
     #[serde(rename = "deepseek-reasoner")]
     DeepSeekReasoner,
+    #[serde(rename = "deepseek-v3.2")]
+    DeepSeekV32,
+    #[serde(rename = "deepseek-v3.2-speciale")]
+    DeepSeekV32Speciale,
 }
 
 impl Model {
@@ -25,12 +36,37 @@ impl Model {
         match self {
             Model::DeepSeekChat => "deepseek-chat",
             Model::DeepSeekReasoner => "deepseek-reasoner",
+            // V3.2 models use "deepseek-chat" as the model name in API calls
+            Model::DeepSeekV32 | Model::DeepSeekV32Speciale => "deepseek-chat",
+        }
+    }
+
+    /// Parse model from string identifier.
+    /// Returns an error for unknown model strings to prevent silent misconfigurations.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "deepseek-chat" => Ok(Self::DeepSeekChat),
+            "deepseek-reasoner" => Ok(Self::DeepSeekReasoner),
+            "deepseek-v3.2" | "deepseek-chat-v3.2" => Ok(Self::DeepSeekV32),
+            "deepseek-v3.2-speciale" => Ok(Self::DeepSeekV32Speciale),
+            _ => Err(format!(
+                "Unknown DeepSeek model: '{s}'. Valid models: deepseek-chat, \
+                 deepseek-reasoner, deepseek-v3.2, deepseek-v3.2-speciale"
+            )),
         }
     }
 
     /// Check if model supports tools
     pub fn supports_tools(&self) -> bool {
-        matches!(self, Model::DeepSeekChat)
+        matches!(self, Model::DeepSeekChat | Model::DeepSeekV32)
+    }
+
+    /// Get the base URL for this model
+    pub fn base_url(&self) -> &'static str {
+        match self {
+            Model::DeepSeekV32Speciale => V32_SPECIALE_BASE_URL,
+            _ => "https://api.deepseek.com",
+        }
     }
 }
 
@@ -129,6 +165,22 @@ pub enum ResponseFormat {
     JsonObject,
 }
 
+/// Thinking mode configuration for V3.2 models
+#[derive(Debug, Clone, Serialize)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub thinking_type: String,
+}
+
+impl ThinkingConfig {
+    /// Create enabled thinking mode config
+    pub fn enabled() -> Self {
+        Self {
+            thinking_type: "enabled".to_string(),
+        }
+    }
+}
+
 /// Chat completion request (OpenAI-style)
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatCompletionRequest {
@@ -154,6 +206,9 @@ pub struct ChatCompletionRequest {
     pub logprobs: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
+    /// Thinking mode for V3.2 models (required for V3.2-Speciale)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 /// Chat completion response
@@ -329,4 +384,72 @@ pub enum AnthropicToolChoice {
     None,
     Any,
     Tool { r#type: String, name: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_parse_valid_models() {
+        assert_eq!(Model::parse("deepseek-chat").unwrap(), Model::DeepSeekChat);
+        assert_eq!(
+            Model::parse("deepseek-reasoner").unwrap(),
+            Model::DeepSeekReasoner
+        );
+        assert_eq!(Model::parse("deepseek-v3.2").unwrap(), Model::DeepSeekV32);
+        assert_eq!(
+            Model::parse("deepseek-chat-v3.2").unwrap(),
+            Model::DeepSeekV32
+        );
+        assert_eq!(
+            Model::parse("deepseek-v3.2-speciale").unwrap(),
+            Model::DeepSeekV32Speciale
+        );
+    }
+
+    #[test]
+    fn test_model_parse_invalid_model_returns_error() {
+        let result = Model::parse("deepseek-speciale");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Unknown DeepSeek model"));
+        assert!(err.contains("deepseek-speciale"));
+    }
+
+    #[test]
+    fn test_model_parse_typo_returns_error() {
+        let result = Model::parse("deep-seek-chat");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown DeepSeek model"));
+    }
+
+    #[test]
+    fn test_model_parse_empty_string_returns_error() {
+        let result = Model::parse("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_model_base_url() {
+        assert_eq!(Model::DeepSeekV32Speciale.base_url(), V32_SPECIALE_BASE_URL);
+        assert_eq!(Model::DeepSeekChat.base_url(), "https://api.deepseek.com");
+        assert_eq!(Model::DeepSeekV32.base_url(), "https://api.deepseek.com");
+    }
+
+    #[test]
+    fn test_model_supports_tools() {
+        assert!(Model::DeepSeekChat.supports_tools());
+        assert!(Model::DeepSeekV32.supports_tools());
+        assert!(!Model::DeepSeekReasoner.supports_tools());
+        assert!(!Model::DeepSeekV32Speciale.supports_tools());
+    }
+
+    #[test]
+    fn test_expiration_constant_format() {
+        let (year, month, day) = V32_SPECIALE_EXPIRATION;
+        assert_eq!(year, 2025);
+        assert!(month >= 1 && month <= 12);
+        assert!(day >= 1 && day <= 31);
+    }
 }

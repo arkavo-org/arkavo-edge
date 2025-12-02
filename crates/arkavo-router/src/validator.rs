@@ -182,6 +182,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Searching...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "search".to_string(),
                 arguments: json!({"query": "test"}),
@@ -200,6 +201,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Using tool...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "nonexistent_tool".to_string(),
                 arguments: json!({}),
@@ -225,6 +227,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Searching...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "search".to_string(),
                 arguments: json!({"limit": 10}),
@@ -251,6 +254,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Searching...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "search".to_string(),
                 arguments: json!({"query": 123}),
@@ -282,6 +286,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "No tools needed".to_string(),
+            reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
         };

@@ -10,6 +10,8 @@ use futures::Stream;
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -26,6 +28,8 @@ pub struct DeepSeekConfig {
     pub use_strict_mode: bool,
     /// Use Anthropic compatibility mode
     pub anthropic_compat: bool,
+    /// Enable thinking mode (required for V3.2-Speciale)
+    pub thinking_mode: bool,
     /// Maximum tokens to generate
     pub max_tokens: Option<u32>,
     /// Temperature for generation
@@ -46,6 +50,7 @@ impl Default for DeepSeekConfig {
             model: "deepseek-chat".to_string(),
             use_strict_mode: false,
             anthropic_compat: false,
+            thinking_mode: false,
             max_tokens: Some(4096),
             temperature: Some(0.7),
             top_p: None,
@@ -59,15 +64,31 @@ impl Default for DeepSeekConfig {
 pub struct DeepSeekClient {
     config: DeepSeekConfig,
     client: Client,
+    /// Circuit breaker: marks endpoint as disabled after consecutive failures
+    endpoint_disabled: Arc<AtomicBool>,
+    /// Track consecutive failures for circuit breaker
+    consecutive_failures: Arc<AtomicU32>,
 }
 
 impl DeepSeekClient {
+    /// Maximum consecutive failures before circuit breaker opens
+    const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
     /// Create a new DeepSeek client
-    pub fn new(config: DeepSeekConfig) -> Result<Self> {
+    pub fn new(mut config: DeepSeekConfig) -> Result<Self> {
         // Validate base URL
         url::Url::parse(&config.base_url).map_err(|e| DeepSeekError::ConfigError {
             message: format!("Invalid base URL '{}': {}", config.base_url, e),
         })?;
+
+        // Auto-enable thinking mode for V3.2-Speciale endpoint
+        if config.base_url.contains("speciale") && !config.thinking_mode {
+            debug!(
+                "Auto-enabling thinking mode for V3.2-Speciale endpoint: {}",
+                config.base_url
+            );
+            config.thinking_mode = true;
+        }
 
         let client = Client::builder()
             .timeout(config.timeout)
@@ -76,7 +97,49 @@ impl DeepSeekClient {
                 message: format!("Failed to create HTTP client: {e}"),
             })?;
 
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            endpoint_disabled: Arc::new(AtomicBool::new(false)),
+            consecutive_failures: Arc::new(AtomicU32::new(0)),
+        })
+    }
+
+    /// Mark endpoint as having a failure (for circuit breaker)
+    fn mark_endpoint_failure(&self) {
+        let failures = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
+        if failures >= Self::MAX_CONSECUTIVE_FAILURES {
+            warn!(
+                "DeepSeek endpoint {} marked as unusable after {} consecutive failures",
+                self.config.base_url, failures
+            );
+            self.endpoint_disabled.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Mark endpoint as having succeeded (resets circuit breaker)
+    fn mark_endpoint_success(&self) {
+        self.consecutive_failures.store(0, Ordering::SeqCst);
+    }
+
+    /// Check if endpoint is usable (circuit breaker is closed)
+    pub fn is_endpoint_usable(&self) -> bool {
+        !self.endpoint_disabled.load(Ordering::SeqCst)
+    }
+
+    /// Check endpoint usability and return error if disabled
+    fn check_endpoint(&self) -> Result<()> {
+        if !self.is_endpoint_usable() {
+            return Err(DeepSeekError::EndpointUnavailable {
+                message: format!(
+                    "DeepSeek endpoint {} disabled after {} consecutive failures. \
+                     The endpoint may be experiencing issues. Try again later or use a different model.",
+                    self.config.base_url,
+                    Self::MAX_CONSECUTIVE_FAILURES
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Create from environment variables
@@ -177,6 +240,13 @@ impl DeepSeekClient {
         // Add JSON instruction if needed
         add_json_instruction_if_needed(&mut messages, &response_format);
 
+        // Enable thinking mode if configured (required for V3.2-Speciale)
+        let thinking = if self.config.thinking_mode {
+            Some(crate::types::ThinkingConfig::enabled())
+        } else {
+            None
+        };
+
         Ok(ChatCompletionRequest {
             model: actual_model,
             messages,
@@ -190,6 +260,7 @@ impl DeepSeekClient {
             response_format,
             logprobs: None,
             n: None,
+            thinking,
         })
     }
 
@@ -201,10 +272,16 @@ impl DeepSeekClient {
         tool_choice: Option<ToolChoice>,
         response_format: Option<ResponseFormat>,
     ) -> Result<ChatCompletionResponse> {
+        // Check circuit breaker before making request
+        self.check_endpoint()?;
+
         let request = self.prepare_request(messages, tools, tool_choice, response_format)?;
 
         let mut retries = 0;
         loop {
+            // Check circuit breaker on each retry attempt (not just the first)
+            self.check_endpoint()?;
+
             let response = self
                 .client
                 .post(self.get_endpoint())
@@ -212,11 +289,15 @@ impl DeepSeekClient {
                 .json(&request)
                 .send()
                 .await
-                .map_err(|e| DeepSeekError::NetworkError {
-                    message: e.to_string(),
+                .map_err(|e| {
+                    self.mark_endpoint_failure();
+                    DeepSeekError::NetworkError {
+                        message: e.to_string(),
+                    }
                 })?;
 
             if response.status().is_success() {
+                self.mark_endpoint_success();
                 return response
                     .json()
                     .await
@@ -226,6 +307,14 @@ impl DeepSeekClient {
             }
 
             let error = self.handle_error_response(response).await?;
+
+            // Mark failure for non-retryable errors or endpoint-specific errors
+            if matches!(
+                error,
+                DeepSeekError::ModelNotFound { .. } | DeepSeekError::AuthenticationFailed { .. }
+            ) {
+                self.mark_endpoint_failure();
+            }
 
             if error.is_retryable() && retries < self.config.max_retries {
                 retries += 1;
@@ -251,6 +340,9 @@ impl DeepSeekClient {
         tool_choice: Option<ToolChoice>,
         response_format: Option<ResponseFormat>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamResponse>> + Send>>> {
+        // Check circuit breaker before making request
+        self.check_endpoint()?;
+
         let mut request = self.prepare_request(messages, tools, tool_choice, response_format)?;
         request.stream = Some(true);
 
@@ -261,14 +353,26 @@ impl DeepSeekClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| DeepSeekError::NetworkError {
-                message: e.to_string(),
+            .map_err(|e| {
+                self.mark_endpoint_failure();
+                DeepSeekError::NetworkError {
+                    message: e.to_string(),
+                }
             })?;
 
         if !response.status().is_success() {
-            return Err(self.handle_error_response(response).await?);
+            let error = self.handle_error_response(response).await?;
+            // Mark failure for non-retryable endpoint errors
+            if matches!(
+                error,
+                DeepSeekError::ModelNotFound { .. } | DeepSeekError::AuthenticationFailed { .. }
+            ) {
+                self.mark_endpoint_failure();
+            }
+            return Err(error);
         }
 
+        self.mark_endpoint_success();
         let stream = SseStream::new(response.bytes_stream());
         Ok(Box::pin(stream))
     }
@@ -341,5 +445,93 @@ impl DeepSeekClient {
         tool_name: &str,
     ) -> Result<Value> {
         validate_tool_arguments(arguments, schema, tool_name)
+    }
+
+    /// Get the current configuration (for testing)
+    #[cfg(test)]
+    pub fn config(&self) -> &DeepSeekConfig {
+        &self.config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auto_enable_thinking_mode_for_speciale_url() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+            thinking_mode: false, // Explicitly set to false
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            client.config().thinking_mode,
+            "thinking_mode should be auto-enabled for speciale URL"
+        );
+    }
+
+    #[test]
+    fn test_standard_url_does_not_auto_enable_thinking() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com".to_string(),
+            thinking_mode: false,
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            !client.config().thinking_mode,
+            "thinking_mode should remain false for standard URL"
+        );
+    }
+
+    #[test]
+    fn test_thinking_mode_preserved_if_already_true() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+            thinking_mode: true, // Already enabled
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(client.config().thinking_mode);
+    }
+
+    #[test]
+    fn test_invalid_base_url_returns_error() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            base_url: "not a valid url".to_string(),
+            ..Default::default()
+        };
+
+        let result = DeepSeekClient::new(config);
+        assert!(result.is_err());
+        match result {
+            Err(DeepSeekError::ConfigError { message }) => {
+                assert!(message.contains("Invalid base URL"));
+            }
+            _ => panic!("Expected ConfigError"),
+        }
+    }
+
+    #[test]
+    fn test_circuit_breaker_initially_open() {
+        let config = DeepSeekConfig {
+            api_key: "test-key".to_string(),
+            ..Default::default()
+        };
+
+        let client = DeepSeekClient::new(config).unwrap();
+        assert!(
+            client.is_endpoint_usable(),
+            "Circuit breaker should be closed initially"
+        );
     }
 }

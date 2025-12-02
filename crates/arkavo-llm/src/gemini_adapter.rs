@@ -111,6 +111,7 @@ impl Provider for GeminiProvider {
             result
                 .map(|response| StreamResponse {
                     content: response.text.unwrap_or_default(),
+                    reasoning_content: None,
                     done: response.done,
                 })
                 .map_err(|e| Error::Stream(format!("Stream error: {e}")))
@@ -177,6 +178,7 @@ impl Provider for GeminiProvider {
 
         Ok(ProviderResponse {
             content: accumulated_text,
+            reasoning_content: None,
             tool_calls: parsed_tool_calls,
             finish_reason: None,
         })

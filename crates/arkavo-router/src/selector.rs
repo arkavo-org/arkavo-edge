@@ -7,6 +7,7 @@ use crate::decision::{ModelChoice, RoutingDecision};
 pub struct ProviderAvailability {
     pub gemini: bool,
     pub anthropic: bool,
+    pub deepseek: bool,
 }
 
 impl ProviderAvailability {
@@ -15,12 +16,13 @@ impl ProviderAvailability {
         Self {
             gemini: std::env::var("GEMINI_API_KEY").is_ok(),
             anthropic: std::env::var("ANTHROPIC_API_KEY").is_ok(),
+            deepseek: std::env::var("DEEPSEEK_API_KEY").is_ok(),
         }
     }
 
     /// Check if any cloud provider is available
     pub fn has_cloud(&self) -> bool {
-        self.gemini || self.anthropic
+        self.gemini || self.anthropic || self.deepseek
     }
 }
 
@@ -108,6 +110,8 @@ impl ModelSelector {
 
             TaskCategory::SecurityScan => ModelChoice::LocalGemma4B,
 
+            TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
+
             TaskCategory::TestGeneration if classification.confidence > 0.70 => {
                 self.best_cloud_model(true)
             }
@@ -152,6 +156,9 @@ impl ModelSelector {
                 "Refactoring: Claude for excellent code transformations"
             }
             (TaskCategory::Refactoring, _) => "Refactoring: Gemini Flash for quick iterations",
+            (TaskCategory::CodeGeneration, ModelChoice::DeepSeekV32) => {
+                "Code generation: DeepSeek V3.2 with tool support for code generation"
+            }
             (TaskCategory::CodeGeneration, _) => {
                 "Code generation: DeepSeek-Coder V2 Lite optimized for code/patch generation"
             }
@@ -175,6 +182,8 @@ impl ModelSelector {
             ModelChoice::LocalDeepSeekCoder => {
                 "Code-specialized (4s), zero cost, optimized for patches"
             }
+            ModelChoice::DeepSeekV32 => "Fast (5s), cost-effective ($0.001), excellent for code",
+            ModelChoice::DeepSeekV32Speciale => "Planning-optimized (5s), reasoning-only, no tools",
         };
 
         format!(
@@ -221,14 +230,27 @@ impl ModelSelector {
                 }
             }
 
-            // Refactoring/CodeGen: Use balanced models
-            TaskCategory::Refactoring | TaskCategory::CodeGeneration => {
+            // Refactoring: Use balanced models
+            TaskCategory::Refactoring => {
                 if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else if self.availability.gemini {
                     ModelChoice::GeminiPro
                 } else {
                     ModelChoice::LocalGemma4B
+                }
+            }
+
+            // CodeGeneration: DeepSeek V3.2 excels at code generation with tools
+            TaskCategory::CodeGeneration => {
+                if self.availability.deepseek {
+                    ModelChoice::DeepSeekV32
+                } else if self.availability.anthropic {
+                    ModelChoice::ClaudeSonnet
+                } else if self.availability.gemini {
+                    ModelChoice::GeminiPro
+                } else {
+                    ModelChoice::LocalDeepSeekCoder
                 }
             }
 
@@ -306,6 +328,7 @@ mod tests {
         ProviderAvailability {
             gemini: true,
             anthropic: false,
+            deepseek: false,
         }
     }
 
@@ -313,6 +336,15 @@ mod tests {
         ProviderAvailability {
             gemini: false,
             anthropic: true,
+            deepseek: false,
+        }
+    }
+
+    fn deepseek_only() -> ProviderAvailability {
+        ProviderAvailability {
+            gemini: false,
+            anthropic: false,
+            deepseek: true,
         }
     }
 
@@ -422,5 +454,23 @@ mod tests {
 
         // When no cloud is available, should fall back to local
         assert!(decision.recommended_model.is_local());
+    }
+
+    #[tokio::test]
+    async fn test_code_generation_routing_deepseek() {
+        let selector = ModelSelector::with_availability(deepseek_only());
+
+        let classification = Classification::new(
+            TaskCategory::CodeGeneration,
+            0.85,
+            "Code generation task".to_string(),
+        );
+
+        let decision = selector
+            .select(&classification, "Generate a function")
+            .unwrap();
+
+        assert_eq!(decision.recommended_model, ModelChoice::DeepSeekV32);
+        assert!(decision.recommended_model.is_deepseek());
     }
 }

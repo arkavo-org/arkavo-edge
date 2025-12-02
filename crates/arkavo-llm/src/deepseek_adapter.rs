@@ -4,9 +4,10 @@ use crate::tool_parser::ParsedToolCall;
 use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use arkavo_deepseek::{
     ChatMessage, DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider, MessageContent, Tool,
-    ToolFunction,
+    ToolFunction, V32_SPECIALE_BASE_URL, V32_SPECIALE_EXPIRATION,
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::Value;
 use tokio_stream::Stream;
 
@@ -57,6 +58,44 @@ impl DeepSeekProvider {
         self.inner = self.inner.with_strict_mode(enabled);
         self
     }
+
+    /// Create a V3.2-Speciale provider for planning tasks (no tools)
+    ///
+    /// Note: This endpoint expires on the date specified in `V32_SPECIALE_EXPIRATION`.
+    /// After that date, this constructor will return an error.
+    ///
+    /// # Panics
+    ///
+    /// This function will not panic as the date/time values are from valid constants.
+    pub fn v32_speciale() -> Result<Self> {
+        // Safety guard: V3.2-Speciale endpoint has an expiration date
+        let (year, month, day) = V32_SPECIALE_EXPIRATION;
+        let expiration = chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .expect("valid date from constant")
+            .and_hms_opt(23, 59, 59)
+            .expect("valid time");
+        let expiration_utc = expiration.and_utc();
+
+        if Utc::now() > expiration_utc {
+            return Err(Error::Config(format!(
+                "DeepSeek V3.2-Speciale endpoint expired on {year}-{month:02}-{day:02}. \
+                 Use standard DeepSeek models instead."
+            )));
+        }
+
+        let api_key = std::env::var("DEEPSEEK_API_KEY")
+            .map_err(|_| Error::Config("DEEPSEEK_API_KEY not set".into()))?;
+
+        let config = DeepSeekConfig {
+            api_key,
+            base_url: V32_SPECIALE_BASE_URL.to_string(),
+            model: "deepseek-chat".to_string(),
+            thinking_mode: true, // V3.2-Speciale requires thinking mode (auto-enabled by client)
+            ..Default::default()
+        };
+
+        Self::new(config)
+    }
 }
 
 /// Convert arkavo-llm messages to arkavo-deepseek ChatMessage
@@ -83,6 +122,7 @@ fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
 fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamResponse {
     StreamResponse {
         content: resp.content.unwrap_or_default(),
+        reasoning_content: resp.reasoning_content,
         done: resp.done,
     }
 }
@@ -244,6 +284,7 @@ impl Provider for DeepSeekProvider {
 
         Ok(ProviderResponse {
             content: first_choice.message.content.clone().unwrap_or_default(),
+            reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
             finish_reason,
         })

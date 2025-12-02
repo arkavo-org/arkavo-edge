@@ -387,6 +387,7 @@ impl Provider for LlamaCppProvider {
 
         Ok(ProviderResponse {
             content,
+            reasoning_content: None,
             tool_calls,
             finish_reason: None,
         })

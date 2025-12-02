@@ -33,12 +33,16 @@ impl ArchitectPlanner {
             images: None,
         }];
 
+        // Use complete_with_tools to get ProviderResponse with reasoning_content
         let response = provider
-            .complete(messages)
+            .complete_with_tools(messages, None, None)
             .await
             .map_err(|e| Error::ModelExecution(format!("Planning phase failed: {e}")))?;
 
-        let mut plan = self.parse_plan_response(task, &response, complexity)?;
+        let mut plan = self.parse_plan_response(task, &response.content, complexity)?;
+
+        // Capture reasoning from thinking models (e.g., DeepSeek V3.2-Speciale)
+        plan.planning_reasoning = response.reasoning_content;
 
         // Calculate cost estimates
         self.estimate_costs(&mut plan);
@@ -47,10 +51,19 @@ impl ArchitectPlanner {
     }
 
     fn get_planning_provider(&self) -> Result<Box<dyn Provider>> {
-        // Prefer Anthropic Opus for planning
+        // Prefer Anthropic Opus for planning (highest quality)
         if self.availability.anthropic {
             use arkavo_llm::providers::anthropic::AnthropicProvider;
             if let Ok(provider) = AnthropicProvider::from_env() {
+                return Ok(Box::new(provider));
+            }
+        }
+
+        // DeepSeek V3.2-Speciale is excellent for planning (reasoning-only, cost-effective)
+        #[cfg(feature = "deepseek")]
+        if self.availability.deepseek {
+            use arkavo_llm::DeepSeekProvider;
+            if let Ok(provider) = DeepSeekProvider::v32_speciale() {
                 return Ok(Box::new(provider));
             }
         }
@@ -63,7 +76,7 @@ impl ArchitectPlanner {
         }
 
         Err(Error::ModelExecution(
-            "No planning model available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.".to_string(),
+            "No planning model available. Set ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, or GEMINI_API_KEY.".to_string(),
         ))
     }
 

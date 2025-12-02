@@ -12,6 +12,10 @@ pub enum ModelChoice {
     LocalGemma4B,
     LocalGemma12B,
     LocalDeepSeekCoder,
+    /// DeepSeek V3.2 - daily driver with tool support
+    DeepSeekV32,
+    /// DeepSeek V3.2-Speciale - planning/reasoning only (no tools)
+    DeepSeekV32Speciale,
 }
 
 impl ModelChoice {
@@ -25,6 +29,7 @@ impl ModelChoice {
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
             Self::LocalDeepSeekCoder => "deepseek-coder-v2-lite-instruct",
+            Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek-chat",
         }
     }
 
@@ -50,12 +55,20 @@ impl ModelChoice {
         matches!(self, Self::GeminiFlash | Self::GeminiPro)
     }
 
+    pub fn is_deepseek(&self) -> bool {
+        matches!(
+            self,
+            Self::DeepSeekV32 | Self::DeepSeekV32Speciale | Self::LocalDeepSeekCoder
+        )
+    }
+
     pub fn provider(&self) -> &str {
         match self {
             Self::GeminiFlash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
+            Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
         }
     }
 }
@@ -146,6 +159,20 @@ impl RoutingDecision {
             (ModelChoice::LocalGemma270M, _) => {
                 vec![ModelChoice::LocalGemma4B, ModelChoice::GeminiFlash]
             }
+            (ModelChoice::DeepSeekV32, _) => {
+                vec![
+                    ModelChoice::DeepSeekV32Speciale,
+                    ModelChoice::ClaudeSonnet,
+                    ModelChoice::LocalDeepSeekCoder,
+                ]
+            }
+            (ModelChoice::DeepSeekV32Speciale, _) => {
+                vec![
+                    ModelChoice::DeepSeekV32,
+                    ModelChoice::ClaudeOpus,
+                    ModelChoice::GeminiPro,
+                ]
+            }
             _ => vec![ModelChoice::GeminiFlash],
         }
     }
@@ -176,6 +203,12 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 75.00;
                 input_cost + output_cost
             }
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+                // DeepSeek V3.2: $0.27/1M input, $1.10/1M output (cache miss)
+                let input_cost = (token_estimate.input as f64 / 1_000_000.0) * 0.27;
+                let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 1.10;
+                input_cost + output_cost
+            }
             ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
@@ -193,6 +226,7 @@ impl RoutingDecision {
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),
             ModelChoice::LocalDeepSeekCoder => Duration::from_secs(4),
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => Duration::from_secs(5),
         }
     }
 }
@@ -231,5 +265,17 @@ mod tests {
         );
 
         assert_eq!(decision.estimated_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn test_deepseek_model_properties() {
+        assert_eq!(ModelChoice::DeepSeekV32.name(), "deepseek-chat");
+        assert_eq!(ModelChoice::DeepSeekV32Speciale.name(), "deepseek-chat");
+        assert_eq!(ModelChoice::DeepSeekV32.provider(), "deepseek");
+        assert_eq!(ModelChoice::DeepSeekV32Speciale.provider(), "deepseek");
+        assert!(ModelChoice::DeepSeekV32.is_deepseek());
+        assert!(ModelChoice::DeepSeekV32Speciale.is_deepseek());
+        assert!(ModelChoice::DeepSeekV32.is_cloud());
+        assert!(!ModelChoice::DeepSeekV32.is_local());
     }
 }

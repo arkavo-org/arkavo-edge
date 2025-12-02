@@ -562,6 +562,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Searching...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "search".to_string(),
                 arguments: json!({"query": "test"}),
@@ -590,6 +591,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "Using tool...".to_string(),
+            reasoning_content: None,
             tool_calls: vec![ParsedToolCall {
                 tool_name: "fake_tool".to_string(),
                 arguments: json!({}),
@@ -615,6 +617,7 @@ mod tests {
 
         let response = ProviderResponse {
             content: "I do not have access to any tools".to_string(),
+            reasoning_content: None,
             tool_calls: vec![],
             finish_reason: None,
         };
