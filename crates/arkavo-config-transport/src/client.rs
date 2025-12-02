@@ -122,7 +122,7 @@ impl ConfigTransportClient {
         // Decrypt bundle
         let bundle = self
             .decryptor
-            .decrypt_bundle(&encrypted_bundle, decryption_key)
+            .decrypt_bundle(&encrypted_bundle)
             .map_err(|e| TransportError::Decryption(e.to_string()))?;
 
         info!(

@@ -11,6 +11,7 @@ use arkavo_protocol::types::{
     AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigUpdateRequest,
     AgentConfigUpdateResponse,
 };
+use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
