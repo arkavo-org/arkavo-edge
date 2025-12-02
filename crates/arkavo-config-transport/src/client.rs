@@ -36,7 +36,7 @@ impl ConfigTransportClient {
     /// 5. Decrypts bundle using agent's identity
     pub async fn request_configuration(
         &self,
-        decryption_key: &[u8],
+        _decryption_key: &[u8],
     ) -> Result<ConfigurationBundle> {
         info!(
             agent_id = %self.agent_identity.agent_id,
@@ -65,12 +65,12 @@ impl ConfigTransportClient {
 
         // In a real implementation, this would call the A2A RPC method
         // For now, we'll simulate the response structure
-        let config_request = AgentConfigGetRequest {
+        let _config_request = AgentConfigGetRequest {
             agent_id: self.agent_identity.agent_id.clone(),
             include_backups: false,
         };
 
-        // This would be: let response = a2a_client.agent_config_get(config_request).await?;
+        // This would be: let response = a2a_client.agent_config_get(_config_request).await?;
         // For now, we return an error indicating this needs A2A client integration
         Err(TransportError::Transport(
             "A2A client integration required - use with A2aRpc implementation".to_string(),
@@ -81,7 +81,7 @@ impl ConfigTransportClient {
     pub fn process_configuration_response(
         &self,
         response: &AgentConfigGetResponse,
-        decryption_key: &[u8],
+        _decryption_key: &[u8],
     ) -> Result<ConfigurationBundle> {
         info!(
             agent_id = %self.agent_identity.agent_id,

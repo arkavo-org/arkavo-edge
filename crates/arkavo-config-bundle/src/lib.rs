@@ -162,7 +162,9 @@ impl ConfigurationBundle {
         }
 
         if self.role.capabilities.is_empty() {
-            return Err(Error::Validation("Role must have at least one capability".to_string()));
+            return Err(Error::Validation(
+                "Role must have at least one capability".to_string(),
+            ));
         }
 
         if self.required_attributes.is_empty() {
@@ -173,7 +175,10 @@ impl ConfigurationBundle {
 
         for (name, secret) in &self.secrets {
             if secret.key.is_empty() {
-                return Err(Error::Validation(format!("Secret '{}' has empty key", name)));
+                return Err(Error::Validation(format!(
+                    "Secret '{}' has empty key",
+                    name
+                )));
             }
         }
 

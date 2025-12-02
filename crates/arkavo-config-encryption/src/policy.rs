@@ -73,9 +73,15 @@ mod tests {
     #[test]
     fn test_create_fqn() {
         let fqn = create_fqn("data/clearance", "confidential");
-        assert_eq!(fqn, "https://arkavo.ai/attr/data/clearance/value/confidential");
+        assert_eq!(
+            fqn,
+            "https://arkavo.ai/attr/data/clearance/value/confidential"
+        );
 
         let fqn2 = create_fqn("capability/filesystem", "read_content");
-        assert_eq!(fqn2, "https://arkavo.ai/attr/capability/filesystem/value/read_content");
+        assert_eq!(
+            fqn2,
+            "https://arkavo.ai/attr/capability/filesystem/value/read_content"
+        );
     }
 }

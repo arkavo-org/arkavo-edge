@@ -4,8 +4,8 @@
 //! configuration transport with the A2A RPC server implementation.
 
 use super::ConfigTransportHandler;
-use crate::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 use crate::Result;
+use crate::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 
 /// Example integration of ConfigTransportHandler into A2aRpcImpl
 ///
@@ -76,10 +76,10 @@ impl ConfigTransportIntegration {
         fallback_fn: impl FnOnce(AgentConfigGetRequest) -> Result<AgentConfigGetResponse>,
     ) -> Result<AgentConfigGetResponse> {
         // Try secure config transport first
-        if let Some(handler) = handler {
-            if let Ok(Some(response)) = handler.handle_config_request(&request).await {
-                return Ok(response);
-            }
+        if let Some(handler) = handler
+            && let Ok(Some(response)) = handler.handle_config_request(&request).await
+        {
+            return Ok(response);
         }
 
         // Fall back to standard config
@@ -93,17 +93,15 @@ mod tests {
 
     #[test]
     fn test_create_handler() {
-        let handler = ConfigTransportIntegration::create_handler(
-            "https://kas.example.com".to_string(),
-        );
+        let handler =
+            ConfigTransportIntegration::create_handler("https://kas.example.com".to_string());
         assert_eq!(handler.kas_url(), "https://kas.example.com");
     }
 
     #[tokio::test]
     async fn test_agent_registration() {
-        let handler = ConfigTransportIntegration::create_handler(
-            "https://kas.example.com".to_string(),
-        );
+        let handler =
+            ConfigTransportIntegration::create_handler("https://kas.example.com".to_string());
 
         let result = ConfigTransportIntegration::handle_agent_registration(
             &handler,

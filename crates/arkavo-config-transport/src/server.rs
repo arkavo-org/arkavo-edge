@@ -83,11 +83,8 @@ impl ConfigTransportServer {
         );
 
         // Create transport envelope
-        let envelope = ConfigTransportEnvelope::new(
-            &encrypted_bundle,
-            signature,
-            self.kas_url.clone(),
-        )?;
+        let envelope =
+            ConfigTransportEnvelope::new(&encrypted_bundle, signature, self.kas_url.clone())?;
 
         let bundle_id = encrypted_bundle.bundle_id.to_string();
 
@@ -109,7 +106,7 @@ impl ConfigTransportServer {
     pub async fn handle_config_request(
         &self,
         request: &AgentConfigGetRequest,
-        agent_public_key: &[u8],
+        _agent_public_key: &[u8],
     ) -> Result<AgentConfigGetResponse> {
         info!(
             agent_id = %request.agent_id,

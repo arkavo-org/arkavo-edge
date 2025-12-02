@@ -3,20 +3,13 @@
 //! This crate provides secure configuration bundle transport over the existing
 //! A2A protocol infrastructure, leveraging the agent.config.* RPC methods.
 
-use arkavo_config_bundle::ConfigurationBundle;
-use arkavo_config_encryption::{
-    AgentIdentity, ConfigBundleDecryptor, ConfigBundleEncryptor, EncryptedBundle, Policy,
-};
-use arkavo_protocol::types::{
-    AgentConfigGetRequest, AgentConfigGetResponse, AgentConfigUpdateRequest,
-    AgentConfigUpdateResponse,
-};
+use arkavo_config_encryption::EncryptedBundle;
+use arkavo_protocol::types::{AgentConfigGetResponse, AgentConfigUpdateRequest};
 use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::{debug, error, info};
 
 pub mod client;
 pub mod server;
@@ -108,18 +101,15 @@ impl ConfigTransportEnvelope {
                 bundle_id: encrypted_bundle.bundle_id.to_string(),
                 target: encrypted_bundle.target.clone(),
                 kas_url,
-                required_attributes: encrypted_bundle
-                    .policy_manifest
-                    .dissemination
-                    .clone(),
+                required_attributes: encrypted_bundle.policy_manifest.dissemination.clone(),
             },
         })
     }
 
     /// Extract the encrypted bundle from the envelope
     pub fn extract_bundle(&self) -> Result<EncryptedBundle> {
-        let bundle_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&self.encrypted_payload)?;
+        let bundle_bytes =
+            base64::engine::general_purpose::STANDARD.decode(&self.encrypted_payload)?;
         let bundle: EncryptedBundle = serde_json::from_slice(&bundle_bytes)?;
         Ok(bundle)
     }
@@ -128,8 +118,7 @@ impl ConfigTransportEnvelope {
     pub fn verify_signature(&self, public_key: &[u8]) -> Result<bool> {
         use arkavo_config_encryption::PublicKey;
 
-        let signature_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&self.signature)?;
+        let signature_bytes = base64::engine::general_purpose::STANDARD.decode(&self.signature)?;
 
         let public_key = PublicKey::from_bytes(public_key.to_vec());
 
@@ -204,8 +193,8 @@ impl Default for BundleRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkavo_config_bundle::{AgentRole, BundleTarget};
-    use arkavo_config_encryption::KeyPair;
+    use arkavo_config_bundle::{AgentRole, BundleTarget, ConfigurationBundle};
+    use arkavo_config_encryption::{ConfigBundleEncryptor, KeyPair, Policy};
 
     #[test]
     fn test_transport_envelope_creation() {

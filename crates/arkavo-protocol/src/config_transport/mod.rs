@@ -5,8 +5,8 @@
 
 pub mod integration;
 
-use crate::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 use crate::Result;
+use crate::types::{AgentConfigGetRequest, AgentConfigGetResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
