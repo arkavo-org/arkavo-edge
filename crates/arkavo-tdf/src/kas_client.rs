@@ -260,6 +260,10 @@ impl ArkavoKasClient {
     /// 1. Acquire OAuth token (cached)
     /// 2. Create opentdf KAS client
     /// 3. Perform rewrap operation
+    ///
+    /// Note: This future is not `Send` due to opentdf-rs KasClient containing
+    /// non-Send RSA key types. Use on single-threaded runtimes or with spawn_local.
+    #[allow(clippy::future_not_send)]
     pub async fn rewrap_manifest(&self, manifest: &TdfManifest) -> Result<Vec<u8>, TdfError> {
         // Get OAuth token
         let token = self.acquire_token().await?;
@@ -347,6 +351,10 @@ impl ArkavoKasClient {
     /// Performs:
     /// 1. Rewrap to get payload key
     /// 2. Decrypt the payload using the key
+    ///
+    /// Note: This future is not `Send` due to opentdf-rs KasClient containing
+    /// non-Send RSA key types. Use on single-threaded runtimes or with spawn_local.
+    #[allow(clippy::future_not_send)]
     pub async fn decrypt_manifest(&self, manifest: &TdfManifest) -> Result<Vec<u8>, TdfError> {
         // Get the payload key via rewrap
         let payload_key = self.rewrap_manifest(manifest).await?;
@@ -413,7 +421,7 @@ impl ArkavoKasClient {
 }
 
 #[cfg(feature = "kas")]
-#[async_trait]
+#[async_trait(?Send)]
 impl KasClient for ArkavoKasClient {
     async fn rewrap(&self, wrapped_key: &str, policy: &str) -> Result<Vec<u8>, TdfError> {
         // This is a simplified interface - for full manifest rewrap use rewrap_manifest

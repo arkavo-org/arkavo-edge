@@ -427,7 +427,7 @@ mod tests {
             path
         };
 
-        let wrong_size_data = hex::encode(&[0u8; 8]);
+        let wrong_size_data = hex::encode([0u8; 8]);
         fs::write(&storage_path, wrong_size_data).expect("Failed to write wrong size data");
 
         let result = get();

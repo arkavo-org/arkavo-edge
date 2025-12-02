@@ -48,8 +48,12 @@ pub trait TdfDecryptor: Send + Sync {
 /// Key Access Service (KAS) client for key operations.
 ///
 /// KAS handles key wrapping/unwrapping with policy binding.
-#[async_trait]
-pub trait KasClient: Send + Sync {
+///
+/// Note: This trait uses `?Send` because the underlying opentdf-rs KasClient
+/// contains non-Send types (RSA keys with raw pointers). Use with care in
+/// multi-threaded contexts.
+#[async_trait(?Send)]
+pub trait KasClient {
     /// Rewrap a wrapped key for the current entity.
     ///
     /// The KAS verifies the entity's attributes against the policy

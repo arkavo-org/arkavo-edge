@@ -1,0 +1,91 @@
+[
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/model/tier",
+    "rule": "hierarchy",
+    "state": "active",
+    "order": [
+      "low_cost",
+      "standard",
+      "advanced",
+      "reasoning"
+    ],
+    "description": "Restricts AI agents based on the cost and reasoning capability of the underlying model."
+  },
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/data/clearance",
+    "rule": "hierarchy",
+    "state": "active",
+    "order": [
+      "public",
+      "internal",
+      "confidential",
+      "restricted",
+      "critical"
+    ],
+    "description": "Standard data classification levels for controlling agent access to sensitive TDFs."
+  },
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/capability/filesystem",
+    "rule": "hierarchy",
+    "state": "active",
+    "order": [
+      "none",
+      "navigate",
+      "read_content",
+      "modify",
+      "delete"
+    ],
+    "description": "Broad operational bundles for agent filesystem access. 'navigate' allows ls/cd; 'read_content' allows cat/grep."
+  },
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/capability/network",
+    "rule": "anyOf",
+    "state": "active",
+    "order": [
+      "localhost_only",
+      "intranet_access",
+      "internet_search",
+      "api_write",
+      "remote_execution"
+    ],
+    "description": "Network permissions for agents. Agents can hold multiple specific network rights."
+  },
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/tools/specific",
+    "rule": "anyOf",
+    "state": "active",
+    "order": [
+      "cmd_ls",
+      "cmd_cd",
+      "cmd_pwd",
+      "cmd_cat",
+      "cmd_grep",
+      "cmd_curl",
+      "git_clone",
+      "git_status",
+      "docker_ps",
+      "k8s_get_pods",
+      "aws_s3_ls",
+      "sql_select"
+    ],
+    "description": "Granular allowlist for specific shell or CLI commands. Used for high-security, limited-scope agents."
+  },
+  {
+    "authority": "https://arkavo.ai",
+    "name": "attr/agent/identity",
+    "rule": "anyOf",
+    "state": "active",
+    "order": [
+      "user_delegate",
+      "autonomous_service",
+      "audit_bot",
+      "developer_debug"
+    ],
+    "description": "Defines the operating mode of the agent (attended vs unattended)."
+  }
+]

@@ -85,6 +85,11 @@ pub enum TdfCommand {
     },
 }
 
+/// Handle TDF subcommands.
+///
+/// Note: This future is not `Send` due to opentdf-rs KasClient containing
+/// non-Send RSA key types. The TDF command runs on the main thread.
+#[allow(clippy::future_not_send)]
 pub async fn handle_tdf_command(command: TdfCommand) -> Result<()> {
     match command {
         TdfCommand::Encrypt {
@@ -160,6 +165,7 @@ async fn handle_encrypt(
     Ok(())
 }
 
+#[allow(clippy::future_not_send)]
 async fn handle_decrypt(
     input: PathBuf,
     output: Option<PathBuf>,

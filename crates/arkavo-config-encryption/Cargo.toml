@@ -1,0 +1,26 @@
+[package]
+name = "arkavo-config-encryption"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arkavo-config-bundle = { path = "../arkavo-config-bundle" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+opentdf = { git = "https://github.com/arkavo-org/opentdf-rs", rev = "2303d76d" }
+ring = "0.17"
+base64 = "0.22"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+
+[features]
+default = []
+kas = []

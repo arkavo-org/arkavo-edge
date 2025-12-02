@@ -171,7 +171,7 @@ impl MockKasClient {
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl KasClient for MockKasClient {
     async fn rewrap(&self, _wrapped_key: &str, policy: &str) -> Result<Vec<u8>, TdfError> {
         let responses = self.responses.lock().unwrap();

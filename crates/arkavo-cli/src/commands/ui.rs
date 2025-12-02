@@ -593,6 +593,18 @@ async fn create_client_from_routing(
                 )
             }
         }
+        ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+            #[cfg(feature = "deepseek")]
+            {
+                use arkavo_llm::DeepSeekProvider;
+                let provider = Box::new(DeepSeekProvider::from_env()?);
+                Ok(LlmClient::new(provider))
+            }
+            #[cfg(not(feature = "deepseek"))]
+            {
+                Err("DeepSeek support requires deepseek feature".into())
+            }
+        }
     }
 }
 
