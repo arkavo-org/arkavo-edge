@@ -692,4 +692,15 @@ async fn test_live_api_v32_speciale_thinking() {
         "Expected 42 in response: {}",
         content
     );
+
+    // Verify reasoning_content is present (the model's thinking process)
+    assert!(
+        choice.message.reasoning_content.is_some(),
+        "Expected reasoning_content in V3.2-Speciale response"
+    );
+    let reasoning = choice.message.reasoning_content.as_ref().unwrap();
+    assert!(
+        !reasoning.is_empty(),
+        "reasoning_content should not be empty"
+    );
 }

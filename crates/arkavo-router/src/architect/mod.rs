@@ -26,6 +26,9 @@ pub struct ArchitectPlan {
     pub opus_only_estimate_usd: f64,
     /// Estimated total cost with architect mode routing
     pub architect_estimate_usd: f64,
+    /// Reasoning/thinking content from the planning model (e.g., DeepSeek V3.2-Speciale)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planning_reasoning: Option<String>,
 }
 
 impl ArchitectPlan {
@@ -37,6 +40,7 @@ impl ArchitectPlan {
             subtasks: Vec::new(),
             opus_only_estimate_usd: 0.0,
             architect_estimate_usd: 0.0,
+            planning_reasoning: None,
         }
     }
 

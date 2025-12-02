@@ -495,6 +495,7 @@ impl Router {
             if let Some(tools) = tool_infos {
                 let response = ProviderResponse {
                     content: accumulated.clone(),
+                    reasoning_content: None,
                     tool_calls: Vec::new(),
                     finish_reason: Some("stop".to_string()),
                 };

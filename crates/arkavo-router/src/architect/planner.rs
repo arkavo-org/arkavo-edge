@@ -33,12 +33,16 @@ impl ArchitectPlanner {
             images: None,
         }];
 
+        // Use complete_with_tools to get ProviderResponse with reasoning_content
         let response = provider
-            .complete(messages)
+            .complete_with_tools(messages, None, None)
             .await
             .map_err(|e| Error::ModelExecution(format!("Planning phase failed: {e}")))?;
 
-        let mut plan = self.parse_plan_response(task, &response, complexity)?;
+        let mut plan = self.parse_plan_response(task, &response.content, complexity)?;
+
+        // Capture reasoning from thinking models (e.g., DeepSeek V3.2-Speciale)
+        plan.planning_reasoning = response.reasoning_content;
 
         // Calculate cost estimates
         self.estimate_costs(&mut plan);

@@ -18,6 +18,9 @@ pub struct SubtaskResult {
     pub model_used: ModelChoice,
     /// Raw response content
     pub response: String,
+    /// Reasoning/thinking content from thinking models (e.g., DeepSeek V3.2-Speciale)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     /// Tool calls made (if any)
     pub tool_calls: Vec<serde_json::Value>,
     /// Actual cost incurred
@@ -158,6 +161,7 @@ impl ArchitectExecutor {
                     .await
                     .map(|content| ProviderResponse {
                         content,
+                        reasoning_content: None,
                         tool_calls: Vec::new(),
                         finish_reason: Some("stop".to_string()),
                     })
@@ -171,6 +175,7 @@ impl ArchitectExecutor {
                         index: subtask.index,
                         model_used: current_model,
                         response: resp.content,
+                        reasoning_content: resp.reasoning_content,
                         tool_calls: resp
                             .tool_calls
                             .iter()
@@ -224,6 +229,7 @@ impl ArchitectExecutor {
             index: subtask.index,
             model_used: current_model,
             response: String::new(),
+            reasoning_content: None,
             tool_calls: Vec::new(),
             actual_cost_usd: 0.0,
             success: false,

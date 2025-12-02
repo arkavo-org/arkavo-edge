@@ -9,6 +9,8 @@ use crate::{Message, Result, StreamResponse};
 #[derive(Debug, Clone)]
 pub struct ProviderResponse {
     pub content: String,
+    /// Reasoning/thinking content from models with thinking mode (e.g., DeepSeek V3.2-Speciale)
+    pub reasoning_content: Option<String>,
     pub tool_calls: Vec<ParsedToolCall>,
     pub finish_reason: Option<String>,
 }
@@ -48,6 +50,7 @@ pub trait Provider: Send + Sync {
         let content = self.complete_with_options(messages, max_tokens).await?;
         Ok(ProviderResponse {
             content,
+            reasoning_content: None,
             tool_calls: Vec::new(),
             finish_reason: None,
         })

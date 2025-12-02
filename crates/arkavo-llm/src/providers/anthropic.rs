@@ -562,6 +562,7 @@ impl Provider for AnthropicProvider {
                                         if tx
                                             .send(Ok(StreamResponse {
                                                 content: text,
+                                                reasoning_content: None,
                                                 done: false,
                                             }))
                                             .await
@@ -580,6 +581,7 @@ impl Provider for AnthropicProvider {
                                         if tx
                                             .send(Ok(StreamResponse {
                                                 content: String::new(),
+                                                reasoning_content: None,
                                                 done: true,
                                             }))
                                             .await
@@ -697,6 +699,7 @@ impl Provider for AnthropicProvider {
 
         Ok(ProviderResponse {
             content: text_content,
+            reasoning_content: None,
             tool_calls,
             finish_reason: message.stop_reason,
         })

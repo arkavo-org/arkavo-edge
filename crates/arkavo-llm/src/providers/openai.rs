@@ -383,6 +383,7 @@ impl Provider for OpenAIProvider {
                                     if tx
                                         .send(Ok(StreamResponse {
                                             content: String::new(),
+                                            reasoning_content: None,
                                             done: true,
                                         }))
                                         .await
@@ -396,6 +397,7 @@ impl Provider for OpenAIProvider {
                                     && tx
                                         .send(Ok(StreamResponse {
                                             content: content.clone(),
+                                            reasoning_content: None,
                                             done: choice.finish_reason.is_some(),
                                         }))
                                         .await

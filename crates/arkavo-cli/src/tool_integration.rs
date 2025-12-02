@@ -98,6 +98,7 @@ pub async fn process_with_tools(
             let result = stream.complete().await?;
             ProviderResponse {
                 content: result.content,
+                reasoning_content: None,
                 tool_calls: result.tool_calls,
                 finish_reason: None,
             }

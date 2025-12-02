@@ -123,6 +123,7 @@ fn convert_messages_to_deepseek(messages: Vec<Message>) -> Vec<ChatMessage> {
 fn convert_stream_response(resp: arkavo_deepseek::StreamResponse) -> StreamResponse {
     StreamResponse {
         content: resp.content.unwrap_or_default(),
+        reasoning_content: resp.reasoning_content,
         done: resp.done,
     }
 }
@@ -284,6 +285,7 @@ impl Provider for DeepSeekProvider {
 
         Ok(ProviderResponse {
             content: first_choice.message.content.clone().unwrap_or_default(),
+            reasoning_content: first_choice.message.reasoning_content.clone(),
             tool_calls: parsed_tool_calls,
             finish_reason,
         })

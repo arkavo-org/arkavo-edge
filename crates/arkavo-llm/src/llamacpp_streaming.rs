@@ -109,6 +109,7 @@ pub(crate) async fn generate_tokens(
 
             let response = StreamResponse {
                 content: piece,
+                reasoning_content: None,
                 done: false,
             };
 
@@ -133,6 +134,7 @@ pub(crate) async fn generate_tokens(
                 );
                 let _ = tx.send(Ok(StreamResponse {
                     content: String::new(),
+                    reasoning_content: None,
                     done: true,
                 }));
                 break;
@@ -148,6 +150,7 @@ pub(crate) async fn generate_tokens(
             send_metrics(start_time, first_token_time, tokens_generated, &tx);
             let _ = tx.send(Ok(StreamResponse {
                 content: String::new(),
+                reasoning_content: None,
                 done: true,
             }));
         }
