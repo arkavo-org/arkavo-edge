@@ -78,9 +78,8 @@ impl DeepSeekProvider {
 
         if Utc::now() > expiration_utc {
             return Err(Error::Config(format!(
-                "DeepSeek V3.2-Speciale endpoint expired on {}-{:02}-{:02}. \
-                 Use standard DeepSeek models instead.",
-                year, month, day
+                "DeepSeek V3.2-Speciale endpoint expired on {year}-{month:02}-{day:02}. \
+                 Use standard DeepSeek models instead."
             )));
         }
 
