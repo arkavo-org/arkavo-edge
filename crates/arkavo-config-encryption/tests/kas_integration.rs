@@ -37,8 +37,9 @@ mod kas_tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "agent.role".to_string(),
-                display_name: "Agent Role".to_string(),
+                attribute: "data/clearance".to_string(),
+                value: "internal".to_string(),
+                display_name: "Data Clearance".to_string(),
             }],
             dissemination: vec!["agent.role=test-agent".to_string()],
         };
@@ -76,8 +77,9 @@ mod kas_tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "agent.role".to_string(),
-                display_name: "Agent Role".to_string(),
+                attribute: "data/clearance".to_string(),
+                value: "internal".to_string(),
+                display_name: "Data Clearance".to_string(),
             }],
             dissemination: vec!["agent.role=test-agent".to_string()],
         };
@@ -130,12 +132,14 @@ mod kas_tests {
         let policy = Policy {
             attributes: vec![
                 PolicyAttribute {
-                    attribute: "agent.role".to_string(),
-                    display_name: "Agent Role".to_string(),
+                    attribute: "data/clearance".to_string(),
+                    value: "internal".to_string(),
+                    display_name: "Data Clearance".to_string(),
                 },
                 PolicyAttribute {
-                    attribute: "environment".to_string(),
-                    display_name: "Environment".to_string(),
+                    attribute: "agent/identity".to_string(),
+                    value: "autonomous_service".to_string(),
+                    display_name: "Agent Identity".to_string(),
                 },
             ],
             dissemination: vec![
@@ -215,12 +219,14 @@ mod kas_tests {
         let policy = Policy {
             attributes: vec![
                 PolicyAttribute {
-                    attribute: "agent.role".to_string(),
-                    display_name: "Agent Role".to_string(),
+                    attribute: "data/clearance".to_string(),
+                    value: "confidential".to_string(),
+                    display_name: "Data Clearance".to_string(),
                 },
                 PolicyAttribute {
-                    attribute: "environment".to_string(),
-                    display_name: "Environment".to_string(),
+                    attribute: "capability/filesystem".to_string(),
+                    value: "read_content".to_string(),
+                    display_name: "Filesystem Capability".to_string(),
                 },
             ],
             dissemination: vec![

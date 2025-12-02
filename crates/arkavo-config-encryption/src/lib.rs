@@ -56,7 +56,7 @@ impl ConfigBundleEncryptor {
         let mut tdf_policy = PolicyBuilder::new().id_auto();
 
         for attr in &policy.attributes {
-            let fqn = format!("https://arkavo.com/attr/{}/value/active", attr.attribute);
+            let fqn = policy::create_fqn(&attr.attribute, &attr.value);
             tdf_policy = tdf_policy
                 .attribute_fqn(&fqn)
                 .map_err(|e| Error::Policy(format!("Invalid attribute FQN: {}", e)))?;
@@ -225,8 +225,9 @@ mod tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "agent.role".to_string(),
-                display_name: "Agent Role".to_string(),
+                attribute: "data/clearance".to_string(),
+                value: "internal".to_string(),
+                display_name: "Data Clearance".to_string(),
             }],
             dissemination: vec!["agent.role=test-agent".to_string()],
         };
@@ -258,8 +259,9 @@ mod tests {
 
         let policy = Policy {
             attributes: vec![PolicyAttribute {
-                attribute: "agent.role".to_string(),
-                display_name: "Agent Role".to_string(),
+                attribute: "data/clearance".to_string(),
+                value: "internal".to_string(),
+                display_name: "Data Clearance".to_string(),
             }],
             dissemination: vec!["agent.role=test-agent".to_string()],
         };

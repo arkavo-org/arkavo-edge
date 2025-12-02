@@ -224,7 +224,11 @@ mod tests {
 
         let encryptor = ConfigBundleEncryptor::new("https://kas.example.com".to_string());
         let mut policy = Policy::new();
-        policy.add_attribute("agent.role".to_string(), "Agent Role".to_string());
+        policy.add_attribute(
+            "agent/identity".to_string(),
+            "autonomous_service".to_string(),
+            "Agent Identity".to_string(),
+        );
         policy.add_dissemination("agent.role=test-agent".to_string());
 
         let encrypted = encryptor.encrypt_bundle(&bundle, policy).unwrap();
@@ -265,7 +269,11 @@ mod tests {
 
         let encryptor = ConfigBundleEncryptor::new("https://kas.example.com".to_string());
         let mut policy = Policy::new();
-        policy.add_attribute("agent.role".to_string(), "Agent Role".to_string());
+        policy.add_attribute(
+            "agent/identity".to_string(),
+            "autonomous_service".to_string(),
+            "Agent Identity".to_string(),
+        );
         policy.add_dissemination("agent.role=test-agent".to_string());
 
         let encrypted = encryptor.encrypt_bundle(&bundle, policy).unwrap();
@@ -306,7 +314,11 @@ mod tests {
 
         let encryptor = ConfigBundleEncryptor::new("https://kas.example.com".to_string());
         let mut policy = Policy::new();
-        policy.add_attribute("agent.role".to_string(), "Agent Role".to_string());
+        policy.add_attribute(
+            "agent/identity".to_string(),
+            "autonomous_service".to_string(),
+            "Agent Identity".to_string(),
+        );
         policy.add_dissemination("agent.role=test-agent".to_string());
 
         let encrypted = encryptor.encrypt_bundle(&bundle, policy).unwrap();

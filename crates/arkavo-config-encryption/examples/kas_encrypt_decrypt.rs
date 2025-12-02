@@ -53,17 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  ✓ Settings: {} configured", bundle.settings.len());
     println!();
 
-    // Step 2: Define access policy
+    // Step 2: Define access policy using Arkavo attribute schema
     println!("Step 2: Defining access policy...");
     let policy = Policy {
         attributes: vec![
             PolicyAttribute {
-                attribute: "agent.role".to_string(),
-                display_name: "Agent Role".to_string(),
+                attribute: "data/clearance".to_string(),
+                value: "internal".to_string(),
+                display_name: "Data Clearance".to_string(),
             },
             PolicyAttribute {
-                attribute: "environment".to_string(),
-                display_name: "Environment".to_string(),
+                attribute: "agent/identity".to_string(),
+                value: "autonomous_service".to_string(),
+                display_name: "Agent Identity".to_string(),
             },
         ],
         dissemination: vec![

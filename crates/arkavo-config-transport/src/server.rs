@@ -208,7 +208,11 @@ mod tests {
         bundle.add_required_attribute("agent.role=test-agent".to_string());
 
         let mut policy = Policy::new();
-        policy.add_attribute("agent.role".to_string(), "Agent Role".to_string());
+        policy.add_attribute(
+            "agent/identity".to_string(),
+            "autonomous_service".to_string(),
+            "Agent Identity".to_string(),
+        );
         policy.add_dissemination("agent.role=test-agent".to_string());
 
         let bundle_id = server.distribute_bundle(bundle, policy).await.unwrap();
