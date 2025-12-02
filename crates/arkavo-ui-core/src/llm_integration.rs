@@ -58,6 +58,21 @@ impl LlmIntegration {
                     anyhow::bail!("ANTHROPIC_API_KEY not set")
                 }
             }
+            ModelChoice::DeepSeekV32 | ModelChoice::DeepSeekV32Speciale => {
+                #[cfg(feature = "deepseek")]
+                {
+                    use arkavo_llm::DeepSeekProvider;
+                    if let Ok(provider) = DeepSeekProvider::from_env() {
+                        Ok(LlmClient::new(Box::new(provider)))
+                    } else {
+                        anyhow::bail!("DEEPSEEK_API_KEY not set")
+                    }
+                }
+                #[cfg(not(feature = "deepseek"))]
+                {
+                    anyhow::bail!("DeepSeek feature not enabled")
+                }
+            }
             ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B

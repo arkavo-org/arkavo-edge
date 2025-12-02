@@ -18,6 +18,10 @@ pub enum Model {
     DeepSeekChat,
     #[serde(rename = "deepseek-reasoner")]
     DeepSeekReasoner,
+    #[serde(rename = "deepseek-v3.2")]
+    DeepSeekV32,
+    #[serde(rename = "deepseek-v3.2-speciale")]
+    DeepSeekV32Speciale,
 }
 
 impl Model {
@@ -25,12 +29,35 @@ impl Model {
         match self {
             Model::DeepSeekChat => "deepseek-chat",
             Model::DeepSeekReasoner => "deepseek-reasoner",
+            // V3.2 models use "deepseek-chat" as the model name in API calls
+            Model::DeepSeekV32 | Model::DeepSeekV32Speciale => "deepseek-chat",
+        }
+    }
+
+    /// Parse model from string identifier
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "deepseek-chat" => Self::DeepSeekChat,
+            "deepseek-reasoner" => Self::DeepSeekReasoner,
+            "deepseek-v3.2" | "deepseek-chat-v3.2" => Self::DeepSeekV32,
+            "deepseek-v3.2-speciale" => Self::DeepSeekV32Speciale,
+            _ => Self::DeepSeekChat,
         }
     }
 
     /// Check if model supports tools
     pub fn supports_tools(&self) -> bool {
-        matches!(self, Model::DeepSeekChat)
+        matches!(self, Model::DeepSeekChat | Model::DeepSeekV32)
+    }
+
+    /// Get the base URL for this model
+    pub fn base_url(&self) -> &'static str {
+        match self {
+            Model::DeepSeekV32Speciale => {
+                "https://api.deepseek.com/v3.2_speciale_expires_on_20251215"
+            }
+            _ => "https://api.deepseek.com",
+        }
     }
 }
 

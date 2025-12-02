@@ -62,6 +62,10 @@ pub enum DeepSeekError {
     #[error("Stream error: {message}")]
     StreamError { message: String },
 
+    /// Endpoint unavailable (circuit breaker open)
+    #[error("Endpoint unavailable: {message}")]
+    EndpointUnavailable { message: String },
+
     /// Generic error wrapper
     #[error(transparent)]
     Other(#[from] anyhow::Error),

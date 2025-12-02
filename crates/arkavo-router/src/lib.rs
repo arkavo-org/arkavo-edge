@@ -622,7 +622,9 @@ impl Router {
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
             ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
-            ModelChoice::LocalDeepSeekCoder => ModelChoice::GeminiFlash,
+            ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
+            ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
+            ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
             ModelChoice::GeminiFlash => ModelChoice::ClaudeSonnet,
             ModelChoice::ClaudeSonnet => ModelChoice::GeminiPro,
             ModelChoice::GeminiPro => ModelChoice::ClaudeOpus,
@@ -789,7 +791,9 @@ impl Router {
             ModelChoice::GeminiFlash
             | ModelChoice::GeminiPro
             | ModelChoice::ClaudeSonnet
-            | ModelChoice::ClaudeOpus => arkavo_mcp_tools::DetailLevel::FullSchema,
+            | ModelChoice::ClaudeOpus
+            | ModelChoice::DeepSeekV32
+            | ModelChoice::DeepSeekV32Speciale => arkavo_mcp_tools::DetailLevel::FullSchema,
         }
     }
 

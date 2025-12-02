@@ -10,6 +10,8 @@ use futures::Stream;
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -59,9 +61,16 @@ impl Default for DeepSeekConfig {
 pub struct DeepSeekClient {
     config: DeepSeekConfig,
     client: Client,
+    /// Circuit breaker: marks endpoint as disabled after consecutive failures
+    endpoint_disabled: Arc<AtomicBool>,
+    /// Track consecutive failures for circuit breaker
+    consecutive_failures: Arc<AtomicU32>,
 }
 
 impl DeepSeekClient {
+    /// Maximum consecutive failures before circuit breaker opens
+    const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
     /// Create a new DeepSeek client
     pub fn new(config: DeepSeekConfig) -> Result<Self> {
         // Validate base URL
@@ -76,7 +85,48 @@ impl DeepSeekClient {
                 message: format!("Failed to create HTTP client: {e}"),
             })?;
 
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            endpoint_disabled: Arc::new(AtomicBool::new(false)),
+            consecutive_failures: Arc::new(AtomicU32::new(0)),
+        })
+    }
+
+    /// Mark endpoint as having a failure (for circuit breaker)
+    fn mark_endpoint_failure(&self) {
+        let failures = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
+        if failures >= Self::MAX_CONSECUTIVE_FAILURES {
+            warn!(
+                "DeepSeek endpoint {} marked as unusable after {} consecutive failures",
+                self.config.base_url, failures
+            );
+            self.endpoint_disabled.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Mark endpoint as having succeeded (resets circuit breaker)
+    fn mark_endpoint_success(&self) {
+        self.consecutive_failures.store(0, Ordering::SeqCst);
+    }
+
+    /// Check if endpoint is usable (circuit breaker is closed)
+    pub fn is_endpoint_usable(&self) -> bool {
+        !self.endpoint_disabled.load(Ordering::SeqCst)
+    }
+
+    /// Check endpoint usability and return error if disabled
+    fn check_endpoint(&self) -> Result<()> {
+        if !self.is_endpoint_usable() {
+            return Err(DeepSeekError::EndpointUnavailable {
+                message: format!(
+                    "Endpoint {} is disabled after {} consecutive failures",
+                    self.config.base_url,
+                    Self::MAX_CONSECUTIVE_FAILURES
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Create from environment variables
@@ -201,6 +251,9 @@ impl DeepSeekClient {
         tool_choice: Option<ToolChoice>,
         response_format: Option<ResponseFormat>,
     ) -> Result<ChatCompletionResponse> {
+        // Check circuit breaker before making request
+        self.check_endpoint()?;
+
         let request = self.prepare_request(messages, tools, tool_choice, response_format)?;
 
         let mut retries = 0;
@@ -212,11 +265,15 @@ impl DeepSeekClient {
                 .json(&request)
                 .send()
                 .await
-                .map_err(|e| DeepSeekError::NetworkError {
-                    message: e.to_string(),
+                .map_err(|e| {
+                    self.mark_endpoint_failure();
+                    DeepSeekError::NetworkError {
+                        message: e.to_string(),
+                    }
                 })?;
 
             if response.status().is_success() {
+                self.mark_endpoint_success();
                 return response
                     .json()
                     .await
@@ -226,6 +283,14 @@ impl DeepSeekClient {
             }
 
             let error = self.handle_error_response(response).await?;
+
+            // Mark failure for non-retryable errors or endpoint-specific errors
+            if matches!(
+                error,
+                DeepSeekError::ModelNotFound { .. } | DeepSeekError::AuthenticationFailed { .. }
+            ) {
+                self.mark_endpoint_failure();
+            }
 
             if error.is_retryable() && retries < self.config.max_retries {
                 retries += 1;
@@ -251,6 +316,9 @@ impl DeepSeekClient {
         tool_choice: Option<ToolChoice>,
         response_format: Option<ResponseFormat>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamResponse>> + Send>>> {
+        // Check circuit breaker before making request
+        self.check_endpoint()?;
+
         let mut request = self.prepare_request(messages, tools, tool_choice, response_format)?;
         request.stream = Some(true);
 
@@ -261,14 +329,26 @@ impl DeepSeekClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| DeepSeekError::NetworkError {
-                message: e.to_string(),
+            .map_err(|e| {
+                self.mark_endpoint_failure();
+                DeepSeekError::NetworkError {
+                    message: e.to_string(),
+                }
             })?;
 
         if !response.status().is_success() {
-            return Err(self.handle_error_response(response).await?);
+            let error = self.handle_error_response(response).await?;
+            // Mark failure for non-retryable endpoint errors
+            if matches!(
+                error,
+                DeepSeekError::ModelNotFound { .. } | DeepSeekError::AuthenticationFailed { .. }
+            ) {
+                self.mark_endpoint_failure();
+            }
+            return Err(error);
         }
 
+        self.mark_endpoint_success();
         let stream = SseStream::new(response.bytes_stream());
         Ok(Box::pin(stream))
     }

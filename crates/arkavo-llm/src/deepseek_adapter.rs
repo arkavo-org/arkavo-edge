@@ -7,6 +7,7 @@ use arkavo_deepseek::{
     ToolFunction,
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::Value;
 use tokio_stream::Stream;
 
@@ -56,6 +57,44 @@ impl DeepSeekProvider {
     pub fn with_strict_mode(mut self, enabled: bool) -> Self {
         self.inner = self.inner.with_strict_mode(enabled);
         self
+    }
+
+    /// Create a V3.2-Speciale provider for planning tasks (no tools)
+    ///
+    /// Note: This endpoint expires on 2025-12-15. After that date, this
+    /// constructor will return an error.
+    ///
+    /// # Panics
+    ///
+    /// This function will not panic as the date/time values are hardcoded
+    /// valid values.
+    pub fn v32_speciale() -> Result<Self> {
+        // Safety guard: V3.2-Speciale endpoint expires on 2025-12-15
+        let expiration = chrono::NaiveDate::from_ymd_opt(2025, 12, 15)
+            .expect("valid date")
+            .and_hms_opt(23, 59, 59)
+            .expect("valid time");
+        let expiration_utc = expiration.and_utc();
+
+        if Utc::now() > expiration_utc {
+            return Err(Error::Config(
+                "DeepSeek V3.2-Speciale endpoint expired on 2025-12-15. \
+                 Use standard DeepSeek models instead."
+                    .into(),
+            ));
+        }
+
+        let api_key = std::env::var("DEEPSEEK_API_KEY")
+            .map_err(|_| Error::Config("DEEPSEEK_API_KEY not set".into()))?;
+
+        let config = DeepSeekConfig {
+            api_key,
+            base_url: "https://api.deepseek.com/v3.2_speciale_expires_on_20251215".to_string(),
+            model: "deepseek-chat".to_string(),
+            ..Default::default()
+        };
+
+        Self::new(config)
     }
 }
 

@@ -47,10 +47,19 @@ impl ArchitectPlanner {
     }
 
     fn get_planning_provider(&self) -> Result<Box<dyn Provider>> {
-        // Prefer Anthropic Opus for planning
+        // Prefer Anthropic Opus for planning (highest quality)
         if self.availability.anthropic {
             use arkavo_llm::providers::anthropic::AnthropicProvider;
             if let Ok(provider) = AnthropicProvider::from_env() {
+                return Ok(Box::new(provider));
+            }
+        }
+
+        // DeepSeek V3.2-Speciale is excellent for planning (reasoning-only, cost-effective)
+        #[cfg(feature = "deepseek")]
+        if self.availability.deepseek {
+            use arkavo_llm::DeepSeekProvider;
+            if let Ok(provider) = DeepSeekProvider::v32_speciale() {
                 return Ok(Box::new(provider));
             }
         }
@@ -63,7 +72,7 @@ impl ArchitectPlanner {
         }
 
         Err(Error::ModelExecution(
-            "No planning model available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY.".to_string(),
+            "No planning model available. Set ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, or GEMINI_API_KEY.".to_string(),
         ))
     }
 
