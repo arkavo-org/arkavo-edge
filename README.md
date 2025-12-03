@@ -20,7 +20,7 @@ brew tap arkavo-org/homebrew-arkavo
 brew install arkavo
 ```
 
-**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup with gemma-3 270M model.
+**Raspberry Pi 5:** Download ARM64 binary from [releases](https://github.com/arkavo-org/arkavo-edge/releases). See [deployment guide](docs/raspberry-pi-deployment.md) for setup. Recommended models: Ministral 3B (text+vision) or gemma-3 270M.
 
 ### Install on Windows
 Download the installer from the [releases page](https://github.com/arkavo-org/arkavo-edge/releases) and run the .exe file.
@@ -43,6 +43,7 @@ That's it. No configuration files, no setup. Agents auto-discover via mDNS and f
 
 ## Features
 - Multi-provider routing (OpenAI, Anthropic, Gemini, Kimi, DeepSeek, local models)
+- **Ministral 3 support** - Local edge models (3B/8B/14B) with vision via llama.cpp
 - Cost-aware model selection
 - GitHub issue orchestration
 - iOS simulator automation (macOS only)

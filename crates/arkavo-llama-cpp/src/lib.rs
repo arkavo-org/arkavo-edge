@@ -32,6 +32,26 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #[cfg(not(target_env = "musl"))]
 static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Model format for chat template selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelFormat {
+    /// Gemma-3 format: <start_of_turn>user\n...<end_of_turn>
+    #[default]
+    Gemma3,
+    /// Mistral V3 format: [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] [INST]...[/INST]
+    MistralV3,
+}
+
+/// Detect model format from model name or path
+pub fn detect_model_format(model_name: &str) -> ModelFormat {
+    let name_lower = model_name.to_lowercase();
+    if name_lower.contains("mistral") || name_lower.contains("ministral") {
+        ModelFormat::MistralV3
+    } else {
+        ModelFormat::Gemma3
+    }
+}
+
 // Global flag to track if GPU has failed (avoid retrying)
 // 0 = not tried, 1 = GPU works, 2 = GPU failed (use CPU)
 #[cfg(not(target_env = "musl"))]
@@ -402,15 +422,39 @@ impl Drop for LlamaContext {
     }
 }
 
+// Gemma-3 chat template
+const GEMMA3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + message['content'] + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}";
+
+// Mistral V3 chat template with BOS token and tool placeholders
+// BOS token is critical for Mistral v3 - injected via {{ bos_token }}
+// Tool tokens included as placeholders for future function calling
+const MISTRAL_V3_TEMPLATE: &str = "{{ bos_token }}{% for message in messages %}{% if message['role'] == 'system' %}[SYSTEM_PROMPT]{{ message['content'] }}[/SYSTEM_PROMPT]{% elif message['role'] == 'user' %}[INST] {{ message['content'] }} [/INST]{% elif message['role'] == 'assistant' %}{{ message['content'] }}</s>{% endif %}{% endfor %}";
+
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
     add_assistant: bool,
 ) -> Result<Vec<u8>, String> {
-    // Gemma-3 chat template - simple format for small models
-    let gemma3_template = "{% for message in messages %}{% if message['role'] == 'user' %}{{'<start_of_turn>user\n' + message['content'] + '<end_of_turn>\n'}}{% elif message['role'] == 'assistant' %}{{'<start_of_turn>model\n' + message['content'] + '<end_of_turn>\n'}}{% endif %}{% endfor %}{% if add_generation_prompt %}<start_of_turn>model\n{% endif %}";
+    // Default to Gemma-3 for backward compatibility
+    apply_chat_template_with_format(messages, add_assistant, ModelFormat::Gemma3)
+}
 
-    let template_cstring = CString::new(gemma3_template)
+#[cfg(not(target_env = "musl"))]
+pub fn apply_chat_template_with_format(
+    messages: &[ffi::llama_chat_message],
+    add_assistant: bool,
+    format: ModelFormat,
+) -> Result<Vec<u8>, String> {
+    let template = match format {
+        ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
+        ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
+    };
+
+    if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
+        eprintln!("Using chat template format: {:?}", format);
+    }
+
+    let template_cstring = CString::new(template)
         .map_err(|e| format!("Failed to create template CString: {}", e))?;
 
     let mut buf = vec![0u8; 64 * 1024];
@@ -775,4 +819,73 @@ pub fn test_minimal_init() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_model_format_mistral() {
+        assert_eq!(
+            detect_model_format("Ministral-3-3B-Instruct"),
+            ModelFormat::MistralV3
+        );
+        assert_eq!(
+            detect_model_format("ministral-8b-instruct-2512"),
+            ModelFormat::MistralV3
+        );
+        assert_eq!(
+            detect_model_format("Mistral-Small-3.2"),
+            ModelFormat::MistralV3
+        );
+        assert_eq!(
+            detect_model_format("/path/to/mistral-7b.gguf"),
+            ModelFormat::MistralV3
+        );
+    }
+
+    #[test]
+    fn test_detect_model_format_gemma() {
+        assert_eq!(detect_model_format("gemma-3-4b"), ModelFormat::Gemma3);
+        assert_eq!(
+            detect_model_format("google/gemma-3-27b-it"),
+            ModelFormat::Gemma3
+        );
+        assert_eq!(detect_model_format("llama-3.2-3b"), ModelFormat::Gemma3);
+        assert_eq!(detect_model_format("qwen2.5-7b"), ModelFormat::Gemma3);
+    }
+
+    #[test]
+    fn test_detect_model_format_case_insensitive() {
+        assert_eq!(
+            detect_model_format("MINISTRAL-3B"),
+            ModelFormat::MistralV3
+        );
+        assert_eq!(
+            detect_model_format("MiStRaL-NeMo"),
+            ModelFormat::MistralV3
+        );
+    }
+
+    #[test]
+    fn test_model_format_default() {
+        assert_eq!(ModelFormat::default(), ModelFormat::Gemma3);
+    }
+
+    #[test]
+    fn test_gemma3_template_contains_markers() {
+        assert!(GEMMA3_TEMPLATE.contains("<start_of_turn>"));
+        assert!(GEMMA3_TEMPLATE.contains("<end_of_turn>"));
+    }
+
+    #[test]
+    fn test_mistral_v3_template_contains_markers() {
+        assert!(MISTRAL_V3_TEMPLATE.contains("{{ bos_token }}"));
+        assert!(MISTRAL_V3_TEMPLATE.contains("[SYSTEM_PROMPT]"));
+        assert!(MISTRAL_V3_TEMPLATE.contains("[/SYSTEM_PROMPT]"));
+        assert!(MISTRAL_V3_TEMPLATE.contains("[INST]"));
+        assert!(MISTRAL_V3_TEMPLATE.contains("[/INST]"));
+        assert!(MISTRAL_V3_TEMPLATE.contains("</s>"));
+    }
 }

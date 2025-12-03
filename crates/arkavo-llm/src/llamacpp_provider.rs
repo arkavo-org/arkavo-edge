@@ -4,7 +4,8 @@ use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResp
 use arkavo_llama_cpp::multimodal::MtmdContext;
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
-    LlamaModel, apply_chat_template, ffi, init_llama_logging, test_minimal_init,
+    LlamaModel, ModelFormat, apply_chat_template_with_format, detect_model_format, ffi,
+    init_llama_logging, test_minimal_init,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -162,17 +163,27 @@ impl LlamaCppProvider {
 
         let (llama_messages, _cstrings) = Self::messages_to_llama_chat_static(&messages)?;
 
-        let prompt_bytes = apply_chat_template(&llama_messages, true)
+        // Detect model format from model name
+        let format = detect_model_format(&self.name);
+
+        let prompt_bytes = apply_chat_template_with_format(&llama_messages, true, format)
             .map_err(|e| Error::Config(format!("Failed to apply chat template: {e}")))?;
 
         if crate::llamacpp_streaming::is_debug()
             && let Ok(prompt_str) = std::str::from_utf8(&prompt_bytes)
         {
             eprintln!("Chat template output:\n{prompt_str}");
-            if prompt_str.contains("<|im_start|>") {
-                eprintln!("WARNING: Template is using Llama-3 format, not Gemma-3!");
-            } else if prompt_str.contains("<start_of_turn>") {
-                eprintln!("✓ Template is using correct Gemma-3 format");
+            match format {
+                ModelFormat::Gemma3 => {
+                    if prompt_str.contains("<start_of_turn>") {
+                        eprintln!("✓ Template is using correct Gemma-3 format");
+                    }
+                }
+                ModelFormat::MistralV3 => {
+                    if prompt_str.contains("[INST]") {
+                        eprintln!("✓ Template is using correct Mistral V3 format");
+                    }
+                }
             }
         }
 

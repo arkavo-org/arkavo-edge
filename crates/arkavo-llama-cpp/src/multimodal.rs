@@ -23,8 +23,8 @@ impl MtmdContext {
         params.n_threads = std::thread::available_parallelism()
             .map(|n| n.get() as i32)
             .unwrap_or(8);
-        params.verbosity = ffi::ggml_log_level_GGML_LOG_LEVEL_WARN;
         params.media_marker = unsafe { ffi::mtmd_default_marker() };
+        params.warmup = true; // Run warmup encode pass after initialization
 
         let ctx = unsafe { ffi::mtmd_init_from_file(c_path.as_ptr(), text_model.ptr, params) };
 

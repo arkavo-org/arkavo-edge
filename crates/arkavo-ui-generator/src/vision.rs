@@ -1,5 +1,9 @@
+mod ministral_loader;
 mod model_loader;
 
+pub use ministral_loader::{
+    DeviceProfile, Ministral3ModelLoader, Ministral3ModelPaths, Ministral3Size,
+};
 pub use model_loader::{ModelPaths, ModelSize, Qwen25VLModelLoader};
 
 use anyhow::{Context, Result};
