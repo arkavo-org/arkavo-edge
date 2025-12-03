@@ -1855,17 +1855,23 @@ async fn initialize_llm_client(
                             ("TheBloke/phi-2-GGUF", "phi-2.Q4_K_M.gguf", "phi-2")
                         }
                         // Ministral 3 models (official Mistral repos)
-                        "mistralai/Ministral-3-3B-Instruct-2512-GGUF" | "ministral-3b" | "ministral3b" => (
+                        "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+                        | "ministral-3b"
+                        | "ministral3b" => (
                             "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
                             "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
                             "ministral-3-3b",
                         ),
-                        "mistralai/Ministral-3-8B-Instruct-2512-GGUF" | "ministral-8b" | "ministral8b" => (
+                        "mistralai/Ministral-3-8B-Instruct-2512-GGUF"
+                        | "ministral-8b"
+                        | "ministral8b" => (
                             "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
                             "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
                             "ministral-3-8b",
                         ),
-                        "mistralai/Ministral-3-14B-Instruct-2512-GGUF" | "ministral-14b" | "ministral14b" => (
+                        "mistralai/Ministral-3-14B-Instruct-2512-GGUF"
+                        | "ministral-14b"
+                        | "ministral14b" => (
                             "mistralai/Ministral-3-14B-Instruct-2512-GGUF",
                             "Ministral-3-14B-Instruct-2512-Q4_K_M.gguf",
                             "ministral-3-14b",

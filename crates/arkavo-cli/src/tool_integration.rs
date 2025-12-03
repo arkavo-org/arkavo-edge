@@ -84,7 +84,9 @@ pub async fn process_with_tools(
         if total_loop_iterations > MAX_TOTAL_LOOP_ITERATIONS {
             tracing::error!(
                 "Absolute loop limit reached: {} iterations (discovery: {}, execution: {})",
-                total_loop_iterations, discovery_iterations, iteration
+                total_loop_iterations,
+                discovery_iterations,
+                iteration
             );
             return Err(format!(
                 "Maximum total loop iterations ({}) exceeded - breaking out of potential infinite loop",
@@ -282,7 +284,8 @@ pub async fn process_with_tools(
                 return Err(format!(
                     "Maximum discovery iterations ({}) exceeded - possible infinite loop",
                     MAX_DISCOVERY_ITERATIONS
-                ).into());
+                )
+                .into());
             }
             continue; // Re-route with expanded knowledge (doesn't count as iteration)
         }

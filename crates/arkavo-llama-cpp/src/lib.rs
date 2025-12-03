@@ -462,8 +462,8 @@ pub fn apply_chat_template_with_format(
         eprintln!("Using chat template format: {:?}", format);
     }
 
-    let template_cstring = CString::new(template)
-        .map_err(|e| format!("Failed to create template CString: {}", e))?;
+    let template_cstring =
+        CString::new(template).map_err(|e| format!("Failed to create template CString: {}", e))?;
 
     let mut buf = vec![0u8; 64 * 1024];
     loop {
@@ -866,14 +866,8 @@ mod tests {
 
     #[test]
     fn test_detect_model_format_case_insensitive() {
-        assert_eq!(
-            detect_model_format("MINISTRAL-3B"),
-            ModelFormat::MistralV3
-        );
-        assert_eq!(
-            detect_model_format("MiStRaL-NeMo"),
-            ModelFormat::MistralV3
-        );
+        assert_eq!(detect_model_format("MINISTRAL-3B"), ModelFormat::MistralV3);
+        assert_eq!(detect_model_format("MiStRaL-NeMo"), ModelFormat::MistralV3);
     }
 
     #[test]
