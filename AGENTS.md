@@ -58,6 +58,22 @@
 - **Autonomous**: Auto-detect capabilities.  No manual configuration.
 - **Orchestration**: Optional centralized control plane.
 
+## Local Model Support
+
+### Ministral 3 (Recommended for Edge)
+Mistral's edge-optimized models with vision capabilities:
+- **3B**: Raspberry Pi 5, 8GB RAM minimum
+- **8B**: Desktop/laptop, 12GB VRAM recommended
+- **14B**: Server/workstation, 16GB+ VRAM
+
+Models auto-download from HuggingFace on first use via `Ministral3ModelLoader`.
+
+### Reasoning Mode
+For complex tasks requiring step-by-step thinking, use Ministral Reasoning variants or add a system prompt:
+```
+Think through this problem step-by-step before providing your answer.
+```
+
 ## 6. Useful Commands
 
 # Build (Debug). No release builds.

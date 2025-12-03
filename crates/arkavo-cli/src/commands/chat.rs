@@ -1854,6 +1854,28 @@ async fn initialize_llm_client(
                         "TheBloke/phi-2-GGUF" | "phi-2" => {
                             ("TheBloke/phi-2-GGUF", "phi-2.Q4_K_M.gguf", "phi-2")
                         }
+                        // Ministral 3 models (official Mistral repos)
+                        "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+                        | "ministral-3b"
+                        | "ministral3b" => (
+                            "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                            "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                            "ministral-3-3b",
+                        ),
+                        "mistralai/Ministral-3-8B-Instruct-2512-GGUF"
+                        | "ministral-8b"
+                        | "ministral8b" => (
+                            "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                            "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+                            "ministral-3-8b",
+                        ),
+                        "mistralai/Ministral-3-14B-Instruct-2512-GGUF"
+                        | "ministral-14b"
+                        | "ministral14b" => (
+                            "mistralai/Ministral-3-14B-Instruct-2512-GGUF",
+                            "Ministral-3-14B-Instruct-2512-Q4_K_M.gguf",
+                            "ministral-3-14b",
+                        ),
                         _ => (
                             "unsloth/gemma-3-270m-it-GGUF",
                             "gemma-3-270m-it-Q4_0.gguf",
@@ -1885,6 +1907,22 @@ async fn initialize_llm_client(
                         "tinyllama-1.1b",
                     ),
                     "phi-2" | "phi2" => ("TheBloke/phi-2-GGUF", "phi-2.Q4_K_M.gguf", "phi-2"),
+                    // Ministral 3 models (official Mistral repos)
+                    "ministral-3b" | "ministral3b" | "ministral-3-3b" => (
+                        "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                        "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                        "ministral-3-3b",
+                    ),
+                    "ministral-8b" | "ministral8b" | "ministral-3-8b" => (
+                        "mistralai/Ministral-3-8B-Instruct-2512-GGUF",
+                        "Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+                        "ministral-3-8b",
+                    ),
+                    "ministral-14b" | "ministral14b" | "ministral-3-14b" => (
+                        "mistralai/Ministral-3-14B-Instruct-2512-GGUF",
+                        "Ministral-3-14B-Instruct-2512-Q4_K_M.gguf",
+                        "ministral-3-14b",
+                    ),
                     _ => (
                         // Default to gemma-3-270m
                         "unsloth/gemma-3-270m-it-GGUF",
