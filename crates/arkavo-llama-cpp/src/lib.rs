@@ -93,6 +93,14 @@ extern "C" fn llama_log_callback_filtered(
                     if str_slice.contains("n_ctx_per_seq") || str_slice.contains("n_ctx_train") {
                         return;
                     }
+                    // Skip Metal tensor API message (informational for pre-M5/A19 devices)
+                    if str_slice.contains("tensor API disabled for pre-M") {
+                        return;
+                    }
+                    // Skip tokenizer config warnings for models with non-standard EOS handling
+                    if str_slice.contains("special_eos_id is not in special_eog_ids") {
+                        return;
+                    }
                 }
                 eprint!("{}", str_slice);
             }

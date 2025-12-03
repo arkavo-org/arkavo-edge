@@ -16,14 +16,16 @@ git clone https://github.com/ggerganov/llama.cpp vendor/llama.cpp
 
 # Checkout the required version (includes Ministral 3 support)
 cd vendor/llama.cpp
-git checkout 13628d8bd  # or later, must include cd3c11890 for Ministral 3
+git checkout ecf74a841  # Ministral 3 + mtmd warmup field
 ```
 
 ### Required Version
 
-**Minimum commit:** `cd3c11890` (model: support Ministral3 #17644) - December 1, 2025
+**Recommended commit:** `ecf74a841` (mtmd: add warmup option) - December 1, 2025
 
-This commit adds the `MISTRAL3` architecture required for Ministral 3 models (3B/8B/14B).
+This commit includes:
+- `cd3c11890`: Ministral 3 architecture support (3B/8B/14B)
+- `ecf74a841`: mtmd_context_params::warmup field for multimodal
 
 ### Updating llama.cpp
 
