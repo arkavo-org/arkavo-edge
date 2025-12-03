@@ -71,8 +71,33 @@ pub async fn process_with_tools(
     let mut all_tool_executions = Vec::new();
     let mut iteration = 0;
     let mut first_call = true;
+    // Safeguard against infinite loops from tool discovery/metadata requests
+    let mut discovery_iterations = 0;
+    const MAX_DISCOVERY_ITERATIONS: usize = 5;
+    // Overall loop safeguard (discovery + execution combined)
+    let mut total_loop_iterations = 0;
+    const MAX_TOTAL_LOOP_ITERATIONS: usize = 20;
 
     loop {
+        // Absolute safeguard against runaway loops
+        total_loop_iterations += 1;
+        if total_loop_iterations > MAX_TOTAL_LOOP_ITERATIONS {
+            tracing::error!(
+                "Absolute loop limit reached: {} iterations (discovery: {}, execution: {})",
+                total_loop_iterations, discovery_iterations, iteration
+            );
+            return Err(format!(
+                "Maximum total loop iterations ({}) exceeded - breaking out of potential infinite loop",
+                MAX_TOTAL_LOOP_ITERATIONS
+            ).into());
+        }
+
+        // Rate limit iterations to avoid overwhelming Terminal.app's process monitoring
+        // (Terminal.app has a bug with rapid subprocess enumeration - macOS 26.2)
+        if total_loop_iterations > 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
         // First call uses route() which handles architect mode detection
         // Subsequent calls use route_with_quality_gate() directly
         let response: ProviderResponse = if first_call {
@@ -182,6 +207,15 @@ pub async fn process_with_tools(
                         };
 
                         messages.push(Message::user(&tool_response));
+
+                        // Safeguard against infinite discovery loops
+                        discovery_iterations += 1;
+                        if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
+                            return Err(format!(
+                                "Maximum discovery iterations ({}) exceeded - possible infinite loop",
+                                MAX_DISCOVERY_ITERATIONS
+                            ).into());
+                        }
                         continue; // Re-route with expanded knowledge (doesn't count as iteration)
                     }
 
@@ -241,6 +275,15 @@ pub async fn process_with_tools(
 
             messages.push(Message::assistant(&response.content));
             messages.push(Message::user(&tool_response));
+
+            // Safeguard against infinite discovery loops
+            discovery_iterations += 1;
+            if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
+                return Err(format!(
+                    "Maximum discovery iterations ({}) exceeded - possible infinite loop",
+                    MAX_DISCOVERY_ITERATIONS
+                ).into());
+            }
             continue; // Re-route with expanded knowledge (doesn't count as iteration)
         }
 
