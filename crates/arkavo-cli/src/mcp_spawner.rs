@@ -36,12 +36,10 @@ impl McpProcessManager {
     }
 
     /// Register an externally spawned process for tracking
-    #[allow(clippy::missing_panics_doc)]
     pub fn register_process(&self, name: String, pid: u32) {
-        self.processes
-            .lock()
-            .unwrap()
-            .push(TrackedProcess { name, pid });
+        if let Ok(mut processes) = self.processes.lock() {
+            processes.push(TrackedProcess { name, pid });
+        }
     }
 
     /// Spawn a new MCP server process
@@ -107,21 +105,19 @@ impl McpProcessManager {
         };
 
         // Track the process by PID
-        self.processes
-            .lock()
-            .unwrap()
-            .push(TrackedProcess { name, pid });
+        if let Ok(mut processes) = self.processes.lock() {
+            processes.push(TrackedProcess { name, pid });
+        }
 
         Ok(process)
     }
 
     /// Shutdown all managed processes gracefully with timeout
-    #[allow(clippy::missing_panics_doc)]
     pub fn shutdown_all(&self) -> Result<(), Box<dyn std::error::Error>> {
         use std::thread;
         use std::time::Duration;
 
-        let mut processes = self.processes.lock().unwrap();
+        let mut processes = self.processes.lock().unwrap_or_else(|e| e.into_inner());
 
         for tracked in processes.iter() {
             // Telemetry: MCP server shutting down

@@ -193,12 +193,12 @@ impl McpClient {
         let metadata = ToolCallMetadata {
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
             llm_origin: llm_origin.to_string(),
             tool_name: tool_name.to_string(),
             arguments: arguments.clone(),
-            request_id: *self.request_id.lock().unwrap(),
+            request_id: *self.request_id.lock().unwrap_or_else(|e| e.into_inner()),
         };
 
         // Log the tool call
@@ -241,11 +241,17 @@ impl McpClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<JsonRpcResponse, Box<dyn std::error::Error>> {
-        let mut process = self.process.lock().unwrap();
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| "MCP process lock poisoned")?;
 
         // Get next request ID
         let request_id = {
-            let mut id = self.request_id.lock().unwrap();
+            let mut id = self
+                .request_id
+                .lock()
+                .map_err(|_| "Request ID lock poisoned")?;
             let current = *id;
             *id += 1;
             current

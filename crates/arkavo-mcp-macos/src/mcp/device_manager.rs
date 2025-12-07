@@ -61,7 +61,7 @@ impl DeviceManager {
             .map_err(|e| TestError::Mcp(format!("Failed to parse device list: {e}")))?;
 
         let mut devices = Vec::new();
-        let mut device_map = self.devices.lock().unwrap();
+        let mut device_map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         device_map.clear();
 
         // Parse simulators
@@ -99,10 +99,17 @@ impl DeviceManager {
         }
 
         // Set active device if none is set and we have booted devices
-        if self.active_device_id.lock().unwrap().is_none()
+        if self
+            .active_device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
             && let Some(booted_device) = devices.iter().find(|d| d.state == DeviceState::Booted)
         {
-            *self.active_device_id.lock().unwrap() = Some(booted_device.id.clone());
+            *self
+                .active_device_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(booted_device.id.clone());
         }
 
         Ok(devices)
@@ -213,32 +220,48 @@ impl DeviceManager {
     }
 
     pub fn get_device(&self, device_id: &str) -> Option<IOSDevice> {
-        self.devices.lock().unwrap().get(device_id).cloned()
+        self.devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(device_id)
+            .cloned()
     }
 
     pub fn get_active_device(&self) -> Option<IOSDevice> {
-        let device_id = self.active_device_id.lock().unwrap().clone()?;
+        let device_id = self
+            .active_device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
         self.get_device(&device_id)
     }
 
     pub fn set_active_device(&self, device_id: &str) -> Result<()> {
-        let devices = self.devices.lock().unwrap();
+        let devices = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if !devices.contains_key(device_id) {
             return Err(TestError::Mcp(format!("Device not found: {device_id}")));
         }
 
-        *self.active_device_id.lock().unwrap() = Some(device_id.to_string());
+        *self
+            .active_device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(device_id.to_string());
         Ok(())
     }
 
     pub fn get_all_devices(&self) -> Vec<IOSDevice> {
-        self.devices.lock().unwrap().values().cloned().collect()
+        self.devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn get_booted_devices(&self) -> Vec<IOSDevice> {
         self.devices
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .values()
             .filter(|d| d.state == DeviceState::Booted)
             .cloned()
@@ -260,7 +283,12 @@ impl DeviceManager {
             .map_err(|e| TestError::Mcp(format!("Failed to boot device: {e}")))?;
 
         // Update device state
-        if let Some(device) = self.devices.lock().unwrap().get_mut(device_id) {
+        if let Some(device) = self
+            .devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(device_id)
+        {
             device.state = DeviceState::Booted;
         }
 
@@ -284,7 +312,12 @@ impl DeviceManager {
             .map_err(|e| TestError::Mcp(format!("Failed to shutdown device: {e}")))?;
 
         // Update device state
-        if let Some(device) = self.devices.lock().unwrap().get_mut(device_id) {
+        if let Some(device) = self
+            .devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(device_id)
+        {
             device.state = DeviceState::Shutdown;
         }
 
@@ -319,11 +352,23 @@ impl DeviceManager {
             .map_err(|e| TestError::Mcp(format!("Failed to delete device: {e}")))?;
 
         // Remove from our cache
-        self.devices.lock().unwrap().remove(device_id);
+        self.devices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(device_id);
 
         // Clear active device if it was deleted
-        if self.active_device_id.lock().unwrap().as_ref() == Some(&device_id.to_string()) {
-            *self.active_device_id.lock().unwrap() = None;
+        if self
+            .active_device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            == Some(&device_id.to_string())
+        {
+            *self
+                .active_device_id
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         }
 
         Ok(())

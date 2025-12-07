@@ -307,7 +307,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Store repo context mode globally for REPL commands
     {
-        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+        let mut mode = REPO_CONTEXT_MODE.write().unwrap_or_else(|e| e.into_inner());
         *mode = repo_context_mode;
     }
 
@@ -606,7 +606,7 @@ Q: \"Recent commits?\" → A: @git_status
     // Determine whether to inject repo context
     let should_inject_context = if let (true, Some(ref p)) = (print_mode, prompt.as_ref()) {
         // For print mode with prompt, check if we should attach context
-        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap_or_else(|e| e.into_inner());
         match (model_size_hint, current_mode.as_str()) {
             // Tiny models: only inject if explicitly on or auto with relevant query
             (Some("270M" | "1B"), "on") => true,
@@ -619,7 +619,7 @@ Q: \"Recent commits?\" → A: @git_status
         }
     } else if !print_mode {
         // Interactive mode: check based on model size and mode
-        let current_mode = REPO_CONTEXT_MODE.read().unwrap();
+        let current_mode = REPO_CONTEXT_MODE.read().unwrap_or_else(|e| e.into_inner());
         match (model_size_hint, current_mode.as_str()) {
             (Some("270M" | "1B"), "on") => true,
             (Some("270M" | "1B"), _) => false, // Default off for tiny in interactive
@@ -806,7 +806,7 @@ Q: \"Recent commits?\" → A: @git_status
                 let new_mode = parts[1];
                 if ["auto", "on", "off"].contains(&new_mode) {
                     {
-                        let mut mode = REPO_CONTEXT_MODE.write().unwrap();
+                        let mut mode = REPO_CONTEXT_MODE.write().unwrap_or_else(|e| e.into_inner());
                         *mode = new_mode.to_string();
                     }
                     println!("Repository context mode set to: {new_mode}");
@@ -821,7 +821,7 @@ Q: \"Recent commits?\" → A: @git_status
                 }
             } else {
                 {
-                    let mode = REPO_CONTEXT_MODE.read().unwrap();
+                    let mode = REPO_CONTEXT_MODE.read().unwrap_or_else(|e| e.into_inner());
                     println!("Current repository context mode: {mode}");
                 }
                 println!("Use: /context {{auto|on|off}} to change");

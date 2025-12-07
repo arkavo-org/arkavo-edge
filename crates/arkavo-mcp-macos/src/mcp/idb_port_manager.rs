@@ -17,20 +17,20 @@ impl IdbPortManager {
 
     /// Find an available port in a range
     pub fn find_available_port(start: u16, end: u16) -> Option<u16> {
-        let allocated = ALLOCATED_PORTS.lock().unwrap();
+        let allocated = ALLOCATED_PORTS.lock().unwrap_or_else(|e| e.into_inner());
 
         (start..=end).find(|&port| !allocated.contains(&port) && Self::is_port_available(port))
     }
 
     /// Allocate a port (mark it as in use)
     pub fn allocate_port(port: u16) {
-        let mut allocated = ALLOCATED_PORTS.lock().unwrap();
+        let mut allocated = ALLOCATED_PORTS.lock().unwrap_or_else(|e| e.into_inner());
         allocated.insert(port);
     }
 
     /// Release a port (mark it as available)
     pub fn release_port(port: u16) {
-        let mut allocated = ALLOCATED_PORTS.lock().unwrap();
+        let mut allocated = ALLOCATED_PORTS.lock().unwrap_or_else(|e| e.into_inner());
         allocated.remove(&port);
     }
 

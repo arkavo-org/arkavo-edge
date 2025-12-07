@@ -89,8 +89,7 @@ pub async fn process_with_tools(
                 iteration
             );
             return Err(format!(
-                "Maximum total loop iterations ({}) exceeded - breaking out of potential infinite loop",
-                MAX_TOTAL_LOOP_ITERATIONS
+                "Maximum total loop iterations ({MAX_TOTAL_LOOP_ITERATIONS}) exceeded - breaking out of potential infinite loop"
             ).into());
         }
 
@@ -214,8 +213,7 @@ pub async fn process_with_tools(
                         discovery_iterations += 1;
                         if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
                             return Err(format!(
-                                "Maximum discovery iterations ({}) exceeded - possible infinite loop",
-                                MAX_DISCOVERY_ITERATIONS
+                                "Maximum discovery iterations ({MAX_DISCOVERY_ITERATIONS}) exceeded - possible infinite loop"
                             ).into());
                         }
                         continue; // Re-route with expanded knowledge (doesn't count as iteration)
@@ -282,8 +280,7 @@ pub async fn process_with_tools(
             discovery_iterations += 1;
             if discovery_iterations > MAX_DISCOVERY_ITERATIONS {
                 return Err(format!(
-                    "Maximum discovery iterations ({}) exceeded - possible infinite loop",
-                    MAX_DISCOVERY_ITERATIONS
+                    "Maximum discovery iterations ({MAX_DISCOVERY_ITERATIONS}) exceeded - possible infinite loop"
                 )
                 .into());
             }

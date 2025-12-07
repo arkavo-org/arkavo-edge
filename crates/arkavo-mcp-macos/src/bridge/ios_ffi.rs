@@ -27,12 +27,8 @@ impl RustTestHarness {
     }
 
     /// Executes an action on the iOS bridge.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn execute_action(&self, action: &str, params: &str) -> Result<String> {
-        if self.bridge.is_none() {
+        let Some(bridge) = self.bridge else {
             return Ok(serde_json::json!({
                 "error": {
                     "code": "IOS_BRIDGE_NOT_CONNECTED",
@@ -45,7 +41,7 @@ impl RustTestHarness {
                 }
             })
             .to_string());
-        }
+        };
 
         let action_cstr = CString::new(action)
             .map_err(|e| TestError::Bridge(format!("Invalid action string: {e}")))?;
@@ -53,11 +49,8 @@ impl RustTestHarness {
             .map_err(|e| TestError::Bridge(format!("Invalid params string: {e}")))?;
 
         unsafe {
-            let result_ptr = ios_bridge_execute_action(
-                self.bridge.unwrap(),
-                action_cstr.as_ptr(),
-                params_cstr.as_ptr(),
-            );
+            let result_ptr =
+                ios_bridge_execute_action(bridge, action_cstr.as_ptr(), params_cstr.as_ptr());
 
             if result_ptr.is_null() {
                 return Err(TestError::Bridge("Null result from iOS bridge".to_string()));
@@ -73,12 +66,8 @@ impl RustTestHarness {
     }
 
     /// Gets the current state from the iOS bridge.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn get_current_state(&self) -> Result<String> {
-        if self.bridge.is_none() {
+        let Some(bridge) = self.bridge else {
             return Ok(serde_json::json!({
                 "error": {
                     "code": "IOS_BRIDGE_NOT_CONNECTED",
@@ -89,10 +78,10 @@ impl RustTestHarness {
                 }
             })
             .to_string());
-        }
+        };
 
         unsafe {
-            let state_ptr = ios_bridge_get_current_state(self.bridge.unwrap());
+            let state_ptr = ios_bridge_get_current_state(bridge);
 
             if state_ptr.is_null() {
                 return Err(TestError::Bridge("Null state from iOS bridge".to_string()));
@@ -108,12 +97,8 @@ impl RustTestHarness {
     }
 
     /// Mutates state on the iOS bridge.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the bridge is not connected (should not happen due to early check).
     pub fn mutate_state(&self, entity: &str, action: &str, data: &str) -> Result<String> {
-        if self.bridge.is_none() {
+        let Some(bridge) = self.bridge else {
             return Ok(serde_json::json!({
                 "error": {
                     "code": "IOS_BRIDGE_NOT_CONNECTED",
@@ -126,7 +111,7 @@ impl RustTestHarness {
                 }
             })
             .to_string());
-        }
+        };
 
         let entity_cstr = CString::new(entity)
             .map_err(|e| TestError::Bridge(format!("Invalid entity string: {e}")))?;
@@ -137,7 +122,7 @@ impl RustTestHarness {
 
         unsafe {
             let result_ptr = ios_bridge_mutate_state(
-                self.bridge.unwrap(),
+                bridge,
                 entity_cstr.as_ptr(),
                 action_cstr.as_ptr(),
                 data_cstr.as_ptr(),
@@ -185,13 +170,13 @@ impl RustTestHarness {
     }
 
     fn create_snapshot(&self) -> Result<Vec<u8>> {
-        if self.bridge.is_none() {
+        let Some(bridge) = self.bridge else {
             return Ok(vec![]);
-        }
+        };
 
         unsafe {
             let mut size: usize = 0;
-            let snapshot_ptr = ios_bridge_create_snapshot(self.bridge.unwrap(), &raw mut size);
+            let snapshot_ptr = ios_bridge_create_snapshot(bridge, &raw mut size);
 
             if snapshot_ptr.is_null() {
                 return Err(TestError::Bridge("Failed to create snapshot".to_string()));
@@ -206,16 +191,12 @@ impl RustTestHarness {
     }
 
     fn restore_snapshot(&self, data: &[u8]) -> Result<()> {
-        if self.bridge.is_none() {
+        let Some(bridge) = self.bridge else {
             return Ok(());
-        }
+        };
 
         unsafe {
-            ios_bridge_restore_snapshot(
-                self.bridge.unwrap(),
-                data.as_ptr().cast::<c_void>(),
-                data.len(),
-            );
+            ios_bridge_restore_snapshot(bridge, data.as_ptr().cast::<c_void>(), data.len());
         }
 
         Ok(())

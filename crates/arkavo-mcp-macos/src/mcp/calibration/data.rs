@@ -60,7 +60,7 @@ impl CalibrationDataStore {
         );
 
         // Update cache
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let version = config.calibration_version.clone();
         cache.insert(device_id.to_string(), config);
 
@@ -70,7 +70,9 @@ impl CalibrationDataStore {
             .storage_path
             .join("backups")
             .join(format!("{device_id}_{version}_{timestamp}.json"));
-        fs::create_dir_all(backup_path.parent().unwrap())?;
+        if let Some(parent) = backup_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
         let full_data = CalibrationData {
             config: cache.get(device_id).cloned().unwrap(),
@@ -84,7 +86,7 @@ impl CalibrationDataStore {
     }
 
     pub fn get_calibration(&self, device_id: &str) -> Option<CalibrationConfig> {
-        let cache = self.cache.lock().unwrap();
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.get(device_id).cloned()
     }
 
@@ -129,7 +131,7 @@ impl CalibrationDataStore {
     pub fn list_calibrated_devices(&self) -> Vec<DeviceSummary> {
         // First, collect all the device data we need while holding the lock
         let device_data: Vec<(String, String, chrono::DateTime<chrono::Utc>)> = {
-            let cache = self.cache.lock().unwrap();
+            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             cache
                 .iter()
                 .map(|(id, config)| {
@@ -212,7 +214,7 @@ impl CalibrationDataStore {
     }
 
     fn load_all_calibrations(&self) -> Result<(), CalibrationError> {
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Ok(entries) = fs::read_dir(&self.storage_path) {
             for entry in entries {
@@ -287,7 +289,7 @@ impl CalibrationCache {
     }
 
     pub fn get(&self, device_id: &str) -> Option<(CalibrationConfig, CalibrationResult)> {
-        let mut cache = self.memory_cache.lock().unwrap();
+        let mut cache = self.memory_cache.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(cached) = cache.get_mut(device_id) {
             cached.accessed_at = chrono::Utc::now();
@@ -298,7 +300,7 @@ impl CalibrationCache {
     }
 
     pub fn put(&self, device_id: String, config: CalibrationConfig, result: CalibrationResult) {
-        let mut cache = self.memory_cache.lock().unwrap();
+        let mut cache = self.memory_cache.lock().unwrap_or_else(|e| e.into_inner());
 
         // Evict least recently used if at capacity
         if cache.len() >= self.max_cache_size
@@ -321,12 +323,12 @@ impl CalibrationCache {
     }
 
     pub fn invalidate(&self, device_id: &str) {
-        let mut cache = self.memory_cache.lock().unwrap();
+        let mut cache = self.memory_cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.remove(device_id);
     }
 
     pub fn clear(&self) {
-        let mut cache = self.memory_cache.lock().unwrap();
+        let mut cache = self.memory_cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 }

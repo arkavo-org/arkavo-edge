@@ -82,11 +82,12 @@ impl IdbWrapper {
                         "[IdbWrapper] Using system IDB at: {}",
                         system_path.display()
                     );
-                    let mut use_system = USE_SYSTEM_IDB.lock().unwrap();
+                    let mut use_system = USE_SYSTEM_IDB.lock().unwrap_or_else(|e| e.into_inner());
                     *use_system = true;
 
                     // Set the path to system IDB
-                    let mut path_guard = EXTRACTED_IDB_PATH.lock().unwrap();
+                    let mut path_guard =
+                        EXTRACTED_IDB_PATH.lock().unwrap_or_else(|e| e.into_inner());
                     *path_guard = Some(system_path);
                     return Ok(());
                 } else if force_system {
@@ -98,7 +99,7 @@ impl IdbWrapper {
                 }
             }
 
-            let mut path_guard = EXTRACTED_IDB_PATH.lock().unwrap();
+            let mut path_guard = EXTRACTED_IDB_PATH.lock().unwrap_or_else(|e| e.into_inner());
 
             if let Some(ref existing_path) = *path_guard {
                 // Already initialized - verify it still exists
@@ -219,9 +220,13 @@ impl IdbWrapper {
                     let status = Command::new("tar")
                         .args([
                             "-xzf",
-                            archive_path.to_str().unwrap(),
+                            archive_path.to_str().ok_or_else(|| {
+                                TestError::Mcp("Invalid UTF-8 in archive path".to_string())
+                            })?,
                             "-C",
-                            temp_dir.to_str().unwrap(),
+                            temp_dir.to_str().ok_or_else(|| {
+                                TestError::Mcp("Invalid UTF-8 in temp dir path".to_string())
+                            })?,
                         ])
                         .status()
                         .map_err(|e| {
@@ -257,7 +262,9 @@ impl IdbWrapper {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&binary_path).unwrap().permissions();
+                let mut perms = fs::metadata(&binary_path)
+                    .map_err(|e| TestError::Mcp(format!("Failed to get binary metadata: {e}")))?
+                    .permissions();
                 perms.set_mode(0o755);
                 fs::set_permissions(&binary_path, perms)
                     .map_err(|e| TestError::Mcp(format!("Failed to set permissions: {e}")))?;
@@ -267,8 +274,11 @@ impl IdbWrapper {
             #[cfg(target_os = "macos")]
             {
                 eprintln!("[IdbWrapper] Removing quarantine attributes from binary...");
+                let binary_path_str = binary_path
+                    .to_str()
+                    .ok_or_else(|| TestError::Mcp("Invalid UTF-8 in binary path".to_string()))?;
                 let xattr_output = Command::new("xattr")
-                    .args(["-cr", binary_path.to_str().unwrap()])
+                    .args(["-cr", binary_path_str])
                     .output();
 
                 if let Ok(output) = xattr_output
@@ -279,10 +289,10 @@ impl IdbWrapper {
 
                 // Also remove quarantine from frameworks
                 let frameworks_dir = temp_dir.join("Frameworks");
-                if frameworks_dir.exists() {
-                    let _ = Command::new("xattr")
-                        .args(["-cr", frameworks_dir.to_str().unwrap()])
-                        .output();
+                if frameworks_dir.exists()
+                    && let Some(fw_path_str) = frameworks_dir.to_str()
+                {
+                    let _ = Command::new("xattr").args(["-cr", fw_path_str]).output();
                 }
             }
 
@@ -327,13 +337,13 @@ impl IdbWrapper {
     /// Get the path to the idb_companion binary
     pub fn get_binary_path() -> Result<PathBuf> {
         // Check if we should use system IDB due to framework conflicts
-        let use_system = USE_SYSTEM_IDB.lock().unwrap();
+        let use_system = USE_SYSTEM_IDB.lock().unwrap_or_else(|e| e.into_inner());
         if *use_system && let Some(system_path) = Self::find_system_idb() {
             return Ok(system_path);
         }
 
         // Use the embedded IDB which includes frameworks
-        let path_guard = EXTRACTED_IDB_PATH.lock().unwrap();
+        let path_guard = EXTRACTED_IDB_PATH.lock().unwrap_or_else(|e| e.into_inner());
         path_guard
             .as_ref()
             .cloned()
@@ -378,7 +388,7 @@ impl IdbWrapper {
         let mut command = Command::new(&binary_path);
 
         // Only set DYLD variables for embedded IDB, not system IDB
-        let use_system = USE_SYSTEM_IDB.lock().unwrap();
+        let use_system = USE_SYSTEM_IDB.lock().unwrap_or_else(|e| e.into_inner());
         if !*use_system {
             eprintln!(
                 "[IdbWrapper::create_command] Using embedded IDB, setting up framework paths..."
@@ -387,10 +397,9 @@ impl IdbWrapper {
             // The binary is in 'bin' dir, frameworks are at '../Frameworks'
             let frameworks_dir = binary_path
                 .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("Frameworks");
+                .and_then(|p| p.parent())
+                .map(|p| p.join("Frameworks"))
+                .ok_or_else(|| TestError::Mcp("Invalid binary path structure".to_string()))?;
             eprintln!(
                 "[IdbWrapper::create_command] Frameworks dir: {}",
                 frameworks_dir.display()
@@ -414,13 +423,13 @@ impl IdbWrapper {
                 command.env("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES");
 
                 // 4. Set framework paths to use our embedded frameworks
-                command.env("DYLD_FRAMEWORK_PATH", frameworks_dir.to_str().unwrap());
+                let fw_path_str = frameworks_dir.to_str().ok_or_else(|| {
+                    TestError::Mcp("Invalid UTF-8 in frameworks path".to_string())
+                })?;
+                command.env("DYLD_FRAMEWORK_PATH", fw_path_str);
                 command.env(
                     "DYLD_FALLBACK_FRAMEWORK_PATH",
-                    format!(
-                        "{}:/System/Library/Frameworks",
-                        frameworks_dir.to_str().unwrap()
-                    ),
+                    format!("{}:/System/Library/Frameworks", fw_path_str),
                 );
 
                 eprintln!(
@@ -451,7 +460,9 @@ impl IdbWrapper {
         // Check and start companion in a separate scope to release the lock before await
         let _device_id_owned = device_id.to_string();
         let needs_start = {
-            let mut processes = COMPANION_PROCESSES.lock().unwrap();
+            let mut processes = COMPANION_PROCESSES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
 
             // Check if we already have a companion running for this device
             if let Some(child) = processes.get_mut(device_id) {
@@ -952,7 +963,7 @@ impl IdbWrapper {
 
                 // Set flag to use system IDB
                 {
-                    let mut use_system = USE_SYSTEM_IDB.lock().unwrap();
+                    let mut use_system = USE_SYSTEM_IDB.lock().unwrap_or_else(|e| e.into_inner());
                     *use_system = true;
                 }
 

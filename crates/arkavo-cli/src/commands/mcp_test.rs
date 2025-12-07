@@ -13,7 +13,10 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()?;
             
-        let stdin = child.stdin.as_mut().unwrap();
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or("Failed to get stdin handle")?;
         stdin.write_all(request.to_string().as_bytes())?;
         stdin.write_all(b"\n")?;
         drop(stdin);

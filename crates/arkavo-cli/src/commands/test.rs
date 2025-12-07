@@ -317,7 +317,9 @@ fn run_bdd_tests(_args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Find all .feature files
     let feature_files = std::fs::read_dir("tests")
-        .unwrap_or_else(|_| std::fs::read_dir(".").unwrap())
+        .or_else(|_| std::fs::read_dir("."))
+        .into_iter()
+        .flatten()
         .filter_map(std::result::Result::ok)
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "feature"))
         .collect::<Vec<_>>();
