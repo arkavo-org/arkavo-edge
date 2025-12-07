@@ -18,9 +18,14 @@ llama-cpp = ["dep:arkavo-llm", "arkavo-llm?/llama-cpp", "arkavo-dataflow/llama-c
 [dependencies]
 ratatui = { workspace = true }
 crossterm = { workspace = true }
-# Syntect with minimal features to reduce binary size
-# Include default syntaxes for common languages
-syntect = { workspace = true, features = ["parsing", "regex-onig", "default-themes", "default-syntaxes"] }
+# Tree-sitter for syntax highlighting (replaces syntect)
+tree-sitter = { workspace = true }
+tree-sitter-highlight = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }
+tree-sitter-go = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 anyhow = { workspace = true }
 unicode-width = "0.2"
