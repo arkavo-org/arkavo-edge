@@ -64,7 +64,7 @@ impl IdbCompanionHealth {
 
         // Step 1: Check companion process and basic metrics
         let (_companion_pid, consecutive_failures, last_successful_tap) = {
-            let mut health_map = COMPANION_HEALTH.lock().unwrap();
+            let mut health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
             let metrics = health_map
                 .entry(device_id.to_string())
                 .or_insert_with(|| CompanionHealthMetrics::new(device_id.to_string()));
@@ -94,7 +94,7 @@ impl IdbCompanionHealth {
 
         // Step 3: Update metrics based on test results
         {
-            let mut health_map = COMPANION_HEALTH.lock().unwrap();
+            let mut health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(metrics) = health_map.get_mut(device_id) {
                 match connection_test_result {
                     Ok(connected) => {
@@ -143,7 +143,7 @@ impl IdbCompanionHealth {
 
     /// Record a tap attempt result
     pub fn record_tap_result(device_id: &str, success: bool, latency_ms: u64) {
-        let mut health_map = COMPANION_HEALTH.lock().unwrap();
+        let mut health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
         let metrics = health_map
             .entry(device_id.to_string())
             .or_insert_with(|| CompanionHealthMetrics::new(device_id.to_string()));
@@ -180,13 +180,13 @@ impl IdbCompanionHealth {
 
     /// Get health metrics for a device
     pub fn get_metrics(device_id: &str) -> Option<CompanionHealthMetrics> {
-        let health_map = COMPANION_HEALTH.lock().unwrap();
+        let health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
         health_map.get(device_id).cloned()
     }
 
     /// Reset health metrics for a device (useful after recovery)
     pub fn reset_metrics(device_id: &str) {
-        let mut health_map = COMPANION_HEALTH.lock().unwrap();
+        let mut health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(metrics) = health_map.get_mut(device_id) {
             metrics.consecutive_failures = 0;
             metrics.last_failed_tap = None;
@@ -257,7 +257,7 @@ impl IdbCompanionHealth {
 
             // 2. Clear connection state
             {
-                let mut health_map = COMPANION_HEALTH.lock().unwrap();
+                let mut health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(metrics) = health_map.get_mut(device_id) {
                     metrics.companion_pid = None;
                     metrics.connection_established = false;
@@ -285,7 +285,7 @@ impl IdbCompanionHealth {
 
     /// Get overall system health report
     pub fn get_health_report() -> serde_json::Value {
-        let health_map = COMPANION_HEALTH.lock().unwrap();
+        let health_map = COMPANION_HEALTH.lock().unwrap_or_else(|e| e.into_inner());
         let mut report = serde_json::Map::new();
 
         for (device_id, metrics) in health_map.iter() {

@@ -1015,7 +1015,12 @@ fn broadcast_agent_mdns_sync(
         use std::thread;
         use std::time::Duration;
 
-        let port: u16 = config.listen.split(':').nth(1).unwrap().parse()?;
+        let port: u16 = config
+            .listen
+            .split(':')
+            .nth(1)
+            .ok_or_else(|| format!("Invalid listen address format: {}", config.listen))?
+            .parse()?;
         let service_ip = get_service_ip();
 
         // Create mDNS daemon
