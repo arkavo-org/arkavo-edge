@@ -147,7 +147,6 @@ impl CodeView {
             self.configs.insert("go".to_string(), config);
         }
     }
-
 }
 
 impl Default for CodeView {
@@ -194,9 +193,7 @@ impl CodeView {
             Some(&"function") | Some(&"function.builtin") | Some(&"function.macro") => {
                 Style::default().fg(Color::Rgb(143, 161, 179))
             } // Blue
-            Some(&"type") | Some(&"type.builtin") => {
-                Style::default().fg(Color::Rgb(235, 203, 139))
-            } // Yellow
+            Some(&"type") | Some(&"type.builtin") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
             Some(&"number") | Some(&"constant") | Some(&"constant.builtin") => {
                 Style::default().fg(Color::Rgb(208, 135, 112))
             } // Orange
@@ -205,14 +202,14 @@ impl CodeView {
                 Style::default().fg(Color::Rgb(191, 97, 106))
             } // Red
             Some(&"property") => Style::default().fg(Color::Rgb(143, 161, 179)), // Blue
-            Some(&"punctuation") | Some(&"punctuation.bracket") | Some(&"punctuation.delimiter") => {
-                Style::default().fg(Color::Rgb(192, 197, 206))
-            } // Light gray
+            Some(&"punctuation")
+            | Some(&"punctuation.bracket")
+            | Some(&"punctuation.delimiter") => Style::default().fg(Color::Rgb(192, 197, 206)), // Light gray
             Some(&"attribute") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
             Some(&"constructor") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
             Some(&"tag") => Style::default().fg(Color::Rgb(191, 97, 106)),        // Red
             Some(&"label") => Style::default().fg(Color::Rgb(180, 142, 173)),     // Purple
-            _ => Style::default().fg(Color::Rgb(192, 197, 206)),                  // Default light gray
+            _ => Style::default().fg(Color::Rgb(192, 197, 206)), // Default light gray
         }
     }
 

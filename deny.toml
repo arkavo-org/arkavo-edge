@@ -14,6 +14,8 @@ ignore = [
     { id = "RUSTSEC-2024-0384", reason = "instant in iroh" },
     # paste unmaintained - transitive via tokenizers, ratatui, iroh, image
     { id = "RUSTSEC-2024-0436", reason = "paste in tokenizers/ratatui/iroh/image transitive deps" },
+    # rustls-pemfile unmaintained - used by arkavo-protocol, migrating to rustls-pki-types
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile in arkavo-protocol - migration pending" },
 ]
 
 [bans]
