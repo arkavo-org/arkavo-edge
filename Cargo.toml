@@ -99,7 +99,7 @@ exclude = ["crates/arkavo-protocol/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.47.0"
+version = "0.47.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]
@@ -157,8 +157,16 @@ handlebars = "6.2"
 # Terminal and UI
 ratatui = "0.29.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
 indicatif = "0.18"
+
+# Syntax highlighting (tree-sitter)
+tree-sitter = "0.24"
+tree-sitter-highlight = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
 
 # Git and filesystem
 git2 = { version = "0.20.2", default-features = false }

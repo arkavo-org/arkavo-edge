@@ -12,10 +12,10 @@ ignore = [
     { id = "RUSTSEC-2023-0071", reason = "rsa timing in opentdf" },
     # iroh P2P library
     { id = "RUSTSEC-2024-0384", reason = "instant in iroh" },
-    # syntect syntax highlighting - tracked in #388
-    { id = "RUSTSEC-2024-0320", reason = "yaml-rust in syntect" },
     # paste unmaintained - transitive via tokenizers, ratatui, iroh, image
     { id = "RUSTSEC-2024-0436", reason = "paste in tokenizers/ratatui/iroh/image transitive deps" },
+    # rustls-pemfile unmaintained - used by arkavo-protocol, migrating to rustls-pki-types
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile in arkavo-protocol - migration pending" },
 ]
 
 [bans]

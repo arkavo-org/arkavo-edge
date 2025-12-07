@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-attestation"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-device-identity",
  "serde",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-bench"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-context",
  "arkavo-gemini",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-observability",
  "async-trait",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-claude-code"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-authorization",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-code-search"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-bundle"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "chrono",
  "serde",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-encryption"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-config-bundle",
  "base64 0.22.1",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-transport"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-config-bundle",
  "arkavo-config-encryption",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-llm",
  "serde",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-device-identity"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "dirs 5.0.1",
  "hex",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "git2",
  "tempfile",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-github"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-llama-cpp-sys",
  "criterion",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "bindgen",
  "cmake",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mesh-tools"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-mcp",
  "arkavo-mcp-tools",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-orchestrator"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "libc",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-tdf",
  "async-trait",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -1125,17 +1125,23 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "syntect",
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-highlight",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
  "unicode-width 0.2.0",
  "uuid",
 ]
 
 [[package]]
 name = "arkavo-ui-core"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -1151,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -1176,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-workspace"
-version = "0.47.0"
+version = "0.47.1"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -1536,9 +1542,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64ct"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
+checksum = "0e050f626429857a27ddccb31e0aca21356bfa709c04041aefddac081a8f068a"
 
 [[package]]
 name = "binary-merge"
@@ -1761,9 +1767,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.48"
+version = "1.2.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c481bdbf0ed3b892f6f806287d72acd515b352a4ec27a208489b8c1bc839633a"
+checksum = "90583009037521a116abf44494efecd645ba48b6622457080f080b85544e2215"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -3066,17 +3072,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fancy-regex"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "998b056554fbe42e03ae0e152895cd1a7e1002aec800fdc6635d20270260c46f"
-dependencies = [
- "bit-set 0.8.0",
- "regex-automata",
- "regex-syntax",
-]
-
-[[package]]
 name = "fastembed"
 version = "4.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3170,9 +3165,9 @@ checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
 name = "flate2"
-version = "1.1.5"
+version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfe33edd8e85a12a67454e37f8c75e730830d83e313556ab9ebf9ee7fbeb3bfb"
+checksum = "a2152dbcb980c05735e2a651d96011320a949eb31a0c8b38b72645ce97dec676"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -3525,9 +3520,9 @@ dependencies = [
 
 [[package]]
 name = "gif"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f954a9e9159ec994f73a30a12b96a702dde78f5547bcb561174597924f7d4162"
+checksum = "f5df2ba84018d80c213569363bdcd0c64e6933c67fe4c1d60ecf822971a3c35e"
 dependencies = [
  "color_quant",
  "weezl",
@@ -3541,9 +3536,9 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "git2"
-version = "0.20.2"
+version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2deb07a133b1520dc1a5690e9bd08950108873d7ed5de38dcc74d3b5ebffa110"
+checksum = "3e2b37e2f62729cdada11f0e6b3b6fe383c69c29fc619e391223e12856af308c"
 dependencies = [
  "bitflags 2.10.0",
  "libc",
@@ -4101,9 +4096,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52e9a2a24dc5c6821e71a7030e1e14b7b632acac55c40e9d2e082c621261bb56"
+checksum = "727805d60e7938b76b826a6ef209eb70eaa1812794f9424d4a4e2d740662df5f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5260,9 +5255,9 @@ dependencies = [
 
 [[package]]
 name = "libgit2-sys"
-version = "0.18.2+1.9.1"
+version = "0.18.3+1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c42fe03df2bd3c53a3a9c7317ad91d80c81cd1fb0caec8d7cc4cd2bfa10c222"
+checksum = "c9b3acc4b91781bb0b3386669d325163746af5f6e4f73e6d2d630e09a35f3487"
 dependencies = [
  "cc",
  "libc",
@@ -5319,12 +5314,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "linked-hash-map"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linux-raw-sys"
@@ -5600,9 +5589,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69d83b0086dc8ecf3ce9ae2874b2d1290252e2a30720bea58a5c6639b0092873"
+checksum = "a69bcab0ad47271a0234d9422b131806bf3968021e5dc9328caf2d4cd58557fc"
 dependencies = [
  "libc",
  "log",
@@ -6815,19 +6804,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
-name = "plist"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "740ebea15c5d1428f910cd1a5f52cebf8d25006245ed8ade92702f4943d91e07"
-dependencies = [
- "base64 0.22.1",
- "indexmap 2.12.1",
- "quick-xml",
- "serde",
- "time",
-]
-
-[[package]]
 name = "plotters"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7035,7 +7011,7 @@ version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
 dependencies = [
- "toml_edit 0.23.7",
+ "toml_edit 0.23.9",
 ]
 
 [[package]]
@@ -7123,9 +7099,9 @@ dependencies = [
 
 [[package]]
 name = "pxfm"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3502d6155304a4173a5f2c34b52b7ed0dd085890326cb50fd625fdf39e86b3b"
+checksum = "7186d3822593aa4393561d186d1393b3923e9d6163d3fbfd6e825e3e6cf3e6a8"
 dependencies = [
  "num-traits",
 ]
@@ -7168,15 +7144,6 @@ name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
-
-[[package]]
-name = "quick-xml"
-version = "0.38.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "quinn"
@@ -8826,28 +8793,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "syntect"
-version = "5.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
-dependencies = [
- "bincode",
- "fancy-regex 0.16.2",
- "flate2",
- "fnv",
- "once_cell",
- "onig",
- "plist",
- "regex-syntax",
- "serde",
- "serde_derive",
- "serde_json",
- "thiserror 2.0.17",
- "walkdir",
- "yaml-rust",
-]
-
-[[package]]
 name = "sysctl"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9294,9 +9239,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.23.7"
+version = "0.23.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6485ef6d0d9b5d0ec17244ff7eb05310113c3f316f2d14200d4de56b3cb98f8d"
+checksum = "5d7cbc3b4b49633d57a0509303158ca50de80ae32c265093b24c414705807832"
 dependencies = [
  "indexmap 2.12.1",
  "toml_datetime 0.7.3",
@@ -9528,6 +9473,19 @@ checksum = "b13d476345220dbe600147dd444165c5791bf85ef53e28acbedd46112ee18431"
 dependencies = [
  "cc",
  "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-highlight"
+version = "0.24.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6411813e4a9ebc87d391b98b0f3ce65d5361cd80c54de8651d8b85b555ea5d95"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "streaming-iterator",
+ "thiserror 1.0.69",
+ "tree-sitter",
 ]
 
 [[package]]
@@ -10865,15 +10823,6 @@ name = "y4m"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
-
-[[package]]
-name = "yaml-rust"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
-dependencies = [
- "linked-hash-map",
-]
 
 [[package]]
 name = "yoke"
