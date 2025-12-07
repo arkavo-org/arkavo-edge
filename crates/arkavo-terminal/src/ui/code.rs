@@ -184,27 +184,29 @@ impl CodeView {
         // Map highlight capture indices to colors (base16-ocean inspired)
         match HIGHLIGHT_NAMES.get(capture_index) {
             Some(&"keyword") => Style::default().fg(Color::Rgb(180, 142, 173)), // Purple
-            Some(&"string") | Some(&"string.special") => {
-                Style::default().fg(Color::Rgb(163, 190, 140))
-            } // Green
+            Some(&"string" | &"string.special") => {
+                Style::default().fg(Color::Rgb(163, 190, 140)) // Green
+            }
             Some(&"comment") => Style::default()
                 .fg(Color::Rgb(101, 115, 126))
                 .add_modifier(Modifier::ITALIC), // Gray italic
-            Some(&"function") | Some(&"function.builtin") | Some(&"function.macro") => {
-                Style::default().fg(Color::Rgb(143, 161, 179))
-            } // Blue
-            Some(&"type") | Some(&"type.builtin") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
-            Some(&"number") | Some(&"constant") | Some(&"constant.builtin") => {
-                Style::default().fg(Color::Rgb(208, 135, 112))
-            } // Orange
+            Some(&"function" | &"function.builtin" | &"function.macro") => {
+                Style::default().fg(Color::Rgb(143, 161, 179)) // Blue
+            }
+            Some(&"type" | &"type.builtin") => {
+                Style::default().fg(Color::Rgb(235, 203, 139)) // Yellow
+            }
+            Some(&"number" | &"constant" | &"constant.builtin") => {
+                Style::default().fg(Color::Rgb(208, 135, 112)) // Orange
+            }
             Some(&"operator") => Style::default().fg(Color::Rgb(192, 197, 206)), // Light gray
-            Some(&"variable") | Some(&"variable.builtin") | Some(&"variable.parameter") => {
-                Style::default().fg(Color::Rgb(191, 97, 106))
-            } // Red
+            Some(&"variable" | &"variable.builtin" | &"variable.parameter") => {
+                Style::default().fg(Color::Rgb(191, 97, 106)) // Red
+            }
             Some(&"property") => Style::default().fg(Color::Rgb(143, 161, 179)), // Blue
-            Some(&"punctuation")
-            | Some(&"punctuation.bracket")
-            | Some(&"punctuation.delimiter") => Style::default().fg(Color::Rgb(192, 197, 206)), // Light gray
+            Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => {
+                Style::default().fg(Color::Rgb(192, 197, 206)) // Light gray
+            }
             Some(&"attribute") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
             Some(&"constructor") => Style::default().fg(Color::Rgb(235, 203, 139)), // Yellow
             Some(&"tag") => Style::default().fg(Color::Rgb(191, 97, 106)),        // Red
