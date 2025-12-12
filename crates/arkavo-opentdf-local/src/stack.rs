@@ -3,7 +3,7 @@
 use crate::config::{ContainerSpec, OpenTdfEndpoints, StackConfig};
 use crate::error::{OpenTdfLocalError, Result};
 use crate::health::{check_opentdf_health, check_orchestrator_health};
-use crate::runtime::{detect_runtime, ContainerRuntime};
+use crate::runtime::{ContainerRuntime, detect_runtime};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::process::Command;
@@ -70,10 +70,18 @@ impl OpenTdfStack {
     /// Get the current stack status.
     pub async fn status(&self) -> Result<StackStatus> {
         let running = self.list_running_containers().await?;
-        let expected: Vec<&str> = self.config.containers.iter().map(|c| c.name.as_str()).collect();
+        let expected: Vec<&str> = self
+            .config
+            .containers
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
 
         let running_names: Vec<&str> = running.iter().map(|c| c.name.as_str()).collect();
-        let running_count = expected.iter().filter(|n| running_names.contains(n)).count();
+        let running_count = expected
+            .iter()
+            .filter(|n| running_names.contains(n))
+            .count();
 
         Ok(match running_count {
             0 => StackStatus::Stopped,
@@ -134,6 +142,7 @@ impl OpenTdfStack {
     ///
     /// Note: Auth is provided by the orchestrator running on localhost:3000,
     /// not by Keycloak in a container.
+    #[allow(clippy::unused_async)]
     pub async fn get_endpoints(&self) -> Result<OpenTdfEndpoints> {
         Ok(OpenTdfEndpoints {
             kas_url: "http://localhost:8080".to_string(),
@@ -188,10 +197,7 @@ impl OpenTdfStack {
                     if parts.len() >= 5 {
                         let name = parts[0].to_string();
                         // Only include OpenTDF-related containers (no longer includes keycloak)
-                        if ["opentdf", "opentdfdb"]
-                            .iter()
-                            .any(|n| name == *n)
-                        {
+                        if ["opentdf", "opentdfdb"].iter().any(|n| name == *n) {
                             let ip = if parts.len() >= 6 {
                                 Some(parts[5].to_string())
                             } else {
@@ -217,10 +223,7 @@ impl OpenTdfStack {
                     if parts.len() >= 3 {
                         let name = parts[0].to_string();
                         // Only include OpenTDF-related containers (no longer includes keycloak)
-                        if ["opentdf", "opentdfdb"]
-                            .iter()
-                            .any(|n| name.contains(n))
-                        {
+                        if ["opentdf", "opentdfdb"].iter().any(|n| name.contains(n)) {
                             return Some(ContainerInfo {
                                 name,
                                 image: parts[1].to_string(),
@@ -257,7 +260,13 @@ impl OpenTdfStack {
 
         // Check if network exists
         let check = Command::new(cmd)
-            .args(["network", "ls", "-q", "--filter", &format!("name={network}")])
+            .args([
+                "network",
+                "ls",
+                "-q",
+                "--filter",
+                &format!("name={network}"),
+            ])
             .output()
             .await
             .map_err(|e| OpenTdfLocalError::RuntimeError(e.to_string()))?;
@@ -326,14 +335,12 @@ impl OpenTdfStack {
 
         debug!("Running: {} {}", cmd, args.join(" "));
 
-        let output = Command::new(cmd)
-            .args(&args)
-            .output()
-            .await
-            .map_err(|e| OpenTdfLocalError::ContainerStartFailed {
+        let output = Command::new(cmd).args(&args).output().await.map_err(|e| {
+            OpenTdfLocalError::ContainerStartFailed {
                 name: spec.name.clone(),
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -397,7 +404,9 @@ impl OpenTdfStack {
                 break;
             }
             if attempt == 30 {
-                warn!("Orchestrator OIDC not available - start orchestrator with: arkavo orchestrator start");
+                warn!(
+                    "Orchestrator OIDC not available - start orchestrator with: arkavo orchestrator start"
+                );
             }
             sleep(Duration::from_secs(1)).await;
         }
@@ -422,16 +431,89 @@ impl OpenTdfStack {
         Ok(())
     }
 
-    /// Ensure configuration directories exist.
+    /// Ensure configuration directories exist and generate config files.
     async fn ensure_config_dirs(&self) -> Result<()> {
         tokio::fs::create_dir_all(&self.config.config_dir)
             .await
-            .map_err(|e| OpenTdfLocalError::ConfigError(format!("Failed to create config dir: {e}")))?;
+            .map_err(|e| {
+                OpenTdfLocalError::ConfigError(format!("Failed to create config dir: {e}"))
+            })?;
 
         tokio::fs::create_dir_all(&self.config.keys_dir)
             .await
-            .map_err(|e| OpenTdfLocalError::ConfigError(format!("Failed to create keys dir: {e}")))?;
+            .map_err(|e| {
+                OpenTdfLocalError::ConfigError(format!("Failed to create keys dir: {e}"))
+            })?;
 
+        // Generate opentdf.yaml config pointing to orchestrator OIDC
+        self.write_opentdf_config().await?;
+
+        Ok(())
+    }
+
+    /// Write the OpenTDF platform configuration file.
+    ///
+    /// This config points the OpenTDF platform to the orchestrator's built-in OIDC
+    /// provider instead of Keycloak.
+    async fn write_opentdf_config(&self) -> Result<()> {
+        let config_path = format!("{}/opentdf.yaml", self.config.config_dir);
+
+        // host.containers.internal resolves to the host machine from Apple containers
+        // For Docker/Podman on Linux, use host.docker.internal or gateway IP
+        let host_internal = if self.runtime == ContainerRuntime::AppleContainer {
+            "host.containers.internal"
+        } else {
+            "host.docker.internal"
+        };
+
+        let config = format!(
+            r#"# OpenTDF Platform Configuration
+# Auto-generated by arkavo - uses orchestrator OIDC provider
+
+server:
+  auth:
+    enabled: true
+    issuer: http://{host_internal}:3000
+    audience: opentdf
+    policy:
+      default: allow
+  grpc:
+    reflection: true
+  http:
+    enabled: true
+
+logger:
+  level: info
+  type: text
+
+db:
+  host: opentdfdb
+  port: 5432
+  user: postgres
+  password: changeme
+  database: opentdf
+  sslmode: disable
+
+services:
+  kas:
+    enabled: true
+  policy:
+    enabled: true
+  authorization:
+    enabled: true
+  entityresolution:
+    enabled: true
+    url: http://{host_internal}:3000/entityresolution
+  wellknown:
+    enabled: true
+"#
+        );
+
+        tokio::fs::write(&config_path, config).await.map_err(|e| {
+            OpenTdfLocalError::ConfigError(format!("Failed to write opentdf.yaml: {e}"))
+        })?;
+
+        debug!("Wrote OpenTDF config to {config_path}");
         Ok(())
     }
 }

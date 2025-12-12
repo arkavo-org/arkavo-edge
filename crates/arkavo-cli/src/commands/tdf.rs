@@ -141,7 +141,10 @@ async fn handle_encrypt(
     let effective_kas_url = if local {
         // Check for running local stack
         if let Some(stack) = arkavo_opentdf_local::OpenTdfStack::detect().await {
-            let endpoints = stack.get_endpoints().await.context("Failed to get local endpoints")?;
+            let endpoints = stack
+                .get_endpoints()
+                .await
+                .context("Failed to get local endpoints")?;
             println!("Using local OpenTDF stack");
             endpoints.kas_url
         } else {
@@ -213,7 +216,10 @@ async fn handle_decrypt(
     let kas_client = if local {
         // Use local OpenTDF stack with orchestrator OIDC
         if let Some(stack) = arkavo_opentdf_local::OpenTdfStack::detect().await {
-            let endpoints = stack.get_endpoints().await.context("Failed to get local endpoints")?;
+            let endpoints = stack
+                .get_endpoints()
+                .await
+                .context("Failed to get local endpoints")?;
             println!("Using local OpenTDF stack");
             println!("  KAS: {}", endpoints.kas_url);
             println!("  OAuth: {}", endpoints.oauth_url);

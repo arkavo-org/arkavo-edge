@@ -110,17 +110,17 @@ impl DataSecurityTool {
         }
 
         // Start the stack
-        let stack = OpenTdfStack::new().map_err(|e| {
-            crate::ToolError::Execution(format!("Failed to initialize stack: {e}"))
-        })?;
+        let stack = OpenTdfStack::new()
+            .map_err(|e| crate::ToolError::Execution(format!("Failed to initialize stack: {e}")))?;
 
         stack.start().await.map_err(|e| {
             crate::ToolError::Execution(format!("Failed to start OpenTDF stack: {e}"))
         })?;
 
-        let endpoints = stack.get_endpoints().await.map_err(|e| {
-            crate::ToolError::Execution(format!("Failed to get endpoints: {e}"))
-        })?;
+        let endpoints = stack
+            .get_endpoints()
+            .await
+            .map_err(|e| crate::ToolError::Execution(format!("Failed to get endpoints: {e}")))?;
 
         Ok(json!({
             "success": true,
@@ -231,7 +231,13 @@ mod tests {
 
         assert_eq!(schema.name, "enable_data_security");
         assert!(schema.description.contains("OpenTDF"));
-        assert!(schema.aliases.as_ref().unwrap().contains(&"opentdf".to_string()));
+        assert!(
+            schema
+                .aliases
+                .as_ref()
+                .unwrap()
+                .contains(&"opentdf".to_string())
+        );
     }
 
     #[tokio::test]

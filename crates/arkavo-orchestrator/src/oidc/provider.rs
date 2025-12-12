@@ -1,8 +1,8 @@
 //! OIDC Provider with client registry and JWT signing.
 
 use super::types::{AccessTokenClaims, ClientRegistration, JsonWebKey, JsonWebKeySet};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use rsa::traits::PublicKeyParts;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,10 +48,7 @@ impl OidcProvider {
         let rsa_e = URL_SAFE_NO_PAD.encode(e_bytes);
 
         // Generate key ID
-        let kid = format!(
-            "arkavo-{}",
-            &uuid::Uuid::new_v4().to_string()[..8]
-        );
+        let kid = format!("arkavo-{}", &uuid::Uuid::new_v4().to_string()[..8]);
 
         // Pre-register default OpenTDF client
         let mut clients = HashMap::new();

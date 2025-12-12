@@ -68,6 +68,33 @@ impl WebhookServer {
             .with_state(state)
     }
 
+    /// Create router with OIDC endpoints merged.
+    ///
+    /// OIDC endpoints (/.well-known/*, /token, /jwks) bypass signature verification
+    /// and rate limiting, as they use their own authentication (client credentials).
+    pub fn router_with_oidc(self, oidc_provider: Arc<crate::oidc::OidcProvider>) -> Router {
+        let state = Arc::new(self);
+
+        // Create OIDC router with its state finalized (becomes Router<()>)
+        let oidc_routes = crate::oidc::router(oidc_provider);
+
+        // Webhook routes with WebhookServer state
+        let webhook_routes = Router::new()
+            .route("/webhook", post(handle_webhook))
+            .route("/health", axum::routing::get(health_check))
+            .with_state(state.clone());
+
+        // Merge both routers (both are now Router<()>)
+        webhook_routes
+            .merge(oidc_routes)
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit_middleware,
+            ))
+            .layer(middleware::from_fn_with_state(state, verify_signature))
+            .layer(CorsLayer::permissive())
+    }
+
     fn verify_signature(&self, signature: &str, payload: &[u8]) -> Result<()> {
         let signature = signature
             .strip_prefix("sha256=")
@@ -101,6 +128,11 @@ impl WebhookServer {
     }
 }
 
+/// Check if a path is an OIDC endpoint that should bypass webhook middleware.
+fn is_oidc_path(path: &str) -> bool {
+    path.starts_with("/.well-known") || path == "/token" || path == "/jwks"
+}
+
 async fn rate_limit_middleware(
     State(server): State<Arc<WebhookServer>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -109,7 +141,8 @@ async fn rate_limit_middleware(
 ) -> Response {
     let path = request.uri().path();
 
-    if path == "/health" {
+    // Bypass rate limiting for health and OIDC endpoints
+    if path == "/health" || is_oidc_path(path) {
         return next.run(request).await;
     }
 
@@ -130,7 +163,8 @@ async fn verify_signature(
 ) -> Response {
     let path = request.uri().path();
 
-    if path == "/health" {
+    // Bypass signature verification for health and OIDC endpoints
+    if path == "/health" || is_oidc_path(path) {
         return next.run(request).await;
     }
 

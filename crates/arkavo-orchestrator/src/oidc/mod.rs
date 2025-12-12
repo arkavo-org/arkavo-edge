@@ -8,7 +8,7 @@ mod provider;
 mod token;
 mod types;
 
-use axum::{routing::get, routing::post, Router};
+use axum::{Router, routing::get, routing::post};
 use std::sync::Arc;
 
 pub use discovery::discovery;
@@ -18,7 +18,6 @@ pub use token::token;
 pub use types::{ClientRegistration, DiscoveryDocument, TokenRequest, TokenResponse};
 
 /// Create OIDC router with the given provider.
-#[must_use]
 pub fn router(provider: Arc<OidcProvider>) -> Router {
     Router::new()
         .route("/.well-known/openid-configuration", get(discovery))

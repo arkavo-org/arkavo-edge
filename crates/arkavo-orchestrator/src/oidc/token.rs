@@ -2,11 +2,11 @@
 
 use super::provider::OidcProvider;
 use super::types::{TokenRequest, TokenResponse};
+use axum::Form;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Form;
-use axum::Json;
 use std::sync::Arc;
 
 /// Error response for token endpoint.

@@ -2,8 +2,8 @@
 
 use super::provider::OidcProvider;
 use super::types::DiscoveryDocument;
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use std::sync::Arc;
 
 /// Handle discovery request (GET /.well-known/openid-configuration).

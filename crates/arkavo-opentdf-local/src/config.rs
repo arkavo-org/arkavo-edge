@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Default network name for OpenTDF containers.
-pub(crate) const DEFAULT_NETWORK: &str = "opentdf_platform";
+#[allow(unreachable_pub)]
+pub const DEFAULT_NETWORK: &str = "opentdf_platform";
 
 /// Container specifications for the OpenTDF stack.
 #[derive(Debug, Clone)]

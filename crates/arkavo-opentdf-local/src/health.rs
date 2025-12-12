@@ -4,20 +4,15 @@ use crate::error::Result;
 use tracing::{debug, warn};
 
 /// Check if the OpenTDF platform is healthy.
-pub(crate) async fn check_opentdf_health(base_url: &str) -> Result<bool> {
+#[allow(unreachable_pub)]
+pub async fn check_opentdf_health(base_url: &str) -> Result<bool> {
     let url = format!("{base_url}/.well-known/opentdf-configuration");
     check_http_endpoint(&url, "OpenTDF").await
 }
 
-/// Check if Keycloak is healthy (legacy, for backwards compatibility).
-#[allow(dead_code)]
-pub(crate) async fn check_keycloak_health(base_url: &str) -> Result<bool> {
-    let url = format!("{base_url}/realms/opentdf");
-    check_http_endpoint(&url, "Keycloak").await
-}
-
 /// Check if the orchestrator OIDC endpoint is healthy.
-pub(crate) async fn check_orchestrator_health(base_url: &str) -> Result<bool> {
+#[allow(unreachable_pub)]
+pub async fn check_orchestrator_health(base_url: &str) -> Result<bool> {
     let url = format!("{base_url}/.well-known/openid-configuration");
     check_http_endpoint(&url, "Orchestrator OIDC").await
 }
@@ -34,22 +29,12 @@ async fn check_http_endpoint(url: &str, service: &str) -> Result<bool> {
     let host_port = parsed.split('/').next().unwrap_or(parsed);
     let parts: Vec<&str> = host_port.split(':').collect();
 
+    let default_port = if url.starts_with("https") { 443 } else { 80 };
+
     let (host, port) = if parts.len() == 2 {
-        (
-            parts[0],
-            parts[1].parse::<u16>().unwrap_or(match url.starts_with("https") {
-                true => 443,
-                false => 80,
-            }),
-        )
+        (parts[0], parts[1].parse::<u16>().unwrap_or(default_port))
     } else {
-        (
-            parts[0],
-            match url.starts_with("https") {
-                true => 443,
-                false => 80,
-            },
-        )
+        (parts[0], default_port)
     };
 
     let addr = format!("{host}:{port}");

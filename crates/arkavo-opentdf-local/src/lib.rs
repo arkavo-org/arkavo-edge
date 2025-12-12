@@ -43,5 +43,5 @@ mod stack;
 
 pub use config::{OpenTdfEndpoints, StackConfig};
 pub use error::{OpenTdfLocalError, Result};
-pub use runtime::{detect_runtime, ContainerRuntime};
+pub use runtime::{ContainerRuntime, detect_runtime};
 pub use stack::{ContainerInfo, OpenTdfStack, StackStatus};

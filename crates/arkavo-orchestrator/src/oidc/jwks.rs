@@ -2,8 +2,8 @@
 
 use super::provider::OidcProvider;
 use super::types::JsonWebKeySet;
-use axum::extract::State;
 use axum::Json;
+use axum::extract::State;
 use std::sync::Arc;
 
 /// Handle JWKS request (GET /jwks).
