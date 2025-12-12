@@ -21,6 +21,9 @@ axum.workspace = true
 tower-http.workspace = true
 sha2.workspace = true
 jsonwebtoken.workspace = true
+base64.workspace = true
+rand.workspace = true
+rsa.workspace = true
 arkavo-protocol = { path = "../arkavo-protocol", features = ["metrics"] }
 arkavo-observability = { path = "../arkavo-observability" }
 arkavo-events = { path = "../arkavo-events" }

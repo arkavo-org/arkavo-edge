@@ -28,6 +28,9 @@ pub mod web_search;
 #[cfg(feature = "ntp-server")]
 pub mod ntp_server;
 
+#[cfg(feature = "data-security")]
+pub mod data_security;
+
 // Re-export commonly used types
 pub use registry::{DetailLevel, McpClient, McpTool, MinimalToolInfo, ToolInfo, ToolRegistry};
 pub use server::{Tool, ToolSchema};

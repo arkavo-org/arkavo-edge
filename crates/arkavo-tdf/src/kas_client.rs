@@ -22,6 +22,26 @@ pub const ARKAVO_KAS_URL: &str = "https://100.arkavo.net";
 /// KAS public key endpoint path.
 pub const KAS_PUBLIC_KEY_PATH: &str = "/kas/v2/kas_public_key";
 
+/// OAuth provider type for token acquisition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OAuthProvider {
+    /// Arkavo identity service (uses /oauth/token endpoint).
+    Arkavo,
+    /// Keycloak (uses /realms/{realm}/protocol/openid-connect/token endpoint).
+    Keycloak {
+        /// The Keycloak realm name.
+        realm: String,
+    },
+    /// Orchestrator built-in OIDC (uses /token endpoint).
+    Orchestrator,
+}
+
+impl Default for OAuthProvider {
+    fn default() -> Self {
+        Self::Arkavo
+    }
+}
+
 /// Configuration for Arkavo KAS client.
 #[derive(Debug, Clone)]
 pub struct ArkavoKasConfig {
@@ -35,6 +55,8 @@ pub struct ArkavoKasConfig {
     pub client_secret: Option<String>,
     /// Request timeout in seconds
     pub timeout_secs: u64,
+    /// OAuth provider type for token endpoint format.
+    pub oauth_provider: OAuthProvider,
 }
 
 impl ArkavoKasConfig {
@@ -47,6 +69,41 @@ impl ArkavoKasConfig {
             client_id: client_id.into(),
             client_secret: None,
             timeout_secs: 30,
+            oauth_provider: OAuthProvider::Arkavo,
+        }
+    }
+
+    /// Create config for local OpenTDF stack with Keycloak.
+    ///
+    /// Uses local Keycloak at `http://192.168.65.4:8888/auth` with realm `opentdf`
+    /// and local KAS at `http://localhost:8080`.
+    #[must_use]
+    pub fn for_local_opentdf() -> Self {
+        Self {
+            oauth_url: "http://192.168.65.4:8888/auth".to_string(),
+            kas_url: "http://localhost:8080".to_string(),
+            client_id: "opentdf-sdk".to_string(),
+            client_secret: Some("secret".to_string()),
+            timeout_secs: 30,
+            oauth_provider: OAuthProvider::Keycloak {
+                realm: "opentdf".to_string(),
+            },
+        }
+    }
+
+    /// Create config for local OpenTDF stack with orchestrator OIDC.
+    ///
+    /// Uses orchestrator at `http://localhost:3000` for auth
+    /// and local KAS at `http://localhost:8080`.
+    #[must_use]
+    pub fn for_local_orchestrator() -> Self {
+        Self {
+            oauth_url: "http://localhost:3000".to_string(),
+            kas_url: "http://localhost:8080".to_string(),
+            client_id: "opentdf-sdk".to_string(),
+            client_secret: Some("secret".to_string()),
+            timeout_secs: 30,
+            oauth_provider: OAuthProvider::Orchestrator,
         }
     }
 
@@ -77,6 +134,13 @@ impl ArkavoKasConfig {
         self.timeout_secs = secs;
         self
     }
+
+    /// Set OAuth provider type.
+    #[must_use]
+    pub fn with_oauth_provider(mut self, provider: OAuthProvider) -> Self {
+        self.oauth_provider = provider;
+        self
+    }
 }
 
 impl Default for ArkavoKasConfig {
@@ -87,6 +151,7 @@ impl Default for ArkavoKasConfig {
             client_id: String::new(),
             client_secret: None,
             timeout_secs: 30,
+            oauth_provider: OAuthProvider::Arkavo,
         }
     }
 }
@@ -177,8 +242,23 @@ impl ArkavoKasClient {
 
         info!("Acquiring OAuth token from {}", self.config.oauth_url);
 
-        // Build token request
-        let token_url = format!("{}/oauth/token", self.config.oauth_url);
+        // Build token request URL based on provider type
+        let token_url = match &self.config.oauth_provider {
+            OAuthProvider::Arkavo => {
+                format!("{}/oauth/token", self.config.oauth_url)
+            }
+            OAuthProvider::Keycloak { realm } => {
+                format!(
+                    "{}/realms/{}/protocol/openid-connect/token",
+                    self.config.oauth_url, realm
+                )
+            }
+            OAuthProvider::Orchestrator => {
+                format!("{}/token", self.config.oauth_url)
+            }
+        };
+
+        debug!("Token URL: {}", token_url);
 
         let mut params = vec![
             ("grant_type", "client_credentials"),
@@ -497,5 +577,47 @@ mod tests {
         assert_eq!(config.oauth_url, ARKAVO_OAUTH_URL);
         assert_eq!(config.kas_url, ARKAVO_KAS_URL);
         assert!(config.client_id.is_empty());
+        assert_eq!(config.oauth_provider, OAuthProvider::Arkavo);
+    }
+
+    #[test]
+    fn local_opentdf_config() {
+        let config = ArkavoKasConfig::for_local_opentdf();
+        assert_eq!(config.oauth_url, "http://192.168.65.4:8888/auth");
+        assert_eq!(config.kas_url, "http://localhost:8080");
+        assert_eq!(config.client_id, "opentdf-sdk");
+        assert_eq!(config.client_secret, Some("secret".to_string()));
+        assert_eq!(
+            config.oauth_provider,
+            OAuthProvider::Keycloak {
+                realm: "opentdf".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn keycloak_provider() {
+        let config = ArkavoKasConfig::new("my-client")
+            .with_oauth_url("http://localhost:8888/auth")
+            .with_oauth_provider(OAuthProvider::Keycloak {
+                realm: "myrealm".to_string(),
+            });
+
+        assert_eq!(
+            config.oauth_provider,
+            OAuthProvider::Keycloak {
+                realm: "myrealm".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn orchestrator_provider() {
+        let config = ArkavoKasConfig::for_local_orchestrator();
+        assert_eq!(config.oauth_url, "http://localhost:3000");
+        assert_eq!(config.kas_url, "http://localhost:8080");
+        assert_eq!(config.client_id, "opentdf-sdk");
+        assert_eq!(config.client_secret, Some("secret".to_string()));
+        assert_eq!(config.oauth_provider, OAuthProvider::Orchestrator);
     }
 }

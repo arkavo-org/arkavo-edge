@@ -38,6 +38,31 @@ fn get_or_create_runtime() -> &'static Runtime {
     })
 }
 
+/// Detects if the user is expressing intent related to data security.
+///
+/// Returns true for phrases like "secure my agents", "enable data security", etc.
+fn detect_security_intent(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+
+    let security_phrases = [
+        "secure my agents",
+        "enable data security",
+        "enable security",
+        "turn on opentdf",
+        "turn on encryption",
+        "encrypt my data",
+        "enable encryption",
+        "data protection",
+        "protect my data",
+        "start opentdf",
+        "data security mode",
+        "tdf encrypt",
+        "attribute-based encryption",
+    ];
+
+    security_phrases.iter().any(|p| lower.contains(p))
+}
+
 /// Determines if repository context should be attached based on the prompt
 fn should_attach_repo_context(prompt: &str) -> bool {
     let p = prompt.trim();
@@ -578,15 +603,28 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize prompt override directory if needed
     let _ = crate::prompt_loader::init_prompt_override_dir();
 
+    // Check if user has security intent to add relevant examples
+    let has_security_intent = prompt.as_ref().is_some_and(|p| detect_security_intent(p));
+
     // Build base system prompt (without repo context initially)
     let base_system_prompt = if mcp_client.is_some() && model_size_hint != Some("270M") {
         // Load chat system prompt with MCP tools info (skip for tiny models)
+        let security_examples = if has_security_intent {
+            r#"
+Q: "Secure my agents" → A: @enable_data_security {"action": "enable"}
+Q: "Enable data security" → A: @enable_data_security {"action": "enable"}
+Q: "Check security status" → A: @enable_data_security {"action": "status"}
+Q: "Encrypt this file" → A: @tdf_encrypt {"input_path": "file.txt"}"#
+        } else {
+            ""
+        };
+
         let tools_info = format!(
             "EXAMPLES:
 Q: \"What git branch am I on?\" → A: @git_status
 Q: \"List files here\" → A: @filesystem {{\"action\": \"list_directory\", \"dir_path\": \".\"}}
 Q: \"What's in the README?\" → A: @filesystem {{\"action\": \"read_file\", \"file_path\": \"README.md\"}}
-Q: \"Recent commits?\" → A: @git_status
+Q: \"Recent commits?\" → A: @git_status{security_examples}
 
 {mcp_info}"
         );

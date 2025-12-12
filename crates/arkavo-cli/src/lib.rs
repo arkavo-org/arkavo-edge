@@ -186,6 +186,35 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        "security" => {
+            let run_async = async {
+                use clap::Parser;
+
+                #[derive(Parser)]
+                #[command(name = "security")]
+                #[command(about = "Local OpenTDF data security stack management")]
+                struct Cli {
+                    #[command(subcommand)]
+                    command: commands::security::SecurityCommand,
+                }
+
+                let cli = Cli::parse_from(
+                    std::iter::once("security")
+                        .chain(args[1..].iter().map(std::string::String::as_str)),
+                );
+                commands::security::handle_security_command(cli.command)
+                    .await
+                    .map_err(std::convert::Into::into)
+            };
+
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => handle.block_on(run_async),
+                Err(_) => {
+                    let runtime = tokio::runtime::Runtime::new()?;
+                    runtime.block_on(run_async)
+                }
+            }
+        }
         "help" => {
             print_usage();
             Ok(())
@@ -215,6 +244,7 @@ fn print_usage() {
     println!("    orchestrator   GitHub issue orchestration");
     println!("    serve          Run as MCP server");
     println!("    tdf            TDF encryption and P2P transport");
+    println!("    security       Local OpenTDF data security stack");
     println!();
     println!("Run 'arkavo <command> --help' for detailed options");
     println!();

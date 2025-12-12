@@ -32,6 +32,10 @@ pub enum TdfCommand {
         /// KAS URL for key wrapping
         #[arg(long, default_value = "https://100.arkavo.net")]
         kas_url: String,
+
+        /// Use local OpenTDF stack (auto-detects or starts if needed)
+        #[arg(long)]
+        local: bool,
     },
 
     /// Decrypt a TDF file
@@ -51,6 +55,10 @@ pub enum TdfCommand {
         /// OAuth client secret
         #[arg(long, env = "ARKAVO_CLIENT_SECRET")]
         client_secret: Option<String>,
+
+        /// Use local OpenTDF stack
+        #[arg(long)]
+        local: bool,
     },
 
     /// Stage encrypted data to Iroh P2P network (requires --features iroh)
@@ -98,14 +106,16 @@ pub async fn handle_tdf_command(command: TdfCommand) -> Result<()> {
             namespace,
             values,
             kas_url,
-        } => handle_encrypt(input, output, namespace, values, kas_url).await,
+            local,
+        } => handle_encrypt(input, output, namespace, values, kas_url, local).await,
 
         TdfCommand::Decrypt {
             input,
             output,
             client_id,
             client_secret,
-        } => handle_decrypt(input, output, client_id, client_secret).await,
+            local,
+        } => handle_decrypt(input, output, client_id, client_secret, local).await,
 
         #[cfg(feature = "iroh")]
         TdfCommand::Stage { input, quiet } => handle_stage(input, quiet).await,
@@ -123,16 +133,32 @@ async fn handle_encrypt(
     namespace: String,
     values: Vec<String>,
     kas_url: String,
+    local: bool,
 ) -> Result<()> {
     use arkavo_tdf::{OpenTdfService, PolicyBuilder, TdfEncryptor};
 
+    // Determine KAS URL based on local flag
+    let effective_kas_url = if local {
+        // Check for running local stack
+        if let Some(stack) = arkavo_opentdf_local::OpenTdfStack::detect().await {
+            let endpoints = stack.get_endpoints().await.context("Failed to get local endpoints")?;
+            println!("Using local OpenTDF stack");
+            endpoints.kas_url
+        } else {
+            anyhow::bail!("Local OpenTDF stack not running. Start with: arkavo security start");
+        }
+    } else {
+        kas_url
+    };
+
     println!("Encrypting {}...", input.display());
+    println!("  KAS: {}", effective_kas_url);
 
     let plaintext = fs::read(&input)
         .await
         .with_context(|| format!("Failed to read {}", input.display()))?;
 
-    let service = OpenTdfService::with_kas_url(kas_url);
+    let service = OpenTdfService::with_kas_url(effective_kas_url);
 
     // Convert Vec<String> to Vec<&str> for the API
     let value_refs: Vec<&str> = values.iter().map(String::as_str).collect();
@@ -171,8 +197,9 @@ async fn handle_decrypt(
     output: Option<PathBuf>,
     client_id: Option<String>,
     client_secret: Option<String>,
+    local: bool,
 ) -> Result<()> {
-    use arkavo_tdf::{ArkavoKasClient, ArkavoKasConfig, TdfManifest};
+    use arkavo_tdf::{ArkavoKasClient, ArkavoKasConfig, OAuthProvider, TdfManifest};
 
     println!("Decrypting {}...", input.display());
 
@@ -183,18 +210,37 @@ async fn handle_decrypt(
     let manifest: TdfManifest =
         serde_json::from_str(&json).context("Failed to parse TDF manifest")?;
 
-    let client_id = client_id.ok_or_else(|| {
-        anyhow::anyhow!(
-            "OAuth client ID required. Set --client-id or ARKAVO_CLIENT_ID environment variable"
-        )
-    })?;
+    let kas_client = if local {
+        // Use local OpenTDF stack with orchestrator OIDC
+        if let Some(stack) = arkavo_opentdf_local::OpenTdfStack::detect().await {
+            let endpoints = stack.get_endpoints().await.context("Failed to get local endpoints")?;
+            println!("Using local OpenTDF stack");
+            println!("  KAS: {}", endpoints.kas_url);
+            println!("  OAuth: {}", endpoints.oauth_url);
 
-    let mut config = ArkavoKasConfig::new(client_id);
-    if let Some(secret) = client_secret {
-        config = config.with_client_secret(secret);
-    }
+            let config = ArkavoKasConfig::new(&endpoints.client_id)
+                .with_client_secret(&endpoints.client_secret)
+                .with_kas_url(&endpoints.kas_url)
+                .with_oauth_url(&endpoints.oauth_url)
+                .with_oauth_provider(OAuthProvider::Orchestrator);
+            ArkavoKasClient::new(config)?
+        } else {
+            anyhow::bail!("Local OpenTDF stack not running. Start with: arkavo security start");
+        }
+    } else {
+        let client_id = client_id.ok_or_else(|| {
+            anyhow::anyhow!(
+                "OAuth client ID required. Set --client-id or ARKAVO_CLIENT_ID environment variable"
+            )
+        })?;
 
-    let kas_client = ArkavoKasClient::new(config)?;
+        let mut config = ArkavoKasConfig::new(client_id);
+        if let Some(secret) = client_secret {
+            config = config.with_client_secret(secret);
+        }
+        ArkavoKasClient::new(config)?
+    };
+
     let plaintext = kas_client
         .decrypt_manifest(&manifest)
         .await

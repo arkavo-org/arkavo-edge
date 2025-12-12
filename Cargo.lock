@@ -412,6 +412,7 @@ dependencies = [
  "arkavo-memory",
  "arkavo-mesh-tools",
  "arkavo-observability",
+ "arkavo-opentdf-local",
  "arkavo-orchestrator",
  "arkavo-protocol",
  "arkavo-registration",
@@ -825,6 +826,7 @@ dependencies = [
  "arkavo-git",
  "arkavo-mcp",
  "arkavo-observability",
+ "arkavo-opentdf-local",
  "arkavo-tdf",
  "arkavo-tdf-iroh",
  "async-trait",
@@ -903,6 +905,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-opentdf-local"
+version = "0.47.2"
+dependencies = [
+ "async-trait",
+ "dirs 6.0.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "arkavo-orchestrator"
 version = "0.47.2"
 dependencies = [
@@ -918,11 +933,14 @@ dependencies = [
  "arkavo-protocol",
  "arkavo-router",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "hex",
  "hmac",
  "jsonwebtoken",
+ "rand 0.8.5",
  "reqwest",
+ "rsa",
  "serde",
  "serde_json",
  "sha2 0.10.9",

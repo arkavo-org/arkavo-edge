@@ -55,6 +55,7 @@ arkavo-crypto = { path = "../arkavo-crypto" }
 arkavo-registration = { path = "../arkavo-registration" }
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf", "kas"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
+arkavo-opentdf-local = { path = "../arkavo-opentdf-local" }
 mdns-sd = { workspace = true, optional = true }
 async-trait = { workspace = true }
 log = { workspace = true }
@@ -94,7 +95,7 @@ arkavo-mcp-macos = { path = "../arkavo-mcp-macos", optional = true }
 
 # Unix dependencies (macOS and Linux)
 [target.'cfg(unix)'.dependencies]
-arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools", optional = true, features = ["data-security"] }
 arkavo-mesh-tools = { path = "../arkavo-mesh-tools", optional = true }
 
 

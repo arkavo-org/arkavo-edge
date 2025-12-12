@@ -61,5 +61,5 @@ pub use opentdf_impl::{OpenTdfConfig, OpenTdfService};
 // Re-export KAS client when feature is enabled
 #[cfg(feature = "kas")]
 pub use kas_client::{
-    ARKAVO_KAS_URL, ARKAVO_OAUTH_URL, ArkavoKasClient, ArkavoKasConfig, KasPublicKey,
+    ARKAVO_KAS_URL, ARKAVO_OAUTH_URL, ArkavoKasClient, ArkavoKasConfig, KasPublicKey, OAuthProvider,
 };

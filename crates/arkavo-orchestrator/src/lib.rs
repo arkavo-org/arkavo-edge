@@ -19,6 +19,7 @@ pub mod github_auth;
 pub mod github_operations;
 pub mod issue_analyzer;
 pub mod issue_router;
+pub mod oidc;
 pub mod orchestrator;
 pub mod types;
 pub mod webhook;

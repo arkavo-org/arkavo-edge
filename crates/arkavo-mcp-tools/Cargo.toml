@@ -41,6 +41,9 @@ chrono-tz = "0.9"
 arkavo-tdf = { path = "../arkavo-tdf", features = ["opentdf"] }
 arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", optional = true }
 
+# For data security / local OpenTDF
+arkavo-opentdf-local = { path = "../arkavo-opentdf-local", optional = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
@@ -49,6 +52,7 @@ criterion = { workspace = true }
 default = []
 ntp-server = []
 iroh = ["dep:arkavo-tdf-iroh"]
+data-security = ["dep:arkavo-opentdf-local"]
 
 [lints]
 workspace = true
