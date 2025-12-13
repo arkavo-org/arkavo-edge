@@ -2,10 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Default network name for OpenTDF containers.
-#[allow(unreachable_pub)]
-pub const DEFAULT_NETWORK: &str = "opentdf_platform";
-
 /// Container specifications for the OpenTDF stack.
 #[derive(Debug, Clone)]
 pub struct ContainerSpec {
@@ -40,15 +36,13 @@ pub struct StackConfig {
 
 impl Default for StackConfig {
     fn default() -> Self {
-        let home = dirs::home_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "/tmp".to_string());
-
-        let config_dir = format!("{home}/.arkavo/opentdf/config");
-        let keys_dir = format!("{home}/.arkavo/opentdf/keys");
+        // Use temp directory for config to avoid permission issues
+        let base_dir = std::env::temp_dir();
+        let config_dir = format!("{}/arkavo-opentdf/config", base_dir.display());
+        let keys_dir = format!("{}/arkavo-opentdf/keys", base_dir.display());
 
         Self {
-            network: DEFAULT_NETWORK.to_string(),
+            network: "opentdf_platform".to_string(),
             config_dir: config_dir.clone(),
             keys_dir: keys_dir.clone(),
             containers: vec![

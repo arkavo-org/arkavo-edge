@@ -1,5 +1,5 @@
 use anyhow::Result;
-use arkavo_orchestrator::{GitHubApp, OrchestratorConfig, WebhookServer};
+use arkavo_orchestrator::{GitHubApp, OrchestratorConfig, WebhookServer, oidc::OidcProvider};
 use arkavo_protocol::rate_limit::RateLimitConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -58,7 +58,13 @@ pub(super) async fn start_orchestrator(
 
     let orchestrator = create_orchestrator(github_app).await?;
 
-    let app = webhook_server.router();
+    // Create OIDC provider for local OpenTDF authentication
+    let issuer = format!("http://localhost:{}", config.webhook_port);
+    let oidc_provider = Arc::new(OidcProvider::new(issuer.clone()));
+    info!("OIDC provider initialized at {}", issuer);
+
+    // Create router with OIDC endpoints merged
+    let app = webhook_server.router_with_oidc(oidc_provider);
     let addr = SocketAddr::from(([0, 0, 0, 0], config.webhook_port));
 
     info!("Starting webhook server on {}", addr);

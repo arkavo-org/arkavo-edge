@@ -155,7 +155,7 @@ async fn handle_encrypt(
     };
 
     println!("Encrypting {}...", input.display());
-    println!("  KAS: {}", effective_kas_url);
+    println!("  KAS: {effective_kas_url}");
 
     let plaintext = fs::read(&input)
         .await

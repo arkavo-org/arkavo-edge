@@ -23,9 +23,10 @@ pub const ARKAVO_KAS_URL: &str = "https://100.arkavo.net";
 pub const KAS_PUBLIC_KEY_PATH: &str = "/kas/v2/kas_public_key";
 
 /// OAuth provider type for token acquisition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum OAuthProvider {
     /// Arkavo identity service (uses /oauth/token endpoint).
+    #[default]
     Arkavo,
     /// Keycloak (uses /realms/{realm}/protocol/openid-connect/token endpoint).
     Keycloak {
@@ -34,12 +35,6 @@ pub enum OAuthProvider {
     },
     /// Orchestrator built-in OIDC (uses /token endpoint).
     Orchestrator,
-}
-
-impl Default for OAuthProvider {
-    fn default() -> Self {
-        Self::Arkavo
-    }
 }
 
 /// Configuration for Arkavo KAS client.

@@ -100,19 +100,22 @@ impl OpenTdfStack {
         // Create network if needed
         self.ensure_network().await?;
 
-        // Start containers in dependency order
+        // Write config (Docker/Podman use hostnames for container networking)
+        self.write_opentdf_config().await?;
+
+        // Start containers
         for container in &self.config.containers {
+            if self.is_container_running(&container.name).await? {
+                info!("Container {} already running", container.name);
+                continue;
+            }
+
             // Wait for dependencies
             for dep in &container.depends_on {
                 self.wait_for_container(dep).await?;
             }
 
-            // Start the container if not already running
-            if !self.is_container_running(&container.name).await? {
-                self.start_container(container).await?;
-            } else {
-                info!("Container {} already running", container.name);
-            }
+            self.start_container(container).await?;
         }
 
         // Wait for services to be healthy
@@ -157,27 +160,11 @@ impl OpenTdfStack {
     async fn list_running_containers(&self) -> Result<Vec<ContainerInfo>> {
         let cmd = self.runtime.command();
 
-        // Apple container CLI uses 'list' instead of 'ps'
-        let list_cmd = if self.runtime == ContainerRuntime::AppleContainer {
-            "list"
-        } else {
-            "ps"
-        };
-
-        let output = if self.runtime == ContainerRuntime::AppleContainer {
-            // Apple container CLI output format is different
-            Command::new(cmd)
-                .arg(list_cmd)
-                .output()
-                .await
-                .map_err(|e| OpenTdfLocalError::RuntimeError(e.to_string()))?
-        } else {
-            Command::new(cmd)
-                .args([list_cmd, "--format", "{{.Names}}\t{{.Image}}\t{{.State}}"])
-                .output()
-                .await
-                .map_err(|e| OpenTdfLocalError::RuntimeError(e.to_string()))?
-        };
+        let output = Command::new(cmd)
+            .args(["ps", "--format", "{{.Names}}\t{{.Image}}\t{{.State}}"])
+            .output()
+            .await
+            .map_err(|e| OpenTdfLocalError::RuntimeError(e.to_string()))?;
 
         if !output.status.success() {
             return Ok(vec![]);
@@ -185,57 +172,25 @@ impl OpenTdfStack {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        let containers: Vec<ContainerInfo> = if self.runtime == ContainerRuntime::AppleContainer {
-            // Parse Apple container list format:
-            // ID          IMAGE                                 OS     ARCH   STATE    ADDR          CPUS  MEMORY
-            // opentdf     registry.opentdf.io/platform:nightly  linux  arm64  running  192.168.65.8  4     1024 MB
-            stdout
-                .lines()
-                .skip(1) // Skip header line
-                .filter_map(|line| {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 5 {
-                        let name = parts[0].to_string();
-                        // Only include OpenTDF-related containers (no longer includes keycloak)
-                        if ["opentdf", "opentdfdb"].iter().any(|n| name == *n) {
-                            let ip = if parts.len() >= 6 {
-                                Some(parts[5].to_string())
-                            } else {
-                                None
-                            };
-                            return Some(ContainerInfo {
-                                name,
-                                image: parts[1].to_string(),
-                                state: parts[4].to_string(),
-                                ip_address: ip,
-                            });
-                        }
+        let containers: Vec<ContainerInfo> = stdout
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() >= 3 {
+                    let name = parts[0].to_string();
+                    // Only include OpenTDF-related containers
+                    if name.contains("opentdf") {
+                        return Some(ContainerInfo {
+                            name,
+                            image: parts[1].to_string(),
+                            state: parts[2].to_string(),
+                            ip_address: None,
+                        });
                     }
-                    None
-                })
-                .collect()
-        } else {
-            // Docker/Podman format
-            stdout
-                .lines()
-                .filter_map(|line| {
-                    let parts: Vec<&str> = line.split('\t').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0].to_string();
-                        // Only include OpenTDF-related containers (no longer includes keycloak)
-                        if ["opentdf", "opentdfdb"].iter().any(|n| name.contains(n)) {
-                            return Some(ContainerInfo {
-                                name,
-                                image: parts[1].to_string(),
-                                state: parts[2].to_string(),
-                                ip_address: None,
-                            });
-                        }
-                    }
-                    None
-                })
-                .collect()
-        };
+                }
+                None
+            })
+            .collect();
 
         Ok(containers)
     }
@@ -431,7 +386,7 @@ impl OpenTdfStack {
         Ok(())
     }
 
-    /// Ensure configuration directories exist and generate config files.
+    /// Ensure configuration directories exist.
     async fn ensure_config_dirs(&self) -> Result<()> {
         tokio::fs::create_dir_all(&self.config.config_dir)
             .await
@@ -445,9 +400,6 @@ impl OpenTdfStack {
                 OpenTdfLocalError::ConfigError(format!("Failed to create keys dir: {e}"))
             })?;
 
-        // Generate opentdf.yaml config pointing to orchestrator OIDC
-        self.write_opentdf_config().await?;
-
         Ok(())
     }
 
@@ -458,22 +410,14 @@ impl OpenTdfStack {
     async fn write_opentdf_config(&self) -> Result<()> {
         let config_path = format!("{}/opentdf.yaml", self.config.config_dir);
 
-        // host.containers.internal resolves to the host machine from Apple containers
-        // For Docker/Podman on Linux, use host.docker.internal or gateway IP
-        let host_internal = if self.runtime == ContainerRuntime::AppleContainer {
-            "host.containers.internal"
-        } else {
-            "host.docker.internal"
-        };
-
-        let config = format!(
-            r#"# OpenTDF Platform Configuration
+        // Docker/Podman use host.docker.internal to reach the host machine
+        let config = r#"# OpenTDF Platform Configuration
 # Auto-generated by arkavo - uses orchestrator OIDC provider
 
 server:
   auth:
     enabled: true
-    issuer: http://{host_internal}:3000
+    issuer: http://host.docker.internal:3000
     audience: opentdf
     policy:
       default: allow
@@ -503,11 +447,10 @@ services:
     enabled: true
   entityresolution:
     enabled: true
-    url: http://{host_internal}:3000/entityresolution
+    url: http://host.docker.internal:3000/entityresolution
   wellknown:
     enabled: true
-"#
-        );
+"#;
 
         tokio::fs::write(&config_path, config).await.map_err(|e| {
             OpenTdfLocalError::ConfigError(format!("Failed to write opentdf.yaml: {e}"))

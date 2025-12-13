@@ -19,6 +19,13 @@ pub enum SecurityCommand {
 
     /// Show status of the local OpenTDF stack
     Status,
+
+    /// Start OIDC provider for local OpenTDF authentication
+    Oidc {
+        /// Port to listen on (default: 3000)
+        #[arg(long, short, default_value = "3000")]
+        port: u16,
+    },
 }
 
 /// Handle security subcommands.
@@ -101,6 +108,44 @@ pub async fn handle_security_command(command: SecurityCommand) -> Result<()> {
             Ok(())
         }
 
+        SecurityCommand::Oidc { port } => {
+            use arkavo_orchestrator::oidc::OidcProvider;
+            use axum::Router;
+            use std::net::SocketAddr;
+            use std::sync::Arc;
+
+            let issuer = format!("http://localhost:{port}");
+            let provider = Arc::new(OidcProvider::new(issuer.clone()));
+
+            // Create router with OIDC endpoints
+            let app: Router = arkavo_orchestrator::oidc::router(provider);
+            let addr = SocketAddr::from(([0, 0, 0, 0], port));
+
+            println!("Starting OIDC provider on http://0.0.0.0:{port}");
+            println!("Issuer URL: {issuer}");
+            println!();
+            println!("Endpoints:");
+            println!("  Discovery: {issuer}/.well-known/openid-configuration");
+            println!("  Token:     {issuer}/token");
+            println!("  JWKS:      {issuer}/jwks");
+            println!();
+            println!("Client credentials:");
+            println!("  Client ID:     opentdf-sdk");
+            println!("  Client Secret: secret");
+            println!();
+            println!("Press Ctrl+C to stop.");
+
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await
+                .context("Failed to bind to port")?;
+
+            axum::serve(listener, app)
+                .await
+                .context("Server error")?;
+
+            Ok(())
+        }
+
         SecurityCommand::Status => {
             match OpenTdfStack::detect().await {
                 Some(stack) => {
@@ -143,9 +188,7 @@ pub async fn handle_security_command(command: SecurityCommand) -> Result<()> {
                             println!();
                             println!("Error: {e}");
                             println!();
-                            println!(
-                                "Install Docker, Podman, or Apple Container CLI to enable data security."
-                            );
+                            println!("Install Docker or Podman to enable data security.");
                         }
                     }
                 }
