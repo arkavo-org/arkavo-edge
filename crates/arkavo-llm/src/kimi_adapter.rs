@@ -1,6 +1,6 @@
 //! Adapter to use arkavo-kimi provider with arkavo-llm
 
-use crate::{Error, Message, Provider, Result, Role, StreamResponse};
+use crate::{Error, LlmConfig, Message, Provider, Result, Role, StreamResponse};
 use arkavo_kimi::{KimiConfig, KimiProvider as InnerKimiProvider};
 use async_trait::async_trait;
 use tokio_stream::Stream;
@@ -31,6 +31,33 @@ impl KimiProvider {
         })?;
 
         Ok(Self { inner })
+    }
+
+    /// Create from LlmConfig
+    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+        let api_key = config
+            .get_api_key("MOONSHOT_API_KEY")
+            .ok_or_else(|| Error::Config("MOONSHOT_API_KEY not provided in config".to_string()))?;
+
+        let mut kimi_config = KimiConfig {
+            api_key: api_key.clone(),
+            ..Default::default()
+        };
+
+        if let Some(base_url) = &config.base_url {
+            kimi_config.base_url.clone_from(base_url);
+        }
+
+        if let Some(model) = &config.model {
+            kimi_config.model = match model.as_str() {
+                "moonshot-v1-8k" => arkavo_kimi::Model::MoonshotV1_8k,
+                "moonshot-v1-32k" => arkavo_kimi::Model::MoonshotV1_32k,
+                "moonshot-v1-128k" => arkavo_kimi::Model::MoonshotV1_128k,
+                _ => arkavo_kimi::Model::MoonshotV1_8k,
+            };
+        }
+
+        Self::new(kimi_config)
     }
 
     /// Set temperature for generation

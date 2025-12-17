@@ -1,7 +1,7 @@
 //! Adapter to use arkavo-deepseek provider with arkavo-llm
 
 use crate::tool_parser::ParsedToolCall;
-use crate::{Error, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
+use crate::{Error, LlmConfig, Message, Provider, ProviderResponse, Result, Role, StreamResponse};
 use arkavo_deepseek::{
     ChatMessage, DeepSeekConfig, DeepSeekProvider as InnerDeepSeekProvider, MessageContent, Tool,
     ToolFunction, V32_SPECIALE_BASE_URL, V32_SPECIALE_EXPIRATION,
@@ -39,6 +39,28 @@ impl DeepSeekProvider {
         })?;
 
         Ok(Self { inner })
+    }
+
+    /// Create from LlmConfig
+    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+        let api_key = config
+            .get_api_key("DEEPSEEK_API_KEY")
+            .ok_or_else(|| Error::Config("DEEPSEEK_API_KEY not provided in config".to_string()))?;
+
+        let mut deepseek_config = DeepSeekConfig {
+            api_key: api_key.clone(),
+            ..Default::default()
+        };
+
+        if let Some(base_url) = &config.base_url {
+            deepseek_config.base_url.clone_from(base_url);
+        }
+
+        if let Some(model) = &config.model {
+            deepseek_config.model.clone_from(model);
+        }
+
+        Self::new(deepseek_config)
     }
 
     /// Set temperature for generation

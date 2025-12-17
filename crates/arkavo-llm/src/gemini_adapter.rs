@@ -1,3 +1,4 @@
+use crate::config::LlmConfig;
 use crate::error::{Error, Result};
 use crate::message::Message;
 use crate::provider::{Provider, ProviderResponse};
@@ -29,6 +30,22 @@ impl GeminiProvider {
     /// Try to create a Gemini provider, returning None if API key is not available
     pub fn try_new() -> Option<Self> {
         Self::new().ok()
+    }
+
+    /// Create from LlmConfig
+    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+        let api_key = config
+            .get_api_key("GEMINI_API_KEY")
+            .ok_or_else(|| Error::Config("GEMINI_API_KEY not provided in config".to_string()))?;
+
+        let model = config
+            .model
+            .clone()
+            .unwrap_or_else(|| "gemini-flash-latest".to_string());
+
+        Ok(Self {
+            client: RestClient::new(api_key.clone(), model),
+        })
     }
 }
 

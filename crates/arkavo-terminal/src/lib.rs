@@ -525,7 +525,7 @@ pub async fn run() -> Result<()> {
 
 #[cfg(any(feature = "llm-remote", feature = "llama-cpp"))]
 async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
-    use arkavo_llm::{LlmClient, Message};
+    use arkavo_llm::{LlmClient, LlmConfig, Message};
     use arkavo_memory::storage::MemoryStorage;
     use std::sync::Arc;
 
@@ -543,14 +543,12 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
         .find(|c| c.memory.content != "CLEARED" && c.memory.content.starts_with("http"));
 
     if let Some(config) = valid_config {
-        // Use saved configuration
+        // Use saved configuration with LlmConfig
         let server_url = &config.memory.content;
-        unsafe {
-            std::env::set_var("OLLAMA_BASE_URL", server_url);
-        }
+        let llm_config = LlmConfig::new("ollama").with_base_url(server_url);
 
         // Try to connect with saved URL
-        if let Ok(client) = LlmClient::from_env() {
+        if let Ok(client) = LlmClient::from_config(&llm_config) {
             let test_message = vec![Message::user("ping")];
             if client.complete(test_message).await.is_ok() {
                 return Ok(client);
@@ -559,7 +557,8 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
     }
 
     // Try default localhost first
-    match LlmClient::from_env() {
+    let default_config = LlmConfig::ollama();
+    match LlmClient::from_config(&default_config) {
         Ok(client) => {
             // Test if the client can connect
             let test_message = vec![Message::user("ping")];
@@ -582,7 +581,7 @@ async fn initialize_llm_client() -> Result<arkavo_llm::LlmClient> {
 async fn prompt_for_ollama_config(
     storage: Arc<arkavo_memory::storage::MemoryStorage>,
 ) -> Result<arkavo_llm::LlmClient> {
-    use arkavo_llm::{LlmClient, Message};
+    use arkavo_llm::{LlmClient, LlmConfig, Message};
     use std::io::{self, Write};
 
     eprintln!("⚠️  Could not connect to Ollama at localhost:11434");
@@ -606,13 +605,11 @@ async fn prompt_for_ollama_config(
         format!("http://{input}")
     };
 
-    // Set the environment variable
-    unsafe {
-        std::env::set_var("OLLAMA_BASE_URL", &base_url);
-    }
+    // Create config with the provided URL
+    let llm_config = LlmConfig::new("ollama").with_base_url(&base_url);
 
     // Try to create client and test it
-    match LlmClient::from_env() {
+    match LlmClient::from_config(&llm_config) {
         Ok(client) => {
             let test_message = vec![Message::user("ping")];
             match client.complete(test_message).await {
