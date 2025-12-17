@@ -1,0 +1,67 @@
+[package]
+name = "arkavo-profile-iroh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Creator profile storage and sync service using Iroh P2P - powers iroh.arkavo.net"
+repository = "https://github.com/arkavo-com/arkavo-edge"
+keywords = ["iroh", "p2p", "profile", "creator", "sync"]
+categories = ["network-programming", "web-programming"]
+
+[[bin]]
+name = "arkavo-profile-iroh"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+arkavo-tdf-iroh = { path = "../arkavo-tdf-iroh", features = ["fs-store"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs", "net", "io-util", "sync", "signal"] }
+async-trait = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# TLS
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio-rustls = "0.26"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Crypto
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "ecdh"] }
+z85 = "3.0"
+sha2 = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Base encoding
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[features]
+default = []
+
+[lints]
+workspace = true
