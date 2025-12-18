@@ -18,7 +18,7 @@ use crate::types::{
     TaskDeclareResponse, TaskGetRequest, TaskGetResponse, TaskResponse, TaskStatus, UserMessage,
 };
 use arkavo_events::{Event, EventPayload, EventWriter, EventWriterConfig};
-use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, StreamLlmModel};
+use arkavo_llm::{DeltaType, LlmClient, LlmClientAdapter, LlmConfig, StreamLlmModel};
 use async_trait::async_trait;
 use futures::StreamExt;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
@@ -1812,14 +1812,8 @@ impl A2aRpcImpl {
             // Note: listen address is stored in endpoint field
             metadata.endpoint.clone_from(&new_config.listen);
 
-            // Update API keys in metadata and environment
+            // Update API keys in metadata (no longer setting env vars - use LlmConfig instead)
             metadata.api_keys.clone_from(&new_config.api_keys);
-            for (key, value) in &new_config.api_keys {
-                // SAFETY: We control the key and value from our config file
-                unsafe {
-                    std::env::set_var(key, value);
-                }
-            }
 
             info!("Updated agent metadata for '{}'", metadata.name);
             info!("  Purpose: {}", metadata.purpose);
@@ -1987,15 +1981,8 @@ async fn reload_configuration_for_watcher(
         let mut metadata = agent_metadata.write().await;
         metadata.purpose.clone_from(&new_config.purpose);
         metadata.endpoint.clone_from(&new_config.listen);
+        // Update API keys in metadata (no longer setting env vars - use LlmConfig instead)
         metadata.api_keys.clone_from(&new_config.api_keys);
-
-        // Update environment variables
-        for (key, value) in &new_config.api_keys {
-            // SAFETY: We control the key and value from our config file
-            unsafe {
-                std::env::set_var(key, value);
-            }
-        }
 
         info!("Updated agent metadata for '{}'", metadata.name);
         info!("  Purpose: {}", metadata.purpose);
@@ -2329,16 +2316,11 @@ impl A2aServer {
         if let Some((provider, rest)) = model_url.split_once("://") {
             match provider {
                 "ollama" => {
-                    // Set environment variables for Ollama client
+                    // Create config for Ollama client
                     if let Some((host_port, model_name)) = rest.rsplit_once('/') {
-                        unsafe {
-                            std::env::set_var("LLM_PROVIDER", "ollama");
-                            std::env::set_var("OLLAMA_BASE_URL", format!("http://{host_port}"));
-                            std::env::set_var("OLLAMA_MODEL", model_name);
-                        }
-
-                        // Create LLM client from environment
-                        let client = LlmClient::from_env().map_err(|e| {
+                        let config =
+                            LlmConfig::ollama_with(format!("http://{host_port}"), model_name);
+                        let client = LlmClient::from_config(&config).map_err(|e| {
                             A2aError::InvalidRequest(format!("Failed to create LLM client: {e}"))
                         })?;
                         Ok(Arc::new(LlmClientAdapter::new(client)))
@@ -2350,21 +2332,24 @@ impl A2aServer {
                 }
                 "kimi" => {
                     // KIMI format: kimi://model-name (e.g., kimi://moonshot-v1-128k)
-                    unsafe {
-                        std::env::set_var("LLM_PROVIDER", "kimi");
-                        // Extract model name from rest (e.g., moonshot-v1-128k)
-                        if !rest.is_empty() {
-                            // Model name is already in the correct format
-                            std::env::set_var("KIMI_MODEL", rest);
-                        }
+                    let api_key = api_keys
+                        .get("MOONSHOT_API_KEY")
+                        .cloned()
+                        .or_else(|| std::env::var("MOONSHOT_API_KEY").ok());
 
-                        // Set API key from agent config if available
-                        if let Some(api_key) = api_keys.get("MOONSHOT_API_KEY") {
-                            std::env::set_var("MOONSHOT_API_KEY", api_key);
-                        }
+                    let mut config = if let Some(key) = api_key {
+                        LlmConfig::kimi(key)
+                    } else {
+                        return Err(A2aError::InvalidRequest(
+                            "MOONSHOT_API_KEY not provided in config or environment".to_string(),
+                        ));
+                    };
+
+                    if !rest.is_empty() {
+                        config.model = Some(rest.to_string());
                     }
-                    // Create LLM client from environment
-                    let client = LlmClient::from_env().map_err(|e| {
+
+                    let client = LlmClient::from_config(&config).map_err(|e| {
                         A2aError::InvalidRequest(format!("Failed to create KIMI client: {e}"))
                     })?;
                     Ok(Arc::new(LlmClientAdapter::new(client)))
@@ -2380,8 +2365,9 @@ impl A2aServer {
                 model_url
             );
 
-            // Try to create client from environment variables (LLM_PROVIDER, etc.)
-            let client = LlmClient::from_env().map_err(|e| {
+            // Try to create client from environment config (reads env vars once at startup)
+            let config = LlmConfig::from_env();
+            let client = LlmClient::from_config(&config).map_err(|e| {
                 A2aError::InvalidRequest(format!(
                     "Failed to create LLM client for model '{model_url}' from environment: {e}. \
                      Either use format 'provider://host:port/model' or set LLM_PROVIDER env var"

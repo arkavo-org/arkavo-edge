@@ -1,4 +1,5 @@
 use crate::chat::ChatRequest;
+use crate::config::LlmConfig;
 #[cfg(feature = "llm-remote")]
 use crate::ollama::OllamaClient;
 use crate::{Error, Message, Provider, Result, StreamResponse};
@@ -43,6 +44,53 @@ impl LlmClient {
                 // Try to create Gemini provider, but return error if API key is missing
                 // The error message now indicates this is optional and will fallback
                 let provider = Box::new(GeminiProvider::new()?);
+                Ok(Self::new(provider))
+            }
+            _ => {
+                #[cfg(any(
+                    feature = "llm-remote",
+                    feature = "kimi",
+                    feature = "deepseek",
+                    feature = "gemini"
+                ))]
+                return Err(Error::Config(format!("Unknown provider: {provider_name}")));
+
+                #[cfg(not(any(feature = "llm-remote", feature = "kimi", feature = "deepseek", feature = "gemini")))]
+                return Err(Error::Config(
+                    "No LLM providers available. Build with 'llm-remote', 'kimi', 'deepseek', 'gemini', or 'llama-cpp' feature enabled.".to_string()
+                ));
+            }
+        }
+    }
+
+    /// Creates an LlmClient from an LlmConfig struct.
+    ///
+    /// This is the preferred method as it avoids the need for unsafe env var manipulation.
+    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+        let provider_name = config.provider.to_lowercase();
+
+        match provider_name.as_str() {
+            #[cfg(feature = "llm-remote")]
+            "ollama" => {
+                let provider = Box::new(OllamaClient::from_config(config)?);
+                Ok(Self::new(provider))
+            }
+            #[cfg(feature = "kimi")]
+            "kimi" => {
+                use crate::KimiProvider;
+                let provider = Box::new(KimiProvider::from_config(config)?);
+                Ok(Self::new(provider))
+            }
+            #[cfg(feature = "deepseek")]
+            "deepseek" => {
+                use crate::DeepSeekProvider;
+                let provider = Box::new(DeepSeekProvider::from_config(config)?);
+                Ok(Self::new(provider))
+            }
+            #[cfg(feature = "gemini")]
+            "gemini" => {
+                use crate::GeminiProvider;
+                let provider = Box::new(GeminiProvider::from_config(config)?);
                 Ok(Self::new(provider))
             }
             _ => {

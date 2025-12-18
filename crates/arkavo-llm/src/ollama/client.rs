@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tokio_stream::Stream;
 
 use super::types::{ChatRequest, ChatResponse};
-use crate::{Error, Message, Provider, Result, StreamResponse};
+use crate::{Error, LlmConfig, Message, Provider, Result, StreamResponse};
 
 #[derive(Debug, Deserialize)]
 struct ModelInfo {
@@ -37,6 +37,10 @@ impl OllamaClient {
         let base_url = std::env::var("OLLAMA_BASE_URL").ok();
         let model = std::env::var("OLLAMA_MODEL").ok();
         Ok(Self::new(base_url, model))
+    }
+
+    pub fn from_config(config: &LlmConfig) -> Result<Self> {
+        Ok(Self::new(config.base_url.clone(), config.model.clone()))
     }
 
     pub async fn list_models(&self) -> Result<Vec<String>> {

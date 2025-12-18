@@ -2,6 +2,7 @@ pub mod chat;
 pub mod client;
 #[cfg(feature = "llm-remote")]
 pub mod common;
+pub mod config;
 pub mod error;
 pub mod image;
 pub mod mcp_converter;
@@ -19,6 +20,7 @@ pub mod tool_parser;
 
 pub use chat::ChatRequest;
 pub use client::LlmClient;
+pub use config::LlmConfig;
 pub use error::{Error, Result};
 pub use image::{ImageFormat, decode_image, encode_image_bytes, encode_image_file};
 pub use mcp_converter::{LocalToolFormat, McpConverter};

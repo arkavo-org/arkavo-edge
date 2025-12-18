@@ -1,6 +1,6 @@
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
-use arkavo_llm::{LlmClient, Message, encode_image_file};
+use arkavo_llm::{LlmClient, LlmConfig, Message, encode_image_file};
 use arkavo_memory::storage::MemoryStorage;
 use arkavo_repo::repository_context::RepositoryContextManager;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -1735,12 +1735,13 @@ async fn initialize_llm_client(
 ) -> Result<LlmClient, Box<dyn std::error::Error>> {
     // Check if model_name specifies a provider directly
     if model_name == "deepseek" {
-        // Set environment variable for DeepSeek provider
-        // SAFETY: This is safe as we're only setting the env var once during initialization
-        unsafe {
-            std::env::set_var("LLM_PROVIDER", "deepseek");
-        }
-        if let Ok(client) = LlmClient::from_env() {
+        // Create config for DeepSeek provider (reads API key from env at startup)
+        let config = LlmConfig::from_env();
+        let config = LlmConfig {
+            provider: "deepseek".to_string(),
+            ..config
+        };
+        if let Ok(client) = LlmClient::from_config(&config) {
             if !print_mode {
                 println!("✓ Connected to DeepSeek API");
             }
@@ -1749,12 +1750,13 @@ async fn initialize_llm_client(
             println!("Failed to connect to DeepSeek. Check DEEPSEEK_API_KEY environment variable.");
         }
     } else if model_name == "kimi" {
-        // Set environment variable for Kimi provider
-        // SAFETY: This is safe as we're only setting the env var once during initialization
-        unsafe {
-            std::env::set_var("LLM_PROVIDER", "kimi");
-        }
-        if let Ok(client) = LlmClient::from_env() {
+        // Create config for Kimi provider
+        let config = LlmConfig::from_env();
+        let config = LlmConfig {
+            provider: "kimi".to_string(),
+            ..config
+        };
+        if let Ok(client) = LlmClient::from_config(&config) {
             if !print_mode {
                 println!("✓ Connected to Kimi API");
             }
@@ -1763,15 +1765,13 @@ async fn initialize_llm_client(
             println!("Failed to connect to Kimi. Check MOONSHOT_API_KEY environment variable.");
         }
     } else if model_name == "gemini" || model_name.starts_with("gemini-") {
-        // Set environment variable for Gemini provider
-        // SAFETY: This is safe as we're only setting the env var once during initialization
-        unsafe {
-            std::env::set_var("LLM_PROVIDER", "gemini");
-            if model_name.starts_with("gemini-") {
-                std::env::set_var("GEMINI_MODEL", model_name);
-            }
+        // Create config for Gemini provider
+        let mut config = LlmConfig::from_env();
+        config.provider = "gemini".to_string();
+        if model_name.starts_with("gemini-") {
+            config.model = Some(model_name.to_string());
         }
-        if let Ok(client) = LlmClient::from_env() {
+        if let Ok(client) = LlmClient::from_config(&config) {
             if !print_mode {
                 println!("✓ Connected to Gemini API");
             }
@@ -1782,11 +1782,8 @@ async fn initialize_llm_client(
     }
 
     // Try to connect to Ollama for other models
-    // SAFETY: This is safe as we're only setting the env var once during initialization
-    unsafe {
-        std::env::set_var("LLM_PROVIDER", "ollama");
-    }
-    if let Ok(client) = LlmClient::from_env()
+    let config = LlmConfig::ollama();
+    if let Ok(client) = LlmClient::from_config(&config)
         && client.complete(vec![Message::user("ping")]).await.is_ok()
     {
         if !print_mode {
