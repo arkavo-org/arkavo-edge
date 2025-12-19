@@ -1,4 +1,9 @@
 //! Integration tests for deliberation with local GGUF models
+//!
+//! These tests require the `llama-cpp` feature and local GGUF models.
+//! Run with: cargo test -p arkavo-router --features llama-cpp --test deliberation_test -- --ignored --nocapture
+
+#![cfg(feature = "llama-cpp")]
 
 use arkavo_llm::{LlamaCppProvider, Message, Provider, Role};
 use arkavo_router::deliberation::{DeliberationConfig, Deliberator};
@@ -14,7 +19,9 @@ async fn test_deliberation_with_ministral_3b() {
     // Check if model exists
     if !std::path::Path::new(MINISTRAL_MODEL_PATH).exists() {
         eprintln!("Ministral 3B model not found at: {}", MINISTRAL_MODEL_PATH);
-        eprintln!("Download with: huggingface-cli download mistralai/Ministral-3-3B-Reasoning-2512-GGUF");
+        eprintln!(
+            "Download with: huggingface-cli download mistralai/Ministral-3-3B-Reasoning-2512-GGUF"
+        );
         return;
     }
 
@@ -66,7 +73,10 @@ async fn test_deliberation_with_ministral_3b() {
     println!("===========================\n");
 
     // Basic assertions
-    assert!(!result.final_response.is_empty(), "Response should not be empty");
+    assert!(
+        !result.final_response.is_empty(),
+        "Response should not be empty"
+    );
     assert!(result.iterations >= 1, "Should have at least 1 iteration");
 }
 
@@ -174,7 +184,10 @@ async fn test_qwen3_math() {
     println!("\nResponse:\n{}", result.final_response);
     println!("=========================\n");
 
-    assert!(!result.final_response.is_empty(), "Response should not be empty");
+    assert!(
+        !result.final_response.is_empty(),
+        "Response should not be empty"
+    );
 }
 
 #[tokio::test]
