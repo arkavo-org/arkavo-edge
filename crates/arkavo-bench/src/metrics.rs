@@ -66,6 +66,7 @@ impl BenchMetrics {
             IssueType::Refusal => "refusal".to_string(),
             IssueType::OffTopic => "off_topic".to_string(),
             IssueType::MissingToolUse => "missing_tool_use".to_string(),
+            IssueType::ToolErrorIgnored => "tool_error_ignored".to_string(),
             IssueType::None => "none".to_string(),
         }
     }
