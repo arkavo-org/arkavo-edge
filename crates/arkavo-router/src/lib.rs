@@ -5,6 +5,7 @@ pub mod architect;
 pub mod classifier;
 pub mod connectivity;
 pub mod decision;
+pub mod deliberation;
 pub mod error;
 pub mod health;
 pub mod judge;
@@ -25,6 +26,7 @@ pub use architect::{
 pub use classifier::{TaskCategory, TaskClassifier};
 pub use connectivity::ConnectivityChecker;
 pub use decision::{ModelChoice, RoutingDecision};
+pub use deliberation::{DeliberationConfig, DeliberationResult, Deliberator};
 pub use error::{Error, Result};
 pub use judge::{IssueType, JudgmentResult, ResponseJudge};
 pub use metrics::RoutingMetrics;
@@ -381,7 +383,7 @@ impl Router {
                     match judge::ResponseJudge::new_gemma_270m().await {
                         Ok(judge) => {
                             let judgment = judge
-                                .evaluate(task_description, &response, &tool_infos)
+                                .evaluate(task_description, &response, &tool_infos, None)
                                 .await?;
 
                             if !judgment.passed {
@@ -515,7 +517,8 @@ impl Router {
                 #[cfg(feature = "llama-cpp")]
                 {
                     if let Ok(judge) = judge::ResponseJudge::new_gemma_4b().await
-                        && let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools).await
+                        && let Ok(judgment) =
+                            judge.evaluate(&task_desc, &response, &tools, None).await
                         && !judgment.passed
                     {
                         tracing::warn!(

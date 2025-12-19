@@ -1,0 +1,241 @@
+//! Integration tests for deliberation with local GGUF models
+//!
+//! These tests require the `llama-cpp` feature and local GGUF models.
+//! Run with: cargo test -p arkavo-router --features llama-cpp --test deliberation_test -- --ignored --nocapture
+
+#![cfg(feature = "llama-cpp")]
+
+use arkavo_llm::{LlamaCppProvider, Message, Provider, Role};
+use arkavo_router::deliberation::{DeliberationConfig, Deliberator};
+use std::sync::Arc;
+
+const MINISTRAL_MODEL_PATH: &str = "/Users/paul/.cache/huggingface/hub/models--mistralai--Ministral-3-3B-Reasoning-2512-GGUF/snapshots/3b993f103009368df16c58fef4ad589cedf1bf24/Ministral-3-3B-Reasoning-2512-Q4_K_M.gguf";
+
+const QWEN3_MODEL_PATH: &str = "/Volumes/SSD/huggingface/hub/models--Qwen--Qwen3-0.6B-GGUF/snapshots/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf";
+
+#[tokio::test]
+#[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test -- --ignored --nocapture
+async fn test_deliberation_with_ministral_3b() {
+    // Check if model exists
+    if !std::path::Path::new(MINISTRAL_MODEL_PATH).exists() {
+        eprintln!("Ministral 3B model not found at: {}", MINISTRAL_MODEL_PATH);
+        eprintln!(
+            "Download with: huggingface-cli download mistralai/Ministral-3-3B-Reasoning-2512-GGUF"
+        );
+        return;
+    }
+
+    println!("Loading Ministral 3B Reasoning model...");
+    let provider = LlamaCppProvider::new(
+        "ministral-3b-reasoning".to_string(),
+        MINISTRAL_MODEL_PATH.to_string(),
+    )
+    .expect("Failed to load Ministral 3B model");
+
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+
+    // Create deliberator with critique enabled but no external judge
+    let config = DeliberationConfig {
+        enable_thinking: true,
+        enable_critique: true,
+        enable_judge: false,
+        max_rounds: 2,
+    };
+
+    let deliberator = Deliberator::new(provider, config);
+
+    // Test task: Simple reasoning question
+    let task = "What is 15% of 80?";
+    let messages = vec![Message {
+        role: Role::User,
+        content: task.to_string(),
+        images: None,
+    }];
+
+    println!("\nTask: {}", task);
+    println!("Running deliberation...\n");
+
+    let result = deliberator
+        .deliberate(task, messages, &[], None)
+        .await
+        .expect("Deliberation failed");
+
+    println!("=== Deliberation Result ===");
+    println!("Iterations: {}", result.iterations);
+    println!("Confidence: {:.2}", result.confidence);
+    if let Some(ref thinking) = result.thinking {
+        println!("\nThinking: {}", thinking);
+    }
+    if let Some(ref critique) = result.critique {
+        println!("\nCritique: {}", critique);
+    }
+    println!("\nFinal Response:\n{}", result.final_response);
+    println!("===========================\n");
+
+    // Basic assertions
+    assert!(
+        !result.final_response.is_empty(),
+        "Response should not be empty"
+    );
+    assert!(result.iterations >= 1, "Should have at least 1 iteration");
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_deliberation_tool_error_scenario() {
+    if !std::path::Path::new(MINISTRAL_MODEL_PATH).exists() {
+        eprintln!("Ministral 3B model not found, skipping test");
+        return;
+    }
+
+    println!("Loading Ministral 3B Reasoning model...");
+    let provider = LlamaCppProvider::new(
+        "ministral-3b-reasoning".to_string(),
+        MINISTRAL_MODEL_PATH.to_string(),
+    )
+    .expect("Failed to load Ministral 3B model");
+
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+
+    let config = DeliberationConfig {
+        enable_thinking: true,
+        enable_critique: true,
+        enable_judge: false,
+        max_rounds: 2,
+    };
+
+    let deliberator = Deliberator::new(provider, config);
+
+    // Simulate a scenario where user asked to send a task and it failed
+    let task = "I tried to send a task to agent 'test-agent' but it failed with 'Agent not found'. \
+                What should I do?";
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: task.to_string(),
+        images: None,
+    }];
+
+    println!("\nTask: {}", task);
+    println!("Running deliberation...\n");
+
+    let result = deliberator
+        .deliberate(task, messages, &[], None)
+        .await
+        .expect("Deliberation failed");
+
+    println!("=== Deliberation Result ===");
+    println!("Iterations: {}", result.iterations);
+    println!("Confidence: {:.2}", result.confidence);
+    println!("\nFinal Response:\n{}", result.final_response);
+    println!("===========================\n");
+
+    // The response should acknowledge the error and suggest solutions
+    let response_lower = result.final_response.to_lowercase();
+    let mentions_error = response_lower.contains("error")
+        || response_lower.contains("not found")
+        || response_lower.contains("agent")
+        || response_lower.contains("check");
+
+    assert!(mentions_error, "Response should address the tool error");
+}
+
+#[tokio::test]
+#[ignore] // Run with: cargo test -p arkavo-router --test deliberation_test test_qwen3 -- --ignored --nocapture
+async fn test_qwen3_math() {
+    if !std::path::Path::new(QWEN3_MODEL_PATH).exists() {
+        eprintln!("Qwen3-0.6B model not found at: {}", QWEN3_MODEL_PATH);
+        eprintln!("Download with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF");
+        return;
+    }
+
+    println!("Loading Qwen3-0.6B model...");
+    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), QWEN3_MODEL_PATH.to_string())
+        .expect("Failed to load Qwen3 model");
+
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+
+    let config = DeliberationConfig {
+        enable_thinking: true,
+        enable_critique: false, // Skip critique for speed
+        enable_judge: false,
+        max_rounds: 1,
+    };
+
+    let deliberator = Deliberator::new(provider, config);
+
+    let task = "What is 7 * 8?";
+    let messages = vec![Message {
+        role: Role::User,
+        content: task.to_string(),
+        images: None,
+    }];
+
+    println!("\nTask: {}", task);
+    println!("Running with Qwen3-0.6B...\n");
+
+    let result = deliberator
+        .deliberate(task, messages, &[], None)
+        .await
+        .expect("Deliberation failed");
+
+    println!("=== Qwen3-0.6B Result ===");
+    println!("Iterations: {}", result.iterations);
+    println!("\nResponse:\n{}", result.final_response);
+    println!("=========================\n");
+
+    assert!(
+        !result.final_response.is_empty(),
+        "Response should not be empty"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_qwen3_coding() {
+    if !std::path::Path::new(QWEN3_MODEL_PATH).exists() {
+        eprintln!("Qwen3-0.6B model not found, skipping test");
+        return;
+    }
+
+    println!("Loading Qwen3-0.6B model...");
+    let provider = LlamaCppProvider::new("qwen3-0.6b".to_string(), QWEN3_MODEL_PATH.to_string())
+        .expect("Failed to load Qwen3 model");
+
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+
+    let config = DeliberationConfig {
+        enable_thinking: true,
+        enable_critique: false,
+        enable_judge: false,
+        max_rounds: 1,
+    };
+
+    let deliberator = Deliberator::new(provider, config);
+
+    let task = "Write a Python function to check if a number is prime.";
+    let messages = vec![Message {
+        role: Role::User,
+        content: task.to_string(),
+        images: None,
+    }];
+
+    println!("\nTask: {}", task);
+    println!("Running with Qwen3-0.6B...\n");
+
+    let result = deliberator
+        .deliberate(task, messages, &[], None)
+        .await
+        .expect("Deliberation failed");
+
+    println!("=== Qwen3-0.6B Coding Result ===");
+    println!("\nResponse:\n{}", result.final_response);
+    println!("================================\n");
+
+    let response_lower = result.final_response.to_lowercase();
+    let has_code = response_lower.contains("def ")
+        || response_lower.contains("function")
+        || response_lower.contains("prime");
+
+    assert!(has_code, "Response should contain code or mention prime");
+}

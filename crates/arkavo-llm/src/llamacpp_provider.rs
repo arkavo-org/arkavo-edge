@@ -184,6 +184,11 @@ impl LlamaCppProvider {
                         eprintln!("✓ Template is using correct Mistral V3 format");
                     }
                 }
+                ModelFormat::Qwen3 => {
+                    if prompt_str.contains("<|im_start|>") {
+                        eprintln!("✓ Template is using correct Qwen3 ChatML format");
+                    }
+                }
             }
         }
 

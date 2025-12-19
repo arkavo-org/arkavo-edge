@@ -40,12 +40,16 @@ pub enum ModelFormat {
     Gemma3,
     /// Mistral V3 format: [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] [INST]...[/INST]
     MistralV3,
+    /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
+    Qwen3,
 }
 
 /// Detect model format from model name or path
 pub fn detect_model_format(model_name: &str) -> ModelFormat {
     let name_lower = model_name.to_lowercase();
-    if name_lower.contains("mistral") || name_lower.contains("ministral") {
+    if name_lower.contains("qwen") {
+        ModelFormat::Qwen3
+    } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
     } else {
         ModelFormat::Gemma3
@@ -438,6 +442,10 @@ const GEMMA3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'
 // Tool tokens included as placeholders for future function calling
 const MISTRAL_V3_TEMPLATE: &str = "{{ bos_token }}{% for message in messages %}{% if message['role'] == 'system' %}[SYSTEM_PROMPT]{{ message['content'] }}[/SYSTEM_PROMPT]{% elif message['role'] == 'user' %}[INST] {{ message['content'] }} [/INST]{% elif message['role'] == 'assistant' %}{{ message['content'] }}</s>{% endif %}{% endfor %}";
 
+// Qwen3 ChatML format template
+// Uses <|im_start|>role\ncontent<|im_end|> format
+const QWEN3_TEMPLATE: &str = "{% for message in messages %}{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n{% elif message['role'] == 'assistant' %}<|im_start|>assistant\n{{ message['content'] }}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}";
+
 #[cfg(not(target_env = "musl"))]
 pub fn apply_chat_template(
     messages: &[ffi::llama_chat_message],
@@ -456,6 +464,7 @@ pub fn apply_chat_template_with_format(
     let template = match format {
         ModelFormat::Gemma3 => GEMMA3_TEMPLATE,
         ModelFormat::MistralV3 => MISTRAL_V3_TEMPLATE,
+        ModelFormat::Qwen3 => QWEN3_TEMPLATE,
     };
 
     if LLAMA_LOGGING_ENABLED.load(Ordering::Relaxed) {
@@ -544,13 +553,14 @@ pub fn detokenize(
     }
 }
 
+/// Convert a token to raw bytes (may be incomplete UTF-8)
 #[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn token_to_piece(
+pub fn token_to_bytes(
     vocab: *const ffi::llama_vocab,
     token: ffi::llama_token,
     special: bool,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; 32];
     loop {
         let n = unsafe {
@@ -565,11 +575,25 @@ pub fn token_to_piece(
         };
         if n >= 0 && (n as usize) <= buf.len() {
             buf.truncate(n as usize);
-            return String::from_utf8(buf).map_err(|e| format!("UTF-8 conversion error: {}", e));
+            return Ok(buf);
         }
         let need = n.checked_neg().unwrap_or((buf.len() * 2) as i32) as usize;
         buf.resize(need, 0);
     }
+}
+
+/// Convert a token to a UTF-8 string piece
+/// Note: BPE tokens may represent incomplete UTF-8 sequences.
+/// Use `token_to_bytes` and buffer for streaming to handle this correctly.
+#[cfg(not(target_env = "musl"))]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn token_to_piece(
+    vocab: *const ffi::llama_vocab,
+    token: ffi::llama_token,
+    special: bool,
+) -> Result<String, String> {
+    let bytes = token_to_bytes(vocab, token, special)?;
+    String::from_utf8(bytes).map_err(|e| format!("UTF-8 conversion error: {}", e))
 }
 
 #[cfg(not(target_env = "musl"))]
@@ -861,13 +885,23 @@ mod tests {
             ModelFormat::Gemma3
         );
         assert_eq!(detect_model_format("llama-3.2-3b"), ModelFormat::Gemma3);
-        assert_eq!(detect_model_format("qwen2.5-7b"), ModelFormat::Gemma3);
+    }
+
+    #[test]
+    fn test_detect_model_format_qwen() {
+        assert_eq!(detect_model_format("qwen2.5-7b"), ModelFormat::Qwen3);
+        assert_eq!(detect_model_format("Qwen3-0.6B"), ModelFormat::Qwen3);
+        assert_eq!(
+            detect_model_format("/path/to/Qwen3-0.6B-Q8_0.gguf"),
+            ModelFormat::Qwen3
+        );
     }
 
     #[test]
     fn test_detect_model_format_case_insensitive() {
         assert_eq!(detect_model_format("MINISTRAL-3B"), ModelFormat::MistralV3);
         assert_eq!(detect_model_format("MiStRaL-NeMo"), ModelFormat::MistralV3);
+        assert_eq!(detect_model_format("QWEN3-1B"), ModelFormat::Qwen3);
     }
 
     #[test]
@@ -889,5 +923,14 @@ mod tests {
         assert!(MISTRAL_V3_TEMPLATE.contains("[INST]"));
         assert!(MISTRAL_V3_TEMPLATE.contains("[/INST]"));
         assert!(MISTRAL_V3_TEMPLATE.contains("</s>"));
+    }
+
+    #[test]
+    fn test_qwen3_template_contains_markers() {
+        assert!(QWEN3_TEMPLATE.contains("<|im_start|>"));
+        assert!(QWEN3_TEMPLATE.contains("<|im_end|>"));
+        assert!(QWEN3_TEMPLATE.contains("system"));
+        assert!(QWEN3_TEMPLATE.contains("user"));
+        assert!(QWEN3_TEMPLATE.contains("assistant"));
     }
 }
