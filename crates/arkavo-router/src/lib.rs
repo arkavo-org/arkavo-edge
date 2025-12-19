@@ -517,7 +517,8 @@ impl Router {
                 #[cfg(feature = "llama-cpp")]
                 {
                     if let Ok(judge) = judge::ResponseJudge::new_gemma_4b().await
-                        && let Ok(judgment) = judge.evaluate(&task_desc, &response, &tools, None).await
+                        && let Ok(judgment) =
+                            judge.evaluate(&task_desc, &response, &tools, None).await
                         && !judgment.passed
                     {
                         tracing::warn!(

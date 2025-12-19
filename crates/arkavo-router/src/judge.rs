@@ -1,4 +1,4 @@
-use arkavo_llm::{tool_executor::ToolExecutionResult, Message, Provider, ProviderResponse, Role};
+use arkavo_llm::{Message, Provider, ProviderResponse, Role, tool_executor::ToolExecutionResult};
 use arkavo_mcp_tools::ToolInfo;
 use std::sync::Arc;
 
@@ -8,8 +8,8 @@ pub enum IssueType {
     InvalidParams,
     Refusal,
     OffTopic,
-    MissingToolUse,    // LLM should have used a tool but didn't
-    ToolErrorIgnored,  // LLM ignored or contradicted tool execution errors
+    MissingToolUse,   // LLM should have used a tool but didn't
+    ToolErrorIgnored, // LLM ignored or contradicted tool execution errors
     None,
 }
 
@@ -814,11 +814,13 @@ mod tests {
 
         assert!(!result.passed);
         assert_eq!(result.issue_type, IssueType::ToolErrorIgnored);
-        assert!(result
-            .reason
-            .as_ref()
-            .unwrap()
-            .contains("did not acknowledge"));
+        assert!(
+            result
+                .reason
+                .as_ref()
+                .unwrap()
+                .contains("did not acknowledge")
+        );
     }
 
     #[tokio::test]
