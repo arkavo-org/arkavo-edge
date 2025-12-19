@@ -1140,6 +1140,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-torg"
+version = "0.47.4"
+dependencies = [
+ "arkavo-llama-cpp",
+ "thiserror 2.0.17",
+ "tokio",
+ "torg-core",
+ "torg-mask",
+]
+
+[[package]]
 name = "arkavo-ui-core"
 version = "0.47.4"
 dependencies = [
@@ -9302,6 +9313,24 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "torg-core"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f772028e6ebc1efa52887e9b544358a2c257fad5247a903145fb18c1e316a1"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "torg-mask"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a08153febc3ee6a702d7b5a68b429e5f3183863286bc7adcc0eddccde981f59f"
+dependencies = [
+ "torg-core",
 ]
 
 [[package]]

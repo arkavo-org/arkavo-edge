@@ -49,6 +49,7 @@ members = [
     "crates/arkavo-config-bundle",
     "crates/arkavo-config-encryption",
     "crates/arkavo-config-transport",
+    "crates/arkavo-torg",
     ".cargo/xtask",
 ]
 default-members = [
@@ -201,6 +202,8 @@ mdns-sd = "0.14"
 
 # LLM and ML
 tokenizers = { version = "0.22.1", default-features = false, features = ["fancy-regex"] }
+torg-core = "0.1"
+torg-mask = "0.1"
 hf-hub = { git = "https://github.com/huggingface/hf-hub", default-features = false, features = ["tokio", "rustls-tls"] }
 fastembed = "4"
 hnsw_rs = "0.3"

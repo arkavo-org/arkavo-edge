@@ -765,6 +765,23 @@ impl LlamaSampler {
         }
     }
 
+    /// Add logit bias constraints for constrained decoding (e.g., TØR-G)
+    ///
+    /// Each bias entry sets a token's logit to the specified value.
+    /// Use `f32::NEG_INFINITY` to completely disable a token.
+    pub fn add_logit_bias(&self, n_vocab: i32, biases: &[ffi::llama_logit_bias]) {
+        let bias_sampler = unsafe {
+            ffi::llama_sampler_init_logit_bias(
+                n_vocab,
+                biases.len() as i32,
+                biases.as_ptr(),
+            )
+        };
+        if !bias_sampler.is_null() {
+            unsafe { ffi::llama_sampler_chain_add(self.ptr, bias_sampler) };
+        }
+    }
+
     pub fn sample(&self, ctx: &LlamaContext, idx: i32) -> ffi::llama_token {
         unsafe { ffi::llama_sampler_sample(self.ptr, ctx.ptr, idx) }
     }
