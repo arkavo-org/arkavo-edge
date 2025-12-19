@@ -1,4 +1,4 @@
-use arkavo_llm::{Message, Provider, ProviderResponse, Role};
+use arkavo_llm::{tool_executor::ToolExecutionResult, Message, Provider, ProviderResponse, Role};
 use arkavo_mcp_tools::ToolInfo;
 use std::sync::Arc;
 
@@ -8,7 +8,8 @@ pub enum IssueType {
     InvalidParams,
     Refusal,
     OffTopic,
-    MissingToolUse, // LLM should have used a tool but didn't
+    MissingToolUse,    // LLM should have used a tool but didn't
+    ToolErrorIgnored,  // LLM ignored or contradicted tool execution errors
     None,
 }
 
@@ -20,6 +21,7 @@ impl std::fmt::Display for IssueType {
             IssueType::Refusal => write!(f, "refusal"),
             IssueType::OffTopic => write!(f, "off_topic"),
             IssueType::MissingToolUse => write!(f, "missing_tool_use"),
+            IssueType::ToolErrorIgnored => write!(f, "tool_error_ignored"),
             IssueType::None => write!(f, "none"),
         }
     }
@@ -107,7 +109,19 @@ impl ResponseJudge {
         original_prompt: &str,
         response: &ProviderResponse,
         available_tools: &[ToolInfo],
+        tool_results: Option<&[ToolExecutionResult]>,
     ) -> crate::Result<JudgmentResult> {
+        // Step 0: Check if LLM properly acknowledged tool execution errors
+        if let Some(results) = tool_results
+            && let Some(error_judgment) = self.check_tool_error_acknowledgment(response, results)
+        {
+            tracing::info!(
+                "Tool error acknowledgment check: FAIL - {}",
+                error_judgment.reason.as_deref().unwrap_or("")
+            );
+            return Ok(error_judgment);
+        }
+
         // Step 1: Run heuristics (instant, free, catches 50% of cases)
         let heuristic_result = self.heuristic_check(original_prompt, response, available_tools);
 
@@ -250,6 +264,101 @@ impl ResponseJudge {
                 suggested_keywords,
             }
         }
+    }
+
+    /// Check if LLM properly acknowledged tool execution errors (strict mode)
+    fn check_tool_error_acknowledgment(
+        &self,
+        response: &ProviderResponse,
+        tool_results: &[ToolExecutionResult],
+    ) -> Option<JudgmentResult> {
+        // Find failed tool executions
+        let failed_tools: Vec<_> = tool_results.iter().filter(|r| !r.success).collect();
+
+        if failed_tools.is_empty() {
+            return None;
+        }
+
+        let response_lower = response.content.to_lowercase();
+
+        // Success-claiming phrases that would contradict a tool failure
+        let success_claims = [
+            "successfully",
+            "completed",
+            "done",
+            "sent it",
+            "executed",
+            "finished",
+            "accomplished",
+            "worked",
+        ];
+
+        // Error acknowledgment phrases
+        let error_indicators = [
+            "error",
+            "failed",
+            "couldn't",
+            "could not",
+            "unable",
+            "problem",
+            "not found",
+            "doesn't exist",
+            "does not exist",
+            "unavailable",
+            "issue",
+        ];
+
+        for failed in &failed_tools {
+            let tool_name_lower = failed.tool_name.to_lowercase();
+            let error_msg = failed.error.as_deref().unwrap_or("Unknown error");
+
+            // Check if LLM claims success for this tool (contradiction)
+            let claims_success = success_claims.iter().any(|claim| {
+                let has_claim = response_lower.contains(claim);
+                // Check if success claim is near the tool name
+                let near_tool = response_lower
+                    .find(&tool_name_lower)
+                    .and_then(|tool_pos| {
+                        response_lower.find(claim).map(|claim_pos| {
+                            // Within 100 chars of each other
+                            tool_pos.abs_diff(claim_pos) < 100
+                        })
+                    })
+                    .unwrap_or(false);
+                has_claim && near_tool
+            });
+
+            if claims_success {
+                return Some(JudgmentResult {
+                    passed: false,
+                    reason: Some(format!(
+                        "LLM claimed success for '{}' but tool returned error: {}",
+                        failed.tool_name, error_msg
+                    )),
+                    issue_type: IssueType::ToolErrorIgnored,
+                    suggested_keywords: Vec::new(),
+                });
+            }
+
+            // Strict mode: Check if error was completely ignored (no mention at all)
+            let mentions_error = error_indicators
+                .iter()
+                .any(|ind| response_lower.contains(ind));
+
+            if !mentions_error {
+                return Some(JudgmentResult {
+                    passed: false,
+                    reason: Some(format!(
+                        "LLM did not acknowledge tool error for '{}': {}",
+                        failed.tool_name, error_msg
+                    )),
+                    issue_type: IssueType::ToolErrorIgnored,
+                    suggested_keywords: Vec::new(),
+                });
+            }
+        }
+
+        None
     }
 
     fn extract_keywords_from_prompt(
@@ -465,6 +574,9 @@ Your answer:"#,
                 s if s.contains("refusal") => IssueType::Refusal,
                 s if s.contains("missing") => IssueType::MissingToolUse,
                 s if s.contains("off") => IssueType::OffTopic,
+                s if s.contains("tool_error") || s.contains("ignored") => {
+                    IssueType::ToolErrorIgnored
+                }
                 _ => IssueType::None,
             })
             .unwrap_or(IssueType::None);
@@ -572,7 +684,7 @@ mod tests {
         };
 
         let result = judge
-            .evaluate("Find test", &response, &tools)
+            .evaluate("Find test", &response, &tools, None)
             .await
             .unwrap();
         assert!(result.passed);
@@ -600,7 +712,10 @@ mod tests {
             finish_reason: None,
         };
 
-        let result = judge.evaluate("Test", &response, &tools).await.unwrap();
+        let result = judge
+            .evaluate("Test", &response, &tools, None)
+            .await
+            .unwrap();
         assert!(!result.passed);
         assert_eq!(result.issue_type, IssueType::HallucinatedTool);
         assert!(result.reason.is_some());
@@ -623,10 +738,123 @@ mod tests {
         };
 
         let result = judge
-            .evaluate("Use tools", &response, &tools)
+            .evaluate("Use tools", &response, &tools, None)
             .await
             .unwrap();
         assert!(!result.passed);
         assert_eq!(result.issue_type, IssueType::Refusal);
+    }
+
+    #[tokio::test]
+    async fn test_tool_error_ignored_claims_success() {
+        let provider = Arc::new(MockJudgeProvider {
+            response: "VERDICT: PASS".to_string(),
+        });
+
+        let judge = ResponseJudge::new(provider);
+        let tools = vec![create_test_tool_info("send_task")];
+
+        // LLM claims success when tool failed
+        let response = ProviderResponse {
+            content: "I used the send_task tool and it completed successfully.".to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        };
+
+        // Tool execution failed
+        let tool_results = vec![ToolExecutionResult {
+            tool_name: "send_task".to_string(),
+            call_id: None,
+            result: json!({"error": "Agent not found"}),
+            success: false,
+            error: Some("Agent 'test-agent' not found".to_string()),
+        }];
+
+        let result = judge
+            .evaluate("Send task to agent", &response, &tools, Some(&tool_results))
+            .await
+            .unwrap();
+
+        assert!(!result.passed);
+        assert_eq!(result.issue_type, IssueType::ToolErrorIgnored);
+        assert!(result.reason.as_ref().unwrap().contains("claimed success"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_error_ignored_no_acknowledgment() {
+        let provider = Arc::new(MockJudgeProvider {
+            response: "VERDICT: PASS".to_string(),
+        });
+
+        let judge = ResponseJudge::new(provider);
+        let tools = vec![create_test_tool_info("send_task")];
+
+        // LLM doesn't mention the error at all
+        let response = ProviderResponse {
+            content: "I have processed your request for the agent.".to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        };
+
+        // Tool execution failed
+        let tool_results = vec![ToolExecutionResult {
+            tool_name: "send_task".to_string(),
+            call_id: None,
+            result: json!({"error": "Agent not found"}),
+            success: false,
+            error: Some("Agent 'test-agent' not found".to_string()),
+        }];
+
+        let result = judge
+            .evaluate("Send task to agent", &response, &tools, Some(&tool_results))
+            .await
+            .unwrap();
+
+        assert!(!result.passed);
+        assert_eq!(result.issue_type, IssueType::ToolErrorIgnored);
+        assert!(result
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("did not acknowledge"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_error_properly_acknowledged() {
+        let provider = Arc::new(MockJudgeProvider {
+            response: "VERDICT: PASS".to_string(),
+        });
+
+        let judge = ResponseJudge::new(provider);
+        let tools = vec![create_test_tool_info("send_task")];
+
+        // LLM properly acknowledges the error
+        let response = ProviderResponse {
+            content: "The agent was not found. Please check the agent name and try again."
+                .to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        };
+
+        // Tool execution failed
+        let tool_results = vec![ToolExecutionResult {
+            tool_name: "send_task".to_string(),
+            call_id: None,
+            result: json!({"error": "Agent not found"}),
+            success: false,
+            error: Some("Agent 'test-agent' not found".to_string()),
+        }];
+
+        let result = judge
+            .evaluate("Send task to agent", &response, &tools, Some(&tool_results))
+            .await
+            .unwrap();
+
+        // Should pass because error was acknowledged
+        assert!(result.passed);
+        assert_eq!(result.issue_type, IssueType::None);
     }
 }
