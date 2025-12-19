@@ -544,13 +544,14 @@ pub fn detokenize(
     }
 }
 
+/// Convert a token to raw bytes (may be incomplete UTF-8)
 #[cfg(not(target_env = "musl"))]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn token_to_piece(
+pub fn token_to_bytes(
     vocab: *const ffi::llama_vocab,
     token: ffi::llama_token,
     special: bool,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; 32];
     loop {
         let n = unsafe {
@@ -565,11 +566,25 @@ pub fn token_to_piece(
         };
         if n >= 0 && (n as usize) <= buf.len() {
             buf.truncate(n as usize);
-            return String::from_utf8(buf).map_err(|e| format!("UTF-8 conversion error: {}", e));
+            return Ok(buf);
         }
         let need = n.checked_neg().unwrap_or((buf.len() * 2) as i32) as usize;
         buf.resize(need, 0);
     }
+}
+
+/// Convert a token to a UTF-8 string piece
+/// Note: BPE tokens may represent incomplete UTF-8 sequences.
+/// Use `token_to_bytes` and buffer for streaming to handle this correctly.
+#[cfg(not(target_env = "musl"))]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn token_to_piece(
+    vocab: *const ffi::llama_vocab,
+    token: ffi::llama_token,
+    special: bool,
+) -> Result<String, String> {
+    let bytes = token_to_bytes(vocab, token, special)?;
+    String::from_utf8(bytes).map_err(|e| format!("UTF-8 conversion error: {}", e))
 }
 
 #[cfg(not(target_env = "musl"))]

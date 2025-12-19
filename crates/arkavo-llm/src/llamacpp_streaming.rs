@@ -9,7 +9,7 @@ use arkavo_llama_cpp::multimodal::{
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, batch_free, batch_get_one_with_logits, batch_get_one_with_offset,
-    batch_init_with_tokens, create_sampler_chain, decode_batch, token_to_piece,
+    batch_init_with_tokens, create_sampler_chain, decode_batch, token_to_bytes,
     tokenize_with_model,
 };
 use std::sync::Arc;
@@ -24,6 +24,70 @@ pub(crate) fn set_debug(enabled: bool) {
 
 pub(crate) fn is_debug() -> bool {
     DEBUG_LLAMACPP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Extract valid UTF-8 from a byte buffer, leaving incomplete sequences for later.
+/// Returns the valid string and modifies the buffer in place to keep only incomplete bytes.
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn extract_valid_utf8(buffer: &mut Vec<u8>) -> String {
+    if buffer.is_empty() {
+        return String::new();
+    }
+
+    // Find the longest valid UTF-8 prefix
+    match std::str::from_utf8(buffer) {
+        Ok(s) => {
+            // Entire buffer is valid UTF-8
+            let result = s.to_string();
+            buffer.clear();
+            result
+        }
+        Err(e) => {
+            let valid_up_to = e.valid_up_to();
+            if valid_up_to == 0 {
+                // Check if we're in the middle of a multi-byte sequence
+                // If the buffer starts with a continuation byte or incomplete sequence,
+                // we need to wait for more bytes
+                if buffer.len() < 4 && is_incomplete_utf8_start(buffer) {
+                    return String::new();
+                }
+                // Otherwise, skip the invalid byte (shouldn't happen with proper tokenizers)
+                buffer.remove(0);
+                String::new()
+            } else {
+                // Extract the valid portion
+                let valid_bytes: Vec<u8> = buffer.drain(..valid_up_to).collect();
+                // SAFETY: We know these bytes are valid UTF-8 from the error
+                unsafe { String::from_utf8_unchecked(valid_bytes) }
+            }
+        }
+    }
+}
+
+/// Check if the buffer contains the start of an incomplete multi-byte UTF-8 sequence
+#[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
+fn is_incomplete_utf8_start(buffer: &[u8]) -> bool {
+    if buffer.is_empty() {
+        return false;
+    }
+    let first = buffer[0];
+    // Check for multi-byte sequence starters
+    if first & 0x80 == 0 {
+        // ASCII - should be valid
+        false
+    } else if first & 0xE0 == 0xC0 {
+        // 2-byte sequence (110xxxxx) - need 2 bytes
+        buffer.len() < 2
+    } else if first & 0xF0 == 0xE0 {
+        // 3-byte sequence (1110xxxx) - need 3 bytes
+        buffer.len() < 3
+    } else if first & 0xF8 == 0xF0 {
+        // 4-byte sequence (11110xxx) - need 4 bytes
+        buffer.len() < 4
+    } else {
+        // Continuation byte or invalid - not an incomplete start
+        false
+    }
 }
 
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
@@ -85,6 +149,9 @@ pub(crate) async fn generate_tokens(
             );
         }
 
+        // Buffer for incomplete UTF-8 sequences
+        let mut utf8_buffer: Vec<u8> = Vec::new();
+
         for _ in 0..max_generation {
             validate_logits(&ctx)?;
 
@@ -95,26 +162,45 @@ pub(crate) async fn generate_tokens(
 
             if token == eos_token {
                 tracing::info!("Generation stopped at EOS token");
+                // Flush any remaining buffer as lossy UTF-8
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                    }));
+                }
                 break;
             }
 
-            let piece = token_to_piece(vocab, token, false)
+            // Get raw bytes for this token
+            let token_bytes = token_to_bytes(vocab, token, false)
                 .map_err(|e| Error::Config(format!("Failed to decode token: {e}")))?;
 
-            if first_token_time.is_none() {
+            // Add to buffer
+            utf8_buffer.extend_from_slice(&token_bytes);
+
+            // Try to extract valid UTF-8 from the buffer
+            let piece = extract_valid_utf8(&mut utf8_buffer);
+
+            if first_token_time.is_none() && !piece.is_empty() {
                 first_token_time = Some(Instant::now());
             }
 
             tokens_generated += 1;
 
-            let response = StreamResponse {
-                content: piece,
-                reasoning_content: None,
-                done: false,
-            };
+            // Only send if we have content
+            if !piece.is_empty() {
+                let response = StreamResponse {
+                    content: piece,
+                    reasoning_content: None,
+                    done: false,
+                };
 
-            if tx.send(Ok(response)).is_err() {
-                break;
+                if tx.send(Ok(response)).is_err() {
+                    break;
+                }
             }
 
             sampler.accept(token);
@@ -132,6 +218,15 @@ pub(crate) async fn generate_tokens(
                     "Generation stopped at context limit: {} tokens",
                     total_tokens
                 );
+                // Flush remaining buffer
+                if !utf8_buffer.is_empty() {
+                    let piece = String::from_utf8_lossy(&utf8_buffer).to_string();
+                    let _ = tx.send(Ok(StreamResponse {
+                        content: piece,
+                        reasoning_content: None,
+                        done: false,
+                    }));
+                }
                 let _ = tx.send(Ok(StreamResponse {
                     content: String::new(),
                     reasoning_content: None,
