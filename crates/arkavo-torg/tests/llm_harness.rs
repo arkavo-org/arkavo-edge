@@ -12,8 +12,8 @@
 use std::path::PathBuf;
 
 use arkavo_llama_cpp::{
-    batch_free, batch_init_with_tokens, decode_batch, detect_model_format, tokenize_with_model,
-    LlamaContext, LlamaModel, LlamaSampler, ModelFormat,
+    LlamaContext, LlamaModel, LlamaSampler, ModelFormat, batch_free, batch_init_with_tokens,
+    decode_batch, detect_model_format, tokenize_with_model,
 };
 use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler};
 use torg_core::Graph;
@@ -188,8 +188,8 @@ pub fn generate_with_constraints(
     // Format and tokenize prompt with correct chat template
     let prompt = format_prompt(policy, format);
     eprintln!("Formatted prompt:\n{}", &prompt[..prompt.len().min(200)]);
-    let tokens = tokenize_with_model(vocab, prompt.as_bytes())
-        .map_err(GenerationError::Tokenization)?;
+    let tokens =
+        tokenize_with_model(vocab, prompt.as_bytes()).map_err(GenerationError::Tokenization)?;
 
     // Process prompt through model
     let mut batch = batch_init_with_tokens(&tokens, 0, true);
@@ -208,8 +208,7 @@ pub fn generate_with_constraints(
         // 1. Logit bias (constraint enforcement) - MUST BE FIRST
         // 2. Temperature
         // 3. Greedy selection
-        let llama_sampler = LlamaSampler::new_chain(true)
-            .map_err(GenerationError::Sampler)?;
+        let llama_sampler = LlamaSampler::new_chain(true).map_err(GenerationError::Sampler)?;
 
         // Add logit bias FIRST to mask disallowed tokens
         llama_sampler.add_logit_bias(torg_sampler.vocab_size(), &bias);
@@ -229,7 +228,8 @@ pub fn generate_with_constraints(
         if pos == tokens.len() as i32 {
             eprintln!("Initial allowed tokens ({}):", allowed.len());
             for &tid in allowed.iter().take(20) {
-                let s = arkavo_llama_cpp::token_to_piece(vocab, tid as i32, true).unwrap_or_default();
+                let s =
+                    arkavo_llama_cpp::token_to_piece(vocab, tid as i32, true).unwrap_or_default();
                 eprintln!("  {} '{}'", tid, s.escape_debug());
             }
         }
@@ -249,7 +249,10 @@ pub fn generate_with_constraints(
 
         // Feed token to TØR-G state machine
         let token_str = arkavo_llama_cpp::token_to_piece(vocab, token, true).unwrap_or_default();
-        eprintln!("Feeding token {} '{}' to TØR-G (allowed: {})", token, token_str, is_allowed);
+        eprintln!(
+            "Feeding token {} '{}' to TØR-G (allowed: {})",
+            token, token_str, is_allowed
+        );
         if let Err(e) = torg_sampler.feed_token(token as u32) {
             eprintln!("feed_token failed: {:?}", e);
             return Err(e.into());
@@ -275,9 +278,8 @@ pub fn verify_or_behavior(graph: &torg_core::Graph, output_id: u16) {
     use torg_core::evaluate;
 
     // OR truth table: T,F→T; F,T→T; F,F→F; T,T→T
-    let inputs_map = |a: bool, b: bool| -> HashMap<u16, bool> {
-        [(0, a), (1, b)].into_iter().collect()
-    };
+    let inputs_map =
+        |a: bool, b: bool| -> HashMap<u16, bool> { [(0, a), (1, b)].into_iter().collect() };
 
     assert!(
         evaluate(graph, &inputs_map(true, false)).unwrap()[&output_id],
@@ -303,9 +305,8 @@ pub fn verify_xor_behavior(graph: &torg_core::Graph, output_id: u16) {
     use torg_core::evaluate;
 
     // XOR truth table: T,F→T; F,T→T; F,F→F; T,T→F
-    let inputs_map = |a: bool, b: bool| -> HashMap<u16, bool> {
-        [(0, a), (1, b)].into_iter().collect()
-    };
+    let inputs_map =
+        |a: bool, b: bool| -> HashMap<u16, bool> { [(0, a), (1, b)].into_iter().collect() };
 
     assert!(
         evaluate(graph, &inputs_map(true, false)).unwrap()[&output_id],

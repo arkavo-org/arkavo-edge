@@ -43,7 +43,7 @@ pub use qwen3::Qwen3TokenMap;
 pub use sampler::TorgLlamaSampler;
 
 // Re-export core types for convenience
-pub use torg_core::{Builder, BuildError, EvalError, Graph, Token};
+pub use torg_core::{BuildError, Builder, EvalError, Graph, Token};
 pub use torg_mask::{
     ConstrainedDecoder, DecodeError, LogitMask, MaskGenerator, TokenMapping, TokenMappingBuilder,
 };

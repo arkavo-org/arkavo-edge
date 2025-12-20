@@ -771,11 +771,7 @@ impl LlamaSampler {
     /// Use `f32::NEG_INFINITY` to completely disable a token.
     pub fn add_logit_bias(&self, n_vocab: i32, biases: &[ffi::llama_logit_bias]) {
         let bias_sampler = unsafe {
-            ffi::llama_sampler_init_logit_bias(
-                n_vocab,
-                biases.len() as i32,
-                biases.as_ptr(),
-            )
+            ffi::llama_sampler_init_logit_bias(n_vocab, biases.len() as i32, biases.as_ptr())
         };
         if !bias_sampler.is_null() {
             unsafe { ffi::llama_sampler_chain_add(self.ptr, bias_sampler) };

@@ -74,7 +74,8 @@ impl Qwen3TokenMap {
         }
 
         // All tokens must exist in the vocabulary
-        let or_id = or_id.ok_or_else(|| TorgError::TokenMapping("Or token '|' not found".into()))?;
+        let or_id =
+            or_id.ok_or_else(|| TorgError::TokenMapping("Or token '|' not found".into()))?;
         let nor_id =
             nor_id.ok_or_else(|| TorgError::TokenMapping("Nor token '!' not found".into()))?;
         let xor_id =

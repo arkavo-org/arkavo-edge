@@ -3,7 +3,7 @@
 //! Tests real-world policy scenarios using torg-core's Builder and evaluate().
 
 use std::collections::HashMap;
-use torg_core::{evaluate, Builder, Token};
+use torg_core::{Builder, Token, evaluate};
 
 /// Build a graph from a token sequence
 fn build_graph(tokens: &[Token]) -> torg_core::Graph {
@@ -45,18 +45,47 @@ fn test_access_control_tdf() {
     // owner AND NOT_public = NOR(4,5) → node 6
     // admin OR result = OR(0,6) → node 7
     let tokens = [
-        InputDecl, Id(0), // admin
-        InputDecl, Id(1), // owner
-        InputDecl, Id(2), // public
+        InputDecl,
+        Id(0), // admin
+        InputDecl,
+        Id(1), // owner
+        InputDecl,
+        Id(2), // public
         // NOT public
-        NodeStart, Id(3), Nor, Id(2), Id(2), NodeEnd,
+        NodeStart,
+        Id(3),
+        Nor,
+        Id(2),
+        Id(2),
+        NodeEnd,
         // AND: owner AND (NOT public) = NOR(NOR(owner,owner), NOR(NOT_pub,NOT_pub))
-        NodeStart, Id(4), Nor, Id(1), Id(1), NodeEnd, // NOT owner
-        NodeStart, Id(5), Nor, Id(3), Id(3), NodeEnd, // NOT (NOT public)
-        NodeStart, Id(6), Nor, Id(4), Id(5), NodeEnd, // AND result
+        NodeStart,
+        Id(4),
+        Nor,
+        Id(1),
+        Id(1),
+        NodeEnd, // NOT owner
+        NodeStart,
+        Id(5),
+        Nor,
+        Id(3),
+        Id(3),
+        NodeEnd, // NOT (NOT public)
+        NodeStart,
+        Id(6),
+        Nor,
+        Id(4),
+        Id(5),
+        NodeEnd, // AND result
         // OR: admin OR result
-        NodeStart, Id(7), Or, Id(0), Id(6), NodeEnd,
-        OutputDecl, Id(7),
+        NodeStart,
+        Id(7),
+        Or,
+        Id(0),
+        Id(6),
+        NodeEnd,
+        OutputDecl,
+        Id(7),
     ];
 
     let graph = build_graph(&tokens);
@@ -88,18 +117,47 @@ fn test_content_moderation() {
     // verified AND NOT_flagged = NOR(NOR(0,0), NOR(3,3)) → nodes 4,5,6
     // result OR appeal = OR(6,2) → node 7
     let tokens = [
-        InputDecl, Id(0), // verified
-        InputDecl, Id(1), // flagged
-        InputDecl, Id(2), // appeal
+        InputDecl,
+        Id(0), // verified
+        InputDecl,
+        Id(1), // flagged
+        InputDecl,
+        Id(2), // appeal
         // NOT flagged
-        NodeStart, Id(3), Nor, Id(1), Id(1), NodeEnd,
+        NodeStart,
+        Id(3),
+        Nor,
+        Id(1),
+        Id(1),
+        NodeEnd,
         // AND: verified AND NOT_flagged
-        NodeStart, Id(4), Nor, Id(0), Id(0), NodeEnd, // NOT verified
-        NodeStart, Id(5), Nor, Id(3), Id(3), NodeEnd, // NOT (NOT flagged)
-        NodeStart, Id(6), Nor, Id(4), Id(5), NodeEnd, // AND result
+        NodeStart,
+        Id(4),
+        Nor,
+        Id(0),
+        Id(0),
+        NodeEnd, // NOT verified
+        NodeStart,
+        Id(5),
+        Nor,
+        Id(3),
+        Id(3),
+        NodeEnd, // NOT (NOT flagged)
+        NodeStart,
+        Id(6),
+        Nor,
+        Id(4),
+        Id(5),
+        NodeEnd, // AND result
         // OR with appeal
-        NodeStart, Id(7), Or, Id(6), Id(2), NodeEnd,
-        OutputDecl, Id(7),
+        NodeStart,
+        Id(7),
+        Or,
+        Id(6),
+        Id(2),
+        NodeEnd,
+        OutputDecl,
+        Id(7),
     ];
 
     let graph = build_graph(&tokens);
@@ -128,18 +186,47 @@ fn test_agent_routing_mesh() {
     // local XOR NOT_busy = XOR(1,3) → node 4
     // capable AND xor_result = NOR(NOR(0,0), NOR(4,4)) → nodes 5,6,7
     let tokens = [
-        InputDecl, Id(0), // capable
-        InputDecl, Id(1), // local
-        InputDecl, Id(2), // busy
+        InputDecl,
+        Id(0), // capable
+        InputDecl,
+        Id(1), // local
+        InputDecl,
+        Id(2), // busy
         // NOT busy
-        NodeStart, Id(3), Nor, Id(2), Id(2), NodeEnd,
+        NodeStart,
+        Id(3),
+        Nor,
+        Id(2),
+        Id(2),
+        NodeEnd,
         // XOR: local XOR NOT_busy
-        NodeStart, Id(4), Xor, Id(1), Id(3), NodeEnd,
+        NodeStart,
+        Id(4),
+        Xor,
+        Id(1),
+        Id(3),
+        NodeEnd,
         // AND: capable AND xor_result
-        NodeStart, Id(5), Nor, Id(0), Id(0), NodeEnd, // NOT capable
-        NodeStart, Id(6), Nor, Id(4), Id(4), NodeEnd, // NOT xor_result
-        NodeStart, Id(7), Nor, Id(5), Id(6), NodeEnd, // AND result
-        OutputDecl, Id(7),
+        NodeStart,
+        Id(5),
+        Nor,
+        Id(0),
+        Id(0),
+        NodeEnd, // NOT capable
+        NodeStart,
+        Id(6),
+        Nor,
+        Id(4),
+        Id(4),
+        NodeEnd, // NOT xor_result
+        NodeStart,
+        Id(7),
+        Nor,
+        Id(5),
+        Id(6),
+        NodeEnd, // AND result
+        OutputDecl,
+        Id(7),
     ];
 
     let graph = build_graph(&tokens);
@@ -173,14 +260,28 @@ fn test_feature_flags() {
     // beta XOR staff = XOR(0,1) → node 3
     // enabled OR xor_result = OR(2,3) → node 4
     let tokens = [
-        InputDecl, Id(0), // beta
-        InputDecl, Id(1), // staff
-        InputDecl, Id(2), // enabled
+        InputDecl,
+        Id(0), // beta
+        InputDecl,
+        Id(1), // staff
+        InputDecl,
+        Id(2), // enabled
         // XOR: beta XOR staff
-        NodeStart, Id(3), Xor, Id(0), Id(1), NodeEnd,
+        NodeStart,
+        Id(3),
+        Xor,
+        Id(0),
+        Id(1),
+        NodeEnd,
         // OR: enabled OR xor_result
-        NodeStart, Id(4), Or, Id(2), Id(3), NodeEnd,
-        OutputDecl, Id(4),
+        NodeStart,
+        Id(4),
+        Or,
+        Id(2),
+        Id(3),
+        NodeEnd,
+        OutputDecl,
+        Id(4),
     ];
 
     let graph = build_graph(&tokens);
@@ -208,16 +309,40 @@ fn test_rate_limit_bypass() {
     // premium OR partner = OR(0,1) → node 3
     // or_result AND throttled = NOR(NOR(3,3), NOR(2,2)) → nodes 4,5,6
     let tokens = [
-        InputDecl, Id(0), // premium
-        InputDecl, Id(1), // partner
-        InputDecl, Id(2), // throttled
+        InputDecl,
+        Id(0), // premium
+        InputDecl,
+        Id(1), // partner
+        InputDecl,
+        Id(2), // throttled
         // OR: premium OR partner
-        NodeStart, Id(3), Or, Id(0), Id(1), NodeEnd,
+        NodeStart,
+        Id(3),
+        Or,
+        Id(0),
+        Id(1),
+        NodeEnd,
         // AND: or_result AND throttled
-        NodeStart, Id(4), Nor, Id(3), Id(3), NodeEnd, // NOT or_result
-        NodeStart, Id(5), Nor, Id(2), Id(2), NodeEnd, // NOT throttled
-        NodeStart, Id(6), Nor, Id(4), Id(5), NodeEnd, // AND result
-        OutputDecl, Id(6),
+        NodeStart,
+        Id(4),
+        Nor,
+        Id(3),
+        Id(3),
+        NodeEnd, // NOT or_result
+        NodeStart,
+        Id(5),
+        Nor,
+        Id(2),
+        Id(2),
+        NodeEnd, // NOT throttled
+        NodeStart,
+        Id(6),
+        Nor,
+        Id(4),
+        Id(5),
+        NodeEnd, // AND result
+        OutputDecl,
+        Id(6),
     ];
 
     let graph = build_graph(&tokens);
@@ -249,25 +374,84 @@ fn test_multi_party_approval() {
     // (A&B) OR (B&C) = OR(5,8) → node 12
     // result OR (A&C) = OR(12,11) → node 13
     let tokens = [
-        InputDecl, Id(0), // alice
-        InputDecl, Id(1), // bob
-        InputDecl, Id(2), // charlie
+        InputDecl,
+        Id(0), // alice
+        InputDecl,
+        Id(1), // bob
+        InputDecl,
+        Id(2), // charlie
         // A AND B
-        NodeStart, Id(3), Nor, Id(0), Id(0), NodeEnd, // NOT alice
-        NodeStart, Id(4), Nor, Id(1), Id(1), NodeEnd, // NOT bob
-        NodeStart, Id(5), Nor, Id(3), Id(4), NodeEnd, // alice AND bob
+        NodeStart,
+        Id(3),
+        Nor,
+        Id(0),
+        Id(0),
+        NodeEnd, // NOT alice
+        NodeStart,
+        Id(4),
+        Nor,
+        Id(1),
+        Id(1),
+        NodeEnd, // NOT bob
+        NodeStart,
+        Id(5),
+        Nor,
+        Id(3),
+        Id(4),
+        NodeEnd, // alice AND bob
         // B AND C
-        NodeStart, Id(6), Nor, Id(1), Id(1), NodeEnd, // NOT bob (reuse would be nice)
-        NodeStart, Id(7), Nor, Id(2), Id(2), NodeEnd, // NOT charlie
-        NodeStart, Id(8), Nor, Id(6), Id(7), NodeEnd, // bob AND charlie
+        NodeStart,
+        Id(6),
+        Nor,
+        Id(1),
+        Id(1),
+        NodeEnd, // NOT bob (reuse would be nice)
+        NodeStart,
+        Id(7),
+        Nor,
+        Id(2),
+        Id(2),
+        NodeEnd, // NOT charlie
+        NodeStart,
+        Id(8),
+        Nor,
+        Id(6),
+        Id(7),
+        NodeEnd, // bob AND charlie
         // A AND C
-        NodeStart, Id(9), Nor, Id(0), Id(0), NodeEnd,  // NOT alice
-        NodeStart, Id(10), Nor, Id(2), Id(2), NodeEnd, // NOT charlie
-        NodeStart, Id(11), Nor, Id(9), Id(10), NodeEnd, // alice AND charlie
+        NodeStart,
+        Id(9),
+        Nor,
+        Id(0),
+        Id(0),
+        NodeEnd, // NOT alice
+        NodeStart,
+        Id(10),
+        Nor,
+        Id(2),
+        Id(2),
+        NodeEnd, // NOT charlie
+        NodeStart,
+        Id(11),
+        Nor,
+        Id(9),
+        Id(10),
+        NodeEnd, // alice AND charlie
         // Combine with ORs
-        NodeStart, Id(12), Or, Id(5), Id(8), NodeEnd,   // (A&B) OR (B&C)
-        NodeStart, Id(13), Or, Id(12), Id(11), NodeEnd, // final OR (A&C)
-        OutputDecl, Id(13),
+        NodeStart,
+        Id(12),
+        Or,
+        Id(5),
+        Id(8),
+        NodeEnd, // (A&B) OR (B&C)
+        NodeStart,
+        Id(13),
+        Or,
+        Id(12),
+        Id(11),
+        NodeEnd, // final OR (A&C)
+        OutputDecl,
+        Id(13),
     ];
 
     let graph = build_graph(&tokens);

@@ -30,8 +30,7 @@ fn test_basic_generation() {
     let ctx = LlamaContext::new(&model).expect("Failed to create context");
 
     // Just verify we can generate any valid graph
-    let graph = generate_with_constraints(&model, &ctx, "A OR B", 50)
-        .expect("Generation failed");
+    let graph = generate_with_constraints(&model, &ctx, "A OR B", 50).expect("Generation failed");
 
     // Just verify we got a valid graph with at least one output
     assert!(
@@ -51,8 +50,8 @@ fn test_access_control_generation() {
     let ctx = LlamaContext::new(&model).expect("Failed to create context");
 
     // Explicit prompt: declare two inputs, OR them, output the result
-    let graph = generate_with_constraints(&model, &ctx, "input0 OR input1", 50)
-        .expect("Generation failed");
+    let graph =
+        generate_with_constraints(&model, &ctx, "input0 OR input1", 50).expect("Generation failed");
 
     // Check we got at least 2 inputs
     if graph.inputs.len() < 2 {
@@ -85,7 +84,7 @@ fn test_content_moderation_generation() {
     let graph = generate_with_constraints(
         &model,
         &ctx,
-        "flagged NOR appeal",  // Simpler prompt for small model
+        "flagged NOR appeal", // Simpler prompt for small model
         100,
     )
     .expect("Generation failed");
@@ -106,9 +105,8 @@ fn test_agent_routing_generation() {
     };
     let ctx = LlamaContext::new(&model).expect("Failed to create context");
 
-    let graph =
-        generate_with_constraints(&model, &ctx, "input0 XOR input1", 50)
-            .expect("Generation failed");
+    let graph = generate_with_constraints(&model, &ctx, "input0 XOR input1", 50)
+        .expect("Generation failed");
 
     // Verify we got a valid graph
     assert!(!graph.outputs.is_empty(), "Should have at least one output");
@@ -116,7 +114,10 @@ fn test_agent_routing_generation() {
 
     // Skip semantic verification if we don't have 2 inputs
     if graph.inputs.len() < 2 {
-        eprintln!("Note: Model generated {} inputs, expected 2", graph.inputs.len());
+        eprintln!(
+            "Note: Model generated {} inputs, expected 2",
+            graph.inputs.len()
+        );
         return;
     }
 
@@ -135,13 +136,8 @@ fn test_majority_vote_generation() {
     let ctx = LlamaContext::new(&model).expect("Failed to create context");
 
     // Simpler prompt for the small model
-    let graph = generate_with_constraints(
-        &model,
-        &ctx,
-        "input0 OR input1 OR input2",
-        150,
-    )
-    .expect("Generation failed");
+    let graph = generate_with_constraints(&model, &ctx, "input0 OR input1 OR input2", 150)
+        .expect("Generation failed");
 
     // Verify we got a valid graph
     assert!(!graph.outputs.is_empty(), "Should have at least one output");
@@ -158,11 +154,7 @@ fn test_prompt_variations() {
     };
 
     // All prompts should produce syntactically valid graphs
-    let prompts = [
-        "A OR B",
-        "input0 OR input1",
-        "x XOR y",
-    ];
+    let prompts = ["A OR B", "input0 OR input1", "x XOR y"];
 
     for prompt in prompts {
         // Create fresh context for each generation (KV cache can't be reused)
@@ -191,15 +183,17 @@ fn test_constraint_enforcement() {
     let vocab = model.get_vocab();
 
     // Build token mapping
-    let mapping = unsafe {
-        arkavo_torg::Qwen3TokenMap::from_vocab(vocab).expect("Failed to build mapping")
-    };
+    let mapping =
+        unsafe { arkavo_torg::Qwen3TokenMap::from_vocab(vocab).expect("Failed to build mapping") };
     let vocab_size = mapping.vocab_size();
     let sampler = arkavo_torg::TorgLlamaSampler::new(mapping.into_mapping(), vocab_size);
 
     // In initial state, check that we have valid constraints
     let allowed = sampler.allowed_tokens();
-    assert!(!allowed.is_empty(), "Initial state should allow some tokens");
+    assert!(
+        !allowed.is_empty(),
+        "Initial state should allow some tokens"
+    );
 
     // Verify that the number of allowed tokens is much smaller than vocab
     let allowed_count = allowed.len();
