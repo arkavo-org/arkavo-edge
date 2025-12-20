@@ -14,9 +14,21 @@ mod manual_tests {
         let interaction = TuiInteractionKit::new();
 
         println!("Available TUI tools (discovery-only):");
-        println!("  - {} ({})", keyboard.schema().name, keyboard.schema().description);
-        println!("  - {} ({})", screenshot.schema().name, screenshot.schema().description);
-        println!("  - {} ({})", interaction.schema().name, interaction.schema().description);
+        println!(
+            "  - {} ({})",
+            keyboard.schema().name,
+            keyboard.schema().description
+        );
+        println!(
+            "  - {} ({})",
+            screenshot.schema().name,
+            screenshot.schema().description
+        );
+        println!(
+            "  - {} ({})",
+            interaction.schema().name,
+            interaction.schema().description
+        );
 
         // Verify tool names
         assert_eq!(keyboard.schema().name, "tui_keyboard");
