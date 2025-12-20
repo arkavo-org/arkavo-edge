@@ -1144,6 +1144,7 @@ name = "arkavo-torg"
 version = "0.47.4"
 dependencies = [
  "arkavo-llama-cpp",
+ "dirs 6.0.0",
  "thiserror 2.0.17",
  "tokio",
  "torg-core",

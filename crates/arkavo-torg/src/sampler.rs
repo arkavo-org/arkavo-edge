@@ -110,16 +110,16 @@ mod tests {
     #[test]
     fn test_sampler_creation() {
         let map = Qwen3TokenMap::mock();
-        let sampler = TorgLlamaSampler::new(map.into_mapping(), 151936);
+        let sampler = TorgLlamaSampler::new(map.into_mapping(), 151_936);
 
-        assert_eq!(sampler.vocab_size(), 151936);
+        assert_eq!(sampler.vocab_size(), 151_936);
         assert!(!sampler.is_complete());
     }
 
     #[test]
     fn test_allowed_tokens() {
         let map = Qwen3TokenMap::mock();
-        let sampler = TorgLlamaSampler::new(map.into_mapping(), 151936);
+        let sampler = TorgLlamaSampler::new(map.into_mapping(), 151_936);
 
         let allowed = sampler.allowed_tokens();
         // Initial state should allow some tokens (InputDecl, NodeStart, OutputDecl, etc.)

@@ -127,7 +127,7 @@ impl Qwen3TokenMap {
 
         Self {
             mapping,
-            vocab_size: 151936, // Qwen3-0.6B vocab size
+            vocab_size: 151_936, // Qwen3-0.6B vocab size
         }
     }
 
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn test_vocab_size() {
         let map = Qwen3TokenMap::mock();
-        assert_eq!(map.vocab_size(), 151936);
+        assert_eq!(map.vocab_size(), 151_936);
     }
 
     #[test]
