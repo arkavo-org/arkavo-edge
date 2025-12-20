@@ -130,8 +130,8 @@ mod tests {
     #[tokio::test]
     async fn test_empty_text() {
         let compressor = ContextCompressor::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+            "qwen3-0.6b".to_string(),
+            Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
         )
         .await;
 
@@ -151,8 +151,8 @@ mod tests {
     fn test_compression_prompt_format() {
         let compressor_result = tokio::runtime::Runtime::new().unwrap().block_on(async {
             ContextCompressor::new(
-                "gemma-3-270m-it".to_string(),
-                Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+                "qwen3-0.6b".to_string(),
+                Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
             )
             .await
         });

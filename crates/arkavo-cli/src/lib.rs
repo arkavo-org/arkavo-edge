@@ -20,7 +20,8 @@ pub fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         use tracing_subscriber::{EnvFilter, fmt};
         fmt()
             .with_env_filter(
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+                // Default to error-only for clean CLI output; use RUST_LOG for more
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error")),
             )
             .with_target(false)
             .with_thread_ids(false)

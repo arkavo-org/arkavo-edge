@@ -1,9 +1,11 @@
 #[cfg(all(unix, feature = "mcp-tools"))]
-use arkavo_llm::{Message, ProviderResponse, ToolExecutionResult, ToolExecutor};
+use arkavo_llm::{Message, ParsedToolCall, ProviderResponse, ToolExecutionResult, ToolExecutor};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use arkavo_mcp_tools::{McpClient as McpClientTrait, ToolRegistry};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use arkavo_router::Router;
+#[cfg(all(unix, feature = "mcp-tools"))]
+use std::collections::HashSet;
 #[cfg(all(unix, feature = "mcp-tools"))]
 use std::sync::Arc;
 
@@ -71,12 +73,18 @@ pub async fn process_with_tools(
     let mut all_tool_executions = Vec::new();
     let mut iteration = 0;
     let mut first_call = true;
+    // Track tools already disclosed to LLM (only disclose once per context)
+    let mut disclosed_tools: HashSet<String> = HashSet::new();
     // Safeguard against infinite loops from tool discovery/metadata requests
     let mut discovery_iterations = 0;
     const MAX_DISCOVERY_ITERATIONS: usize = 5;
     // Overall loop safeguard (discovery + execution combined)
     let mut total_loop_iterations = 0;
     const MAX_TOTAL_LOOP_ITERATIONS: usize = 20;
+    // Track repeated same-tool calls to detect loops
+    let mut last_tool_call: Option<String> = None;
+    let mut same_tool_count = 0;
+    const MAX_SAME_TOOL_CALLS: usize = 3;
 
     loop {
         // Absolute safeguard against runaway loops
@@ -165,17 +173,28 @@ pub async fn process_with_tools(
                             expanded_tools.extend(found);
                         }
 
-                        // Log if no tools were found
-                        if expanded_tools.is_empty() {
+                        // Filter out already-disclosed tools (only disclose once per context)
+                        let new_tools: Vec<_> = expanded_tools
+                            .into_iter()
+                            .filter(|t| !disclosed_tools.contains(&t.name))
+                            .collect();
+
+                        // Log if no NEW tools were found
+                        if new_tools.is_empty() {
                             tracing::warn!(
                                 target: "arkavo_tools::judge_keyword_miss",
                                 keywords = ?keywords,
-                                "Judge suggested keywords but no tools matched"
+                                "Judge suggested keywords but no new tools matched (already disclosed or not found)"
                             );
                         }
 
+                        // Track newly disclosed tools
+                        for tool in &new_tools {
+                            disclosed_tools.insert(tool.name.clone());
+                        }
+
                         // Feed back the tool definitions to the LLM
-                        let tool_list = expanded_tools
+                        let tool_list = new_tools
                             .iter()
                             .map(|t| {
                                 let aliases_text = if let Some(aliases) = &t.aliases {
@@ -197,12 +216,12 @@ pub async fn process_with_tools(
                             .collect::<Vec<_>>()
                             .join("\n");
 
-                        let tool_response = if expanded_tools.is_empty() {
+                        let tool_response = if new_tools.is_empty() {
                             "No matching tools found for the requested information.".to_string()
                         } else {
                             format!(
                                 "Found {} relevant tool(s):\n{}\n\nPlease use these tools to answer the question.",
-                                expanded_tools.len(),
+                                new_tools.len(),
                                 tool_list
                             )
                         };
@@ -241,17 +260,28 @@ pub async fn process_with_tools(
                 expanded_tools.extend(found);
             }
 
-            // Log if no tools were found (learning opportunity)
-            if expanded_tools.is_empty() {
+            // Filter out already-disclosed tools (only disclose once per context)
+            let new_tools: Vec<_> = expanded_tools
+                .into_iter()
+                .filter(|t| !disclosed_tools.contains(&t.name))
+                .collect();
+
+            // Log if no NEW tools were found (learning opportunity)
+            if new_tools.is_empty() {
                 tracing::warn!(
                     target: "arkavo_tools::keyword_miss",
                     keywords = ?requested_keywords,
-                    "No tools matched requested keywords - potential alias candidates"
+                    "No new tools matched requested keywords (already disclosed or not found)"
                 );
             }
 
+            // Track newly disclosed tools
+            for tool in &new_tools {
+                disclosed_tools.insert(tool.name.clone());
+            }
+
             // Feed back the tool definitions to the LLM
-            let tool_list = expanded_tools
+            let tool_list = new_tools
                 .iter()
                 .map(|t| {
                     format!(
@@ -263,12 +293,12 @@ pub async fn process_with_tools(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let tool_response = if expanded_tools.is_empty() {
+            let tool_response = if new_tools.is_empty() {
                 "No matching tools found for the requested keywords. Available tools can be listed with 'list all tools'.".to_string()
             } else {
                 format!(
                     "Found {} matching tool(s):\n{}\n\nYou can now use these tools.",
-                    expanded_tools.len(),
+                    new_tools.len(),
                     tool_list
                 )
             };
@@ -298,7 +328,21 @@ pub async fn process_with_tools(
             .into());
         }
 
-        if response.tool_calls.is_empty() {
+        // Check for markdown-formatted tool calls (model outputting tool name in code blocks)
+        let mut tool_calls = response.tool_calls.clone();
+        if tool_calls.is_empty() {
+            if let Some(parsed_calls) =
+                parse_markdown_tool_calls(&response.content, registry_arc.as_ref())
+            {
+                tracing::debug!(
+                    "Parsed {} tool call(s) from markdown format",
+                    parsed_calls.len()
+                );
+                tool_calls = parsed_calls;
+            }
+        }
+
+        if tool_calls.is_empty() {
             return Ok(ToolIntegrationResult {
                 final_response: response.content,
                 tool_executions: all_tool_executions,
@@ -307,21 +351,39 @@ pub async fn process_with_tools(
         }
 
         // Always show concise tool execution info
-        let tool_names: Vec<&str> = response
-            .tool_calls
-            .iter()
-            .map(|tc| tc.tool_name.as_str())
-            .collect();
-        println!("→ {}", tool_names.join(", "));
+        let tool_names: Vec<&str> = tool_calls.iter().map(|tc| tc.tool_name.as_str()).collect();
+        let current_tools = tool_names.join(", ");
+        println!("→ {current_tools}");
+
+        // Check for repeated same-tool calls (model stuck in loop)
+        if Some(&current_tools) == last_tool_call.as_ref() {
+            same_tool_count += 1;
+            if same_tool_count >= MAX_SAME_TOOL_CALLS {
+                tracing::warn!(
+                    "Model called same tool(s) {} times in a row, breaking loop",
+                    same_tool_count
+                );
+                // Return the last tool results as the final response
+                // The chat layer will use the display field from the tool results
+                return Ok(ToolIntegrationResult {
+                    final_response: String::new(), // Empty triggers fallback display
+                    tool_executions: all_tool_executions,
+                    total_iterations: iteration,
+                });
+            }
+        } else {
+            same_tool_count = 1;
+            last_tool_call = Some(current_tools);
+        }
 
         if config.show_tool_execution {
             println!("\n=== Tool Execution (Iteration {iteration}) ===");
-            println!("LLM wants to call {} tool(s)", response.tool_calls.len());
+            println!("LLM wants to call {} tool(s)", tool_calls.len());
         }
 
         let mut tool_results = Vec::new();
 
-        for tool_call in &response.tool_calls {
+        for tool_call in &tool_calls {
             if config.show_tool_execution {
                 println!("\nExecuting tool: {}", tool_call.tool_name);
                 if let Ok(args_pretty) = serde_json::to_string_pretty(&tool_call.arguments) {
@@ -357,6 +419,64 @@ pub async fn process_with_tools(
         if config.show_tool_execution {
             println!("\n=== Feeding results back to LLM ===\n");
         }
+    }
+}
+
+/// Parse markdown-formatted tool calls from response content
+/// Only matches when content is clearly a standalone tool invocation attempt
+/// (e.g., just ```get_time_status``` with minimal surrounding text)
+#[cfg(all(unix, feature = "mcp-tools"))]
+fn parse_markdown_tool_calls(
+    content: &str,
+    registry: &ToolRegistry,
+) -> Option<Vec<ParsedToolCall>> {
+    use regex::Regex;
+
+    // Only attempt parsing if content is short (under 100 chars) - clear tool invocation attempt
+    // Longer responses are normal text that happens to mention tools
+    let trimmed = content.trim();
+    if trimmed.len() > 100 {
+        return None;
+    }
+
+    let mut tool_calls = Vec::new();
+
+    // Pattern 1: Code block with tool name (```tool_name``` or ```tool_name {...}```)
+    if let Ok(code_block_re) = Regex::new(r"```(\w+)(?:\s*(\{[^}]*}))?```") {
+        for cap in code_block_re.captures_iter(trimmed) {
+            if let Some(name_match) = cap.get(1) {
+                let name = name_match.as_str();
+                if registry.get(name).is_some() {
+                    let args = cap
+                        .get(2)
+                        .and_then(|m| serde_json::from_str(m.as_str()).ok())
+                        .unwrap_or_else(|| serde_json::json!({}));
+                    tool_calls.push(ParsedToolCall {
+                        tool_name: name.to_string(),
+                        arguments: args,
+                        call_id: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Pattern 2: Just tool name on its own line (model outputting tool name without formatting)
+    if tool_calls.is_empty() && !trimmed.contains(' ') && trimmed.len() < 50 {
+        // Single word that might be a tool name
+        if registry.get(trimmed).is_some() {
+            tool_calls.push(ParsedToolCall {
+                tool_name: trimmed.to_string(),
+                arguments: serde_json::json!({}),
+                call_id: None,
+            });
+        }
+    }
+
+    if tool_calls.is_empty() {
+        None
+    } else {
+        Some(tool_calls)
     }
 }
 

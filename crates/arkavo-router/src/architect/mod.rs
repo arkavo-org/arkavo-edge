@@ -86,7 +86,7 @@ impl Subtask {
             index,
             description,
             category,
-            assigned_model: ModelChoice::LocalGemma4B, // Default, will be set by selector
+            assigned_model: ModelChoice::LocalQwen3, // Default, will be set by selector
             estimated_cost_usd: 0.0,
             dependencies: Vec::new(),
         }

@@ -36,11 +36,11 @@ static LLAMA_LOGGING_ENABLED: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ModelFormat {
     /// Gemma-3 format: <start_of_turn>user\n...<end_of_turn>
-    #[default]
     Gemma3,
     /// Mistral V3 format: [SYSTEM_PROMPT]...[/SYSTEM_PROMPT] [INST]...[/INST]
     MistralV3,
     /// Qwen3 format (ChatML): <|im_start|>user\n...<|im_end|>
+    #[default]
     Qwen3,
 }
 
@@ -51,8 +51,11 @@ pub fn detect_model_format(model_name: &str) -> ModelFormat {
         ModelFormat::Qwen3
     } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
         ModelFormat::MistralV3
-    } else {
+    } else if name_lower.contains("gemma") {
         ModelFormat::Gemma3
+    } else {
+        // Default to Qwen3 for unknown models (TØRG-compatible)
+        ModelFormat::Qwen3
     }
 }
 
@@ -897,7 +900,15 @@ mod tests {
             detect_model_format("google/gemma-3-27b-it"),
             ModelFormat::Gemma3
         );
-        assert_eq!(detect_model_format("llama-3.2-3b"), ModelFormat::Gemma3);
+    }
+
+    #[test]
+    fn test_detect_model_format_unknown_defaults_to_qwen3() {
+        // Unknown models should default to Qwen3 (TØRG-compatible)
+        assert_eq!(detect_model_format("llama-3.2-3b"), ModelFormat::Qwen3);
+        assert_eq!(detect_model_format("phi-3-mini"), ModelFormat::Qwen3);
+        assert_eq!(detect_model_format("deepseek-coder"), ModelFormat::Qwen3);
+        assert_eq!(detect_model_format("unknown-model"), ModelFormat::Qwen3);
     }
 
     #[test]
@@ -919,7 +930,7 @@ mod tests {
 
     #[test]
     fn test_model_format_default() {
-        assert_eq!(ModelFormat::default(), ModelFormat::Gemma3);
+        assert_eq!(ModelFormat::default(), ModelFormat::Qwen3);
     }
 
     #[test]

@@ -248,27 +248,21 @@ pub struct TaskClassifier {
 #[cfg(all(feature = "llama-cpp", not(target_env = "musl")))]
 impl TaskClassifier {
     pub async fn new() -> Result<Self> {
-        use hf_hub::api::tokio::Api;
+        // Use model discovery to find any available model (prefers Qwen3/Ministral)
+        let model_path = crate::model_discovery::find_any_gguf()
+            .await
+            .ok_or_else(|| Error::Classification(
+                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
+            ))?;
 
-        let api = Api::new().map_err(|e| {
-            Error::Provider(arkavo_llm::Error::Config(format!(
-                "Failed to initialize HF API: {e}"
-            )))
-        })?;
-        let repo = api.repo(hf_hub::Repo::model(
-            "unsloth/gemma-3-270m-it-GGUF".to_string(),
-        ));
-        let model_path = repo.get("gemma-3-270m-it-Q4_0.gguf").await.map_err(|e| {
-            Error::Provider(arkavo_llm::Error::Config(format!(
-                "Failed to download model: {e}"
-            )))
-        })?;
+        let model_name = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("local-classifier")
+            .to_string();
 
-        let provider = LlamaCppProvider::new(
-            "gemma-3-270m-it".to_string(),
-            model_path.to_string_lossy().to_string(),
-        )
-        .map_err(Error::Provider)?;
+        let provider = LlamaCppProvider::new(model_name, model_path.to_string_lossy().to_string())
+            .map_err(Error::Provider)?;
 
         Ok(Self {
             provider: Arc::new(Mutex::new(provider)),

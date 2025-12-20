@@ -5,6 +5,20 @@ use clap::{Args, Subcommand};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Check if a model has proper chat template support
+fn get_model_compatibility(model_name: &str) -> (&'static str, &'static str) {
+    let name_lower = model_name.to_lowercase();
+    if name_lower.contains("qwen") {
+        ("compatible", "Qwen3")
+    } else if name_lower.contains("mistral") || name_lower.contains("ministral") {
+        ("compatible", "MistralV3")
+    } else if name_lower.contains("gemma") {
+        ("compatible", "Gemma3")
+    } else {
+        ("incompatible", "unknown format")
+    }
+}
+
 #[derive(Args)]
 pub struct ModelCommand {
     #[command(subcommand)]
@@ -212,7 +226,16 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
             if !found_models.is_empty() {
                 for (model_name, file_name, path, size) in &found_models {
                     let size_gb = *size as f64 / (1024.0 * 1024.0 * 1024.0);
-                    println!("  ✓ {model_name}/{file_name} ({size_gb:.1} GB)");
+                    let (compat_status, format) = get_model_compatibility(model_name);
+                    let icon = if compat_status == "compatible" {
+                        "✓"
+                    } else {
+                        "⚠"
+                    };
+                    println!("  {icon} {model_name}/{file_name} ({size_gb:.1} GB) [{format}]");
+                    if compat_status == "incompatible" {
+                        println!("      Warning: May use incorrect chat template");
+                    }
                     if std::env::var("ARKAVO_DEBUG").is_ok() {
                         println!("    Path: {}", path.display());
                     }
@@ -220,9 +243,7 @@ pub async fn run(cmd: &ModelCommand) -> Result<()> {
                 println!("\nDownload models with: hf download <repo> <file.gguf>");
             } else {
                 println!("  No GGUF models found in HuggingFace cache");
-                println!(
-                    "  Download with: hf download unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_0.gguf"
-                );
+                println!("  Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf");
             }
         }
 

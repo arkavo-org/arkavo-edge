@@ -68,6 +68,7 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+regex = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
 indicatif = { workspace = true }
@@ -76,7 +77,6 @@ hf-hub = { workspace = true }
 dirs = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
-hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

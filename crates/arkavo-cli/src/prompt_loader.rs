@@ -128,11 +128,18 @@ pub fn render_prompt(template: &str, variables: &[(String, String)]) -> String {
 pub fn load_chat_system_prompt(mcp_available: bool, available_tools: Option<&str>) -> String {
     // For small models, minimal or no system prompt works best
     if mcp_available {
-        if let Some(tools) = available_tools {
+        let tools_section = if let Some(tools) = available_tools {
             format!("Available tools:\n{tools}")
         } else {
             String::new()
-        }
+        };
+
+        format!(
+            "{tools_section}
+
+Tool Discovery: If you need a tool not listed above, request it with REQUEST_TOOL: <keyword>
+Examples: REQUEST_TOOL: time, REQUEST_TOOL: github, REQUEST_TOOL: security"
+        )
     } else {
         String::new()
     }

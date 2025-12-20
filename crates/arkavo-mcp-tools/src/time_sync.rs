@@ -31,8 +31,16 @@ impl GetAgentTimeTool {
         Self {
             schema: ToolSchema {
                 name: "get_agent_time".to_string(),
-                aliases: Some(vec!["time".to_string(), "clock".to_string(), "date".to_string(), "datetime".to_string()]),
-                description: "Get the current time as understood by this agent. Supports multiple output formats and timezones.".to_string(),
+                aliases: Some(vec![
+                    "time".to_string(),
+                    "current_time".to_string(),
+                    "now".to_string(),
+                    "clock".to_string(),
+                    "date".to_string(),
+                    "datetime".to_string(),
+                    "what_time".to_string(),
+                ]),
+                description: "Get the current time. Use this tool when asked 'what time is it?' or for current date/time.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -53,18 +61,24 @@ impl GetAgentTimeTool {
     }
 
     fn format_time(now: DateTime<Utc>, format: &str, timezone_str: &str) -> crate::Result<Value> {
+        use std::str::FromStr;
         let tz = if timezone_str == "UTC" || timezone_str.is_empty() {
             chrono_tz::UTC
         } else {
-            timezone_str
-                .parse::<chrono_tz::Tz>()
+            chrono_tz::Tz::from_str(timezone_str)
                 .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid timezone: {}", e)))?
         };
 
         let local_time = now.with_timezone(&tz);
 
+        // Create human-readable display text
+        let display = local_time
+            .format("%A, %B %d, %Y at %I:%M:%S %p %Z")
+            .to_string();
+
         match format {
             "rfc3339" | "" => Ok(json!({
+                "display": format!("The current time is: {}", display),
                 "timestamp": local_time.to_rfc3339(),
                 "format": "rfc3339",
                 "timezone": timezone_str,
@@ -73,12 +87,14 @@ impl GetAgentTimeTool {
                 "source": "system_clock"
             })),
             "unix" => Ok(json!({
+                "display": format!("The current time is: {} ({} seconds since epoch)", display, now.timestamp()),
                 "unix_seconds": now.timestamp(),
                 "unix_nanos": now.timestamp_subsec_nanos(),
                 "format": "unix",
                 "source": "system_clock"
             })),
             "iso8601" => Ok(json!({
+                "display": format!("The current time is: {}", display),
                 "timestamp": local_time.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
                 "format": "iso8601",
                 "timezone": timezone_str,
@@ -319,8 +335,8 @@ impl GetTimeStatusTool {
         Self {
             schema: ToolSchema {
                 name: "get_time_status".to_string(),
-                aliases: None,
-                description: "Get time synchronization status and health information.".to_string(),
+                aliases: Some(vec!["ntp_status".to_string(), "sync_status".to_string()]),
+                description: "Check NTP time synchronization health. For current time, use get_agent_time instead.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {},
@@ -359,7 +375,14 @@ impl Tool for GetTimeStatusTool {
             "unknown"
         };
 
+        // Always include current system time so the model can answer time queries
+        let now = Utc::now();
+        let display = now.format("%A, %B %d, %Y at %I:%M:%S %p UTC").to_string();
+
         Ok(json!({
+            "display": format!("The current time is: {}. Sync status: {}", display, health),
+            "current_time": now.to_rfc3339(),
+            "current_time_unix": now.timestamp(),
             "synchronized": synchronized,
             "last_sync": state.timestamp.map(|t| t.to_rfc3339()),
             "server": state.server,

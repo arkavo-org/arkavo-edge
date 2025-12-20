@@ -8,8 +8,17 @@ pub enum ModelChoice {
     GeminiPro,
     ClaudeSonnet,
     ClaudeOpus,
+    /// Qwen3-0.6B - fast, TØRG-compatible (preferred default)
+    LocalQwen3,
+    /// Ministral-3B - TØRG-compatible, higher quality
+    LocalMinistral3B,
+    /// Ministral-8B - TØRG-compatible, high quality
+    LocalMinistral8B,
+    /// Legacy: Gemma-3-270M (if cached)
     LocalGemma270M,
+    /// Legacy: Gemma-3-4B (if cached)
     LocalGemma4B,
+    /// Legacy: Gemma-3-12B (if cached)
     LocalGemma12B,
     LocalDeepSeekCoder,
     /// DeepSeek V3.2 - daily driver with tool support
@@ -25,6 +34,9 @@ impl ModelChoice {
             Self::GeminiPro => "gemini-3-pro-preview",
             Self::ClaudeSonnet => "claude-sonnet-4-5-20250929",
             Self::ClaudeOpus => "claude-opus-4-5-20251101",
+            Self::LocalQwen3 => "qwen3-0.6b",
+            Self::LocalMinistral3B => "ministral-3b",
+            Self::LocalMinistral8B => "ministral-8b",
             Self::LocalGemma270M => "gemma-3-270m-it",
             Self::LocalGemma4B => "gemma-3-4b-it",
             Self::LocalGemma12B => "gemma-3-12b-it",
@@ -36,7 +48,10 @@ impl ModelChoice {
     pub fn is_local(&self) -> bool {
         matches!(
             self,
-            Self::LocalGemma270M
+            Self::LocalQwen3
+                | Self::LocalMinistral3B
+                | Self::LocalMinistral8B
+                | Self::LocalGemma270M
                 | Self::LocalGemma4B
                 | Self::LocalGemma12B
                 | Self::LocalDeepSeekCoder
@@ -66,6 +81,8 @@ impl ModelChoice {
         match self {
             Self::GeminiFlash | Self::GeminiPro => "google",
             Self::ClaudeSonnet | Self::ClaudeOpus => "anthropic",
+            Self::LocalQwen3 => "local-qwen",
+            Self::LocalMinistral3B | Self::LocalMinistral8B => "local-ministral",
             Self::LocalGemma270M | Self::LocalGemma4B | Self::LocalGemma12B => "local-gemma",
             Self::LocalDeepSeekCoder => "local-deepseek",
             Self::DeepSeekV32 | Self::DeepSeekV32Speciale => "deepseek",
@@ -131,30 +148,37 @@ impl RoutingDecision {
                 vec![
                     ModelChoice::GeminiPro,
                     ModelChoice::ClaudeSonnet,
-                    ModelChoice::LocalGemma4B,
+                    ModelChoice::LocalMinistral3B,
                 ]
             }
             (ModelChoice::GeminiPro, _) => {
                 vec![
                     ModelChoice::ClaudeOpus,
                     ModelChoice::GeminiFlash,
-                    ModelChoice::LocalGemma12B,
+                    ModelChoice::LocalMinistral8B,
                 ]
             }
             (ModelChoice::ClaudeSonnet, _) => {
                 vec![
                     ModelChoice::GeminiFlash,
                     ModelChoice::ClaudeOpus,
-                    ModelChoice::LocalGemma4B,
+                    ModelChoice::LocalMinistral3B,
                 ]
             }
             (ModelChoice::ClaudeOpus, _) => {
                 vec![
                     ModelChoice::GeminiPro,
                     ModelChoice::ClaudeSonnet,
-                    ModelChoice::LocalGemma12B,
+                    ModelChoice::LocalMinistral8B,
                 ]
             }
+            // Qwen3 -> Ministral-3B -> Ministral-8B
+            (ModelChoice::LocalQwen3, _) => {
+                vec![ModelChoice::LocalMinistral3B, ModelChoice::GeminiFlash]
+            }
+            (ModelChoice::LocalMinistral3B, _) => vec![ModelChoice::LocalMinistral8B],
+            (ModelChoice::LocalMinistral8B, _) => vec![ModelChoice::GeminiFlash],
+            // Legacy Gemma fallbacks
             (ModelChoice::LocalGemma4B, _) => vec![ModelChoice::LocalGemma12B],
             (ModelChoice::LocalGemma270M, _) => {
                 vec![ModelChoice::LocalGemma4B, ModelChoice::GeminiFlash]
@@ -209,7 +233,11 @@ impl RoutingDecision {
                 let output_cost = (token_estimate.output as f64 / 1_000_000.0) * 1.10;
                 input_cost + output_cost
             }
-            ModelChoice::LocalGemma270M
+            // All local models are free
+            ModelChoice::LocalQwen3
+            | ModelChoice::LocalMinistral3B
+            | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
             | ModelChoice::LocalDeepSeekCoder => 0.0,
@@ -222,6 +250,9 @@ impl RoutingDecision {
             ModelChoice::GeminiPro => Duration::from_secs(10),
             ModelChoice::ClaudeSonnet => Duration::from_secs(5),
             ModelChoice::ClaudeOpus => Duration::from_secs(15),
+            ModelChoice::LocalQwen3 => Duration::from_millis(500),
+            ModelChoice::LocalMinistral3B => Duration::from_secs(2),
+            ModelChoice::LocalMinistral8B => Duration::from_secs(4),
             ModelChoice::LocalGemma270M => Duration::from_millis(500),
             ModelChoice::LocalGemma4B => Duration::from_secs(2),
             ModelChoice::LocalGemma12B => Duration::from_secs(5),

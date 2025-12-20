@@ -89,8 +89,8 @@ mod tests {
     #[tokio::test]
     async fn test_pipeline_creation() {
         let result = CompressionPipeline::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+            "qwen3-0.6b".to_string(),
+            Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
         )
         .await;
 
@@ -112,8 +112,8 @@ mod tests {
     #[tokio::test]
     async fn test_empty_text_compression() {
         let pipeline = CompressionPipeline::new(
-            "gemma-3-270m-it".to_string(),
-            Some("unsloth/gemma-3-270m-it-GGUF".to_string()),
+            "qwen3-0.6b".to_string(),
+            Some("Qwen/Qwen3-0.6B-GGUF".to_string()),
         )
         .await;
 

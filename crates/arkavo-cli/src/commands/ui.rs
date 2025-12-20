@@ -553,7 +553,10 @@ async fn create_client_from_routing(
                 Err("Anthropic support requires llm-remote feature".into())
             }
         }
-        ModelChoice::LocalGemma270M
+        ModelChoice::LocalQwen3
+        | ModelChoice::LocalMinistral3B
+        | ModelChoice::LocalMinistral8B
+        | ModelChoice::LocalGemma270M
         | ModelChoice::LocalGemma4B
         | ModelChoice::LocalGemma12B
         | ModelChoice::LocalDeepSeekCoder => {
