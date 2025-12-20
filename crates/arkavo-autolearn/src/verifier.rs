@@ -122,6 +122,9 @@ impl From<&StressTestResult> for StressStats {
     }
 }
 
+/// Default timeout for SAT verification (500ms)
+pub const DEFAULT_VERIFICATION_TIMEOUT_MS: u64 = 500;
+
 /// Configuration for the immune verifier
 #[derive(Debug, Clone)]
 pub struct VerifierConfig {
@@ -133,6 +136,8 @@ pub struct VerifierConfig {
     pub strict_invariants: bool,
     /// Sample inputs to test against invariants
     pub invariant_sample_size: usize,
+    /// Timeout for SAT operations (fail-safe: reject on timeout)
+    pub timeout_ms: u64,
 }
 
 impl Default for VerifierConfig {
@@ -147,6 +152,7 @@ impl Default for VerifierConfig {
             max_policy_holes: 0,
             strict_invariants: true,
             invariant_sample_size: 100,
+            timeout_ms: DEFAULT_VERIFICATION_TIMEOUT_MS,
         }
     }
 }
@@ -185,7 +191,11 @@ impl ImmuneVerifier {
     ///
     /// Checks the graph against invariant constraints and runs
     /// basic stress testing.
-    pub fn verify(&self, graph: &Graph, _signal: &PainSignal) -> AutoLearnResult<VerificationResult> {
+    pub fn verify(
+        &self,
+        graph: &Graph,
+        _signal: &PainSignal,
+    ) -> AutoLearnResult<VerificationResult> {
         let mut result = VerificationResult::passed();
 
         // Check invariant constraints
@@ -279,7 +289,10 @@ impl ImmuneVerifier {
     }
 
     /// Exhaustive invariant checking for deep verification
-    fn exhaustive_invariant_check(&self, graph: &Graph) -> AutoLearnResult<Vec<InvariantViolation>> {
+    fn exhaustive_invariant_check(
+        &self,
+        graph: &Graph,
+    ) -> AutoLearnResult<Vec<InvariantViolation>> {
         let mut violations = Vec::new();
         let num_inputs = graph.inputs.len();
 
@@ -399,13 +412,12 @@ mod tests {
 
     #[test]
     fn test_verification_result_builder() {
-        let result = VerificationResult::passed()
-            .with_stress_stats(StressStats {
-                inputs_tested: 100,
-                true_cases: 75,
-                false_cases: 25,
-                boundary_probes: 5,
-            });
+        let result = VerificationResult::passed().with_stress_stats(StressStats {
+            inputs_tested: 100,
+            true_cases: 75,
+            false_cases: 25,
+            boundary_probes: 5,
+        });
 
         assert!(result.passed);
         assert!(result.stress_stats.is_some());
@@ -420,8 +432,7 @@ mod tests {
             contract_id: None,
         };
 
-        let result = VerificationResult::passed()
-            .with_invariant_violation(violation);
+        let result = VerificationResult::passed().with_invariant_violation(violation);
 
         assert!(!result.passed);
         assert_eq!(result.invariant_violations.len(), 1);
@@ -433,5 +444,183 @@ mod tests {
         assert_eq!(config.max_policy_holes, 0);
         assert!(config.strict_invariants);
         assert_eq!(config.invariant_sample_size, 100);
+        assert_eq!(config.timeout_ms, DEFAULT_VERIFICATION_TIMEOUT_MS);
+    }
+}
+
+/// Adversarial security tests for the ImmuneVerifier
+///
+/// These tests verify that the verifier correctly rejects malicious
+/// or invalid patches, implementing AUTO-005 zero-trust verification.
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use arkavo_crypto::AgentKeypair;
+    use arkavo_sbe::InvariantContract;
+    use torg_core::{Builder, Token};
+
+    /// Create a graph that always outputs TRUE (tautology)
+    fn create_always_true_graph() -> Graph {
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        // Node 1: OR(0, 0) - just passes through input
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(1)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+        // Node 2: OR(1, TRUE) - always TRUE
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(1)).unwrap();
+        builder.push(Token::True).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.finish().unwrap()
+    }
+
+    /// Create an invariant that requires output to be FALSE when input is FALSE
+    /// (i.e., "deny by default" - if no explicit permission, deny)
+    fn create_deny_default_invariant() -> Graph {
+        // Invariant: NOT(input=FALSE AND output=TRUE)
+        // Equivalently: input OR NOT(output)
+        // If input is FALSE (no permission), output must be FALSE
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap(); // input
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(2)).unwrap(); // output from policy (to check)
+        // NOT output = NOR(output, output)
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(3)).unwrap();
+        builder.push(Token::Nor).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+        // input OR NOT(output)
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(4)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::Id(3)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(4)).unwrap();
+        builder.finish().unwrap()
+    }
+
+    #[test]
+    fn test_adversarial_always_allow_patch_rejected() {
+        // ADVERSARIAL TEST: A patch that always returns TRUE (bypasses all checks)
+        // should be rejected if we have a "deny by default" invariant
+
+        let keypair = AgentKeypair::generate();
+        let invariant_graph = create_deny_default_invariant();
+        let mut contract = InvariantContract::new(
+            "Deny by default: output must be FALSE when input is FALSE".to_string(),
+            invariant_graph,
+        );
+        contract.sign(&keypair);
+
+        let mut invariant_layer = InvariantLayer::new();
+        invariant_layer.add_contract(contract).unwrap();
+
+        let verifier = ImmuneVerifier::new(Arc::new(invariant_layer));
+
+        // Create a malicious "always allow" patch
+        let poisoned_graph = create_always_true_graph();
+
+        // The verifier should REJECT this patch
+        let result = verifier.deep_verify(&poisoned_graph).unwrap();
+
+        assert!(
+            !result.passed,
+            "SECURITY FAILURE: Verifier accepted an 'always allow' patch that violates deny-by-default invariant"
+        );
+        assert!(
+            !result.invariant_violations.is_empty(),
+            "SECURITY FAILURE: No invariant violation detected for policy bypass"
+        );
+    }
+
+    #[test]
+    fn test_valid_patch_with_invariant_passes() {
+        // A valid patch that respects the invariant should pass
+        let keypair = AgentKeypair::generate();
+        let invariant_graph = create_deny_default_invariant();
+        let mut contract =
+            InvariantContract::new("Deny by default".to_string(), invariant_graph);
+        contract.sign(&keypair);
+
+        let mut invariant_layer = InvariantLayer::new();
+        invariant_layer.add_contract(contract).unwrap();
+
+        let verifier = ImmuneVerifier::new(Arc::new(invariant_layer));
+
+        // Create a compliant graph: output = input (respects deny-by-default)
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(1)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(1)).unwrap();
+        let compliant_graph = builder.finish().unwrap();
+
+        let result = verifier.deep_verify(&compliant_graph).unwrap();
+        assert!(result.passed, "Valid patch should pass verification");
+    }
+
+    #[test]
+    fn test_empty_graph_handled() {
+        // A minimal graph should be handled without panic
+        let invariant_layer = Arc::new(InvariantLayer::new());
+        let verifier = ImmuneVerifier::new(invariant_layer);
+
+        // Create minimal graph with no useful logic
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        let minimal_graph = builder.finish().unwrap();
+
+        // This should at least complete without panic
+        let result = verifier.deep_verify(&minimal_graph);
+        assert!(result.is_ok(), "Verifier should handle minimal graphs");
+    }
+
+    #[test]
+    fn test_strict_mode_rejects_on_first_violation() {
+        // With strict_invariants = true, first violation should stop
+        let keypair = AgentKeypair::generate();
+        let invariant_graph = create_deny_default_invariant();
+        let mut contract =
+            InvariantContract::new("Deny by default".to_string(), invariant_graph);
+        contract.sign(&keypair);
+
+        let mut invariant_layer = InvariantLayer::new();
+        invariant_layer.add_contract(contract).unwrap();
+
+        let config = VerifierConfig {
+            strict_invariants: true,
+            ..Default::default()
+        };
+        let verifier = ImmuneVerifier::with_config(Arc::new(invariant_layer), config);
+
+        let poisoned_graph = create_always_true_graph();
+        let result = verifier.deep_verify(&poisoned_graph).unwrap();
+
+        assert!(!result.passed);
+        // In strict mode, we stop at first violation
+        assert_eq!(result.invariant_violations.len(), 1);
     }
 }

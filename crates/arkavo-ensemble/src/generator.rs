@@ -115,9 +115,10 @@ pub async fn generate_llm_candidate<S: LlmSynthesizer>(
     let prompt = context.build_prompt();
     let prompt_hash = hash_string(&prompt);
 
-    let graph = synthesizer.synthesize(&prompt).await.map_err(|e| {
-        crate::error::EnsembleError::Synthesis(e.message)
-    })?;
+    let graph = synthesizer
+        .synthesize(&prompt)
+        .await
+        .map_err(|e| crate::error::EnsembleError::Synthesis(e.message))?;
 
     let policy = PolicyLayer::new(graph);
 
@@ -149,16 +150,10 @@ pub fn generate_boundary_mutation(
 }
 
 /// Generate a candidate to remediate an anomaly
-pub fn generate_anomaly_remediation(
-    anomaly_id: Uuid,
-    remediation_graph: Graph,
-) -> PolicyCandidate {
+pub fn generate_anomaly_remediation(anomaly_id: Uuid, remediation_graph: Graph) -> PolicyCandidate {
     let policy = PolicyLayer::new(remediation_graph);
 
-    PolicyCandidate::new(
-        policy,
-        GenerationMethod::AnomalyRemediation { anomaly_id },
-    )
+    PolicyCandidate::new(policy, GenerationMethod::AnomalyRemediation { anomaly_id })
 }
 
 /// Hash a string for prompt tracking

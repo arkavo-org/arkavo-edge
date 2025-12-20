@@ -111,11 +111,7 @@ impl PainSignal {
 
     /// Create a pain signal from a boundary probe
     #[must_use]
-    pub fn from_boundary_probe(
-        probe: BoundaryProbe,
-        graph: &Graph,
-        model_id: String,
-    ) -> Self {
+    pub fn from_boundary_probe(probe: BoundaryProbe, graph: &Graph, model_id: String) -> Self {
         // Closer to boundary = higher severity
         let severity = 1.0 / (probe.distance_to_flip as f64 + 1.0);
 
@@ -263,8 +259,9 @@ impl PainAggregator {
         graph: &Graph,
         model_id: String,
     ) {
-        let signal =
-            PainSignal::from_runtime_anomaly(output_id, input_hash, expected, actual, graph, model_id);
+        let signal = PainSignal::from_runtime_anomaly(
+            output_id, input_hash, expected, actual, graph, model_id,
+        );
         self.push(signal);
     }
 

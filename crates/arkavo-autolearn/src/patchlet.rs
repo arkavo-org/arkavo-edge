@@ -95,7 +95,7 @@ impl Patchlet {
 /// Graph serialization module (re-implements arkavo-sbe pattern)
 mod graph_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use torg_core::{graph::Node, token::BoolOp, Graph};
+    use torg_core::{Graph, graph::Node, token::BoolOp};
 
     #[derive(Serialize, Deserialize)]
     struct SerializableGraph {
@@ -278,8 +278,8 @@ mod tests {
             sat_probes: 100,
         };
 
-        let patchlet = Patchlet::new(graph, trigger, GenerationMethod::Manual)
-            .with_verification(verification);
+        let patchlet =
+            Patchlet::new(graph, trigger, GenerationMethod::Manual).with_verification(verification);
 
         assert!(patchlet.verification.passed);
         assert_eq!(patchlet.verification.invariant_checks, 5);

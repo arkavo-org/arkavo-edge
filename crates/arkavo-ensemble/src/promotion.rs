@@ -4,7 +4,7 @@
 
 use uuid::Uuid;
 
-use arkavo_sat::{stress_test, StressTestConfig};
+use arkavo_sat::{StressTestConfig, stress_test};
 use arkavo_sbe::{PolicyLayer, PolicyUpdateRequest};
 
 use crate::candidate::CandidateState;
@@ -204,10 +204,7 @@ impl<C: CostFunction> PolicyEnsemble<C> {
         // Create policy update request for quorum approval
         Ok(PolicyUpdateRequest::new(
             candidate.policy.graph.clone(),
-            format!(
-                "Ensemble promotion: {} ({})",
-                candidate_id, regret_info
-            ),
+            format!("Ensemble promotion: {} ({})", candidate_id, regret_info),
             proposer,
         ))
     }
@@ -309,10 +306,7 @@ mod tests {
         let fake_id = Uuid::new_v4();
         let result = ensemble.promote_candidate(fake_id, vec![]);
 
-        assert!(matches!(
-            result,
-            Err(EnsembleError::CandidateNotFound(_))
-        ));
+        assert!(matches!(result, Err(EnsembleError::CandidateNotFound(_))));
     }
 
     #[test]

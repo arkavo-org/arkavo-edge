@@ -187,8 +187,8 @@ impl AnomalyPrioritizer {
         let mut reason = PriorityReason::NearBoundary;
 
         // Violation component
-        let violation_score =
-            self.weights.violation_weight * (history.violation_count as f64 / self.max_violations as f64);
+        let violation_score = self.weights.violation_weight
+            * (history.violation_count as f64 / self.max_violations as f64);
         if violation_score > max_component {
             max_component = violation_score;
             reason = PriorityReason::HighViolationRate;
@@ -197,7 +197,8 @@ impl AnomalyPrioritizer {
         // Recency component
         if let Some(last) = history.last_violation {
             let elapsed = last.elapsed().as_secs_f64();
-            let recency_score = self.weights.recency_weight * (-elapsed / RECENCY_DECAY_SECONDS).exp();
+            let recency_score =
+                self.weights.recency_weight * (-elapsed / RECENCY_DECAY_SECONDS).exp();
             if recency_score > max_component {
                 max_component = recency_score;
                 reason = PriorityReason::RecentAnomaly;
@@ -237,7 +238,11 @@ impl AnomalyPrioritizer {
             .collect();
 
         // Sort by score descending
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         scored.truncate(k);
         scored

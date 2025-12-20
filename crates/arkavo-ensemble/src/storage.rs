@@ -160,13 +160,12 @@ impl SqliteEnsembleStore {
 
     /// Load regret for a candidate
     pub async fn load_regret(&self, candidate_id: Uuid) -> EnsembleResult<Option<StoredRegret>> {
-        let row: Option<RegretRow> = sqlx::query_as(
-            "SELECT * FROM ensemble_regret WHERE candidate_id = ?1",
-        )
-        .bind(candidate_id.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| EnsembleError::Storage(e.to_string()))?;
+        let row: Option<RegretRow> =
+            sqlx::query_as("SELECT * FROM ensemble_regret WHERE candidate_id = ?1")
+                .bind(candidate_id.to_string())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| EnsembleError::Storage(e.to_string()))?;
 
         Ok(row.map(StoredRegret::from_row))
     }
@@ -204,8 +203,7 @@ pub struct StoredCandidate {
 
 impl StoredCandidate {
     fn from_row(row: CandidateRow) -> EnsembleResult<Self> {
-        let id = Uuid::parse_str(&row.id)
-            .map_err(|e| EnsembleError::Storage(e.to_string()))?;
+        let id = Uuid::parse_str(&row.id).map_err(|e| EnsembleError::Storage(e.to_string()))?;
 
         let state = parse_state(&row.state)?;
 

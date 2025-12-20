@@ -121,10 +121,7 @@ impl ModificationTracker {
 
         // Filter to just outputs
         let output_set: HashSet<u16> = graph.outputs.iter().copied().collect();
-        let affected_outputs: Vec<u16> = all_affected
-            .intersection(&output_set)
-            .copied()
-            .collect();
+        let affected_outputs: Vec<u16> = all_affected.intersection(&output_set).copied().collect();
 
         // Calculate savings
         let total_outputs = graph.outputs.len();
@@ -161,7 +158,8 @@ impl ModificationTracker {
     /// Mark outputs as verified at current version
     pub fn mark_verified(&mut self, output_ids: &[u16]) {
         for &output_id in output_ids {
-            self.verified_versions.insert(output_id, self.current_version);
+            self.verified_versions
+                .insert(output_id, self.current_version);
         }
         self.modified_nodes.clear();
     }

@@ -37,6 +37,12 @@ pub struct AutoLearnConfig {
     pub synthesis_timeout: Duration,
     /// Maximum concurrent synthesis operations
     pub max_concurrent_synthesis: usize,
+    /// Dry-run mode: synthesize and verify but don't broadcast
+    ///
+    /// When enabled, patches are synthesized and verified but NOT
+    /// broadcast to the network. Use this to observe the system
+    /// safely before enabling full self-healing propagation.
+    pub dry_run: bool,
 }
 
 impl Default for AutoLearnConfig {
@@ -46,6 +52,7 @@ impl Default for AutoLearnConfig {
             synthesis_threshold: 0.5,
             synthesis_timeout: Duration::from_secs(30),
             max_concurrent_synthesis: 2,
+            dry_run: false,
         }
     }
 }
@@ -61,6 +68,8 @@ pub struct AutoLearnStats {
     pub syntheses_failed: u64,
     /// Patches broadcast
     pub patches_broadcast: u64,
+    /// Patches verified but not broadcast (dry-run mode)
+    pub patches_dry_run: u64,
     /// Remote patches received
     pub patches_received: u64,
     /// Remote patches accepted
@@ -245,10 +254,27 @@ impl<C: CostFunction> AutoLearner<C> {
             return Ok(None);
         }
 
-        // Step 4: Swarm Propagation
+        // Step 4: Swarm Propagation (or dry-run logging)
         let patchlet = self.create_patchlet(&graph, &signal, &verification);
-        let patch_id = self.network.broadcast_patch(&patchlet).await?;
-        self.stats.patches_broadcast += 1;
+
+        let patch_id = if self.config.dry_run {
+            // DRY-RUN MODE: Log but don't broadcast
+            let dry_run_id = Uuid::new_v4();
+            self.stats.patches_dry_run += 1;
+            tracing::info!(
+                "[DRY-RUN] Would broadcast patch {} (signal: {}, severity: {:.2})",
+                dry_run_id,
+                signal.source.description(),
+                signal.severity
+            );
+            dry_run_id
+        } else {
+            // LIVE MODE: Broadcast to network
+            let id = self.network.broadcast_patch(&patchlet).await?;
+            self.stats.patches_broadcast += 1;
+            tracing::info!("Broadcast patch {}", id);
+            id
+        };
 
         // Add to local ensemble for counterfactual evaluation
         let policy = PolicyLayer::new(graph);
@@ -261,7 +287,6 @@ impl<C: CostFunction> AutoLearner<C> {
             tracing::debug!("Failed to add candidate: {}", e);
         }
 
-        tracing::info!("Broadcast patch {}", patch_id);
         Ok(Some(patch_id))
     }
 
@@ -277,7 +302,9 @@ impl<C: CostFunction> AutoLearner<C> {
         let approve = verification.passed;
 
         // Vote on the patch
-        self.network.vote_on_patch(incoming.patch_id, approve).await?;
+        self.network
+            .vote_on_patch(incoming.patch_id, approve)
+            .await?;
 
         if approve {
             self.stats.patches_accepted += 1;
@@ -453,13 +480,7 @@ impl<C: CostFunction> AutoLearnerBuilder<C> {
 
         let verifier = ImmuneVerifier::with_config(invariant_layer, self.verifier_config);
 
-        let mut learner = AutoLearner::new(
-            self.config,
-            synthesizer,
-            verifier,
-            network,
-            ensemble,
-        );
+        let mut learner = AutoLearner::new(self.config, synthesizer, verifier, network, ensemble);
 
         if let Some(scheduler) = self.probe_scheduler {
             learner = learner.with_probe_scheduler(scheduler);

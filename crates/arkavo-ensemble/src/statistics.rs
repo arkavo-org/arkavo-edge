@@ -41,14 +41,7 @@ impl TTestResult {
 ///
 /// # Returns
 /// Test result with t-statistic, degrees of freedom, and p-value
-pub fn welch_t_test(
-    mean1: f64,
-    var1: f64,
-    n1: u64,
-    mean2: f64,
-    var2: f64,
-    n2: u64,
-) -> TTestResult {
+pub fn welch_t_test(mean1: f64, var1: f64, n1: u64, mean2: f64, var2: f64, n2: u64) -> TTestResult {
     // Ensure we have enough samples
     if n1 < 2 || n2 < 2 {
         return TTestResult {

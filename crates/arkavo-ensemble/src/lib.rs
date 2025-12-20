@@ -66,25 +66,25 @@ pub mod storage;
 pub use candidate::{CandidateState, GenerationMethod, PolicyCandidate};
 pub use cost::{BinaryCost, BoundaryDistanceCost, ConstantCost, CostFunction, WeightedCost};
 pub use ensemble::{
-    EnsembleConfig, EvaluationResult, PolicyEnsemble, DEFAULT_MAX_CANDIDATES,
-    DEFAULT_PROMOTION_HOURS,
+    DEFAULT_MAX_CANDIDATES, DEFAULT_PROMOTION_HOURS, EnsembleConfig, EvaluationResult,
+    PolicyEnsemble,
 };
 pub use error::{EnsembleError, EnsembleResult};
 pub use generator::{
-    generate_anomaly_remediation, generate_boundary_mutation, generate_llm_candidate,
-    LlmSynthesizer, SynthesisContext, SynthesisError,
+    LlmSynthesizer, SynthesisContext, SynthesisError, generate_anomaly_remediation,
+    generate_boundary_mutation, generate_llm_candidate,
 };
 pub use promotion::PromotionCandidate;
 pub use regret::{
-    hash_inputs, CandidateRegret, Outcome, RegretAccumulator, DEFAULT_ATTRIBUTION_WINDOW,
-    DEFAULT_MAX_OUTCOMES,
+    CandidateRegret, DEFAULT_ATTRIBUTION_WINDOW, DEFAULT_MAX_OUTCOMES, Outcome, RegretAccumulator,
+    hash_inputs,
 };
-pub use statistics::{welch_t_test, TTestResult, DEFAULT_SIGNIFICANCE_THRESHOLD};
+pub use statistics::{DEFAULT_SIGNIFICANCE_THRESHOLD, TTestResult, welch_t_test};
 pub use storage::{SqliteEnsembleStore, StoredCandidate, StoredRegret};
 
 // Re-export dependencies for convenience
-pub use arkavo_sbe::{InvariantLayer, PolicyLayer};
 pub use arkavo_sat;
+pub use arkavo_sbe::{InvariantLayer, PolicyLayer};
 
 #[cfg(test)]
 mod tests {
@@ -147,8 +147,7 @@ mod tests {
             max_candidates: 2,
             ..Default::default()
         };
-        let mut ensemble =
-            PolicyEnsemble::with_config(production, invariants, cost, config);
+        let mut ensemble = PolicyEnsemble::with_config(production, invariants, cost, config);
 
         // Add 2 candidates
         for _ in 0..2 {
@@ -160,9 +159,11 @@ mod tests {
 
         // Third should fail
         let policy = PolicyLayer::new(create_simple_graph());
-        assert!(ensemble
-            .add_candidate(policy, GenerationMethod::Manual)
-            .is_err());
+        assert!(
+            ensemble
+                .add_candidate(policy, GenerationMethod::Manual)
+                .is_err()
+        );
     }
 
     #[test]

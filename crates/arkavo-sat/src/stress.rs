@@ -255,18 +255,19 @@ where
         .ok_or_else(|| SatError::InvalidGraph(format!("Output {} not found", output_id)))?;
 
     if let Some(expected) = expected_fn(inputs)
-        && expected != *actual {
-            return Ok(Some(PolicyHole {
-                input: inputs.clone(),
-                expected,
-                actual: *actual,
-                output_id,
-                description: format!(
-                    "Policy returned {} but expected {} for inputs {:?}",
-                    actual, expected, inputs
-                ),
-            }));
-        }
+        && expected != *actual
+    {
+        return Ok(Some(PolicyHole {
+            input: inputs.clone(),
+            expected,
+            actual: *actual,
+            output_id,
+            description: format!(
+                "Policy returned {} but expected {} for inputs {:?}",
+                actual, expected, inputs
+            ),
+        }));
+    }
 
     Ok(None)
 }

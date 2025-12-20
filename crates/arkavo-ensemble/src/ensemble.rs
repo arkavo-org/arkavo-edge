@@ -13,7 +13,7 @@ use arkavo_sbe::{InvariantLayer, PolicyLayer};
 use crate::candidate::{GenerationMethod, PolicyCandidate};
 use crate::cost::CostFunction;
 use crate::error::{EnsembleError, EnsembleResult};
-use crate::regret::{hash_inputs, Outcome, RegretAccumulator, DEFAULT_ATTRIBUTION_WINDOW};
+use crate::regret::{DEFAULT_ATTRIBUTION_WINDOW, Outcome, RegretAccumulator, hash_inputs};
 use crate::statistics::DEFAULT_SIGNIFICANCE_THRESHOLD;
 
 /// Default maximum candidates
@@ -100,8 +100,7 @@ impl<C: CostFunction> PolicyEnsemble<C> {
         cost_function: C,
         config: EnsembleConfig,
     ) -> Self {
-        let regret_accumulator =
-            RegretAccumulator::with_config(config.attribution_window, 10_000);
+        let regret_accumulator = RegretAccumulator::with_config(config.attribution_window, 10_000);
 
         Self {
             production,
@@ -243,13 +242,12 @@ impl<C: CostFunction> PolicyEnsemble<C> {
         }
 
         // 4. Record outcome for regret tracking (REG-001, REG-002)
-        self.regret_accumulator
-            .record_outcome(Outcome {
-                timestamp: std::time::Instant::now(),
-                input_hash: hash_inputs(inputs),
-                production_cost,
-                candidate_costs,
-            });
+        self.regret_accumulator.record_outcome(Outcome {
+            timestamp: std::time::Instant::now(),
+            input_hash: hash_inputs(inputs),
+            production_cost,
+            candidate_costs,
+        });
 
         Ok(EvaluationResult {
             production_output,
@@ -343,8 +341,7 @@ mod tests {
             max_candidates: 2,
             ..Default::default()
         };
-        let mut ensemble =
-            PolicyEnsemble::with_config(production, invariants, cost, config);
+        let mut ensemble = PolicyEnsemble::with_config(production, invariants, cost, config);
 
         // Add 2 candidates - should succeed
         for _ in 0..2 {

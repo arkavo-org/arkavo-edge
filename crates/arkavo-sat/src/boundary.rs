@@ -401,8 +401,7 @@ mod tests {
         base_inputs.insert(1, false);
 
         // Can we flip 1 input to get output = true?
-        let result =
-            can_flip_to_target_sat(&cnf, &base_inputs, 2, true, 1, &graph.inputs).unwrap();
+        let result = can_flip_to_target_sat(&cnf, &base_inputs, 2, true, 1, &graph.inputs).unwrap();
 
         assert!(result.is_some());
         let flipped = result.unwrap();
@@ -459,7 +458,10 @@ mod tests {
         let result =
             can_flip_to_target_sat(&cnf, &base_inputs, output_id, true, 1, &graph.inputs).unwrap();
 
-        assert!(result.is_some(), "Should find a 1-flip solution for large OR");
+        assert!(
+            result.is_some(),
+            "Should find a 1-flip solution for large OR"
+        );
 
         // Verify only 1 input was flipped
         let flipped = result.unwrap();

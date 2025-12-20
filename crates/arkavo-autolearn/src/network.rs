@@ -111,11 +111,7 @@ impl GossipNetworkBridge {
     }
 
     /// Register a peer's public key for verification
-    pub async fn register_peer_key(
-        &self,
-        peer_id: String,
-        pubkey: arkavo_crypto::AgentPublicKey,
-    ) {
+    pub async fn register_peer_key(&self, peer_id: String, pubkey: arkavo_crypto::AgentPublicKey) {
         self.protocol.register_key(peer_id, pubkey).await;
     }
 
@@ -133,12 +129,8 @@ impl GossipNetworkBridge {
         let content_hash = compute_content_hash(&content);
 
         // Create and sign announcement
-        let mut announcement = PatchAnnouncement::new(
-            patch_id,
-            content_hash,
-            self.agent_id().to_string(),
-            vec![],
-        );
+        let mut announcement =
+            PatchAnnouncement::new(patch_id, content_hash, self.agent_id().to_string(), vec![]);
         sign_announcement(&mut announcement, &self.keypair)
             .map_err(|e| AutoLearnError::Network(e.to_string()))?;
 
@@ -187,16 +179,18 @@ impl GossipNetworkBridge {
                 votes: delivery.votes,
             };
 
-            self.patch_tx.send(incoming).await.map_err(|e| {
-                AutoLearnError::Network(format!("Failed to forward patch: {}", e))
-            })?;
+            self.patch_tx
+                .send(incoming)
+                .await
+                .map_err(|e| AutoLearnError::Network(format!("Failed to forward patch: {}", e)))?;
         }
 
         // Forward response messages to outbox
         for response in responses {
-            self.outbox_tx.send(response).await.map_err(|e| {
-                AutoLearnError::Network(format!("Failed to send response: {}", e))
-            })?;
+            self.outbox_tx
+                .send(response)
+                .await
+                .map_err(|e| AutoLearnError::Network(format!("Failed to send response: {}", e)))?;
         }
 
         Ok(())
@@ -211,8 +205,7 @@ impl GossipNetworkBridge {
             .await
             .map_err(AutoLearnError::Gossip)?;
 
-        sign_vote(&mut vote, &self.keypair)
-            .map_err(|e| AutoLearnError::Network(e.to_string()))?;
+        sign_vote(&mut vote, &self.keypair).map_err(|e| AutoLearnError::Network(e.to_string()))?;
 
         // Send vote
         self.outbox_tx
@@ -260,9 +253,7 @@ pub fn create_network(
 ) -> (Arc<GossipNetworkBridge>, NetworkHandle) {
     let mut bridge = GossipNetworkBridge::new(agent_id, keypair, config);
 
-    let outbox_rx = bridge
-        .take_outbox()
-        .expect("outbox should be available");
+    let outbox_rx = bridge.take_outbox().expect("outbox should be available");
     let patch_rx = bridge
         .take_patch_receiver()
         .expect("patch receiver should be available");
@@ -310,22 +301,20 @@ mod tests {
             severity: 0.5,
             timestamp: Utc::now(),
         };
-        Patchlet::new(graph, trigger, GenerationMethod::Manual)
-            .with_verification(VerificationSummary {
+        Patchlet::new(graph, trigger, GenerationMethod::Manual).with_verification(
+            VerificationSummary {
                 passed: true,
                 invariant_checks: 1,
                 sat_probes: 10,
-            })
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_bridge_creation() {
         let keypair = AgentKeypair::generate();
-        let bridge = GossipNetworkBridge::new(
-            "test-agent".to_string(),
-            keypair,
-            NetworkConfig::default(),
-        );
+        let bridge =
+            GossipNetworkBridge::new("test-agent".to_string(), keypair, NetworkConfig::default());
 
         assert_eq!(bridge.peer_count().await, 0);
     }
@@ -333,11 +322,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_remove_peers() {
         let keypair = AgentKeypair::generate();
-        let bridge = GossipNetworkBridge::new(
-            "test-agent".to_string(),
-            keypair,
-            NetworkConfig::default(),
-        );
+        let bridge =
+            GossipNetworkBridge::new("test-agent".to_string(), keypair, NetworkConfig::default());
 
         bridge.add_peer("peer-1".to_string()).await;
         bridge.add_peer("peer-2".to_string()).await;
@@ -350,11 +336,8 @@ mod tests {
     #[tokio::test]
     async fn test_broadcast_patch() {
         let keypair = AgentKeypair::generate();
-        let mut bridge = GossipNetworkBridge::new(
-            "test-agent".to_string(),
-            keypair,
-            NetworkConfig::default(),
-        );
+        let mut bridge =
+            GossipNetworkBridge::new("test-agent".to_string(), keypair, NetworkConfig::default());
 
         let mut outbox = bridge.take_outbox().unwrap();
 
@@ -374,11 +357,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_network() {
         let keypair = AgentKeypair::generate();
-        let (bridge, _handle) = create_network(
-            "test-agent".to_string(),
-            keypair,
-            NetworkConfig::default(),
-        );
+        let (bridge, _handle) =
+            create_network("test-agent".to_string(), keypair, NetworkConfig::default());
 
         assert_eq!(bridge.peer_count().await, 0);
     }

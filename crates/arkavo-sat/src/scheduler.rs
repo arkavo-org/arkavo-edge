@@ -3,15 +3,15 @@
 //! Runs probing tasks during idle cycles with configurable CPU budget
 //! to avoid impacting foreground operations.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use torg_core::Graph;
 
-use crate::boundary::{find_epsilon_boundary, BoundaryProbe};
+use crate::boundary::{BoundaryProbe, find_epsilon_boundary};
 use crate::error::SatResult;
 
 /// Default CPU budget (5%)

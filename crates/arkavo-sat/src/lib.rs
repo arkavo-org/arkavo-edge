@@ -43,8 +43,8 @@ pub use boundary::{
     probe_boundary,
 };
 pub use cache::{
-    compute_graph_hash, find_epsilon_boundary_cached, CacheStats, ProbeCache, ProbeCacheKey,
-    DEFAULT_CACHE_CAPACITY, DEFAULT_CACHE_TTL,
+    CacheStats, DEFAULT_CACHE_CAPACITY, DEFAULT_CACHE_TTL, ProbeCache, ProbeCacheKey,
+    compute_graph_hash, find_epsilon_boundary_cached,
 };
 pub use cardinality::{
     create_flip_indicators, encode_at_most_k, encode_exactly_k, encode_xor, force_value,
@@ -56,8 +56,8 @@ pub use prioritizer::{
     AnomalyPrioritizer, NodeHistory, PriorityReason, PriorityWeights, ScoredNode,
 };
 pub use scheduler::{
-    probe_sync, ProbeResult, ProbeScheduler, ProbeTask, SchedulerConfig, SchedulerStats,
-    DEFAULT_BATCH_SIZE, DEFAULT_CPU_BUDGET, DEFAULT_MIN_INTERVAL,
+    DEFAULT_BATCH_SIZE, DEFAULT_CPU_BUDGET, DEFAULT_MIN_INTERVAL, ProbeResult, ProbeScheduler,
+    ProbeTask, SchedulerConfig, SchedulerStats, probe_sync,
 };
 pub use stress::{
     CoverageStats, PolicyHole, StressTestConfig, StressTestResult, find_contradictions,

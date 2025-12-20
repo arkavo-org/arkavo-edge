@@ -71,10 +71,11 @@ pub use network::{
     GossipNetworkBridge, IncomingPatch, NetworkConfig, NetworkHandle, create_network,
 };
 pub use patchlet::{PainTrigger, Patchlet, VerificationSummary};
-pub use signals::{PainAggregator, PainSignal, PainSource, DEFAULT_MAX_SIGNALS};
+pub use signals::{DEFAULT_MAX_SIGNALS, PainAggregator, PainSignal, PainSource};
 pub use synthesizer::{MinistralSynthesizer, SynthesizerConfig};
 pub use verifier::{
-    ImmuneVerifier, InvariantViolation, StressStats, VerificationResult, VerifierConfig,
+    DEFAULT_VERIFICATION_TIMEOUT_MS, ImmuneVerifier, InvariantViolation, StressStats,
+    VerificationResult, VerifierConfig,
 };
 
 // Re-export dependencies for convenience
@@ -120,10 +121,7 @@ mod tests {
         use arkavo_ensemble::SynthesisContext;
 
         // Create a pain signal
-        let ctx = SynthesisContext::new(
-            "test-model".to_string(),
-            "Test synthesis".to_string(),
-        );
+        let ctx = SynthesisContext::new("test-model".to_string(), "Test synthesis".to_string());
         let signal = PainSignal::new(
             PainSource::External {
                 description: "Test pain".to_string(),
@@ -175,10 +173,7 @@ mod tests {
         let invariant_layer = Arc::new(InvariantLayer::new());
         let verifier = ImmuneVerifier::new(invariant_layer);
 
-        let ctx = SynthesisContext::new(
-            "test-model".to_string(),
-            "Test".to_string(),
-        );
+        let ctx = SynthesisContext::new("test-model".to_string(), "Test".to_string());
         let signal = PainSignal::new(
             PainSource::External {
                 description: "test".to_string(),
@@ -194,11 +189,8 @@ mod tests {
     #[tokio::test]
     async fn test_network_bridge() {
         let keypair = AgentKeypair::generate();
-        let bridge = GossipNetworkBridge::new(
-            "test-agent".to_string(),
-            keypair,
-            NetworkConfig::default(),
-        );
+        let bridge =
+            GossipNetworkBridge::new("test-agent".to_string(), keypair, NetworkConfig::default());
 
         bridge.add_peer("peer-1".to_string()).await;
         assert_eq!(bridge.peer_count().await, 1);

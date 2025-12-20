@@ -207,16 +207,17 @@ impl GossipProtocol {
         let patches = self.patches.read().await;
 
         if let Some(state) = patches.get(&request.patch_id)
-            && let Some(content) = &state.content {
-                // We have the content, send it
-                let delivery = PatchDelivery {
-                    patch_id: request.patch_id,
-                    content: content.clone(),
-                    content_hash: state.announcement.patch_hash,
-                    votes: state.consensus.votes.values().cloned().collect(),
-                };
-                return Ok(vec![GossipMessage::PatchDelivery(delivery)]);
-            }
+            && let Some(content) = &state.content
+        {
+            // We have the content, send it
+            let delivery = PatchDelivery {
+                patch_id: request.patch_id,
+                content: content.clone(),
+                content_hash: state.announcement.patch_hash,
+                votes: state.consensus.votes.values().cloned().collect(),
+            };
+            return Ok(vec![GossipMessage::PatchDelivery(delivery)]);
+        }
 
         // We don't have it, propagate the request
         Ok(vec![GossipMessage::PatchRequest(request)])
@@ -285,7 +286,9 @@ impl GossipProtocol {
     pub async fn create_digest(&self) -> AntiEntropyDigest {
         let patches = self.patches.read().await;
 
-        let known_patches = patches.values().map(|state| PatchDigestEntry {
+        let known_patches = patches
+            .values()
+            .map(|state| PatchDigestEntry {
                 patch_id: state.announcement.patch_id,
                 patch_hash: state.announcement.patch_hash,
                 status: state.status,
