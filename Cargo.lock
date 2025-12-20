@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-crypto"
-version = "0.1.0"
+version = "0.47.5"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-registration"
-version = "0.1.0"
+version = "0.47.5"
 dependencies = [
  "arkavo-crypto",
  "arkavo-device-identity",
