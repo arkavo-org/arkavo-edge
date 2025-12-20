@@ -49,6 +49,20 @@ pub enum AutoLearnError {
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// Model not loaded (LLM synthesis requires loading a model)
+    #[error("Model not loaded: call with_model() to load an LLM")]
+    ModelNotLoaded,
+
+    /// TØR-G constrained decoding error
+    #[cfg(feature = "llm")]
+    #[error("TØR-G error: {0}")]
+    Torg(#[from] arkavo_torg::TorgError),
+
+    /// LLM inference error
+    #[cfg(feature = "llm")]
+    #[error("LLM error: {0}")]
+    Llm(String),
 }
 
 /// Result type for auto-learning operations

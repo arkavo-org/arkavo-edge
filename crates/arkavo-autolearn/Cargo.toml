@@ -26,10 +26,11 @@ sha2 = { workspace = true }
 
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 arkavo-torg = { path = "../arkavo-torg", optional = true }
+arkavo-llama-cpp = { path = "../arkavo-llama-cpp", optional = true }
 
 [features]
 default = []
-llm = ["arkavo-torg"]
+llm = ["arkavo-torg", "arkavo-llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
