@@ -6,20 +6,26 @@ use crate::{
     github_org_knowledge::{
         GitHubCiStatusTool, GitHubOrgOverviewTool, GitHubOrgReposTool, GitHubRelatedIssuesTool,
     },
+    registry::{DetailLevel, MinimalToolInfo, ToolRegistry},
     server::Tool,
     state::QueryStateKit,
-    tui::{interaction::TuiInteractionKit, keyboard::TuiKeyboardKit, screenshot::TuiScreenshotKit},
 };
 #[allow(unused_imports)]
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
 
 /// Cross-platform MCP connection providing platform-independent tools
+///
+/// Uses progressive tool disclosure: core tools are listed upfront,
+/// additional tools can be discovered via `search_tools()`.
 #[derive(Clone)]
 pub struct McpConnection {
+    /// Core tools exposed in list_tools() for progressive disclosure
     tools: Arc<HashMap<String, Arc<dyn Tool>>>,
+    /// Full registry for tool discovery and fallback execution
+    registry: Arc<ToolRegistry>,
     runtime_handle: Handle,
 }
 
@@ -33,6 +39,10 @@ impl std::fmt::Debug for McpConnection {
 
 impl McpConnection {
     /// Creates a new MCP connection with cross-platform tools
+    ///
+    /// Core tools are exposed via `list_tools()` for progressive disclosure.
+    /// Additional tools can be discovered via `search_tools()` which delegates
+    /// to the full `ToolRegistry`.
     ///
     /// # Panics
     ///
@@ -48,7 +58,10 @@ impl McpConnection {
                 .clone()
         });
 
-        // Register cross-platform tools
+        // Create the full registry for discovery and fallback
+        let registry = Arc::new(ToolRegistry::new());
+
+        // Register core cross-platform tools (progressive disclosure)
         tools.insert("filesystem".to_string(), Arc::new(FileSystemKit::new()));
         tools.insert("git_status".to_string(), Arc::new(GitStatusKit::new()));
         tools.insert(
@@ -79,19 +92,11 @@ impl McpConnection {
             Arc::new(GitHubOrgOverviewTool::new()),
         );
 
-        // TUI tools (work on all platforms with terminal)
-        tools.insert("tui_keyboard".to_string(), Arc::new(TuiKeyboardKit::new()));
-        tools.insert(
-            "tui_screenshot".to_string(),
-            Arc::new(TuiScreenshotKit::new()),
-        );
-        tools.insert(
-            "tui_interaction".to_string(),
-            Arc::new(TuiInteractionKit::new()),
-        );
+        // TUI tools moved to discovery-only (available via search_tools/registry)
 
         Ok(Self {
             tools: Arc::new(tools),
+            registry,
             runtime_handle,
         })
     }
@@ -100,27 +105,40 @@ impl McpConnection {
         self.tools.keys().cloned().collect()
     }
 
+    /// Search for tools matching the query using the full registry.
+    ///
+    /// This enables progressive tool discovery - LLM can request tools
+    /// that aren't in the core set by searching with keywords.
+    pub fn search_tools(&self, query: &str, detail: DetailLevel) -> Vec<MinimalToolInfo> {
+        self.registry.search_tools(query, detail)
+    }
+
     pub fn get_tool_schema(&self, name: &str) -> Option<Value> {
-        self.tools.get(name).map(|tool| {
+        // Try core tools first
+        if let Some(tool) = self.tools.get(name) {
             let schema = tool.schema();
-            serde_json::json!({
+            return Some(serde_json::json!({
                 "name": schema.name,
                 "description": schema.description,
                 "parameters": schema.parameters
+            }));
+        }
+
+        // Fall back to registry for discovered tools
+        self.registry.get_tool_info(name).map(|info| {
+            serde_json::json!({
+                "name": info.name,
+                "description": info.description,
+                "parameters": info.schema
             })
         })
     }
 
     #[allow(clippy::disallowed_methods)]
     pub fn call_tool(&self, name: &str, args: Value, _llm_origin: &str) -> Result<Value, String> {
-        // Verify tool exists
-        let _tool = self
-            .tools
-            .get(name)
-            .ok_or_else(|| format!("Tool not found: {name}"))?;
-
-        // Clone the tools map and tool name to use in the thread
+        // Clone values needed for execution
         let tools = self.tools.clone();
+        let registry = self.registry.clone();
         let tool_name = name.to_string();
         let handle = self.runtime_handle.clone();
 
@@ -128,23 +146,41 @@ impl McpConnection {
         if Handle::try_current().is_ok() {
             // We're in an async context, spawn a separate thread to avoid runtime conflicts
             std::thread::spawn(move || {
-                let tool = tools
-                    .get(&tool_name)
-                    .ok_or_else(|| format!("Tool not found: {tool_name}"))?;
+                // Try core tools first
+                if let Some(tool) = tools.get(&tool_name) {
+                    return handle.block_on(async move {
+                        tool.execute(args).await.map_err(|e| e.to_string())
+                    });
+                }
 
-                handle.block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) })
+                // Fall back to registry for discovered tools
+                if let Some(tool) = registry.get(&tool_name) {
+                    return handle.block_on(async move {
+                        tool.execute(args).await.map_err(|e| e.to_string())
+                    });
+                }
+
+                Err(format!("Tool not found: {tool_name}"))
             })
             .join()
             .map_err(|_| "Thread panic during tool execution".to_string())?
         } else {
             // No runtime conflict, execute directly
-            let tool = self
-                .tools
-                .get(name)
-                .ok_or_else(|| format!("Tool not found: {name}"))?;
+            // Try core tools first
+            if let Some(tool) = self.tools.get(name) {
+                return self.runtime_handle.block_on(async move {
+                    tool.execute(args).await.map_err(|e| e.to_string())
+                });
+            }
 
-            self.runtime_handle
-                .block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) })
+            // Fall back to registry for discovered tools
+            if let Some(tool) = self.registry.get(name) {
+                return self.runtime_handle.block_on(async move {
+                    tool.execute(args).await.map_err(|e| e.to_string())
+                });
+            }
+
+            Err(format!("Tool not found: {name}"))
         }
     }
 }

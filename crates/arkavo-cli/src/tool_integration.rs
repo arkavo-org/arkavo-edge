@@ -5,6 +5,8 @@ use arkavo_mcp_tools::{McpClient as McpClientTrait, ToolRegistry};
 #[cfg(all(unix, feature = "mcp-tools"))]
 use arkavo_router::Router;
 #[cfg(all(unix, feature = "mcp-tools"))]
+use std::collections::HashSet;
+#[cfg(all(unix, feature = "mcp-tools"))]
 use std::sync::Arc;
 
 #[cfg(not(all(unix, feature = "mcp-tools")))]
@@ -71,6 +73,8 @@ pub async fn process_with_tools(
     let mut all_tool_executions = Vec::new();
     let mut iteration = 0;
     let mut first_call = true;
+    // Track tools already disclosed to LLM (only disclose once per context)
+    let mut disclosed_tools: HashSet<String> = HashSet::new();
     // Safeguard against infinite loops from tool discovery/metadata requests
     let mut discovery_iterations = 0;
     const MAX_DISCOVERY_ITERATIONS: usize = 5;
@@ -165,17 +169,28 @@ pub async fn process_with_tools(
                             expanded_tools.extend(found);
                         }
 
-                        // Log if no tools were found
-                        if expanded_tools.is_empty() {
+                        // Filter out already-disclosed tools (only disclose once per context)
+                        let new_tools: Vec<_> = expanded_tools
+                            .into_iter()
+                            .filter(|t| !disclosed_tools.contains(&t.name))
+                            .collect();
+
+                        // Log if no NEW tools were found
+                        if new_tools.is_empty() {
                             tracing::warn!(
                                 target: "arkavo_tools::judge_keyword_miss",
                                 keywords = ?keywords,
-                                "Judge suggested keywords but no tools matched"
+                                "Judge suggested keywords but no new tools matched (already disclosed or not found)"
                             );
                         }
 
+                        // Track newly disclosed tools
+                        for tool in &new_tools {
+                            disclosed_tools.insert(tool.name.clone());
+                        }
+
                         // Feed back the tool definitions to the LLM
-                        let tool_list = expanded_tools
+                        let tool_list = new_tools
                             .iter()
                             .map(|t| {
                                 let aliases_text = if let Some(aliases) = &t.aliases {
@@ -197,12 +212,12 @@ pub async fn process_with_tools(
                             .collect::<Vec<_>>()
                             .join("\n");
 
-                        let tool_response = if expanded_tools.is_empty() {
+                        let tool_response = if new_tools.is_empty() {
                             "No matching tools found for the requested information.".to_string()
                         } else {
                             format!(
                                 "Found {} relevant tool(s):\n{}\n\nPlease use these tools to answer the question.",
-                                expanded_tools.len(),
+                                new_tools.len(),
                                 tool_list
                             )
                         };
@@ -241,17 +256,28 @@ pub async fn process_with_tools(
                 expanded_tools.extend(found);
             }
 
-            // Log if no tools were found (learning opportunity)
-            if expanded_tools.is_empty() {
+            // Filter out already-disclosed tools (only disclose once per context)
+            let new_tools: Vec<_> = expanded_tools
+                .into_iter()
+                .filter(|t| !disclosed_tools.contains(&t.name))
+                .collect();
+
+            // Log if no NEW tools were found (learning opportunity)
+            if new_tools.is_empty() {
                 tracing::warn!(
                     target: "arkavo_tools::keyword_miss",
                     keywords = ?requested_keywords,
-                    "No tools matched requested keywords - potential alias candidates"
+                    "No new tools matched requested keywords (already disclosed or not found)"
                 );
             }
 
+            // Track newly disclosed tools
+            for tool in &new_tools {
+                disclosed_tools.insert(tool.name.clone());
+            }
+
             // Feed back the tool definitions to the LLM
-            let tool_list = expanded_tools
+            let tool_list = new_tools
                 .iter()
                 .map(|t| {
                     format!(
@@ -263,12 +289,12 @@ pub async fn process_with_tools(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let tool_response = if expanded_tools.is_empty() {
+            let tool_response = if new_tools.is_empty() {
                 "No matching tools found for the requested keywords. Available tools can be listed with 'list all tools'.".to_string()
             } else {
                 format!(
                     "Found {} matching tool(s):\n{}\n\nYou can now use these tools.",
-                    expanded_tools.len(),
+                    new_tools.len(),
                     tool_list
                 )
             };
