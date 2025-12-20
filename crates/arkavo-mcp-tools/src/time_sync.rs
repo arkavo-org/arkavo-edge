@@ -31,8 +31,16 @@ impl GetAgentTimeTool {
         Self {
             schema: ToolSchema {
                 name: "get_agent_time".to_string(),
-                aliases: Some(vec!["time".to_string(), "clock".to_string(), "date".to_string(), "datetime".to_string()]),
-                description: "Get the current time as understood by this agent. Supports multiple output formats and timezones.".to_string(),
+                aliases: Some(vec![
+                    "time".to_string(),
+                    "current_time".to_string(),
+                    "now".to_string(),
+                    "clock".to_string(),
+                    "date".to_string(),
+                    "datetime".to_string(),
+                    "what_time".to_string(),
+                ]),
+                description: "Get the current time. Use this tool when asked 'what time is it?' or for current date/time.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -319,8 +327,8 @@ impl GetTimeStatusTool {
         Self {
             schema: ToolSchema {
                 name: "get_time_status".to_string(),
-                aliases: None,
-                description: "Get time synchronization status and health information.".to_string(),
+                aliases: Some(vec!["ntp_status".to_string(), "sync_status".to_string()]),
+                description: "Check NTP time synchronization health. For current time, use get_agent_time instead.".to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {},
@@ -359,7 +367,12 @@ impl Tool for GetTimeStatusTool {
             "unknown"
         };
 
+        // Always include current system time so the model can answer time queries
+        let now = Utc::now();
+
         Ok(json!({
+            "current_time": now.to_rfc3339(),
+            "current_time_unix": now.timestamp(),
             "synchronized": synchronized,
             "last_sync": state.timestamp.map(|t| t.to_rfc3339()),
             "server": state.server,

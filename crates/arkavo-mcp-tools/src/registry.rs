@@ -374,7 +374,8 @@ impl ToolRegistry {
             })
             .collect();
 
-        let results: Vec<MinimalToolInfo> = self
+        // Collect matching tools with priority scores
+        let mut scored_results: Vec<(i32, MinimalToolInfo)> = self
             .tools
             .values()
             .filter_map(|tool| {
@@ -382,50 +383,78 @@ impl ToolRegistry {
                 let name_lower = schema.name.to_lowercase();
                 let desc_lower = schema.description.to_lowercase();
 
-                // Exact name match (highest priority)
+                // Priority scoring: higher = better match
+                let mut priority = 0i32;
+
+                // Exact alias match (highest priority - user intent)
+                let exact_alias_match = schema
+                    .aliases
+                    .as_ref()
+                    .map(|aliases| {
+                        query_words
+                            .iter()
+                            .any(|q| aliases.iter().any(|a| a.to_lowercase() == *q))
+                    })
+                    .unwrap_or(false);
+                if exact_alias_match {
+                    priority += 100;
+                }
+
+                // Exact name match
                 let exact_name_match = query_words.iter().any(|q| q == &name_lower);
+                if exact_name_match {
+                    priority += 50;
+                }
 
                 // Token-based matching: check if any query word appears in name or description
                 let name_words: Vec<&str> = name_lower.split(&['_', '-', ' '][..]).collect();
                 let desc_words: Vec<&str> = desc_lower.split_whitespace().collect();
 
-                let token_matches = query_words.iter().any(|q_word| {
-                    // Match if query word appears in tool name words
-                    name_words.iter().any(|n_word| n_word.contains(q_word.as_str()))
-                        // Or in description words
-                        || desc_words.iter().any(|d_word| d_word.contains(q_word.as_str()))
-                });
+                let name_token_match = query_words
+                    .iter()
+                    .any(|q_word| name_words.iter().any(|n| n.contains(q_word.as_str())));
+                if name_token_match {
+                    priority += 10;
+                }
 
-                // Also check aliases (exact match and tokenized)
-                let alias_match = schema
+                let desc_token_match = query_words
+                    .iter()
+                    .any(|q_word| desc_words.iter().any(|d| d.contains(q_word.as_str())));
+                if desc_token_match {
+                    priority += 1;
+                }
+
+                // Partial alias match
+                let partial_alias_match = schema
                     .aliases
                     .as_ref()
                     .map(|aliases| {
                         query_words.iter().any(|q_word| {
                             aliases.iter().any(|alias| {
                                 let alias_lower = alias.to_lowercase();
-                                // Exact alias match
-                                if q_word == &alias_lower {
-                                    return true;
-                                }
-                                // Tokenized alias match
                                 let alias_words: Vec<&str> =
                                     alias_lower.split(&['_', '-', ' '][..]).collect();
-                                alias_words
-                                    .iter()
-                                    .any(|a_word| a_word.contains(q_word.as_str()))
+                                alias_words.iter().any(|a| a.contains(q_word.as_str()))
                             })
                         })
                     })
                     .unwrap_or(false);
+                if partial_alias_match && !exact_alias_match {
+                    priority += 20;
+                }
 
-                if exact_name_match || token_matches || alias_match {
-                    Some(self.build_minimal_info(schema, detail))
+                if priority > 0 {
+                    Some((priority, self.build_minimal_info(schema, detail)))
                 } else {
                     None
                 }
             })
             .collect();
+
+        // Sort by priority (highest first)
+        scored_results.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let results: Vec<MinimalToolInfo> = scored_results.into_iter().map(|(_, info)| info).collect();
 
         // Log if search returned no results (learning opportunity for new aliases)
         if results.is_empty() && !query.trim().is_empty() {

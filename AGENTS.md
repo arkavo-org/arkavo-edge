@@ -88,7 +88,7 @@ cargo test
 
 # Run
 ```bash
-cargo run -p arkavo -- chat --prompt "Hello"
+ARKAVO_DEBUG=1 ARKAVO_DEBUG_CHAT=1 cargo run -p arkavo -- chat --prompt "What time is it?"
 ```
 
 ## 7. Environment Variables
