@@ -50,6 +50,9 @@ members = [
     "crates/arkavo-config-encryption",
     "crates/arkavo-config-transport",
     "crates/arkavo-torg",
+    "crates/arkavo-sbe",
+    "crates/arkavo-sat",
+    "crates/arkavo-gossip",
     ".cargo/xtask",
 ]
 default-members = [

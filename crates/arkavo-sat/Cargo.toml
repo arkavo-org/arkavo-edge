@@ -1,0 +1,16 @@
+[package]
+name = "arkavo-sat"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SAT solver integration for TØRG policy boundary probing"
+
+[dependencies]
+torg-core = { workspace = true }
+varisat = "0.2"
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
