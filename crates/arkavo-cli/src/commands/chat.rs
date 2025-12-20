@@ -78,7 +78,7 @@ fn strip_think_blocks(content: &str) -> String {
     }
 
     // Strip conversation prefixes that shouldn't be in output
-    for prefix in ["Human:", "Assistant:", "User:"] {
+    for prefix in ["Human:", "Assistant:", "User:", "A:", "Q:"] {
         result = result.replace(prefix, "");
     }
 
@@ -1318,7 +1318,32 @@ async fn process_message_print_with_router(
 
     // Strip <think> blocks and print response cleanly
     let response = strip_think_blocks(&result.final_response);
-    println!("{}", response.trim());
+    let trimmed = response.trim();
+
+    // Debug: show what we're working with
+    if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("[DEBUG] final_response length: {}", result.final_response.len());
+        eprintln!("[DEBUG] stripped length: {}", response.len());
+        eprintln!("[DEBUG] trimmed length: {}", trimmed.len());
+        eprintln!("[DEBUG] tool_executions count: {}", result.tool_executions.len());
+    }
+
+    // If response is empty but we executed tools, show tool results directly
+    if trimmed.is_empty() && !result.tool_executions.is_empty() {
+        // Extract display text from tool results (tools provide their own summaries)
+        for exec in &result.tool_executions {
+            if exec.success {
+                // Check for display/summary field first, fall back to result JSON
+                if let Some(display) = exec.result.get("display").and_then(|v| v.as_str()) {
+                    println!("{display}");
+                } else if let Ok(result_str) = serde_json::to_string_pretty(&exec.result) {
+                    println!("{result_str}");
+                }
+            }
+        }
+    } else if !trimmed.is_empty() {
+        println!("{trimmed}");
+    }
 
     if !result.tool_executions.is_empty() {
         eprintln!(

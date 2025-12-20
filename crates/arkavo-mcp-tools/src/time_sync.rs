@@ -61,18 +61,22 @@ impl GetAgentTimeTool {
     }
 
     fn format_time(now: DateTime<Utc>, format: &str, timezone_str: &str) -> crate::Result<Value> {
+        use std::str::FromStr;
         let tz = if timezone_str == "UTC" || timezone_str.is_empty() {
             chrono_tz::UTC
         } else {
-            timezone_str
-                .parse::<chrono_tz::Tz>()
+            chrono_tz::Tz::from_str(timezone_str)
                 .map_err(|e| crate::ToolError::InvalidParams(format!("Invalid timezone: {}", e)))?
         };
 
         let local_time = now.with_timezone(&tz);
 
+        // Create human-readable display text
+        let display = local_time.format("%A, %B %d, %Y at %I:%M:%S %p %Z").to_string();
+
         match format {
             "rfc3339" | "" => Ok(json!({
+                "display": format!("The current time is: {}", display),
                 "timestamp": local_time.to_rfc3339(),
                 "format": "rfc3339",
                 "timezone": timezone_str,
@@ -81,12 +85,14 @@ impl GetAgentTimeTool {
                 "source": "system_clock"
             })),
             "unix" => Ok(json!({
+                "display": format!("The current time is: {} ({} seconds since epoch)", display, now.timestamp()),
                 "unix_seconds": now.timestamp(),
                 "unix_nanos": now.timestamp_subsec_nanos(),
                 "format": "unix",
                 "source": "system_clock"
             })),
             "iso8601" => Ok(json!({
+                "display": format!("The current time is: {}", display),
                 "timestamp": local_time.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
                 "format": "iso8601",
                 "timezone": timezone_str,
@@ -369,8 +375,10 @@ impl Tool for GetTimeStatusTool {
 
         // Always include current system time so the model can answer time queries
         let now = Utc::now();
+        let display = now.format("%A, %B %d, %Y at %I:%M:%S %p UTC").to_string();
 
         Ok(json!({
+            "display": format!("The current time is: {}. Sync status: {}", display, health),
             "current_time": now.to_rfc3339(),
             "current_time_unix": now.timestamp(),
             "synchronized": synchronized,
