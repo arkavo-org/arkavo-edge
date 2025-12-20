@@ -38,6 +38,53 @@ fn get_or_create_runtime() -> &'static Runtime {
     })
 }
 
+/// Strip LLM internal blocks (`<think>`, `<tool>`, conversation prefixes) for clean output
+/// In debug mode, prints thinking content to stderr before stripping
+fn strip_think_blocks(content: &str) -> String {
+    let mut result = content.to_string();
+    let debug = SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed);
+
+    // Extract and optionally display think blocks
+    while let Some(start) = result.find("<think>") {
+        if let Some(end) = result.find("</think>") {
+            let think_content = &result[start + 7..end];
+            if debug && !think_content.trim().is_empty() {
+                eprintln!("[thinking] {}", think_content.trim());
+            }
+            let end_pos = end + "</think>".len();
+            result = format!("{}{}", &result[..start], &result[end_pos..]);
+        } else {
+            // Unclosed think block - remove from <think> to end
+            if debug {
+                let think_content = &result[start + 7..];
+                if !think_content.trim().is_empty() {
+                    eprintln!("[thinking] {}", think_content.trim());
+                }
+            }
+            result = result[..start].to_string();
+            break;
+        }
+    }
+
+    // Strip <tool>...</tool> blocks (already executed)
+    while let Some(start) = result.find("<tool>") {
+        if let Some(end) = result.find("</tool>") {
+            let end_pos = end + "</tool>".len();
+            result = format!("{}{}", &result[..start], &result[end_pos..]);
+        } else {
+            result = result[..start].to_string();
+            break;
+        }
+    }
+
+    // Strip conversation prefixes that shouldn't be in output
+    for prefix in ["Human:", "Assistant:", "User:"] {
+        result = result.replace(prefix, "");
+    }
+
+    result
+}
+
 /// Determines if repository context should be attached based on the prompt
 fn should_attach_repo_context(prompt: &str) -> bool {
     let p = prompt.trim();
@@ -1269,7 +1316,9 @@ async fn process_message_print_with_router(
     let result =
         process_with_tools(task_description, messages.to_vec(), Some(config), mcp_arc).await?;
 
-    println!("{}", result.final_response);
+    // Strip <think> blocks and print response cleanly
+    let response = strip_think_blocks(&result.final_response);
+    println!("{}", response.trim());
 
     if !result.tool_executions.is_empty() {
         eprintln!(
