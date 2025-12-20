@@ -87,11 +87,11 @@ impl ModelSelector {
                 ModelChoice::GeminiFlash
             }
         } else {
-            // No cloud available, use local
+            // No cloud available, use local (prefer Qwen3/Ministral)
             if prefer_pro {
-                ModelChoice::LocalGemma12B
+                ModelChoice::LocalMinistral8B
             } else {
-                ModelChoice::LocalGemma4B
+                ModelChoice::LocalQwen3
             }
         }
     }
@@ -106,9 +106,9 @@ impl ModelSelector {
                 self.best_cloud_model(true)
             }
 
-            TaskCategory::CodeSearch => ModelChoice::LocalGemma4B,
+            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
 
-            TaskCategory::SecurityScan => ModelChoice::LocalGemma4B,
+            TaskCategory::SecurityScan => ModelChoice::LocalMinistral3B,
 
             TaskCategory::CodeGeneration if self.availability.deepseek => ModelChoice::DeepSeekV32,
 
@@ -116,13 +116,13 @@ impl ModelSelector {
                 self.best_cloud_model(true)
             }
 
-            TaskCategory::Documentation => ModelChoice::LocalGemma4B,
+            TaskCategory::Documentation => ModelChoice::LocalQwen3,
 
             TaskCategory::Refactoring if classification.confidence > 0.75 => {
                 self.best_cloud_model(false)
             }
 
-            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
+            TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
 
             TaskCategory::VisionAnalysis => self.best_cloud_model(false),
 
@@ -176,6 +176,9 @@ impl ModelSelector {
             ModelChoice::GeminiPro => "Highest quality, comprehensive output ($0.009)",
             ModelChoice::ClaudeSonnet => "Fast (5s), excellent quality ($0.018-0.045)",
             ModelChoice::ClaudeOpus => "Premium quality, complex reasoning ($0.090-0.225)",
+            ModelChoice::LocalQwen3 => "Ultra-fast (<1s), zero cost, TØRG-compatible",
+            ModelChoice::LocalMinistral3B => "Fast (2s), zero cost, TØRG-compatible",
+            ModelChoice::LocalMinistral8B => "High quality (4s), zero cost, TØRG-compatible",
             ModelChoice::LocalGemma270M => "Ultra-fast (<1s), zero cost",
             ModelChoice::LocalGemma4B => "Fast (2s), zero cost, private",
             ModelChoice::LocalGemma12B => "High quality, zero cost, private",
@@ -204,7 +207,7 @@ impl ModelSelector {
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
@@ -217,7 +220,7 @@ impl ModelSelector {
                 } else if self.availability.gemini {
                     ModelChoice::GeminiPro
                 } else {
-                    ModelChoice::LocalGemma12B
+                    ModelChoice::LocalMinistral8B
                 }
             }
 
@@ -226,7 +229,7 @@ impl ModelSelector {
                 if self.availability.gemini {
                     ModelChoice::GeminiFlash
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalQwen3
                 }
             }
 
@@ -237,7 +240,7 @@ impl ModelSelector {
                 } else if self.availability.gemini {
                     ModelChoice::GeminiPro
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
@@ -255,7 +258,7 @@ impl ModelSelector {
             }
 
             // Code search: Local model is sufficient
-            TaskCategory::CodeSearch => ModelChoice::LocalGemma4B,
+            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
 
             // Vision: Needs multimodal
             TaskCategory::VisionAnalysis => {
@@ -264,7 +267,7 @@ impl ModelSelector {
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
@@ -275,7 +278,7 @@ impl ModelSelector {
                 } else if self.availability.gemini {
                     ModelChoice::GeminiFlash
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalQwen3
                 }
             }
         }
@@ -292,9 +295,9 @@ impl ModelSelector {
         if budget_usage_percent > self.budget_threshold && decision.recommended_model.is_cloud() {
             let local_fallback = match classification.category {
                 TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
-                    ModelChoice::LocalGemma12B
+                    ModelChoice::LocalMinistral3B
                 }
-                _ => ModelChoice::LocalGemma4B,
+                _ => ModelChoice::LocalQwen3,
             };
 
             decision.reasoning = format!(
@@ -392,7 +395,7 @@ mod tests {
             .select(&classification, "Find all uses of")
             .unwrap();
 
-        assert_eq!(decision.recommended_model, ModelChoice::LocalGemma4B);
+        assert_eq!(decision.recommended_model, ModelChoice::LocalQwen3);
         assert_eq!(decision.estimated_cost_usd, 0.0);
     }
 
@@ -408,7 +411,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(decision.recommended_model, ModelChoice::LocalGemma12B);
+        assert_eq!(decision.recommended_model, ModelChoice::LocalMinistral3B);
         assert!(decision.reasoning.contains("Budget constrained"));
     }
 

@@ -40,17 +40,23 @@ pub struct ResponseJudge {
 }
 
 impl ResponseJudge {
+    /// Create a new judge using any available small local model (prefers Qwen3/Ministral)
     #[cfg(feature = "llama-cpp")]
-    pub async fn new_gemma_270m() -> crate::Result<Self> {
-        let model_path = crate::model_discovery::find_gguf_model(
-            "unsloth/gemma-3-270m-it-GGUF",
-            "gemma-3-270m-it-Q4_0.gguf",
-        )
-        .await
-        .map_err(crate::Error::ModelExecution)?;
+    pub async fn new_local() -> crate::Result<Self> {
+        let model_path = crate::model_discovery::find_any_gguf()
+            .await
+            .ok_or_else(|| crate::Error::ModelExecution(
+                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
+            ))?;
+
+        let model_name = model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("local-judge")
+            .to_string();
 
         let provider = arkavo_llm::LlamaCppProvider::new(
-            "gemma-3-270m-it".to_string(),
+            model_name,
             model_path.to_string_lossy().to_string(),
         )
         .map_err(|e| {
@@ -62,26 +68,25 @@ impl ResponseJudge {
         })
     }
 
+    /// Legacy: Create judge with gemma-270m (falls back to any available model)
     #[cfg(feature = "llama-cpp")]
+    #[deprecated(note = "Use new_local() instead")]
+    pub async fn new_gemma_270m() -> crate::Result<Self> {
+        Self::new_local().await
+    }
+
+    /// Legacy: Create judge with gemma-4b (falls back to any available model)
+    #[cfg(feature = "llama-cpp")]
+    #[deprecated(note = "Use new_local() instead")]
     pub async fn new_gemma_4b() -> crate::Result<Self> {
-        let model_path = crate::model_discovery::find_gguf_model(
-            "unsloth/gemma-3-4b-it-GGUF",
-            "gemma-3-4b-it-Q4_0.gguf",
-        )
-        .await
-        .map_err(crate::Error::ModelExecution)?;
+        Self::new_local().await
+    }
 
-        let provider = arkavo_llm::LlamaCppProvider::new(
-            "gemma-3-4b-it".to_string(),
-            model_path.to_string_lossy().to_string(),
-        )
-        .map_err(|e| {
-            crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
-        })?;
-
-        Ok(Self {
-            judge_provider: Arc::new(provider),
-        })
+    #[cfg(not(feature = "llama-cpp"))]
+    pub async fn new_local() -> crate::Result<Self> {
+        Err(crate::Error::Config(
+            "Judge requires llama-cpp feature to be enabled".to_string(),
+        ))
     }
 
     #[cfg(not(feature = "llama-cpp"))]

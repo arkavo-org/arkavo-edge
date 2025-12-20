@@ -793,7 +793,7 @@ fn execute_ai_task(task: &str, config: &TaskConfig) -> Result<(), Box<dyn std::e
         eprintln!("Please either:");
         eprintln!("  - Set GEMINI_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY");
         eprintln!(
-            "  - Download a local model with: huggingface-cli download unsloth/gemma-3-4b-it-GGUF"
+            "  - Download a local model with: huggingface-cli download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf"
         );
         return Err("No models available".into());
     }
@@ -1046,9 +1046,9 @@ fn detect_available_llms() -> Vec<LlmInfo> {
 
     // Always include local model
     llms.push(LlmInfo {
-        name: "Local Gemma".to_string(),
+        name: "Local Qwen3".to_string(),
         provider: "Local".to_string(),
-        model: "gemma-3-270m-it".to_string(),
+        model: "qwen3-0.6b".to_string(),
     });
 
     llms

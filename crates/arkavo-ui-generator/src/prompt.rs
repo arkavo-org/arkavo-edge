@@ -132,7 +132,7 @@ mod tests {
         };
 
         let decision = RoutingDecision {
-            recommended_model: ModelChoice::LocalGemma4B,
+            recommended_model: ModelChoice::LocalQwen3,
             reasoning: "test".to_string(),
             estimated_cost_usd: 0.0,
             should_compress: false,

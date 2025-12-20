@@ -183,7 +183,7 @@ Guidelines:
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
@@ -196,7 +196,7 @@ Guidelines:
                 } else if self.availability.gemini {
                     ModelChoice::GeminiPro
                 } else {
-                    ModelChoice::LocalGemma12B
+                    ModelChoice::LocalMinistral8B
                 }
             }
 
@@ -205,7 +205,7 @@ Guidelines:
                 if self.availability.gemini {
                     ModelChoice::GeminiFlash
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalQwen3
                 }
             }
 
@@ -216,12 +216,12 @@ Guidelines:
                 } else if self.availability.gemini {
                     ModelChoice::GeminiPro
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
             // Code search: Local model is sufficient
-            TaskCategory::CodeSearch => ModelChoice::LocalGemma4B,
+            TaskCategory::CodeSearch => ModelChoice::LocalQwen3,
 
             // Vision: Needs multimodal
             TaskCategory::VisionAnalysis => {
@@ -230,7 +230,7 @@ Guidelines:
                 } else if self.availability.anthropic {
                     ModelChoice::ClaudeSonnet
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalMinistral3B
                 }
             }
 
@@ -241,7 +241,7 @@ Guidelines:
                 } else if self.availability.gemini {
                     ModelChoice::GeminiFlash
                 } else {
-                    ModelChoice::LocalGemma4B
+                    ModelChoice::LocalQwen3
                 }
             }
         }
@@ -325,7 +325,7 @@ mod tests {
         // Should prefer cheaper models for frontend
         assert!(matches!(
             model,
-            ModelChoice::GeminiFlash | ModelChoice::ClaudeSonnet | ModelChoice::LocalGemma4B
+            ModelChoice::GeminiFlash | ModelChoice::ClaudeSonnet | ModelChoice::LocalMinistral3B
         ));
     }
 
@@ -337,7 +337,7 @@ mod tests {
         // Should prefer capable models for backend
         assert!(matches!(
             model,
-            ModelChoice::ClaudeOpus | ModelChoice::GeminiPro | ModelChoice::LocalGemma12B
+            ModelChoice::ClaudeOpus | ModelChoice::GeminiPro | ModelChoice::LocalMinistral8B
         ));
     }
 }

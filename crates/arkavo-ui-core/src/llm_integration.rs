@@ -73,7 +73,10 @@ impl LlmIntegration {
                     anyhow::bail!("DeepSeek feature not enabled")
                 }
             }
-            ModelChoice::LocalGemma270M
+            ModelChoice::LocalQwen3
+            | ModelChoice::LocalMinistral3B
+            | ModelChoice::LocalMinistral8B
+            | ModelChoice::LocalGemma270M
             | ModelChoice::LocalGemma4B
             | ModelChoice::LocalGemma12B
             | ModelChoice::LocalDeepSeekCoder => {

@@ -110,7 +110,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .windows(2)
         .find(|w| w[0] == "--model")
         .map(|w| w[1].clone())
-        .unwrap_or_else(|| "gemma-3-270m".to_string());
+        .unwrap_or_else(|| "qwen3".to_string());
 
     // Parse sampling parameters for llama.cpp
     let temperature = args
@@ -382,11 +382,19 @@ async fn initialize_llm_client(
                 "gemma-2-2b-it-Q4_K_M.gguf",
                 "gemma-2-2b-it",
             ),
+            "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
+                ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
+            }
+            "ministral-3b" | "ministral3b" | "ministral" => (
+                "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                "ministral-3-3b",
+            ),
             _ => (
-                // Default to gemma-3-270m
-                "unsloth/gemma-3-270m-it-GGUF",
-                "gemma-3-270m-it-Q4_0.gguf",
-                "gemma-3-270m-it",
+                // Default to Qwen3-0.6B (TØRG-compatible)
+                "Qwen/Qwen3-0.6B-GGUF",
+                "Qwen3-0.6B-Q8_0.gguf",
+                "qwen3-0.6b",
             ),
         };
 

@@ -267,9 +267,15 @@ impl ArchitectExecutor {
 
     fn escalate_model(&self, current: &ModelChoice) -> ModelChoice {
         match current {
+            // Qwen3/Ministral escalation path
+            ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
+            ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
+            ModelChoice::LocalMinistral8B => ModelChoice::GeminiFlash,
+            // Legacy Gemma escalation path
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::GeminiFlash,
             ModelChoice::LocalGemma12B => ModelChoice::GeminiPro,
+            // Other escalation paths
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
             ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,

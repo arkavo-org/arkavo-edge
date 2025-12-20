@@ -1,6 +1,6 @@
 use crate::{AgentDescriptor, RegistrationError};
-use qrcode::render::unicode;
 use qrcode::QrCode;
+use qrcode::render::unicode;
 
 pub fn generate_qr_string(descriptor: &AgentDescriptor) -> Result<String, RegistrationError> {
     let url = descriptor.to_url();

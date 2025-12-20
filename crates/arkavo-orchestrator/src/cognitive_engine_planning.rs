@@ -61,8 +61,13 @@ impl Planner {
         );
 
         let planning_provider: Arc<dyn Provider> = match decision.recommended_model {
-            arkavo_router::ModelChoice::LocalGemma4B
-            | arkavo_router::ModelChoice::LocalGemma12B => {
+            arkavo_router::ModelChoice::LocalQwen3
+            | arkavo_router::ModelChoice::LocalMinistral3B
+            | arkavo_router::ModelChoice::LocalMinistral8B
+            | arkavo_router::ModelChoice::LocalGemma270M
+            | arkavo_router::ModelChoice::LocalGemma4B
+            | arkavo_router::ModelChoice::LocalGemma12B
+            | arkavo_router::ModelChoice::LocalDeepSeekCoder => {
                 return Err(Error::Other(anyhow::anyhow!(
                     "Local models not yet supported for planning. Set GEMINI_API_KEY for remote planning."
                 )));

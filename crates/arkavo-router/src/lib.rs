@@ -195,10 +195,10 @@ impl Router {
     fn get_local_fallback(&self, category: TaskCategory) -> ModelChoice {
         match category {
             TaskCategory::FrontendUI | TaskCategory::BackendAPI | TaskCategory::Refactoring => {
-                ModelChoice::LocalGemma4B
+                ModelChoice::LocalMinistral3B
             }
-            TaskCategory::CodeGeneration => ModelChoice::LocalGemma4B,
-            _ => ModelChoice::LocalGemma4B,
+            TaskCategory::CodeGeneration => ModelChoice::LocalMinistral3B,
+            _ => ModelChoice::LocalQwen3,
         }
     }
 
@@ -262,11 +262,11 @@ impl Router {
             });
         }
 
-        // Always include local model
+        // Always include local model (prefer Qwen3/Ministral)
         llms.push(LlmInfo {
-            name: "Local (Gemma)".to_string(),
+            name: "Local".to_string(),
             provider: "Local".to_string(),
-            model: "gemma-3-270m-it".to_string(),
+            model: "qwen3-0.6b / ministral-3b".to_string(),
             available: true,
         });
 
@@ -379,8 +379,8 @@ impl Router {
 
                 #[cfg(feature = "llama-cpp")]
                 {
-                    // Use local Gemma-3 270M model for cost-free judgment
-                    match judge::ResponseJudge::new_gemma_270m().await {
+                    // Use local model for cost-free judgment (prefers Qwen3/Ministral)
+                    match judge::ResponseJudge::new_local().await {
                         Ok(judge) => {
                             let judgment = judge
                                 .evaluate(task_description, &response, &tool_infos, None)
@@ -516,7 +516,7 @@ impl Router {
                 // Deep validation with LLM judge (when available)
                 #[cfg(feature = "llama-cpp")]
                 {
-                    if let Ok(judge) = judge::ResponseJudge::new_gemma_4b().await
+                    if let Ok(judge) = judge::ResponseJudge::new_local().await
                         && let Ok(judgment) =
                             judge.evaluate(&task_desc, &response, &tools, None).await
                         && !judgment.passed
@@ -623,9 +623,15 @@ impl Router {
 
     fn upgrade_model(&self, current: &ModelChoice) -> ModelChoice {
         match current {
+            // Qwen3/Ministral upgrade path
+            ModelChoice::LocalQwen3 => ModelChoice::LocalMinistral3B,
+            ModelChoice::LocalMinistral3B => ModelChoice::LocalMinistral8B,
+            ModelChoice::LocalMinistral8B => ModelChoice::GeminiFlash,
+            // Legacy Gemma upgrade path
             ModelChoice::LocalGemma270M => ModelChoice::LocalGemma4B,
             ModelChoice::LocalGemma4B => ModelChoice::LocalGemma12B,
             ModelChoice::LocalGemma12B => ModelChoice::GeminiFlash,
+            // Other upgrade paths
             ModelChoice::LocalDeepSeekCoder => ModelChoice::DeepSeekV32,
             ModelChoice::DeepSeekV32 => ModelChoice::ClaudeSonnet,
             ModelChoice::DeepSeekV32Speciale => ModelChoice::ClaudeOpus,
@@ -662,15 +668,21 @@ impl Router {
                     // Fallback to local model when Gemini API key is not available
                     #[cfg(feature = "llama-cpp")]
                     {
-                        let model_path = model_discovery::find_gguf_model(
-                            "unsloth/gemma-3-270m-it-GGUF",
-                            "gemma-3-270m-it-Q4_0.gguf",
-                        )
-                        .await
-                        .map_err(Error::ModelExecution)?;
+                        // Use model discovery to find any compatible model (prefers Qwen3/Ministral)
+                        let model_path = model_discovery::find_any_gguf()
+                            .await
+                            .ok_or_else(|| Error::ModelExecution(
+                                "No local GGUF models found. Download with: hf download Qwen/Qwen3-0.6B-GGUF Qwen3-0.6B-Q8_0.gguf".to_string()
+                            ))?;
+
+                        let model_name = model_path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("local-model")
+                            .to_string();
 
                         let provider = arkavo_llm::LlamaCppProvider::new(
-                            "gemma-3-270m-it".to_string(),
+                            model_name,
                             model_path.to_string_lossy().to_string(),
                         )
                         .map_err(|e| {
@@ -687,6 +699,60 @@ impl Router {
                         ))
                     }
                 }
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalQwen3 => {
+                let model_path = model_discovery::find_gguf_model(
+                    "Qwen/Qwen3-0.6B-GGUF",
+                    "Qwen3-0.6B-Q8_0.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "qwen3-0.6b".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalMinistral3B => {
+                let model_path = model_discovery::find_gguf_model(
+                    "mistralai/Ministral-3-3B-Instruct-2512-GGUF",
+                    "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "ministral-3b".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
+            }
+            #[cfg(feature = "llama-cpp")]
+            ModelChoice::LocalMinistral8B => {
+                let model_path = model_discovery::find_gguf_model(
+                    "mistralai/Ministral-8B-Instruct-2512-GGUF",
+                    "Ministral-8B-Instruct-2512-Q4_K_M.gguf",
+                )
+                .await
+                .map_err(Error::ModelExecution)?;
+
+                let provider = arkavo_llm::LlamaCppProvider::new(
+                    "ministral-8b".to_string(),
+                    model_path.to_string_lossy().to_string(),
+                )
+                .map_err(|e| {
+                    Error::ModelExecution(format!("Failed to create LlamaCpp provider: {e}"))
+                })?;
+                Ok(Box::new(provider))
             }
             #[cfg(feature = "llama-cpp")]
             ModelChoice::LocalGemma270M => {
@@ -786,13 +852,18 @@ impl Router {
     fn detail_level_for_model(model: &decision::ModelChoice) -> arkavo_mcp_tools::DetailLevel {
         use decision::ModelChoice;
         match model {
-            ModelChoice::LocalGemma270M | ModelChoice::LocalGemma4B => {
+            // Small models - minimal context
+            ModelChoice::LocalQwen3 | ModelChoice::LocalGemma270M => {
                 arkavo_mcp_tools::DetailLevel::NameOnly
             }
-            ModelChoice::LocalGemma12B | ModelChoice::LocalDeepSeekCoder => {
-                arkavo_mcp_tools::DetailLevel::NameAndDescription
-            }
-            ModelChoice::GeminiFlash
+            // Medium models - some description
+            ModelChoice::LocalMinistral3B
+            | ModelChoice::LocalGemma4B
+            | ModelChoice::LocalGemma12B
+            | ModelChoice::LocalDeepSeekCoder => arkavo_mcp_tools::DetailLevel::NameAndDescription,
+            // Large models and cloud - full schema
+            ModelChoice::LocalMinistral8B
+            | ModelChoice::GeminiFlash
             | ModelChoice::GeminiPro
             | ModelChoice::ClaudeSonnet
             | ModelChoice::ClaudeOpus

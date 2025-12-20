@@ -14,12 +14,26 @@ fn main() {
     // Track only key files that indicate real source changes
     // Avoid tracking directories as CMake build artifacts trigger false rebuilds
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=ARKAVO_TARGET_DEVICE");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/CMakeLists.txt");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/include/llama.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/mtmd.h");
     println!("cargo:rerun-if-changed=../../vendor/llama.cpp/tools/mtmd/clip.h");
     // Track git HEAD to detect submodule updates
-    println!("cargo:rerun-if-changed=../../vendor/llama.cpp/.git/HEAD");
+    let git_path = std::path::Path::new("../../vendor/llama.cpp/.git");
+    if git_path.exists() {
+        if git_path.is_dir() {
+            println!("cargo:rerun-if-changed=../../vendor/llama.cpp/.git/HEAD");
+        } else {
+            // It's a git-link file
+            println!("cargo:rerun-if-changed=../../vendor/llama.cpp/.git");
+            // Also try to track the actual HEAD in the main repository's modules directory
+            let submodule_head = std::path::Path::new("../../.git/modules/vendor/llama.cpp/HEAD");
+            if submodule_head.exists() {
+                println!("cargo:rerun-if-changed=../../.git/modules/vendor/llama.cpp/HEAD");
+            }
+        }
+    }
 
     let mut config = cmake::Config::new("../../vendor/llama.cpp");
 

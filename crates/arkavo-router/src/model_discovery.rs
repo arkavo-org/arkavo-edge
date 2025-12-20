@@ -151,15 +151,15 @@ fn find_gguf_in_dir(dir: &std::path::Path) -> Option<PathBuf> {
 /// Scan entire HuggingFace cache for any .gguf file
 ///
 /// This is the ultimate fallback when no specific model is found.
-/// Prefers smaller models (gemma-3-270m) over larger ones.
+/// Prefers TØRG-compatible models (Qwen3, Ministral) over others.
 pub async fn find_any_gguf() -> Option<PathBuf> {
     let cache = get_hf_cache_dir()?;
 
-    // Priority order: prefer smaller, faster models
+    // Priority order: prefer TØRG-compatible models (Qwen3, Ministral)
     let preferred_repos = [
-        "models--unsloth--gemma-3-270m-it-GGUF",
-        "models--bartowski--gemma-3-270m-it-GGUF",
-        "models--unsloth--gemma-3-4b-it-GGUF",
+        "models--Qwen--Qwen3-0.6B-GGUF",
+        "models--mistralai--Ministral-3-3B-Instruct-2512-GGUF",
+        "models--mistralai--Ministral-3-8B-Instruct-2512-GGUF",
     ];
 
     // Check preferred repos first
@@ -196,8 +196,7 @@ mod tests {
     async fn test_find_gguf_model() {
         // This test will only pass if the model is already cached
         // or if network is available
-        let result =
-            find_gguf_model("unsloth/gemma-3-270m-it-GGUF", "gemma-3-270m-it-Q4_0.gguf").await;
+        let result = find_gguf_model("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf").await;
 
         match result {
             Ok(path) => {
@@ -206,7 +205,7 @@ mod tests {
             }
             Err(e) => {
                 // Expected if model not cached and no network
-                assert!(e.contains("Download with: huggingface-cli download"));
+                assert!(e.contains("Download with:"));
             }
         }
     }

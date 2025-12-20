@@ -243,7 +243,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         println!("OPTIONS:");
         println!("    --prompt <TEXT>       One-shot query (exits after response)");
         println!("    --image <PATH>        Attach image for vision queries");
-        println!("    --model <NAME>        Model to use (default: gemma-3-270m)");
+        println!("    --model <NAME>        Model to use (default: qwen3)");
         println!("    --repo-context MODE   auto|on|off (default: auto)");
         println!("    --new-session         Start fresh without history");
         println!("    --debug               Show debug output");
@@ -295,7 +295,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .windows(2)
         .find(|w| w[0] == "--model")
         .map(|w| w[1].clone())
-        .unwrap_or_else(|| "gemma-3-270m".to_string());
+        .unwrap_or_else(|| "qwen3".to_string());
 
     // Parse repo context mode: auto (default), on, off
     let repo_context_mode = args
@@ -1724,6 +1724,178 @@ pub async fn initialize_llm_for_ui(
     initialize_llm_client(false, model_name, 0.7, 0.9, 40, 4096, 42).await
 }
 
+/// List local GGUF models from HuggingFace cache
+fn list_local_gguf_models() -> Vec<(String, String, std::path::PathBuf, u64)> {
+    let mut found_models = Vec::new();
+
+    let hf_cache_dir = if let Ok(hf_home) = std::env::var("HF_HOME") {
+        Some(std::path::PathBuf::from(hf_home).join("hub"))
+    } else {
+        dirs::home_dir().map(|d| d.join(".cache").join("huggingface").join("hub"))
+    };
+
+    if let Some(cache_dir) = hf_cache_dir
+        && cache_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&cache_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if dir_name.starts_with("models--") {
+                    let snapshots_dir = path.join("snapshots");
+                    if snapshots_dir.exists()
+                        && let Ok(snapshot_entries) = std::fs::read_dir(&snapshots_dir)
+                    {
+                        for snapshot in snapshot_entries.flatten() {
+                            let snapshot_path = snapshot.path();
+                            if snapshot_path.is_dir()
+                                && let Ok(files) = std::fs::read_dir(&snapshot_path)
+                            {
+                                for file in files.flatten() {
+                                    if let Some(name) = file.file_name().to_str()
+                                        && name.ends_with(".gguf")
+                                    {
+                                        let model_name = dir_name
+                                            .strip_prefix("models--")
+                                            .unwrap_or(dir_name)
+                                            .replace("--", "/");
+                                        let file_path = file.path();
+                                        let size = std::fs::metadata(&file_path)
+                                            .map(|m| m.len())
+                                            .unwrap_or(0);
+                                        found_models.push((
+                                            model_name,
+                                            name.to_string(),
+                                            file_path,
+                                            size,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    found_models
+}
+
+/// Find a compatible model in the HuggingFace cache
+fn find_compatible_cached_model() -> Option<(String, String, std::path::PathBuf)> {
+    let models = list_local_gguf_models();
+
+    // Priority order: Qwen3, Ministral, Gemma
+    for (repo, file, path, _size) in &models {
+        let name_lower = repo.to_lowercase();
+        if name_lower.contains("qwen") {
+            return Some((repo.clone(), file.clone(), path.clone()));
+        }
+    }
+    for (repo, file, path, _size) in &models {
+        let name_lower = repo.to_lowercase();
+        if name_lower.contains("ministral") || name_lower.contains("mistral") {
+            return Some((repo.clone(), file.clone(), path.clone()));
+        }
+    }
+    for (repo, file, path, _size) in &models {
+        let name_lower = repo.to_lowercase();
+        if name_lower.contains("gemma") {
+            return Some((repo.clone(), file.clone(), path.clone()));
+        }
+    }
+
+    None
+}
+
+/// Initialize LLM with a compatible cached model or prompt to download Qwen3 + Ministral
+#[cfg(feature = "llama-cpp")]
+async fn initialize_with_compatible_model_or_download(
+    print_mode: bool,
+    temperature: f32,
+    top_p: f32,
+    top_k: i32,
+    max_tokens: u32,
+    seed: u32,
+) -> Result<LlmClient, Box<dyn std::error::Error>> {
+    use hf_hub::api::tokio::Api;
+
+    // Check for compatible models in cache first
+    if let Some((repo, file, path)) = find_compatible_cached_model() {
+        if !print_mode {
+            println!("Found compatible model: {repo}/{file}");
+        }
+        return LlmClient::from_llamacpp_model_with_config(
+            file.trim_end_matches(".gguf"),
+            path.to_string_lossy().to_string(),
+            temperature,
+            top_p,
+            top_k,
+            max_tokens,
+            seed,
+        )
+        .await
+        .map_err(|e| e.into());
+    }
+
+    // No compatible model found - prompt user to download
+    if !print_mode {
+        println!("\nNo compatible models found. Arkavo Edge uses multiple models via the router.");
+        println!("The following models will be downloaded:");
+        println!("  • Qwen3-0.6B (~600MB) - Fast, for simple tasks");
+        println!("  • Ministral-3B (~2GB) - Higher quality reasoning");
+        print!("\nDownload both models now? (Y/n) ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if input.trim().to_lowercase() == "n" {
+            return Err("Download declined by user.".into());
+        }
+    }
+
+    let api = Api::new()?;
+
+    // Download Qwen3-0.6B
+    if !print_mode {
+        println!("\nDownloading Qwen3-0.6B...");
+    }
+    let qwen_repo = api.repo(hf_hub::Repo::model("Qwen/Qwen3-0.6B-GGUF".to_string()));
+    let qwen_path = qwen_repo.get("Qwen3-0.6B-Q8_0.gguf").await?;
+    if !print_mode {
+        println!("  ✓ Qwen3-0.6B downloaded");
+    }
+
+    // Download Ministral-3B
+    if !print_mode {
+        println!("Downloading Ministral-3B...");
+    }
+    let ministral_repo = api.repo(hf_hub::Repo::model(
+        "mistralai/Ministral-3-3B-Instruct-2512-GGUF".to_string(),
+    ));
+    let _ministral_path = ministral_repo
+        .get("Ministral-3-3B-Instruct-2512-Q4_K_M.gguf")
+        .await?;
+    if !print_mode {
+        println!("  ✓ Ministral-3B downloaded");
+        println!("\nModels ready. Using Qwen3-0.6B for this session.");
+    }
+
+    LlmClient::from_llamacpp_model_with_config(
+        "qwen3-0.6b",
+        qwen_path.to_string_lossy().to_string(),
+        temperature,
+        top_p,
+        top_k,
+        max_tokens,
+        seed,
+    )
+    .await
+    .map_err(|e| e.into())
+}
+
 async fn initialize_llm_client(
     print_mode: bool,
     model_name: &str,
@@ -1873,11 +2045,22 @@ async fn initialize_llm_client(
                             "Ministral-3-14B-Instruct-2512-Q4_K_M.gguf",
                             "ministral-3-14b",
                         ),
-                        _ => (
-                            "unsloth/gemma-3-270m-it-GGUF",
-                            "gemma-3-270m-it-Q4_0.gguf",
-                            "gemma-3-270m-it",
-                        ),
+                        // Qwen3 models
+                        "Qwen/Qwen3-0.6B-GGUF" | "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
+                            ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
+                        }
+                        _ => {
+                            // Check cache for compatible models or prompt to download
+                            return initialize_with_compatible_model_or_download(
+                                print_mode,
+                                temperature,
+                                top_p,
+                                top_k,
+                                max_tokens,
+                                seed,
+                            )
+                            .await;
+                        }
                     }
                 }
             } else {
@@ -1920,12 +2103,22 @@ async fn initialize_llm_client(
                         "Ministral-3-14B-Instruct-2512-Q4_K_M.gguf",
                         "ministral-3-14b",
                     ),
-                    _ => (
-                        // Default to gemma-3-270m
-                        "unsloth/gemma-3-270m-it-GGUF",
-                        "gemma-3-270m-it-Q4_0.gguf",
-                        "gemma-3-270m-it",
-                    ),
+                    // Qwen3 models
+                    "qwen3-0.6b" | "qwen-0.6b" | "qwen3" | "qwen" => {
+                        ("Qwen/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q8_0.gguf", "qwen3-0.6b")
+                    }
+                    _ => {
+                        // Check cache for compatible models or prompt to download
+                        return initialize_with_compatible_model_or_download(
+                            print_mode,
+                            temperature,
+                            top_p,
+                            top_k,
+                            max_tokens,
+                            seed,
+                        )
+                        .await;
+                    }
                 }
             };
 
