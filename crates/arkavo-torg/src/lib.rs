@@ -40,7 +40,7 @@ mod qwen3;
 mod sampler;
 
 pub use ministral::MinistralTokenMap;
-pub use prompt::{format_prompt, TORG_SYSTEM_PROMPT};
+pub use prompt::{TORG_SYSTEM_PROMPT, format_prompt};
 pub use qwen3::Qwen3TokenMap;
 pub use sampler::TorgLlamaSampler;
 

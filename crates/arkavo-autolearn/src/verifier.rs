@@ -552,8 +552,7 @@ mod security_tests {
         // A valid patch that respects the invariant should pass
         let keypair = AgentKeypair::generate();
         let invariant_graph = create_deny_default_invariant();
-        let mut contract =
-            InvariantContract::new("Deny by default".to_string(), invariant_graph);
+        let mut contract = InvariantContract::new("Deny by default".to_string(), invariant_graph);
         contract.sign(&keypair);
 
         let mut invariant_layer = InvariantLayer::new();
@@ -603,8 +602,7 @@ mod security_tests {
         // With strict_invariants = true, first violation should stop
         let keypair = AgentKeypair::generate();
         let invariant_graph = create_deny_default_invariant();
-        let mut contract =
-            InvariantContract::new("Deny by default".to_string(), invariant_graph);
+        let mut contract = InvariantContract::new("Deny by default".to_string(), invariant_graph);
         contract.sign(&keypair);
 
         let mut invariant_layer = InvariantLayer::new();

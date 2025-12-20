@@ -14,8 +14,6 @@ use crate::error::AutoLearnResult;
 use crate::signals::PainSignal;
 
 #[cfg(feature = "llm")]
-use std::path::Path;
-#[cfg(feature = "llm")]
 use crate::error::AutoLearnError;
 #[cfg(feature = "llm")]
 use arkavo_llama_cpp::{
@@ -24,8 +22,10 @@ use arkavo_llama_cpp::{
 };
 #[cfg(feature = "llm")]
 use arkavo_torg::{
-    MinistralTokenMap, Qwen3TokenMap, TorgLlamaSampler, TokenMapping, format_prompt,
+    MinistralTokenMap, Qwen3TokenMap, TokenMapping, TorgLlamaSampler, format_prompt,
 };
+#[cfg(feature = "llm")]
+use std::path::Path;
 
 /// Configuration for the synthesizer
 #[derive(Debug, Clone)]
@@ -51,8 +51,14 @@ impl Default for SynthesizerConfig {
 /// Token map variant for different model families
 #[cfg(feature = "llm")]
 enum TokenMapVariant {
-    Ministral { mapping: TokenMapping, vocab_size: i32 },
-    Qwen3 { mapping: TokenMapping, vocab_size: i32 },
+    Ministral {
+        mapping: TokenMapping,
+        vocab_size: i32,
+    },
+    Qwen3 {
+        mapping: TokenMapping,
+        vocab_size: i32,
+    },
 }
 
 /// Ministral-3B based policy synthesizer
@@ -98,35 +104,42 @@ impl MinistralSynthesizer {
     ///
     /// Returns an error if the model cannot be loaded or token mapping fails.
     #[cfg(feature = "llm")]
-    pub fn with_model(config: SynthesizerConfig, model_path: &Path) -> Result<Self, AutoLearnError> {
-        let model = LlamaModel::from_file(model_path.to_str().ok_or_else(|| {
-            AutoLearnError::Llm("Invalid model path".to_string())
-        })?).map_err(|e| AutoLearnError::Llm(e))?;
+    pub fn with_model(
+        config: SynthesizerConfig,
+        model_path: &Path,
+    ) -> Result<Self, AutoLearnError> {
+        let model = LlamaModel::from_file(
+            model_path
+                .to_str()
+                .ok_or_else(|| AutoLearnError::Llm("Invalid model path".to_string()))?,
+        )
+        .map_err(|e| AutoLearnError::Llm(e))?;
 
         let vocab = model.get_vocab();
 
         // Auto-detect model type from model_id or path
         let model_name = model_path.to_string_lossy().to_lowercase();
-        let token_map = if model_name.contains("qwen") || config.model_id.to_lowercase().contains("qwen") {
-            // SAFETY: vocab pointer is valid from model
-            let map = unsafe { Qwen3TokenMap::from_vocab(vocab) }
-                .map_err(|e| AutoLearnError::Llm(format!("Qwen3 token map error: {e}")))?;
-            let vocab_size = map.vocab_size();
-            TokenMapVariant::Qwen3 {
-                mapping: map.into_mapping(),
-                vocab_size,
-            }
-        } else {
-            // Default to Ministral
-            // SAFETY: vocab pointer is valid from model
-            let map = unsafe { MinistralTokenMap::from_vocab(vocab) }
-                .map_err(|e| AutoLearnError::Llm(format!("Ministral token map error: {e}")))?;
-            let vocab_size = map.vocab_size();
-            TokenMapVariant::Ministral {
-                mapping: map.into_mapping(),
-                vocab_size,
-            }
-        };
+        let token_map =
+            if model_name.contains("qwen") || config.model_id.to_lowercase().contains("qwen") {
+                // SAFETY: vocab pointer is valid from model
+                let map = unsafe { Qwen3TokenMap::from_vocab(vocab) }
+                    .map_err(|e| AutoLearnError::Llm(format!("Qwen3 token map error: {e}")))?;
+                let vocab_size = map.vocab_size();
+                TokenMapVariant::Qwen3 {
+                    mapping: map.into_mapping(),
+                    vocab_size,
+                }
+            } else {
+                // Default to Ministral
+                // SAFETY: vocab pointer is valid from model
+                let map = unsafe { MinistralTokenMap::from_vocab(vocab) }
+                    .map_err(|e| AutoLearnError::Llm(format!("Ministral token map error: {e}")))?;
+                let vocab_size = map.vocab_size();
+                TokenMapVariant::Ministral {
+                    mapping: map.into_mapping(),
+                    vocab_size,
+                }
+            };
 
         tracing::info!(
             "Loaded model from {} with {} token mapping",
@@ -183,7 +196,8 @@ impl LlmSynthesizer for MinistralSynthesizer {
                 _ => {
                     return Box::pin(async {
                         Err(SynthesisError {
-                            message: "Model not loaded. Call with_model() to load an LLM.".to_string(),
+                            message: "Model not loaded. Call with_model() to load an LLM."
+                                .to_string(),
                         })
                     });
                 }
@@ -224,13 +238,20 @@ fn synthesize_with_torg(
     config: &SynthesizerConfig,
 ) -> Result<Graph, SynthesisError> {
     // 1. Create fresh context for this generation
-    let ctx = LlamaContext::new(model)
-        .map_err(|e| SynthesisError { message: e.to_string() })?;
+    let ctx = LlamaContext::new(model).map_err(|e| SynthesisError {
+        message: e.to_string(),
+    })?;
 
     // Get mapping and vocab size
     let (mapping, vocab_size) = match token_map {
-        TokenMapVariant::Ministral { mapping, vocab_size } => (mapping.clone(), *vocab_size),
-        TokenMapVariant::Qwen3 { mapping, vocab_size } => (mapping.clone(), *vocab_size),
+        TokenMapVariant::Ministral {
+            mapping,
+            vocab_size,
+        } => (mapping.clone(), *vocab_size),
+        TokenMapVariant::Qwen3 {
+            mapping,
+            vocab_size,
+        } => (mapping.clone(), *vocab_size),
     };
 
     let mut torg_sampler = TorgLlamaSampler::new(mapping, vocab_size);
@@ -239,7 +260,8 @@ fn synthesize_with_torg(
     let format = detect_model_format(&config.model_id);
     let formatted = format_prompt(prompt, format);
 
-    tracing::debug!("Formatted prompt ({} chars): {}...",
+    tracing::debug!(
+        "Formatted prompt ({} chars): {}...",
         formatted.len(),
         &formatted[..formatted.len().min(100)]
     );
@@ -262,14 +284,13 @@ fn synthesize_with_torg(
         let bias = torg_sampler.get_logit_bias();
 
         // Create sampler chain: logit_bias → temp → greedy/top_p
-        let sampler = LlamaSampler::new_chain(true)
-            .map_err(|e| SynthesisError { message: e })?;
+        let sampler = LlamaSampler::new_chain(true).map_err(|e| SynthesisError { message: e })?;
         sampler.add_logit_bias(torg_sampler.vocab_size(), &bias);
         sampler.add_temp(config.temperature);
         if config.temperature == 0.0 {
             sampler.add_greedy();
         } else {
-            sampler.add_top_p(0.95, 1);  // min_keep = 1
+            sampler.add_top_p(0.95, 1); // min_keep = 1
         }
 
         let token = sampler.sample(&ctx, -1);
@@ -298,13 +319,16 @@ fn synthesize_with_torg(
     // 5. Extract graph
     if !torg_sampler.is_complete() {
         return Err(SynthesisError {
-            message: format!("Max tokens ({}) reached without completing graph", config.max_tokens),
+            message: format!(
+                "Max tokens ({}) reached without completing graph",
+                config.max_tokens
+            ),
         });
     }
 
-    torg_sampler
-        .finish()
-        .map_err(|e| SynthesisError { message: e.to_string() })
+    torg_sampler.finish().map_err(|e| SynthesisError {
+        message: e.to_string(),
+    })
 }
 
 /// Mock synthesizer for testing

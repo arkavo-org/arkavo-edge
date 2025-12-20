@@ -15,9 +15,7 @@ use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, LlamaSampler, ModelFormat, batch_free, batch_init_with_tokens,
     decode_batch, detect_model_format, tokenize_with_model,
 };
-use arkavo_torg::{
-    MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler, format_prompt,
-};
+use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler, format_prompt};
 use torg_core::Graph;
 use torg_mask::TokenMapping;
 
