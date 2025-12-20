@@ -36,6 +36,8 @@ impl Qwen3TokenMap {
         let mut xor_id = None;
         let mut node_start_id = None;
         let mut node_end_id = None;
+        let mut input_decl_id = None;
+        let mut output_decl_id = None;
         let mut true_id = None;
         let mut false_id = None;
 
@@ -62,12 +64,16 @@ impl Qwen3TokenMap {
                 "True" | "true" | "TRUE" if true_id.is_none() => true_id = Some(id as u32),
                 "False" | "false" | "FALSE" if false_id.is_none() => false_id = Some(id as u32),
 
+                // Structural tokens using common ASCII characters
+                // Use '<' for input declaration, '>' for output declaration
+                "<" => input_decl_id = Some(id as u32),
+                ">" => output_decl_id = Some(id as u32),
+
                 _ => {}
             }
         }
 
-        // Use fallback IDs for tokens not found in vocabulary
-        // In practice, these should be configured based on actual model analysis
+        // All tokens must exist in the vocabulary
         let or_id = or_id.ok_or_else(|| TorgError::TokenMapping("Or token '|' not found".into()))?;
         let nor_id =
             nor_id.ok_or_else(|| TorgError::TokenMapping("Nor token '!' not found".into()))?;
@@ -77,10 +83,12 @@ impl Qwen3TokenMap {
             .ok_or_else(|| TorgError::TokenMapping("NodeStart token '[' not found".into()))?;
         let node_end_id = node_end_id
             .ok_or_else(|| TorgError::TokenMapping("NodeEnd token ']' not found".into()))?;
+        let input_decl_id = input_decl_id
+            .ok_or_else(|| TorgError::TokenMapping("InputDecl token '<' not found".into()))?;
+        let output_decl_id = output_decl_id
+            .ok_or_else(|| TorgError::TokenMapping("OutputDecl token '>' not found".into()))?;
 
-        // Use fallback values for tokens that may need special handling
-        let input_decl_id = vocab_size as u32 - 5;
-        let output_decl_id = vocab_size as u32 - 4;
+        // Use fallback values for boolean literals (less critical)
         let true_id = true_id.unwrap_or(vocab_size as u32 - 3);
         let false_id = false_id.unwrap_or(vocab_size as u32 - 2);
 

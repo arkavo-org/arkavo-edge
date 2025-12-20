@@ -51,11 +51,22 @@ pub fn load_model_if_available() -> Option<LlamaModel> {
 }
 
 /// System prompt for TØR-G generation
-pub const TORG_SYSTEM_PROMPT: &str = r#"You are a TØR-G policy generator.
-Output format: IN:id IN:id ... [node_id op arg1 arg2] ... OUT:node_id
+/// Format uses single-character tokens:
+/// - `<` followed by number for input declaration
+/// - `>` followed by number for output declaration
+/// - `[` `]` for node bounds
+/// - `|` `!` `^` for OR, NOR, XOR operators
+pub const TORG_SYSTEM_PROMPT: &str = r#"Generate TØR-G boolean circuits.
+
+Syntax: <id declares input, [id op a b] defines node, >id declares output.
 Operators: | (OR), ! (NOR), ^ (XOR)
-Example: IN:0 IN:1 [2 | 0 1] OUT:2 means "input0 OR input1"
-Generate ONLY the TØR-G tokens, no explanation."#;
+
+Examples:
+"A OR B" -> <0 <1 [2 | 0 1] >2
+"X XOR Y" -> <0 <1 [2 ^ 0 1] >2
+"NOT A" -> <0 [1 ! 0 0] >1
+
+Output ONLY the tokens."#;
 
 /// Format a policy description using Qwen3 chat template
 pub fn format_prompt(policy: &str) -> String {
@@ -134,18 +145,46 @@ pub fn generate_with_constraints(
 
     // Generation loop with constrained sampling
     for _ in 0..max_tokens {
-        // Create fresh sampler chain for this token
+        // Get TØR-G constraints FIRST
+        let bias = torg_sampler.get_logit_bias();
+
+        // Create sampler chain with CORRECT ORDER:
+        // 1. Logit bias (constraint enforcement) - MUST BE FIRST
+        // 2. Temperature
+        // 3. Greedy selection
         let llama_sampler = LlamaSampler::new_chain(true)
             .map_err(GenerationError::Sampler)?;
-        llama_sampler.add_temp(0.0); // Greedy for determinism
 
-        // Apply TØR-G constraints
-        let bias = torg_sampler.get_logit_bias();
+        // Add logit bias FIRST to mask disallowed tokens
         llama_sampler.add_logit_bias(torg_sampler.vocab_size(), &bias);
+
+        // Then temperature (0.0 for greedy/deterministic)
+        llama_sampler.add_temp(0.0);
+
+        // Finally, greedy selection
         llama_sampler.add_greedy();
 
         // Sample next token
         let token = llama_sampler.sample(ctx, -1);
+
+        // Debug: show allowed tokens (first iteration only)
+        let allowed = torg_sampler.allowed_tokens();
+        let is_allowed = allowed.contains(&(token as u32));
+        if pos == tokens.len() as i32 {
+            eprintln!("Initial allowed tokens ({}):", allowed.len());
+            for &tid in allowed.iter().take(20) {
+                let s = arkavo_llama_cpp::token_to_piece(vocab, tid as i32, true).unwrap_or_default();
+                eprintln!("  {} '{}'", tid, s.escape_debug());
+            }
+        }
+
+        // CRITICAL: Verify mask is working - sampled token MUST be allowed
+        assert!(
+            is_allowed,
+            "MASK FAILURE: Sampled token {} not in allowed set {:?}",
+            token,
+            &allowed[..allowed.len().min(10)]
+        );
 
         // Check for completion
         if token == eos || torg_sampler.is_complete() {
@@ -153,7 +192,12 @@ pub fn generate_with_constraints(
         }
 
         // Feed token to TØR-G state machine
-        torg_sampler.feed_token(token as u32)?;
+        let token_str = arkavo_llama_cpp::token_to_piece(vocab, token, true).unwrap_or_default();
+        eprintln!("Feeding token {} '{}' to TØR-G (allowed: {})", token, token_str, is_allowed);
+        if let Err(e) = torg_sampler.feed_token(token as u32) {
+            eprintln!("feed_token failed: {:?}", e);
+            return Err(e.into());
+        }
 
         // Advance model context
         let mut batch = batch_init_with_tokens(&[token], pos, true);
