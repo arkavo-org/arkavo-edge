@@ -72,7 +72,9 @@ impl GetAgentTimeTool {
         let local_time = now.with_timezone(&tz);
 
         // Create human-readable display text
-        let display = local_time.format("%A, %B %d, %Y at %I:%M:%S %p %Z").to_string();
+        let display = local_time
+            .format("%A, %B %d, %Y at %I:%M:%S %p %Z")
+            .to_string();
 
         match format {
             "rfc3339" | "" => Ok(json!({

@@ -55,13 +55,11 @@ impl ResponseJudge {
             .unwrap_or("local-judge")
             .to_string();
 
-        let provider = arkavo_llm::LlamaCppProvider::new(
-            model_name,
-            model_path.to_string_lossy().to_string(),
-        )
-        .map_err(|e| {
-            crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
-        })?;
+        let provider =
+            arkavo_llm::LlamaCppProvider::new(model_name, model_path.to_string_lossy().to_string())
+                .map_err(|e| {
+                    crate::Error::ModelExecution(format!("Failed to create judge provider: {e}"))
+                })?;
 
         Ok(Self {
             judge_provider: Arc::new(provider),

@@ -1322,10 +1322,16 @@ async fn process_message_print_with_router(
 
     // Debug: show what we're working with
     if SHOW_DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-        eprintln!("[DEBUG] final_response length: {}", result.final_response.len());
+        eprintln!(
+            "[DEBUG] final_response length: {}",
+            result.final_response.len()
+        );
         eprintln!("[DEBUG] stripped length: {}", response.len());
         eprintln!("[DEBUG] trimmed length: {}", trimmed.len());
-        eprintln!("[DEBUG] tool_executions count: {}", result.tool_executions.len());
+        eprintln!(
+            "[DEBUG] tool_executions count: {}",
+            result.tool_executions.len()
+        );
     }
 
     // If response is empty but we executed tools, show tool results directly

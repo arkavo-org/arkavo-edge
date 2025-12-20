@@ -11,7 +11,7 @@ use crate::{
     state::QueryStateKit,
 };
 #[allow(unused_imports)]
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
@@ -168,16 +168,16 @@ impl McpConnection {
             // No runtime conflict, execute directly
             // Try core tools first
             if let Some(tool) = self.tools.get(name) {
-                return self.runtime_handle.block_on(async move {
-                    tool.execute(args).await.map_err(|e| e.to_string())
-                });
+                return self
+                    .runtime_handle
+                    .block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) });
             }
 
             // Fall back to registry for discovered tools
             if let Some(tool) = self.registry.get(name) {
-                return self.runtime_handle.block_on(async move {
-                    tool.execute(args).await.map_err(|e| e.to_string())
-                });
+                return self
+                    .runtime_handle
+                    .block_on(async move { tool.execute(args).await.map_err(|e| e.to_string()) });
             }
 
             Err(format!("Tool not found: {name}"))

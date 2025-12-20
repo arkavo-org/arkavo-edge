@@ -261,11 +261,8 @@ impl TaskClassifier {
             .unwrap_or("local-classifier")
             .to_string();
 
-        let provider = LlamaCppProvider::new(
-            model_name,
-            model_path.to_string_lossy().to_string(),
-        )
-        .map_err(Error::Provider)?;
+        let provider = LlamaCppProvider::new(model_name, model_path.to_string_lossy().to_string())
+            .map_err(Error::Provider)?;
 
         Ok(Self {
             provider: Arc::new(Mutex::new(provider)),

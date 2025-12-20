@@ -454,7 +454,8 @@ impl ToolRegistry {
         // Sort by priority (highest first)
         scored_results.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let results: Vec<MinimalToolInfo> = scored_results.into_iter().map(|(_, info)| info).collect();
+        let results: Vec<MinimalToolInfo> =
+            scored_results.into_iter().map(|(_, info)| info).collect();
 
         // Log if search returned no results (learning opportunity for new aliases)
         if results.is_empty() && !query.trim().is_empty() {
