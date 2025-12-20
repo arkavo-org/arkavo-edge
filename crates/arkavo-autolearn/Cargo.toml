@@ -1,0 +1,35 @@
+[package]
+name = "arkavo-autolearn"
+version.workspace = true
+edition.workspace = true
+description = "Auto-learning loop for self-healing agents"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arkavo-ensemble = { path = "../arkavo-ensemble" }
+arkavo-gossip = { path = "../arkavo-gossip" }
+arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-sat = { path = "../arkavo-sat" }
+arkavo-sbe = { path = "../arkavo-sbe" }
+arkavo-crypto = { path = "../arkavo-crypto" }
+torg-core = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+chrono = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+
+[target.'cfg(not(target_env = "musl"))'.dependencies]
+arkavo-torg = { path = "../arkavo-torg", optional = true }
+
+[features]
+default = []
+llm = ["arkavo-torg"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

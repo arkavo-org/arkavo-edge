@@ -1,0 +1,23 @@
+[package]
+name = "arkavo-ensemble"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Policy ensemble with counterfactual evaluation for TØRG"
+
+[dependencies]
+arkavo-sbe = { path = "../arkavo-sbe" }
+arkavo-sat = { path = "../arkavo-sat" }
+torg-core = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+chrono = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }

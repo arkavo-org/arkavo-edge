@@ -151,16 +151,15 @@ impl GossipProtocol {
         self.patches.write().await.insert(patch_id, state);
 
         // Generate messages to propagate
-        let mut messages = Vec::new();
-
-        // Request the patch content
-        messages.push(GossipMessage::PatchRequest(PatchRequest {
-            patch_id,
-            requester: self.agent_id.clone(),
-        }));
-
-        // Propagate announcement to peers (gossip)
-        messages.push(GossipMessage::PatchAnnounce(announcement));
+        let messages = vec![
+            // Request the patch content
+            GossipMessage::PatchRequest(PatchRequest {
+                patch_id,
+                requester: self.agent_id.clone(),
+            }),
+            // Propagate announcement to peers (gossip)
+            GossipMessage::PatchAnnounce(announcement),
+        ];
 
         Ok(messages)
     }

@@ -53,6 +53,8 @@ members = [
     "crates/arkavo-sbe",
     "crates/arkavo-sat",
     "crates/arkavo-gossip",
+    "crates/arkavo-ensemble",
+    "crates/arkavo-autolearn",
     ".cargo/xtask",
 ]
 default-members = [
