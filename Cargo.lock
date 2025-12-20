@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-cli",
  "serde_json",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-agui"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-attestation"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-device-identity",
  "serde",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-authorization"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-bench"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-context",
  "arkavo-gemini",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-browser"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-budget"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cef"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-observability",
  "async-trait",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-claude-code"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-authorization",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-cli"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-code-search"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-bundle"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "chrono",
  "serde",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-encryption"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-config-bundle",
  "base64 0.22.1",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-config-transport"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-config-bundle",
  "arkavo-config-encryption",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-context"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-llm",
  "serde",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-dataflow"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-debugger"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-events",
  "arkavo-memory",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-deepseek"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-device-identity"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "dirs 5.0.1",
  "hex",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-events"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "bincode",
  "chrono",
@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-gemini"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-git"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "git2",
  "tempfile",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-github"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-kimi"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-llama-cpp-sys",
  "criterion",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llama-cpp-sys"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "bindgen",
  "cmake",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-llm"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-deepseek",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "async-trait",
  "serde",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-core"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-macos"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-git",
  "arkavo-mcp",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-runtime"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-llm",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mcp-tools"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-browser",
  "arkavo-git",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-memory"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-events",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-mesh-tools"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-mcp",
  "arkavo-mcp-tools",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-observability"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-orchestrator"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-budget",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-protocol"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-crypto",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-qwen"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-repo"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-git",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-router"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-budget",
  "arkavo-context",
@@ -1061,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-snpe"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "libc",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-tdf-iroh"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-tdf",
  "async-trait",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-terminal"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-dataflow",
@@ -1140,8 +1140,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkavo-torg"
+version = "0.47.5"
+dependencies = [
+ "arkavo-llama-cpp",
+ "dirs 6.0.0",
+ "thiserror 2.0.17",
+ "tokio",
+ "torg-core",
+ "torg-mask",
+]
+
+[[package]]
 name = "arkavo-ui-core"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-agui",
@@ -1157,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-ui-generator"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "anyhow",
  "arkavo-browser",
@@ -1182,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "arkavo-workspace"
-version = "0.47.4"
+version = "0.47.5"
 dependencies = [
  "arkavo-mcp",
  "async-trait",
@@ -9302,6 +9314,24 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "torg-core"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62626eee74567a9d38b0a7399143f23b22d98b56a6811888a52c3b14e62a0e1b"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "torg-mask"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebef126e548849b744166aca5a02ed2ddef3930a2d7c4d0807f7d338b35ce8c6"
+dependencies = [
+ "torg-core",
 ]
 
 [[package]]

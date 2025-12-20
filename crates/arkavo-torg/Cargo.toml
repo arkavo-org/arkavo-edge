@@ -1,0 +1,22 @@
+[package]
+name = "arkavo-torg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "TØR-G constrained decoding integration for arkavo-edge"
+
+[dependencies]
+torg-core.workspace = true
+torg-mask.workspace = true
+arkavo-llama-cpp = { path = "../arkavo-llama-cpp" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros"] }
+dirs.workspace = true
+
+[lints]
+workspace = true
