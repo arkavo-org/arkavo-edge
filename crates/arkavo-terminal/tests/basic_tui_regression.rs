@@ -1,6 +1,9 @@
 /// Basic TUI regression tests that can run without triggering runtime issues
 /// These tests verify the TUI testing infrastructure is working
-use arkavo_mcp_tools::mcp_connection::McpConnection;
+///
+/// Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
+use arkavo_mcp_tools::server::Tool;
+use arkavo_mcp_tools::tui::{TuiInteractionKit, TuiKeyboardKit, TuiScreenshotKit};
 use serde_json::json;
 
 #[test]
@@ -13,17 +16,14 @@ fn test_tui_keyboard_functionality() {
 
     println!("=== Testing TUI Keyboard Tool ===");
 
-    let mcp = McpConnection::new().expect("Failed to create MCP connection");
+    let keyboard = TuiKeyboardKit::new();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
     // Test key press
-    let result = mcp.call_tool(
-        "tui_keyboard",
-        json!({
-            "action": "key",
-            "key": "a"
-        }),
-        "test",
-    );
+    let result = rt.block_on(keyboard.execute(json!({
+        "action": "key",
+        "key": "a"
+    })));
 
     match result {
         Ok(res) => {
@@ -39,14 +39,10 @@ fn test_tui_keyboard_functionality() {
     }
 
     // Test text typing
-    let result = mcp.call_tool(
-        "tui_keyboard",
-        json!({
-            "action": "text",
-            "text": "Hello TUI"
-        }),
-        "test",
-    );
+    let result = rt.block_on(keyboard.execute(json!({
+        "action": "text",
+        "text": "Hello TUI"
+    })));
 
     match result {
         Ok(res) => {
@@ -62,15 +58,11 @@ fn test_tui_keyboard_functionality() {
     }
 
     // Test shortcut
-    let result = mcp.call_tool(
-        "tui_keyboard",
-        json!({
-            "action": "shortcut",
-            "shortcut": "c",
-            "modifiers": ["ctrl"]
-        }),
-        "test",
-    );
+    let result = rt.block_on(keyboard.execute(json!({
+        "action": "shortcut",
+        "shortcut": "c",
+        "modifiers": ["ctrl"]
+    })));
 
     match result {
         Ok(res) => {
@@ -96,17 +88,14 @@ fn test_tui_screenshot_functionality() {
 
     println!("=== Testing TUI Screenshot Tool ===");
 
-    let mcp = McpConnection::new().expect("Failed to create MCP connection");
+    let screenshot = TuiScreenshotKit::new();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
     // Test text format screenshot
-    let result = mcp.call_tool(
-        "tui_screenshot",
-        json!({
-            "format": "text",
-            "include_colors": false
-        }),
-        "test",
-    );
+    let result = rt.block_on(screenshot.execute(json!({
+        "format": "text",
+        "include_colors": false
+    })));
 
     match result {
         Ok(res) => {
@@ -127,51 +116,41 @@ fn test_tui_screenshot_functionality() {
 fn test_tui_interaction_schema() {
     println!("=== Testing TUI Interaction Tool Schema ===");
 
-    let mcp = McpConnection::new().expect("Failed to create MCP connection");
+    let interaction = TuiInteractionKit::new();
+    let schema = interaction.schema();
 
-    let schema = mcp
-        .get_tool_schema("tui_interaction")
-        .expect("Failed to get tui_interaction schema");
+    println!("TUI Interaction schema name: {}", schema.name);
+    println!("TUI Interaction schema description: {}", schema.description);
 
-    println!(
-        "TUI Interaction schema: {}",
-        serde_json::to_string_pretty(&schema).unwrap()
-    );
+    assert_eq!(schema.name, "tui_interaction");
+    assert!(schema.description.contains("TUI"));
 
-    assert_eq!(schema["name"], "tui_interaction");
-    assert!(schema["description"].as_str().unwrap().contains("TUI"));
-
-    // Verify the schema has the expected actions
-    let parameters = &schema["parameters"];
-    assert!(parameters.is_object());
+    // Verify the schema has parameters
+    assert!(schema.parameters.is_object());
 }
 
 #[test]
 fn test_all_tui_tools_schemas() {
     println!("=== Verifying All TUI Tool Schemas ===");
 
-    let mcp = McpConnection::new().expect("Failed to create MCP connection");
-
-    let tui_tools = vec![
-        "tui_keyboard",
-        "tui_screenshot",
-        "tui_interaction",
-        // Note: tui_harness is mentioned in docs but not yet implemented
+    // Test TUI tools directly since they are discovery-only (not in core MCP tools)
+    let tools: Vec<(&str, Box<dyn Tool>)> = vec![
+        ("tui_keyboard", Box::new(TuiKeyboardKit::new())),
+        ("tui_screenshot", Box::new(TuiScreenshotKit::new())),
+        ("tui_interaction", Box::new(TuiInteractionKit::new())),
     ];
 
-    for tool_name in tui_tools {
-        println!("\nChecking schema for: {tool_name}");
+    for (expected_name, tool) in tools {
+        println!("\nChecking schema for: {expected_name}");
 
-        let schema = mcp
-            .get_tool_schema(tool_name)
-            .unwrap_or_else(|| panic!("Failed to get {tool_name} schema"));
+        let schema = tool.schema();
 
         // Verify basic schema structure
-        assert_eq!(schema["name"], tool_name);
-        assert!(schema.get("description").is_some());
-        assert!(schema.get("parameters").is_some());
+        assert_eq!(schema.name, expected_name);
+        assert!(!schema.description.is_empty());
+        assert!(schema.parameters.is_object());
 
-        println!("  ✓ Schema valid for {tool_name}");
+        println!("  ✓ Schema valid for {expected_name}");
     }
 }
 
@@ -185,7 +164,8 @@ fn test_keyboard_modifiers() {
 
     println!("=== Testing Keyboard Modifiers ===");
 
-    let mcp = McpConnection::new().expect("Failed to create MCP connection");
+    let keyboard = TuiKeyboardKit::new();
+    let rt = tokio::runtime::Runtime::new().unwrap();
 
     let modifier_combos = vec![
         (vec!["ctrl"], "c"),
@@ -198,15 +178,11 @@ fn test_keyboard_modifiers() {
     for (modifiers, key) in modifier_combos {
         println!("\nTesting {modifiers:?} + {key}");
 
-        let result = mcp.call_tool(
-            "tui_keyboard",
-            json!({
-                "action": "shortcut",
-                "shortcut": key,
-                "modifiers": modifiers
-            }),
-            "test",
-        );
+        let result = rt.block_on(keyboard.execute(json!({
+            "action": "shortcut",
+            "shortcut": key,
+            "modifiers": modifiers
+        })));
 
         match result {
             Ok(res) => {
