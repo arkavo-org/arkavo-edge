@@ -1,71 +1,59 @@
+/// Manual TUI tests that verify tool functionality
+/// Note: TUI tools are discovery-only (not in core MCP tools), so we test them directly.
 #[cfg(test)]
 mod manual_tests {
-    use arkavo_mcp_tools::mcp_connection::McpConnection;
+    use arkavo_mcp_tools::server::Tool;
+    use arkavo_mcp_tools::tui::{TuiInteractionKit, TuiKeyboardKit, TuiScreenshotKit};
     use serde_json::json;
 
     #[test]
     fn test_tui_tools_available() {
-        // Create MCP connection and verify TUI tools are registered
-        let mcp = McpConnection::new().expect("Failed to create MCP connection");
+        // Verify TUI tools can be instantiated and have valid schemas
+        let keyboard = TuiKeyboardKit::new();
+        let screenshot = TuiScreenshotKit::new();
+        let interaction = TuiInteractionKit::new();
 
-        let tools = mcp.list_tools();
-        println!("Available MCP tools:");
-        for tool in &tools {
-            println!("  - {tool}");
-        }
+        println!("Available TUI tools (discovery-only):");
+        println!("  - {} ({})", keyboard.schema().name, keyboard.schema().description);
+        println!("  - {} ({})", screenshot.schema().name, screenshot.schema().description);
+        println!("  - {} ({})", interaction.schema().name, interaction.schema().description);
 
-        // Check that TUI tools are present
-        assert!(
-            tools.contains(&"tui_keyboard".to_string()),
-            "tui_keyboard tool not found"
-        );
-        assert!(
-            tools.contains(&"tui_screenshot".to_string()),
-            "tui_screenshot tool not found"
-        );
-        assert!(
-            tools.contains(&"tui_interaction".to_string()),
-            "tui_interaction tool not found"
-        );
-        // Note: tui_harness is mentioned in docs but not yet implemented
-        // assert!(
-        //     tools.contains(&"tui_harness".to_string()),
-        //     "tui_harness tool not found"
-        // );
+        // Verify tool names
+        assert_eq!(keyboard.schema().name, "tui_keyboard");
+        assert_eq!(screenshot.schema().name, "tui_screenshot");
+        assert_eq!(interaction.schema().name, "tui_interaction");
     }
 
     #[test]
     fn test_tui_keyboard_schema() {
-        let mcp = McpConnection::new().expect("Failed to create MCP connection");
-
-        // Get and verify keyboard tool schema
-        let schema = mcp
-            .get_tool_schema("tui_keyboard")
-            .expect("Failed to get tui_keyboard schema");
+        let keyboard = TuiKeyboardKit::new();
+        let schema = keyboard.schema();
 
         println!(
             "tui_keyboard schema: {}",
-            serde_json::to_string_pretty(&schema).unwrap()
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": schema.name,
+                "description": schema.description,
+                "parameters": schema.parameters,
+            }))
+            .unwrap()
         );
 
-        assert_eq!(schema["name"], "tui_keyboard");
-        assert!(schema["description"].as_str().unwrap().contains("keyboard"));
+        assert_eq!(schema.name, "tui_keyboard");
+        assert!(schema.description.contains("keyboard"));
     }
 
     #[test]
     #[ignore = "Requires manual verification of output"]
     fn test_simple_keyboard_action() {
-        let mcp = McpConnection::new().expect("Failed to create MCP connection");
+        let keyboard = TuiKeyboardKit::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
         // Test sending a simple key
-        let result = mcp.call_tool(
-            "tui_keyboard",
-            json!({
-                "action": "key",
-                "key": "a"
-            }),
-            "test",
-        );
+        let result = rt.block_on(keyboard.execute(json!({
+            "action": "key",
+            "key": "a"
+        })));
 
         match result {
             Ok(res) => {
