@@ -71,6 +71,7 @@ pub mod invariant;
 pub mod layer;
 mod patchlet;
 mod policy;
+pub mod storage;
 
 // Re-export main types
 pub use adaptive::{AdaptiveLayer, DEFAULT_ROLLBACK_TIMEOUT_MS, RollbackHandle};
@@ -82,6 +83,10 @@ pub use patchlet::{
     AppliedPatchlet, DEFAULT_MAX_PATCHLET_NODES, DEFAULT_MAX_PATCHLETS, PatchOp, Patchlet,
 };
 pub use policy::{DEFAULT_QUORUM_THRESHOLD, PolicyLayer, PolicyUpdateRequest, PolicyVote};
+pub use storage::{
+    SbeStore, SqliteSbeStore, StoredContract, StoredNodeLayer, StoredPatchlet,
+    deserialize_patch_op, serialize_patch_op,
+};
 
 // Re-export torg-core types for convenience
 pub use torg_core::{BuildError, Builder, EvalError, Graph, Token};

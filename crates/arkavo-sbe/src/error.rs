@@ -68,6 +68,10 @@ pub enum SbeError {
     /// Quorum not reached for policy update
     #[error("Quorum not reached: {votes}/{required} votes received")]
     QuorumNotReached { votes: usize, required: usize },
+
+    /// Storage error
+    #[error("Storage error: {0}")]
+    Storage(String),
 }
 
 /// Result type alias for SBE operations

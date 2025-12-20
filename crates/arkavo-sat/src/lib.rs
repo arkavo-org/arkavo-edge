@@ -31,10 +31,15 @@
 pub mod boundary;
 pub mod cnf;
 pub mod error;
+pub mod stress;
 
 pub use boundary::{BoundaryProbe, find_epsilon_boundary, find_satisfying_inputs, probe_boundary};
 pub use cnf::{CnfFormula, extract_cnf};
 pub use error::{SatError, SatResult};
+pub use stress::{
+    CoverageStats, PolicyHole, StressTestConfig, StressTestResult, find_contradictions,
+    is_satisfiable, is_tautology, stress_test,
+};
 
 // Re-export torg-core and varisat types for convenience
 pub use torg_core::Graph;

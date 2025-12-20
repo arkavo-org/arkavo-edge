@@ -685,6 +685,7 @@ version = "0.48.0"
 dependencies = [
  "arkavo-crypto",
  "chrono",
+ "hex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1095,6 +1096,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "thiserror 2.0.17",
  "tokio",
  "torg-core",
