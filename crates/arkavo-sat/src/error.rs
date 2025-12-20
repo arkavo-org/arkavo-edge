@@ -24,6 +24,22 @@ pub enum SatError {
     /// Boundary probing failed
     #[error("Boundary probing failed: {0}")]
     BoundaryProbe(String),
+
+    /// Cardinality constraint error
+    #[error("Cardinality constraint error: {0}")]
+    Cardinality(String),
+
+    /// Background scheduler error
+    #[error("Scheduler error: {0}")]
+    Scheduler(String),
+
+    /// Cache operation error
+    #[error("Cache error: {0}")]
+    Cache(String),
+
+    /// Operation cancelled
+    #[error("Operation cancelled")]
+    Cancelled,
 }
 
 /// Result type alias for SAT operations

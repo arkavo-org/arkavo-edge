@@ -29,13 +29,36 @@
 //! CDCL SAT solver with good performance characteristics.
 
 pub mod boundary;
+pub mod cache;
+pub mod cardinality;
 pub mod cnf;
 pub mod error;
+pub mod incremental;
+pub mod prioritizer;
+pub mod scheduler;
 pub mod stress;
 
-pub use boundary::{BoundaryProbe, find_epsilon_boundary, find_satisfying_inputs, probe_boundary};
+pub use boundary::{
+    BoundaryProbe, can_flip_to_target_sat, find_epsilon_boundary, find_satisfying_inputs,
+    probe_boundary,
+};
+pub use cache::{
+    compute_graph_hash, find_epsilon_boundary_cached, CacheStats, ProbeCache, ProbeCacheKey,
+    DEFAULT_CACHE_CAPACITY, DEFAULT_CACHE_TTL,
+};
+pub use cardinality::{
+    create_flip_indicators, encode_at_most_k, encode_exactly_k, encode_xor, force_value,
+};
 pub use cnf::{CnfFormula, extract_cnf};
 pub use error::{SatError, SatResult};
+pub use incremental::{IncrementalAnalysis, ModificationTracker};
+pub use prioritizer::{
+    AnomalyPrioritizer, NodeHistory, PriorityReason, PriorityWeights, ScoredNode,
+};
+pub use scheduler::{
+    probe_sync, ProbeResult, ProbeScheduler, ProbeTask, SchedulerConfig, SchedulerStats,
+    DEFAULT_BATCH_SIZE, DEFAULT_CPU_BUDGET, DEFAULT_MIN_INTERVAL,
+};
 pub use stress::{
     CoverageStats, PolicyHole, StressTestConfig, StressTestResult, find_contradictions,
     is_satisfiable, is_tautology, stress_test,

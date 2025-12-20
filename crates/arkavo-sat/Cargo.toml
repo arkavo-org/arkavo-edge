@@ -11,6 +11,8 @@ torg-core = { workspace = true }
 varisat = "0.2"
 thiserror = { workspace = true }
 serde = { workspace = true }
+lru = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

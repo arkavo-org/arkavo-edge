@@ -1,12 +1,15 @@
 //! Boundary probing for policy stress testing
 //!
 //! Generates synthetic inputs near decision boundaries using SAT solving.
+//! Uses cardinality constraints for efficient k-flip queries without
+//! brute-force enumeration.
 
 use std::collections::HashMap;
 
 use torg_core::Graph;
-use varisat::{ExtendFormula, Solver};
+use varisat::{ExtendFormula, Lit, Solver};
 
+use crate::cardinality::{create_flip_indicators, encode_at_most_k};
 use crate::cnf::{CnfFormula, extract_cnf};
 use crate::error::{SatError, SatResult};
 
@@ -166,88 +169,130 @@ fn compute_flip_distance(
     Ok(max_distance + 1)
 }
 
-/// Check if we can reach target output by flipping exactly `k` inputs
+/// Check if we can reach target output by flipping at most `k` inputs
+///
+/// Uses SAT solver with cardinality constraints for efficient search.
+/// This removes the k≤3, n≤10 limitations of the brute-force approach.
 fn can_flip_to_target(
     graph: &Graph,
-    _cnf: &CnfFormula,
+    cnf: &CnfFormula,
     base_inputs: &HashMap<u16, bool>,
     output_id: u16,
     target_output: bool,
     k: u32,
 ) -> SatResult<bool> {
-    // For small k, enumerate all k-subsets
-    let input_ids: Vec<u16> = graph.inputs.clone();
-
-    if k == 1 {
-        for &input_id in &input_ids {
-            let mut flipped = base_inputs.clone();
-            if let Some(val) = flipped.get_mut(&input_id) {
-                *val = !*val;
-            }
-
-            // Check if this produces the target output
-            let result = torg_core::evaluate(graph, &flipped);
-            if let Ok(outputs) = result
-                && outputs.get(&output_id) == Some(&target_output)
-            {
-                return Ok(true);
-            }
-        }
-        return Ok(false);
-    }
-
-    // For larger k, use cardinality constraints with SAT solver
-    // (simplified: just try all combinations up to small k)
-    if k <= 3 && input_ids.len() <= 10 {
-        let n = input_ids.len();
-        for combo in combinations(n, k as usize) {
-            let mut flipped = base_inputs.clone();
-            for &idx in &combo {
-                let input_id = input_ids[idx];
-                if let Some(val) = flipped.get_mut(&input_id) {
-                    *val = !*val;
-                }
-            }
-
-            let result = torg_core::evaluate(graph, &flipped);
-            if let Ok(outputs) = result
-                && outputs.get(&output_id) == Some(&target_output)
-            {
-                return Ok(true);
-            }
-        }
-    }
-
-    Ok(false)
+    can_flip_to_target_sat(cnf, base_inputs, output_id, target_output, k, &graph.inputs)
+        .map(|opt| opt.is_some())
 }
 
-/// Generate all k-combinations of indices from 0..n
-fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
-    let mut result = Vec::new();
-    let mut combo = vec![0usize; k];
+/// SAT-based k-flip query using cardinality constraints
+///
+/// Returns the flipped input assignment if one exists, None otherwise.
+///
+/// # Algorithm
+///
+/// 1. Create fresh solver with base CNF
+/// 2. Create flip indicator variables for each input
+/// 3. Add cardinality constraint: at_most_k(flip_indicators, k)
+/// 4. For each input: constrain CNF input = base_value XOR flip_indicator
+/// 5. Assert output = target
+/// 6. Solve and extract final input assignment from CNF variables
+pub fn can_flip_to_target_sat(
+    cnf: &CnfFormula,
+    base_inputs: &HashMap<u16, bool>,
+    output_id: u16,
+    target_output: bool,
+    k: u32,
+    input_ids: &[u16],
+) -> SatResult<Option<HashMap<u16, bool>>> {
+    let mut solver = Solver::new();
 
-    fn generate(
-        start: usize,
-        n: usize,
-        k: usize,
-        pos: usize,
-        combo: &mut Vec<usize>,
-        result: &mut Vec<Vec<usize>>,
-    ) {
-        if pos == k {
-            result.push(combo.clone());
-            return;
-        }
-        for i in start..=(n - k + pos) {
-            combo[pos] = i;
-            generate(i + 1, n, k, pos + 1, combo, result);
+    // Add base CNF clauses
+    for clause in &cnf.clauses {
+        solver.add_clause(clause);
+    }
+
+    // Create flip indicator variables
+    let flip_indicators = create_flip_indicators(&mut solver, input_ids.len());
+
+    // Add cardinality constraint: at most k flips
+    encode_at_most_k(&mut solver, &flip_indicators, k as usize)?;
+
+    // Collect input literals for later extraction
+    let mut input_lits: Vec<(u16, Lit)> = Vec::with_capacity(input_ids.len());
+
+    for (i, &input_id) in input_ids.iter().enumerate() {
+        let base_value = *base_inputs.get(&input_id).unwrap_or(&false);
+
+        // Get the original input literal from CNF
+        let Some(&input_lit) = cnf.variable_map.get(&input_id) else {
+            return Err(SatError::InvalidGraph(format!(
+                "Input {} not found in CNF variable map",
+                input_id
+            )));
+        };
+        input_lits.push((input_id, input_lit));
+
+        // Encode: input_lit = base_value XOR flip_indicator
+        //
+        // If base_value = true:
+        //   flip=false -> input=true:  (¬flip → input)  = (flip ∨ input)
+        //   flip=true  -> input=false: (flip → ¬input)  = (¬flip ∨ ¬input)
+        //   Combined: input ↔ ¬flip
+        //
+        // If base_value = false:
+        //   flip=false -> input=false: (¬flip → ¬input) = (flip ∨ ¬input)
+        //   flip=true  -> input=true:  (flip → input)   = (¬flip ∨ input)
+        //   Combined: input ↔ flip
+        let flip = flip_indicators[i];
+        if base_value {
+            // input ↔ ¬flip: (input ∨ flip) ∧ (¬input ∨ ¬flip)
+            solver.add_clause(&[input_lit, flip]);
+            solver.add_clause(&[!input_lit, !flip]);
+        } else {
+            // input ↔ flip: (input ∨ ¬flip) ∧ (¬input ∨ flip)
+            solver.add_clause(&[input_lit, !flip]);
+            solver.add_clause(&[!input_lit, flip]);
         }
     }
 
-    if k <= n {
-        generate(0, n, k, 0, &mut combo, &mut result);
+    // Add constraint for desired output value
+    if let Some(&output_lit) = cnf.variable_map.get(&output_id) {
+        if target_output {
+            solver.add_clause(&[output_lit]);
+        } else {
+            solver.add_clause(&[!output_lit]);
+        }
+    } else {
+        return Err(SatError::InvalidGraph(format!(
+            "Output {} not found in CNF",
+            output_id
+        )));
     }
-    result
+
+    // Solve
+    match solver.solve() {
+        Ok(true) => {
+            let model = solver
+                .model()
+                .ok_or_else(|| SatError::Solver("No model available after SAT".into()))?;
+
+            // Extract input assignment from CNF input variables
+            let mut assignment = HashMap::new();
+            for (input_id, input_lit) in input_lits {
+                let var = input_lit.var();
+                let value = model
+                    .iter()
+                    .find(|l| l.var() == var)
+                    .map(|l| l.is_positive())
+                    .unwrap_or(false);
+                assignment.insert(input_id, value);
+            }
+            Ok(Some(assignment))
+        }
+        Ok(false) => Ok(None),
+        Err(e) => Err(SatError::Solver(e.to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -269,6 +314,37 @@ mod tests {
         builder.push(Token::NodeEnd).unwrap();
         builder.push(Token::OutputDecl).unwrap();
         builder.push(Token::Id(2)).unwrap();
+        builder.finish().unwrap()
+    }
+
+    fn create_many_input_graph() -> Graph {
+        // Create a graph with 15 inputs: output = OR(all inputs)
+        let mut builder = Builder::new();
+
+        for i in 0..15 {
+            builder.push(Token::InputDecl).unwrap();
+            builder.push(Token::Id(i)).unwrap();
+        }
+
+        // Chain of OR gates: n15 = 0 OR 1, n16 = n15 OR 2, ...
+        let mut prev = 0;
+        for i in 1..15 {
+            let node_id = 15 + i as u16;
+            builder.push(Token::NodeStart).unwrap();
+            builder.push(Token::Id(node_id)).unwrap();
+            builder.push(Token::Or).unwrap();
+            if i == 1 {
+                builder.push(Token::Id(0)).unwrap();
+            } else {
+                builder.push(Token::Id(prev)).unwrap();
+            }
+            builder.push(Token::Id(i as u16)).unwrap();
+            builder.push(Token::NodeEnd).unwrap();
+            prev = node_id;
+        }
+
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(prev)).unwrap();
         builder.finish().unwrap()
     }
 
@@ -315,10 +391,93 @@ mod tests {
     }
 
     #[test]
-    fn test_combinations() {
-        let combos = combinations(4, 2);
-        assert_eq!(combos.len(), 6); // C(4,2) = 6
-        assert!(combos.contains(&vec![0, 1]));
-        assert!(combos.contains(&vec![2, 3]));
+    fn test_sat_based_flip_single() {
+        let graph = create_or_graph();
+        let cnf = extract_cnf(&graph).unwrap();
+
+        // Start with all false (output = false)
+        let mut base_inputs = HashMap::new();
+        base_inputs.insert(0, false);
+        base_inputs.insert(1, false);
+
+        // Can we flip 1 input to get output = true?
+        let result =
+            can_flip_to_target_sat(&cnf, &base_inputs, 2, true, 1, &graph.inputs).unwrap();
+
+        assert!(result.is_some());
+        let flipped = result.unwrap();
+
+        // Exactly one should be true now
+        let a = *flipped.get(&0).unwrap_or(&false);
+        let b = *flipped.get(&1).unwrap_or(&false);
+        assert!(a ^ b, "Expected exactly one input flipped");
+    }
+
+    #[test]
+    fn test_sat_based_flip_impossible() {
+        let graph = create_or_graph();
+        let cnf = extract_cnf(&graph).unwrap();
+
+        // Start with all true (output = true for OR)
+        let mut base_inputs = HashMap::new();
+        base_inputs.insert(0, true);
+        base_inputs.insert(1, true);
+
+        // Can we flip 1 input to get output = false? No, need to flip both
+        let result =
+            can_flip_to_target_sat(&cnf, &base_inputs, 2, false, 1, &graph.inputs).unwrap();
+
+        assert!(result.is_none());
+
+        // But flipping 2 should work
+        let result =
+            can_flip_to_target_sat(&cnf, &base_inputs, 2, false, 2, &graph.inputs).unwrap();
+
+        assert!(result.is_some());
+        let flipped = result.unwrap();
+        let a = *flipped.get(&0).unwrap_or(&true);
+        let b = *flipped.get(&1).unwrap_or(&true);
+        assert!(!a && !b, "Both should be false after flip");
+    }
+
+    #[test]
+    fn test_sat_based_flip_large_graph() {
+        // Test with >10 inputs (previously would fail due to brute-force limits)
+        let graph = create_many_input_graph();
+        let cnf = extract_cnf(&graph).unwrap();
+
+        // Start with all false (output = false for big OR)
+        let mut base_inputs = HashMap::new();
+        for &input_id in &graph.inputs {
+            base_inputs.insert(input_id, false);
+        }
+
+        // Find the output node ID (last node)
+        let output_id = *graph.outputs.first().unwrap();
+
+        // Can we flip 1 input to get output = true?
+        let result =
+            can_flip_to_target_sat(&cnf, &base_inputs, output_id, true, 1, &graph.inputs).unwrap();
+
+        assert!(result.is_some(), "Should find a 1-flip solution for large OR");
+
+        // Verify only 1 input was flipped
+        let flipped = result.unwrap();
+        let flip_count = flipped.values().filter(|&&v| v).count();
+        assert_eq!(flip_count, 1, "Should flip exactly 1 input");
+    }
+
+    #[test]
+    fn test_epsilon_boundary_uses_sat() {
+        let graph = create_or_graph();
+        let probes = find_epsilon_boundary(&graph, 2, 2).unwrap();
+
+        // Should find boundary probes
+        assert!(!probes.is_empty());
+
+        // All probes should have distance <= epsilon
+        for probe in &probes {
+            assert!(probe.distance_to_flip <= 2);
+        }
     }
 }
