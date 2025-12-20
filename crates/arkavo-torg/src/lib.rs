@@ -34,9 +34,11 @@
 //! let result = graph.evaluate(&inputs);
 //! ```
 
+mod ministral;
 mod qwen3;
 mod sampler;
 
+pub use ministral::MinistralTokenMap;
 pub use qwen3::Qwen3TokenMap;
 pub use sampler::TorgLlamaSampler;
 

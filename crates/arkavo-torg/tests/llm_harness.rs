@@ -1,6 +1,7 @@
 //! Test harness for LLM-based TØR-G integration tests
 //!
 //! Provides model loading, prompt formatting, and constrained generation utilities.
+//! Supports multiple model families: Qwen3 and Ministral.
 
 #![cfg(not(target_env = "musl"))]
 #![allow(dead_code)] // Harness functions may not all be used in every test
@@ -11,11 +12,12 @@
 use std::path::PathBuf;
 
 use arkavo_llama_cpp::{
-    batch_free, batch_init_with_tokens, decode_batch, tokenize_with_model, LlamaContext,
-    LlamaModel, LlamaSampler,
+    batch_free, batch_init_with_tokens, decode_batch, detect_model_format, tokenize_with_model,
+    LlamaContext, LlamaModel, LlamaSampler, ModelFormat,
 };
-use arkavo_torg::{Qwen3TokenMap, TorgError, TorgLlamaSampler};
+use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler};
 use torg_core::Graph;
+use torg_mask::TokenMapping;
 
 const DEFAULT_MODEL_PATH: &str = ".cache/arkavo/models/qwen3-0.6b.gguf";
 
@@ -68,11 +70,58 @@ Examples:
 
 Output ONLY the tokens."#;
 
-/// Format a policy description using Qwen3 chat template
-pub fn format_prompt(policy: &str) -> String {
-    format!(
-        "<|im_start|>system\n{TORG_SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{policy}<|im_end|>\n<|im_start|>assistant\n",
-    )
+/// Format a policy description using the appropriate chat template for the model
+pub fn format_prompt(policy: &str, format: ModelFormat) -> String {
+    match format {
+        ModelFormat::Qwen3 => {
+            // ChatML format for Qwen models
+            format!(
+                "<|im_start|>system\n{TORG_SYSTEM_PROMPT}<|im_end|>\n\
+                 <|im_start|>user\n{policy}<|im_end|>\n\
+                 <|im_start|>assistant\n"
+            )
+        }
+        ModelFormat::MistralV3 => {
+            // Mistral V3 format for Ministral models
+            format!(
+                "[SYSTEM_PROMPT]{TORG_SYSTEM_PROMPT}[/SYSTEM_PROMPT]\
+                 [INST] {policy} [/INST]"
+            )
+        }
+        ModelFormat::Gemma3 => {
+            // Fallback for other models
+            format!(
+                "<start_of_turn>user\n{TORG_SYSTEM_PROMPT}\n\n{policy}<end_of_turn>\n\
+                 <start_of_turn>model\n"
+            )
+        }
+    }
+}
+
+/// Build a token mapping appropriate for the model format
+///
+/// # Safety
+///
+/// The `vocab` pointer must be valid and point to an initialized llama_vocab.
+pub unsafe fn build_token_map(
+    vocab: *const arkavo_llama_cpp::ffi::llama_vocab,
+    format: ModelFormat,
+) -> Result<(TokenMapping, i32), TorgError> {
+    match format {
+        ModelFormat::MistralV3 => {
+            // SAFETY: caller guarantees vocab is valid
+            let map = unsafe { MinistralTokenMap::from_vocab(vocab)? };
+            let vocab_size = map.vocab_size();
+            Ok((map.into_mapping(), vocab_size))
+        }
+        _ => {
+            // Default to Qwen3 mapping for other formats
+            // SAFETY: caller guarantees vocab is valid
+            let map = unsafe { Qwen3TokenMap::from_vocab(vocab)? };
+            let vocab_size = map.vocab_size();
+            Ok((map.into_mapping(), vocab_size))
+        }
+    }
 }
 
 /// Error type for generation failures
@@ -125,13 +174,20 @@ pub fn generate_with_constraints(
 ) -> Result<Graph, GenerationError> {
     let vocab = model.get_vocab();
 
-    // Build token mapping from vocabulary
-    let mapping = unsafe { Qwen3TokenMap::from_vocab(vocab)? };
-    let vocab_size = mapping.vocab_size();
-    let mut torg_sampler = TorgLlamaSampler::new(mapping.into_mapping(), vocab_size);
+    // Detect model format from path
+    let model_path = model_path();
+    let model_name = model_path.to_string_lossy();
+    let format = detect_model_format(&model_name);
+    eprintln!("Detected model format: {:?}", format);
 
-    // Format and tokenize prompt
-    let prompt = format_prompt(policy);
+    // Build token mapping appropriate for this model
+    let (mapping, vocab_size) =
+        unsafe { build_token_map(vocab, format).map_err(GenerationError::Torg)? };
+    let mut torg_sampler = TorgLlamaSampler::new(mapping, vocab_size);
+
+    // Format and tokenize prompt with correct chat template
+    let prompt = format_prompt(policy, format);
+    eprintln!("Formatted prompt:\n{}", &prompt[..prompt.len().min(200)]);
     let tokens = tokenize_with_model(vocab, prompt.as_bytes())
         .map_err(GenerationError::Tokenization)?;
 
