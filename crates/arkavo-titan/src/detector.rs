@@ -12,7 +12,7 @@ use arkavo_sbe::InvariantLayer;
 use torg_core::EvalError;
 
 use crate::accumulator::EmaAccumulator;
-use crate::evidence::{hash_inputs, AnomalyEvidence};
+use crate::evidence::{AnomalyEvidence, hash_inputs};
 
 /// O(1) or O(N) complexity surprise classification
 ///

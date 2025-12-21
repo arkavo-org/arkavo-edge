@@ -42,7 +42,7 @@ impl EmaAccumulator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            output_ema: [0.5; MAX_OUTPUTS], // Start with 50% baseline
+            output_ema: [0.5; MAX_OUTPUTS],  // Start with 50% baseline
             output_var: [0.25; MAX_OUTPUTS], // Maximum variance for binary
             sample_count: [0; MAX_OUTPUTS],
             z_threshold: DEFAULT_Z_THRESHOLD,
@@ -83,7 +83,9 @@ impl EmaAccumulator {
 
         // Update variance estimate using Welford's online algorithm (simplified)
         let diff = x - old_ema;
-        let new_var = self.alpha.mul_add(diff * diff, (1.0 - self.alpha) * self.output_var[idx]);
+        let new_var = self
+            .alpha
+            .mul_add(diff * diff, (1.0 - self.alpha) * self.output_var[idx]);
         self.output_var[idx] = new_var;
 
         // Increment sample count (saturating)

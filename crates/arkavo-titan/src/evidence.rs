@@ -2,8 +2,8 @@
 //!
 //! Evidence structs capture detected anomalies with minimal allocation overhead.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
@@ -108,7 +108,13 @@ impl AnomalyEvidence {
 
     /// Create evidence for statistical drift
     #[inline]
-    pub fn drift(output_id: u16, baseline: f64, current: f64, z_score: f64, input_hash: u64) -> Self {
+    pub fn drift(
+        output_id: u16,
+        baseline: f64,
+        current: f64,
+        z_score: f64,
+        input_hash: u64,
+    ) -> Self {
         Self {
             level: AnomalyLevel::StatisticalDrift,
             timestamp: Instant::now(),

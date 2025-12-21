@@ -105,7 +105,13 @@ impl TitanMonitor {
             CompositeDetector::standard(invariants)
         };
 
-        (Self { evidence_tx: tx, detector }, rx)
+        (
+            Self {
+                evidence_tx: tx,
+                detector,
+            },
+            rx,
+        )
     }
 
     /// Create with custom detector chain
@@ -115,7 +121,13 @@ impl TitanMonitor {
         channel_size: usize,
     ) -> (Self, mpsc::Receiver<AnomalyEvidence>) {
         let (tx, rx) = mpsc::channel(channel_size);
-        (Self { evidence_tx: tx, detector }, rx)
+        (
+            Self {
+                evidence_tx: tx,
+                detector,
+            },
+            rx,
+        )
     }
 
     /// Evaluate a graph with automatic anomaly detection
@@ -166,7 +178,10 @@ pub fn evaluate_with_inspection(
     graph: &Graph,
     inputs: &HashMap<u16, bool>,
     invariants: &InvariantLayer,
-) -> (Result<HashMap<u16, bool>, EvalError>, Option<AnomalyEvidence>) {
+) -> (
+    Result<HashMap<u16, bool>, EvalError>,
+    Option<AnomalyEvidence>,
+) {
     let result = torg_core::evaluate(graph, inputs);
 
     let error = result.as_ref().err();

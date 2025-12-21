@@ -13,6 +13,7 @@ arkavo-gossip = { path = "../arkavo-gossip" }
 arkavo-sat = { path = "../arkavo-sat" }
 arkavo-sbe = { path = "../arkavo-sbe" }
 arkavo-crypto = { path = "../arkavo-crypto" }
+arkavo-titan = { path = "../arkavo-titan" }
 torg-core = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 chrono = { workspace = true }
