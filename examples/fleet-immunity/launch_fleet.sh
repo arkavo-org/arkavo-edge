@@ -15,15 +15,15 @@ echo ""
 
 cd "$(dirname "$0")"
 
-# Check if arkavo is available
-if ! command -v arkavo &> /dev/null; then
-    echo "[ERROR] arkavo CLI not found. Please build with: cargo build"
-    exit 1
+# Build environment simulator if needed
+if [ ! -f env-simulator/target/debug/fleet-env-simulator ]; then
+    echo "[BUILD ] Building environment simulator..."
+    (cd env-simulator && cargo build -q)
 fi
 
 # Start environment simulator
 echo "[ENV   ] Starting warehouse environment on port 8360..."
-arkavo environment --config environment/warehouse.yaml &
+./env-simulator/target/debug/fleet-env-simulator &
 ENV_PID=$!
 echo $ENV_PID > .env.pid
 sleep 2

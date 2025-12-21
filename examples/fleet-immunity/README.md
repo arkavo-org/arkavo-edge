@@ -63,6 +63,9 @@ fleet-immunity/
 ├── stop_fleet.sh                # Stop all rovers
 ├── inject_hazard.sh             # Inject black ice hazard
 ├── monitor_fleet.sh             # Watch fleet logs
+├── env-simulator/               # Warehouse environment simulator (Rust)
+│   ├── Cargo.toml
+│   └── src/main.rs
 ├── environment/
 │   ├── warehouse.yaml           # Sector definitions
 │   └── routes.yaml              # Delivery routes

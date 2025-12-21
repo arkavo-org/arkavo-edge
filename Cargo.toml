@@ -102,7 +102,7 @@ default-members = [
     "crates/arkavo-registration",
     ".cargo/xtask",
 ]
-exclude = ["crates/arkavo-protocol/fuzz"]
+exclude = ["crates/arkavo-protocol/fuzz", "examples"]
 resolver = "2"
 
 [workspace.package]
