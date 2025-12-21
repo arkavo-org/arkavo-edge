@@ -34,3 +34,4 @@ llm = ["arkavo-torg", "arkavo-llama-cpp"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+anyhow = { workspace = true }
