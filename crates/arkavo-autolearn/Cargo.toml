@@ -34,5 +34,10 @@ default = []
 llm = ["arkavo-torg", "arkavo-llama-cpp"]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 anyhow = { workspace = true }
+hex = { workspace = true }
+
+[[example]]
+name = "multi_agent_healing"
+path = "examples/multi_agent_healing.rs"
