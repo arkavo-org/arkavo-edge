@@ -37,6 +37,47 @@ pub trait LlmSynthesizer: Send + Sync {
         &self,
         prompt: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Graph, SynthesisError>> + Send + '_>>;
+
+    /// Compile a policy from structured text rules (zero-shot)
+    ///
+    /// This is the primary interface for the "Cognitive Switchboard" pattern,
+    /// where natural language policies are compiled into sub-microsecond
+    /// evaluable TØR-G graphs.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let policy = r#"
+    ///     Inputs: [is_sensitive, battery_low, peer_available]
+    ///     Outputs: [route_local, route_delegate, route_cloud]
+    ///     Rules:
+    ///     1. If sensitive, NEVER route to cloud
+    ///     2. If battery_low AND peer_available, delegate
+    ///     3. Default to local
+    /// "#;
+    /// let graph = synthesizer.compile_policy(policy).await?;
+    /// ```
+    fn compile_policy(
+        &self,
+        text_rules: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Graph, SynthesisError>> + Send + '_>> {
+        let prompt = format_policy_prompt(text_rules);
+        self.synthesize(&prompt)
+    }
+}
+
+/// Format structured policy rules into an optimal TØR-G synthesis prompt
+///
+/// Converts human-readable policy specifications into the prompt format
+/// expected by the constrained decoding system.
+pub fn format_policy_prompt(text_rules: &str) -> String {
+    format!(
+        "Compile this policy into a boolean TØR-G graph.\n\
+         Use OR, NOR, XOR gates. Map inputs to outputs via intermediate nodes.\n\n\
+         Policy specification:\n{}\n\n\
+         Generate the graph:",
+        text_rules.trim()
+    )
 }
 
 /// Context for candidate generation

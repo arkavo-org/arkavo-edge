@@ -71,8 +71,8 @@ pub use ensemble::{
 };
 pub use error::{EnsembleError, EnsembleResult};
 pub use generator::{
-    LlmSynthesizer, SynthesisContext, SynthesisError, generate_anomaly_remediation,
-    generate_boundary_mutation, generate_llm_candidate,
+    LlmSynthesizer, SynthesisContext, SynthesisError, format_policy_prompt,
+    generate_anomaly_remediation, generate_boundary_mutation, generate_llm_candidate,
 };
 pub use promotion::PromotionCandidate;
 pub use regret::{

@@ -1,7 +1,7 @@
 //! Pain signal aggregation
 //!
 //! Aggregates anomaly signals from multiple sources (runtime, boundary probing,
-//! SAT analysis) and prioritizes them for synthesis.
+//! SAT analysis, Titan Monitor) and prioritizes them for synthesis.
 
 use std::collections::VecDeque;
 
@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use arkavo_ensemble::SynthesisContext;
 use arkavo_sat::{AnomalyPrioritizer, BoundaryProbe, PolicyHole, ScoredNode};
+use arkavo_titan::{AnomalyDetails, AnomalyEvidence, AnomalyLevel};
 use torg_core::Graph;
 
 /// Source of a pain signal
@@ -33,6 +34,15 @@ pub enum PainSource {
     /// External signal from control plane
     External {
         /// Description of the external signal
+        description: String,
+    },
+    /// Titan Monitor detected anomaly
+    TitanAnomaly {
+        /// Anomaly level (HardFailure, BoundaryViolation, StatisticalDrift)
+        level: AnomalyLevel,
+        /// Hash of input that triggered the anomaly
+        input_hash: u64,
+        /// Description of the anomaly
         description: String,
     },
 }
@@ -66,6 +76,7 @@ impl PainSource {
                 )
             }
             Self::External { description } => format!("External: {description}"),
+            Self::TitanAnomaly { description, .. } => format!("Titan: {description}"),
         }
     }
 
@@ -76,7 +87,37 @@ impl PainSource {
             Self::RuntimeAnomaly { output_id, .. } => Some(*output_id),
             Self::BoundaryProbe(probe) => Some(probe.output_id),
             Self::PolicyHole(hole) => Some(hole.output_id),
-            Self::External { .. } => None,
+            Self::External { .. } | Self::TitanAnomaly { .. } => None,
+        }
+    }
+}
+
+impl From<AnomalyEvidence> for PainSource {
+    fn from(evidence: AnomalyEvidence) -> Self {
+        let description = match &evidence.details {
+            AnomalyDetails::EvalError { error } => format!("Evaluation error: {error}"),
+            AnomalyDetails::BoundaryViolation {
+                contract_id,
+                description,
+            } => format!(
+                "Boundary violation (contract {}): {}",
+                contract_id, description
+            ),
+            AnomalyDetails::Drift {
+                output_id,
+                baseline,
+                current,
+                z_score,
+            } => format!(
+                "Drift at output {}: baseline={:.3}, current={:.1}, z={:.2}",
+                output_id, baseline, current, z_score
+            ),
+        };
+
+        Self::TitanAnomaly {
+            level: evidence.level,
+            input_hash: evidence.input_hash,
+            description,
         }
     }
 }
@@ -262,6 +303,27 @@ impl PainAggregator {
         let signal = PainSignal::from_runtime_anomaly(
             output_id, input_hash, expected, actual, graph, model_id,
         );
+        self.push(signal);
+    }
+
+    /// Add signal from Titan Monitor evidence
+    ///
+    /// Converts `AnomalyEvidence` from the Titan Monitor into a `PainSignal`
+    /// and adds it to the queue for processing by the AutoLearner.
+    pub fn from_titan_evidence(
+        &mut self,
+        evidence: AnomalyEvidence,
+        graph: &Graph,
+        model_id: String,
+    ) {
+        let severity = evidence.level.severity();
+        let source = PainSource::from(evidence);
+
+        let context = SynthesisContext::new(model_id, source.description())
+            .with_inputs(graph.inputs.clone())
+            .with_outputs(graph.outputs.clone());
+
+        let signal = PainSignal::new(source, severity, context);
         self.push(signal);
     }
 
