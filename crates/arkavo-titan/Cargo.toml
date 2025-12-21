@@ -1,0 +1,17 @@
+[package]
+name = "arkavo-titan"
+version.workspace = true
+edition.workspace = true
+description = "Low-latency runtime anomaly detection for TØRG policy graphs"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+torg-core = { workspace = true }
+arkavo-sbe = { path = "../arkavo-sbe" }
+tokio = { workspace = true, features = ["sync"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
