@@ -57,6 +57,7 @@ members = [
     "crates/arkavo-autolearn",
     "crates/arkavo-titan",
     "crates/arkavo-hrm",
+    "crates/arkavo-critic",
     ".cargo/xtask",
 ]
 default-members = [
@@ -102,6 +103,7 @@ default-members = [
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
     "crates/arkavo-hrm",
+    "crates/arkavo-critic",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]

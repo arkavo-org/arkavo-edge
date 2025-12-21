@@ -1,0 +1,284 @@
+//! Critic verification pipeline
+//!
+//! Orchestrates verification checks in priority order.
+
+use crate::checks::{CheckResult, VerificationCheck, VerificationInput};
+use crate::config::CriticConfig;
+use crate::evidence::{CheckSeverity, VerificationEvidence};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Result of running the full verification pipeline
+#[derive(Debug)]
+pub struct PipelineResult {
+    /// Overall pass/fail status
+    pub passed: bool,
+    /// Evidence from all checks
+    pub evidence: Vec<VerificationEvidence>,
+    /// Total latency in milliseconds
+    pub total_latency_ms: u64,
+    /// Number of checks run
+    pub checks_run: usize,
+    /// Number of checks skipped
+    pub checks_skipped: usize,
+    /// Whether human approval is needed
+    pub needs_approval: bool,
+}
+
+impl PipelineResult {
+    /// Get all failed checks
+    pub fn failures(&self) -> Vec<&VerificationEvidence> {
+        self.evidence
+            .iter()
+            .filter(|e| e.status.is_failed())
+            .collect()
+    }
+
+    /// Get the highest severity issue
+    pub fn max_severity(&self) -> Option<CheckSeverity> {
+        self.evidence.iter().map(|e| e.severity).max()
+    }
+}
+
+/// The Critic verification pipeline
+pub struct CriticPipeline {
+    config: CriticConfig,
+    checks: Vec<Arc<dyn VerificationCheck>>,
+}
+
+impl CriticPipeline {
+    /// Create a new pipeline with default config
+    pub fn new() -> Self {
+        Self {
+            config: CriticConfig::default(),
+            checks: Vec::new(),
+        }
+    }
+
+    /// Create with custom config
+    pub fn with_config(config: CriticConfig) -> Self {
+        Self {
+            config,
+            checks: Vec::new(),
+        }
+    }
+
+    /// Add a check to the pipeline
+    pub fn add_check<C: VerificationCheck + 'static>(mut self, check: C) -> Self {
+        self.checks.push(Arc::new(check));
+        self
+    }
+
+    /// Add a shared check to the pipeline
+    pub fn add_shared_check(mut self, check: Arc<dyn VerificationCheck>) -> Self {
+        self.checks.push(check);
+        self
+    }
+
+    /// Run the verification pipeline
+    pub async fn verify(&self, input: &VerificationInput) -> PipelineResult {
+        let start = Instant::now();
+        let mut evidence: Vec<VerificationEvidence> = Vec::new();
+        let mut checks_run = 0;
+        let mut checks_skipped = 0;
+        let mut needs_approval = false;
+        let mut had_failure = false;
+
+        // Sort checks by priority (lower = runs first)
+        let mut sorted_checks: Vec<_> = self.checks.iter().collect();
+        sorted_checks.sort_by_key(|c| c.priority());
+
+        for check in sorted_checks {
+            // Check timeout
+            if start.elapsed() > self.config.total_timeout() {
+                tracing::warn!(
+                    check_id = check.id(),
+                    "Pipeline timeout reached, skipping remaining checks"
+                );
+                break;
+            }
+
+            // Check applicability
+            if !check.is_applicable(input) {
+                checks_skipped += 1;
+                continue;
+            }
+
+            // Run the check
+            let result = check.verify(input).await;
+            checks_run += 1;
+
+            match result {
+                CheckResult::Pass => {
+                    // Create passing evidence for tracking
+                    let latency = start.elapsed().as_millis() as u64;
+                    evidence.push(VerificationEvidence::passed(
+                        check.id(),
+                        "Check passed",
+                        latency,
+                    ));
+                }
+                CheckResult::Fail(e) => {
+                    let should_fail = e.severity.should_fail(self.config.min_fail_severity);
+                    if should_fail {
+                        had_failure = true;
+                    }
+                    evidence.push(e);
+
+                    if self.config.fail_fast && had_failure {
+                        tracing::debug!(
+                            check_id = check.id(),
+                            "Fail-fast triggered, stopping pipeline"
+                        );
+                        break;
+                    }
+                }
+                CheckResult::Warn(e) => {
+                    evidence.push(e);
+                }
+                CheckResult::Skip(reason) => {
+                    checks_skipped += 1;
+                    tracing::debug!(
+                        check_id = check.id(),
+                        reason = %reason,
+                        "Check skipped"
+                    );
+                }
+                CheckResult::NeedsApproval(e) => {
+                    needs_approval = true;
+                    evidence.push(e);
+                }
+            }
+        }
+
+        let total_latency = start.elapsed().as_millis() as u64;
+
+        tracing::info!(
+            passed = !had_failure,
+            checks_run = checks_run,
+            checks_skipped = checks_skipped,
+            needs_approval = needs_approval,
+            latency_ms = total_latency,
+            "Pipeline complete"
+        );
+
+        PipelineResult {
+            passed: !had_failure && !needs_approval,
+            evidence,
+            total_latency_ms: total_latency,
+            checks_run,
+            checks_skipped,
+            needs_approval,
+        }
+    }
+
+    /// Get the number of registered checks
+    pub fn check_count(&self) -> usize {
+        self.checks.len()
+    }
+}
+
+impl Default for CriticPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checks::{LintCheck, PolicyCheck, SchemaCheck};
+    use arkavo_llm::ProviderResponse;
+
+    fn response(content: &str) -> ProviderResponse {
+        ProviderResponse {
+            content: content.to_string(),
+            reasoning_content: None,
+            tool_calls: vec![],
+            finish_reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_pipeline() {
+        let pipeline = CriticPipeline::new();
+        let input = VerificationInput::new("Test".to_string(), response("Test response"), vec![]);
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(result.passed);
+        assert_eq!(result.checks_run, 0);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_all_pass() {
+        let pipeline = CriticPipeline::new()
+            .add_check(SchemaCheck::new())
+            .add_check(LintCheck::new());
+
+        let input = VerificationInput::new(
+            "Test".to_string(),
+            response("This is a valid and complete response."),
+            vec![],
+        );
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(result.passed);
+        // SchemaCheck skips (no tool calls), LintCheck runs
+        assert!(result.checks_run >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_fail_fast() {
+        let config = CriticConfig {
+            fail_fast: true,
+            ..Default::default()
+        };
+
+        let pipeline = CriticPipeline::with_config(config)
+            .add_check(PolicyCheck::with_security_defaults())
+            .add_check(LintCheck::new());
+
+        let input = VerificationInput::new(
+            "Test".to_string(),
+            response("The api_key is sk-secret"),
+            vec![],
+        );
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(!result.passed);
+        // Should stop after policy check fails
+        assert_eq!(result.checks_run, 1);
+        assert!(!result.failures().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_priority_ordering() {
+        let pipeline = CriticPipeline::new()
+            .add_check(LintCheck::new().with_priority(20))
+            .add_check(SchemaCheck::with_priority(10))
+            .add_check(PolicyCheck::new().with_priority(15));
+
+        // Schema (10) should run before Policy (15) which runs before Lint (20)
+        assert_eq!(pipeline.check_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_pipeline_result_methods() {
+        let pipeline = CriticPipeline::new().add_check(PolicyCheck::with_security_defaults());
+
+        let input = VerificationInput::new(
+            "Test".to_string(),
+            response("The api_key is exposed"),
+            vec![],
+        );
+
+        let result = pipeline.verify(&input).await;
+
+        assert!(!result.passed);
+        assert!(!result.failures().is_empty());
+        assert_eq!(result.max_severity(), Some(CheckSeverity::Critical));
+    }
+}
