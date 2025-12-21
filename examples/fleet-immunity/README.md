@@ -1,54 +1,44 @@
 # Fleet Immunity: Black Ice Scenario
 
-This example demonstrates Arkavo Edge's self-healing artificial immune system using autonomous delivery rovers that learn from crashes and share safety lessons across the fleet in real-time.
+This example demonstrates a self-healing artificial immune system using autonomous delivery rovers that learn from crashes and share safety lessons across the fleet in real-time.
 
 ## The Story
 
-Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alpha hits black ice in Sector 4, crashes, learns "slow down in Sector 4", and broadcasts this lesson via A2A. Beta, approaching Sector 4, receives the patch just in time and slows down instead of crashing.
+Three autonomous delivery rovers (Alpha, Beta, Gamma) navigate a warehouse. Alpha hits black ice in Sector 4, crashes, learns "slow down in Sector 4", and broadcasts this lesson via HTTP. Beta, approaching Sector 4, receives the lesson and slows down instead of crashing.
 
 ## Why This Matters
 
 1. **Visceral Value**: "My car learned from the car ahead and saved my life"
-2. **Edge Justification**: Cloud latency would cause Beta to crash before receiving the lesson - it *must* be local mesh gossip
+2. **Edge Justification**: Cloud latency would cause Beta to crash before receiving the lesson
 3. **Visual Impact**: Speed indicators, CRASH vs SLOWING DOWN messaging
 
 ## Quick Start
 
-### 1. Build Arkavo
-
-```bash
-cd ../..
-cargo build
-```
-
-### 2. Launch the Fleet
+### 1. Launch the Fleet
 
 ```bash
 ./launch_fleet.sh
 ```
 
-### 3. Monitor the Fleet
+This automatically builds the simulators if needed.
 
-```bash
-./monitor_fleet.sh
-```
-
-### 4. Inject the Hazard
+### 2. Inject the Hazard
 
 ```bash
 ./inject_hazard.sh
 ```
 
-### 5. Watch the Magic
+### 3. Watch the Magic
 
-- Alpha enters Sector 4 at high speed
-- Alpha crashes (traction loss while driving fast)
-- Alpha synthesizes patch: "IF Sector_4 THEN Drive_Slow"
-- Alpha broadcasts to fleet via A2A
+The rovers will:
+- Navigate through sectors at FAST speed
+- Alpha enters Sector 4, hits black ice, CRASHES
+- Alpha synthesizes lesson: `"IF Sector_4 THEN Drive_Slow"`
+- Alpha broadcasts to Beta and Gamma
 - Beta/Gamma verify and vote APPROVE
-- Beta enters Sector 4 and SLOWS DOWN - no crash!
+- Beta enters Sector 4 at SLOW speed - CRASH AVOIDED!
 
-### 6. Stop the Fleet
+### 4. Stop the Fleet
 
 ```bash
 ./stop_fleet.sh
@@ -66,6 +56,9 @@ fleet-immunity/
 ├── env-simulator/               # Warehouse environment simulator (Rust)
 │   ├── Cargo.toml
 │   └── src/main.rs
+├── rover-simulator/             # Rover behavior simulator (Rust)
+│   ├── Cargo.toml
+│   └── src/main.rs
 ├── environment/
 │   ├── warehouse.yaml           # Sector definitions
 │   └── routes.yaml              # Delivery routes
@@ -75,19 +68,16 @@ fleet-immunity/
 ├── rover-beta/
 │   ├── AGENTS.md                # Beta configuration
 │   └── logs/
-├── rover-gamma/
-│   ├── AGENTS.md                # Gamma configuration
-│   └── logs/
-└── scenarios/
-    ├── black-ice.yaml           # Black ice injection
-    └── normal-operation.yaml    # Baseline test
+└── rover-gamma/
+    ├── AGENTS.md                # Gamma configuration
+    └── logs/
 ```
 
 ## How It Works
 
 ### The Rovers
 
-Each rover is an Arkavo Edge agent configured via `AGENTS.md`:
+Each rover runs as a `rover-simulator` process with a specific route:
 
 - **Rover Alpha**: Route 1→2→4→3 (hits Sector 4 first)
 - **Rover Beta**: Route 2→3→4→1 (approaches Sector 4 second)
@@ -95,7 +85,7 @@ Each rover is an Arkavo Edge agent configured via `AGENTS.md`:
 
 ### The Safety Invariant
 
-All rovers share the same invariant (SBE):
+All rovers enforce:
 ```
 NOT(traction_loss AND drive_fast)
 ```
@@ -103,54 +93,36 @@ Translation: "It is forbidden to drive fast while sliding."
 
 ### The Healing Cycle
 
-1. **Pain Detection** (Titan Monitor)
-   - Alpha enters Sector 4 at high speed
-   - Environment injects traction loss
-   - Titan detects invariant violation: driving fast while sliding
+1. **Pain Detection**
+   - Alpha enters Sector 4 at FAST speed
+   - Environment returns hazard (black_ice, traction: 0.1)
+   - Alpha detects: driving fast while sliding = CRASH
 
-2. **Synthesis** (Ministral-3B)
-   - Alpha's local LLM generates a patch
-   - Patch: "IF Sector_4 THEN Drive_Slow"
-   - Verified against 500 test inputs
+2. **Synthesis**
+   - Alpha generates a safety lesson
+   - Lesson: `"IF Sector_4 THEN Drive_Slow"`
 
-3. **Propagation** (A2A + Gossip)
-   - Alpha broadcasts patch to fleet
-   - Beta and Gamma receive via A2A protocol
+3. **Propagation**
+   - Alpha broadcasts lesson to fleet via HTTP POST
+   - Beta and Gamma receive at `/lesson` endpoint
 
-4. **Zero-Trust Verification**
-   - Beta and Gamma verify patch independently
-   - Each agent runs its own SAT verification
-   - They don't trust Alpha's LLM
+4. **Verification**
+   - Beta and Gamma verify the lesson independently
+   - Each rover votes APPROVE
 
-5. **Quorum Consensus**
-   - 2/3 majority required for adoption
-   - All 3 rovers vote APPROVE
-   - Patch is applied fleet-wide
+5. **Policy Application**
+   - Rovers add Sector 4 to their "slow down" policy set
 
 6. **Immunity**
    - Beta approaches Sector 4
-   - Policy check triggers: Sector_4 detected
-   - Beta slows down BEFORE entering
-   - No crash!
+   - Policy check: Sector 4 is in slow-down set
+   - Beta enters at SLOW speed
+   - Traction loss detected but no crash!
 
 ## Expected Output
 
 ```
-━━━━━━ PHASE 1: FLEET INITIALIZATION ━━━━━━
-
-[ALPHA ] Rover initialized - Delivery Route A
-[ALPHA ] Registering on mesh: rover-alpha._fleet._tcp.local.
-[BETA  ] Rover initialized - Delivery Route B
-[GAMMA ] Rover initialized - Delivery Route C
-[FLEET ] All rovers connected via A2A (3/3)
-
-━━━━━━ PHASE 2: NORMAL OPERATION ━━━━━━
-
-[ALPHA ] Sector 1 >>> FAST >>> [OK]
-[BETA  ] Sector 2 >>> FAST >>> [OK]
-[GAMMA ] Sector 3 >>> FAST >>> [OK]
-
-━━━━━━ PHASE 3: THE CRASH ━━━━━━
+━━━━━━ THE CRASH ━━━━━━
 
 [ALPHA ] Entering Sector 4...
 [ALPHA ] Speed: >>> FAST >>>
@@ -160,17 +132,19 @@ Translation: "It is forbidden to drive fast while sliding."
 [ALPHA ] ███           >>> CRASH <<<          ███
 [ALPHA ] ████████████████████████████████████████
 
-[ALPHA ] [PAIN] Titan: Driving fast while sliding!
+[ALPHA ] [PAIN] Driving fast while sliding! (black_ice)
 
-━━━━━━ PHASE 4: LEARNING ━━━━━━
+━━━━━━ LEARNING ━━━━━━
 
 [ALPHA ] Synthesizing safety lesson...
 [ALPHA ] [OK] Lesson: "IF Sector_4 THEN Drive_Slow"
-[ALPHA ] Broadcasting to fleet via A2A...
+[ALPHA ] Broadcasting to fleet...
 
-━━━━━━ PHASE 5: FLEET PROPAGATION ━━━━━━
+━━━━━━ PROPAGATION ━━━━━━
 
 [BETA  ] Received lesson from ALPHA via A2A
+[BETA  ]   Rule: "IF Sector_4 THEN Drive_Slow"
+[BETA  ]   Reason: black_ice in Cold Storage (traction: 0.1)
 [BETA  ] Verifying independently...
 [BETA  ] Voting: APPROVE
 
@@ -178,31 +152,37 @@ Translation: "It is forbidden to drive fast while sliding."
 [GAMMA ] Verifying independently...
 [GAMMA ] Voting: APPROVE
 
-[FLEET ] Quorum reached: 3/3 approved
+━━━━━━ IMMUNITY ━━━━━━
 
-━━━━━━ PHASE 6: IMMUNITY ━━━━━━
-
-[BETA  ] Approaching Sector 4...
-[BETA  ] Policy check: Sector_4 detected
+[BETA  ] Entering Sector 4...
+[BETA  ] Speed: >>> SLOW >>>
+[BETA  ] TRACTION LOSS DETECTED!
 
 [BETA  ] ════════════════════════════════════════
 [BETA  ] ═══      >>> SLOWING DOWN <<<       ═══
 [BETA  ] ════════════════════════════════════════
 
-[BETA  ] [OK] CRASH AVOIDED - Learned from Alpha!
-
-━━━━━━ FLEET IMMUNITY ACHIEVED ━━━━━━
+[BETA  ] [OK] CRASH AVOIDED - Learned from fleet!
 ```
 
-## Key Talking Points
+## Architecture
 
-| Component | Description |
-|-----------|-------------|
-| **Titan Monitor** | Nervous system with 34ns overhead. Detects invariant violations. |
-| **SBE** | Symbolic Boundary Evolution. Hierarchical policy layers. |
-| **Ministral-3B** | Local edge LLM for patch synthesis. No cloud latency. |
-| **A2A Protocol** | Agent-to-agent mesh communication. |
-| **Gossip Protocol** | Quorum consensus (2/3 majority) for patch adoption. |
+| Component | Port | Description |
+|-----------|------|-------------|
+| **env-simulator** | 8360 | Warehouse environment with sectors and hazards |
+| **rover-alpha** | 8351 | First rover, route 1→2→4→3 |
+| **rover-beta** | 8352 | Second rover, route 2→3→4→1 |
+| **rover-gamma** | 8353 | Third rover, route 3→1→2→4 |
+
+### API Endpoints
+
+**Environment Simulator (port 8360)**
+- `GET /status` - Get all sectors and hazards
+- `GET /sector/:id` - Get specific sector status
+- `POST /inject` - Inject a hazard into a sector
+
+**Rover Simulator (ports 8351-8353)**
+- `POST /lesson` - Receive a safety lesson from another rover
 
 ## Video Recording Tips
 
@@ -212,10 +192,6 @@ Translation: "It is forbidden to drive fast while sliding."
 4. **Hazard**: `./inject_hazard.sh` - black ice appears
 5. **Crash**: Alpha's dramatic CRASH box
 6. **Learning**: Alpha synthesizes lesson
-7. **Propagation**: A2A messages between rovers
+7. **Propagation**: Messages between rovers
 8. **Salvation**: Beta's SLOWING DOWN box
 9. **Payoff**: "The fleet learned. No human intervention."
-
-## License
-
-This example is part of the Arkavo project and follows the same license terms.
