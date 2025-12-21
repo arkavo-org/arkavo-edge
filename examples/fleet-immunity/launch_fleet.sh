@@ -14,22 +14,22 @@ echo "  ╚═══════════════════════
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ARKAVO="$REPO_ROOT/target/debug/arkavo"
 
 cd "$SCRIPT_DIR"
-
-# Build arkavo if needed
-if [ ! -f "$ARKAVO" ]; then
-    echo "[BUILD ] Building arkavo CLI..."
-    (cd "$REPO_ROOT" && cargo build -p arkavo -q)
-fi
 
 # Build environment simulator if needed
 if [ ! -f env-simulator/target/debug/fleet-env-simulator ]; then
     echo "[BUILD ] Building environment simulator..."
     (cd env-simulator && cargo build -q)
 fi
+
+# Build rover simulator if needed
+if [ ! -f rover-simulator/target/debug/rover-simulator ]; then
+    echo "[BUILD ] Building rover simulator..."
+    (cd rover-simulator && cargo build -q)
+fi
+
+ROVER_SIM="$SCRIPT_DIR/rover-simulator/target/debug/rover-simulator"
 
 # Start environment simulator
 echo "[ENV   ] Starting warehouse environment on port 8360..."
@@ -38,24 +38,26 @@ ENV_PID=$!
 echo $ENV_PID > .env.pid
 sleep 2
 
-# Start rovers
+# Define peer URLs for each rover
+ALPHA_URL="http://localhost:8351"
+BETA_URL="http://localhost:8352"
+GAMMA_URL="http://localhost:8353"
+
+# Start rovers with their routes
 echo ""
-echo "[ALPHA ] Starting Rover Alpha on port 8351..."
-(cd "$SCRIPT_DIR/rover-alpha" && "$ARKAVO" agent --config AGENTS.md) &
+"$ROVER_SIM" --name alpha --port 8351 --route "1,2,4,3" --peers "$BETA_URL,$GAMMA_URL" &
 ALPHA_PID=$!
 echo $ALPHA_PID > .alpha.pid
 
 sleep 1
 
-echo "[BETA  ] Starting Rover Beta on port 8352..."
-(cd "$SCRIPT_DIR/rover-beta" && "$ARKAVO" agent --config AGENTS.md) &
+"$ROVER_SIM" --name beta --port 8352 --route "2,3,4,1" --peers "$ALPHA_URL,$GAMMA_URL" &
 BETA_PID=$!
 echo $BETA_PID > .beta.pid
 
 sleep 1
 
-echo "[GAMMA ] Starting Rover Gamma on port 8353..."
-(cd "$SCRIPT_DIR/rover-gamma" && "$ARKAVO" agent --config AGENTS.md) &
+"$ROVER_SIM" --name gamma --port 8353 --route "3,1,2,4" --peers "$ALPHA_URL,$BETA_URL" &
 GAMMA_PID=$!
 echo $GAMMA_PID > .gamma.pid
 

@@ -65,7 +65,7 @@ async fn main() {
     let app = Router::new()
         .route("/status", get(status))
         .route("/inject", post(inject))
-        .route("/sector/{id}", get(get_sector))
+        .route("/sector/:id", get(get_sector))
         .with_state(state);
 
     println!("[ENV] Warehouse environment simulator started on port 8360");
