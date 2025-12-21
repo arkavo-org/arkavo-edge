@@ -3778,6 +3778,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "golden-dataset"
+version = "0.1.0"
+dependencies = [
+ "arkavo-critic",
+ "arkavo-hrm",
+ "arkavo-llm",
+ "arkavo-mcp-tools",
+ "chrono",
+ "rand 0.8.5",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "governor"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

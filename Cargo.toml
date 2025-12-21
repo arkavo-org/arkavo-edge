@@ -58,6 +58,7 @@ members = [
     "crates/arkavo-titan",
     "crates/arkavo-hrm",
     "crates/arkavo-critic",
+    "tests/golden_dataset",
     ".cargo/xtask",
 ]
 default-members = [
