@@ -5,11 +5,11 @@ edition.workspace = true
 description = "Auto-learning loop for self-healing agents"
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [dependencies]
 arkavo-ensemble = { path = "../arkavo-ensemble" }
 arkavo-gossip = { path = "../arkavo-gossip" }
-arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-sat = { path = "../arkavo-sat" }
 arkavo-sbe = { path = "../arkavo-sbe" }
 arkavo-crypto = { path = "../arkavo-crypto" }

@@ -305,7 +305,6 @@ dependencies = [
  "arkavo-ensemble",
  "arkavo-gossip",
  "arkavo-llama-cpp",
- "arkavo-protocol",
  "arkavo-sat",
  "arkavo-sbe",
  "arkavo-torg",

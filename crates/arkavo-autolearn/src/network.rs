@@ -362,4 +362,59 @@ mod tests {
 
         assert_eq!(bridge.peer_count().await, 0);
     }
+
+    #[tokio::test]
+    async fn test_peer_key_registration() {
+        // Test that peer keys are properly registered for signature verification
+        let agent_keypair = AgentKeypair::generate();
+        let peer_keypair = AgentKeypair::generate();
+
+        let bridge = GossipNetworkBridge::new(
+            "test-agent".to_string(),
+            agent_keypair,
+            NetworkConfig::default(),
+        );
+
+        // Register a peer's public key
+        bridge
+            .register_peer_key("peer-1".to_string(), peer_keypair.public_key().clone())
+            .await;
+
+        // Verify peer was added
+        bridge.add_peer("peer-1".to_string()).await;
+        assert_eq!(bridge.peer_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_signed_patch_broadcast() {
+        // Verify that broadcast patches are signed with the agent's keypair
+        let keypair = AgentKeypair::generate();
+        let mut bridge =
+            GossipNetworkBridge::new("test-agent".to_string(), keypair, NetworkConfig::default());
+
+        let mut outbox = bridge.take_outbox().unwrap();
+
+        let patchlet = create_test_patchlet();
+        let patch_id = bridge.broadcast_patch(&patchlet).await.unwrap();
+
+        assert!(!patch_id.is_nil());
+
+        // Get the announcement message
+        let msg = outbox.recv().await.unwrap();
+
+        // Verify it's an announcement (which should be signed)
+        if let GossipMessage::PatchAnnounce(announcement) = msg {
+            // The announcement should have a valid signature from our keypair
+            assert!(
+                !announcement.patch_hash.is_empty(),
+                "Announcement should have patch hash"
+            );
+            assert!(
+                !announcement.signature.is_empty(),
+                "Announcement should be signed"
+            );
+        } else {
+            panic!("Expected PatchAnnounce message");
+        }
+    }
 }

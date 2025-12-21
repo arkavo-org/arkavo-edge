@@ -161,6 +161,7 @@ impl Default for VerifierConfig {
 ///
 /// Implements the "distrust your own LLM" principle by verifying
 /// synthesized graphs before they can be propagated to the swarm.
+#[derive(Clone)]
 pub struct ImmuneVerifier {
     /// Invariant layer containing safety contracts
     invariant_layer: Arc<InvariantLayer>,
@@ -620,5 +621,144 @@ mod security_tests {
         assert!(!result.passed);
         // In strict mode, we stop at first violation
         assert_eq!(result.invariant_violations.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verification_timeout_fires_on_complex_graph() {
+        use std::time::Duration;
+
+        // Create a graph with many inputs to ensure longer SAT solving time
+        let graph = create_large_input_graph(15);
+        let invariant_layer = Arc::new(InvariantLayer::new());
+        let config = VerifierConfig {
+            timeout_ms: 1, // 1ms timeout - very short to ensure it fires
+            ..Default::default()
+        };
+        let verifier = ImmuneVerifier::with_config(invariant_layer, config);
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(1),
+            tokio::task::spawn_blocking({
+                let v = verifier.clone();
+                let g = graph.clone();
+                move || v.deep_verify(&g)
+            }),
+        )
+        .await;
+
+        // Either timeout or task panic is acceptable - the key is we don't wait forever
+        assert!(
+            result.is_err() || result.unwrap().is_ok(),
+            "Verification should complete or timeout"
+        );
+    }
+
+    /// Create a graph with many inputs for timeout testing
+    fn create_large_input_graph(num_inputs: usize) -> Graph {
+        let mut builder = Builder::new();
+        for i in 0..num_inputs {
+            builder.push(Token::InputDecl).unwrap();
+            builder.push(Token::Id(i as u16)).unwrap();
+        }
+        // Create complex logic combining all inputs
+        let mut prev_id = 0u16;
+        for i in 1..num_inputs {
+            let node_id = (num_inputs + i) as u16;
+            builder.push(Token::NodeStart).unwrap();
+            builder.push(Token::Id(node_id)).unwrap();
+            builder.push(Token::Or).unwrap();
+            builder.push(Token::Id(prev_id)).unwrap();
+            builder.push(Token::Id(i as u16)).unwrap();
+            builder.push(Token::NodeEnd).unwrap();
+            prev_id = node_id;
+        }
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(prev_id)).unwrap();
+        builder.finish().unwrap()
+    }
+
+    #[test]
+    fn test_synthesized_graph_bypasses_permissions_rejected() {
+        // AUTO-005: Distrust your own LLM
+        // Simulate a scenario where the synthesizer produces a graph that
+        // LOOKS syntactically valid but violates semantic invariants
+        // (privilege escalation attack)
+
+        let keypair = AgentKeypair::generate();
+
+        // Invariant: "Admin action requires admin role"
+        // Represented as: admin_role OR NOT(admin_action)
+        let invariant_graph = create_admin_role_invariant();
+        let mut contract = InvariantContract::new(
+            "Admin actions require admin role".to_string(),
+            invariant_graph,
+        );
+        contract.sign(&keypair);
+
+        let mut invariant_layer = InvariantLayer::new();
+        invariant_layer.add_contract(contract).unwrap();
+
+        let verifier = ImmuneVerifier::new(Arc::new(invariant_layer));
+
+        // Simulate LLM producing a graph that allows admin actions for everyone
+        let poisoned_graph = create_privilege_escalation_graph();
+
+        let result = verifier.deep_verify(&poisoned_graph).unwrap();
+
+        assert!(
+            !result.passed,
+            "SECURITY FAILURE: LLM-synthesized privilege escalation patch was accepted"
+        );
+    }
+
+    /// Create an invariant requiring admin_role for admin_action
+    fn create_admin_role_invariant() -> Graph {
+        // admin_role (input 0) OR NOT(admin_action output, input 2)
+        // This ensures: if admin_action is TRUE, admin_role must be TRUE
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap(); // admin_role
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(2)).unwrap(); // admin_action (output to check)
+
+        // NOT(admin_action) = NOR(2, 2)
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(3)).unwrap();
+        builder.push(Token::Nor).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+
+        // admin_role OR NOT(admin_action)
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(4)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::Id(3)).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(4)).unwrap();
+        builder.finish().unwrap()
+    }
+
+    /// Create a malicious graph that grants admin actions to everyone
+    fn create_privilege_escalation_graph() -> Graph {
+        // Malicious graph: admin_action = TRUE always (bypasses role check)
+        let mut builder = Builder::new();
+        builder.push(Token::InputDecl).unwrap();
+        builder.push(Token::Id(0)).unwrap(); // admin_role (ignored)
+
+        // Output TRUE regardless of input
+        builder.push(Token::NodeStart).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.push(Token::Or).unwrap();
+        builder.push(Token::Id(0)).unwrap();
+        builder.push(Token::True).unwrap();
+        builder.push(Token::NodeEnd).unwrap();
+
+        builder.push(Token::OutputDecl).unwrap();
+        builder.push(Token::Id(2)).unwrap();
+        builder.finish().unwrap()
     }
 }

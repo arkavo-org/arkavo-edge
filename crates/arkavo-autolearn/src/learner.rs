@@ -243,8 +243,27 @@ impl<C: CostFunction> AutoLearner<C> {
 
         self.stats.syntheses_succeeded += 1;
 
-        // Step 3: Immune Response - verify with InvariantLayer
-        let verification = self.verifier.verify(&graph, &signal)?;
+        // Step 3: Immune Response - verify with InvariantLayer (with timeout)
+        let timeout_ms = self.verifier.config().timeout_ms;
+        let verifier = self.verifier.clone();
+        let graph_clone = graph.clone();
+        let signal_clone = signal.clone();
+
+        let verification = match tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            tokio::task::spawn_blocking(move || verifier.verify(&graph_clone, &signal_clone)),
+        )
+        .await
+        {
+            Ok(Ok(Ok(result))) => result,
+            Ok(Ok(Err(e))) => return Err(e),
+            Ok(Err(e)) => return Err(AutoLearnError::Verification(e.to_string())),
+            Err(_) => {
+                tracing::warn!("Verification timeout after {}ms", timeout_ms);
+                return Err(AutoLearnError::Timeout);
+            }
+        };
+
         if !verification.passed {
             tracing::debug!(
                 "Verification failed: {} invariant violations, {} boundary issues",
@@ -297,8 +316,27 @@ impl<C: CostFunction> AutoLearner<C> {
 
         let graph = incoming.patchlet.graph.clone();
 
-        // Zero-trust: verify independently (distrust remote LLM)
-        let verification = self.verifier.deep_verify(&graph)?;
+        // Zero-trust: verify independently (distrust remote LLM) with 2x timeout
+        let timeout_ms = self.verifier.config().timeout_ms * 2;
+        let verifier = self.verifier.clone();
+        let graph_clone = graph.clone();
+
+        let verification = match tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            tokio::task::spawn_blocking(move || verifier.deep_verify(&graph_clone)),
+        )
+        .await
+        {
+            Ok(Ok(Ok(result))) => result,
+            Ok(Ok(Err(e))) => return Err(e),
+            Ok(Err(e)) => return Err(AutoLearnError::Verification(e.to_string())),
+            Err(_) => {
+                tracing::warn!("Deep verification timeout after {}ms", timeout_ms);
+                self.stats.patches_rejected += 1;
+                return Ok(()); // Reject on timeout - fail safe
+            }
+        };
+
         let approve = verification.passed;
 
         // Vote on the patch
