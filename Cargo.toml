@@ -50,6 +50,11 @@ members = [
     "crates/arkavo-config-encryption",
     "crates/arkavo-config-transport",
     "crates/arkavo-torg",
+    "crates/arkavo-sbe",
+    "crates/arkavo-sat",
+    "crates/arkavo-gossip",
+    "crates/arkavo-ensemble",
+    "crates/arkavo-autolearn",
     ".cargo/xtask",
 ]
 default-members = [
@@ -101,7 +106,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.48.0"
+version = "0.49.0"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

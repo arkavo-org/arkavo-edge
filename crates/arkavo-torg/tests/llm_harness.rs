@@ -15,7 +15,7 @@ use arkavo_llama_cpp::{
     LlamaContext, LlamaModel, LlamaSampler, ModelFormat, batch_free, batch_init_with_tokens,
     decode_batch, detect_model_format, tokenize_with_model,
 };
-use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler};
+use arkavo_torg::{MinistralTokenMap, Qwen3TokenMap, TorgError, TorgLlamaSampler, format_prompt};
 use torg_core::Graph;
 use torg_mask::TokenMapping;
 
@@ -52,51 +52,7 @@ pub fn load_model_if_available() -> Option<LlamaModel> {
     }
 }
 
-/// System prompt for TØR-G generation
-/// Format uses single-character tokens:
-/// - `<` followed by number for input declaration
-/// - `>` followed by number for output declaration
-/// - `[` `]` for node bounds
-/// - `|` `!` `^` for OR, NOR, XOR operators
-pub const TORG_SYSTEM_PROMPT: &str = r#"Generate TØR-G boolean circuits.
-
-Syntax: <id declares input, [id op a b] defines node, >id declares output.
-Operators: | (OR), ! (NOR), ^ (XOR)
-
-Examples:
-"A OR B" -> <0 <1 [2 | 0 1] >2
-"X XOR Y" -> <0 <1 [2 ^ 0 1] >2
-"NOT A" -> <0 [1 ! 0 0] >1
-
-Output ONLY the tokens."#;
-
-/// Format a policy description using the appropriate chat template for the model
-pub fn format_prompt(policy: &str, format: ModelFormat) -> String {
-    match format {
-        ModelFormat::Qwen3 => {
-            // ChatML format for Qwen models
-            format!(
-                "<|im_start|>system\n{TORG_SYSTEM_PROMPT}<|im_end|>\n\
-                 <|im_start|>user\n{policy}<|im_end|>\n\
-                 <|im_start|>assistant\n"
-            )
-        }
-        ModelFormat::MistralV3 => {
-            // Mistral V3 format for Ministral models
-            format!(
-                "[SYSTEM_PROMPT]{TORG_SYSTEM_PROMPT}[/SYSTEM_PROMPT]\
-                 [INST] {policy} [/INST]"
-            )
-        }
-        ModelFormat::Gemma3 => {
-            // Fallback for other models
-            format!(
-                "<start_of_turn>user\n{TORG_SYSTEM_PROMPT}\n\n{policy}<end_of_turn>\n\
-                 <start_of_turn>model\n"
-            )
-        }
-    }
-}
+// Note: TORG_SYSTEM_PROMPT and format_prompt are now imported from arkavo_torg
 
 /// Build a token mapping appropriate for the model format
 ///

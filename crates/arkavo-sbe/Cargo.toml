@@ -1,0 +1,24 @@
+[package]
+name = "arkavo-sbe"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Symbolic Boundary Evolution - Hierarchical policy layers for TØRG"
+
+[dependencies]
+torg-core = { workspace = true }
+arkavo-crypto = { path = "../arkavo-crypto" }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+sqlx = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

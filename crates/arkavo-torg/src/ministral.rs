@@ -84,14 +84,11 @@ impl MinistralTokenMap {
         }
 
         // Log vocab size for debugging
-        eprintln!("Ministral vocab size: {}", vocab_size);
+        eprintln!("Ministral vocab size: {vocab_size}");
 
         // Verify no token collision with chat template markers
         if let (Some(bracket_id), true) = (node_start_id, inst_token_found) {
-            eprintln!(
-                "Token scan: '[' = {}, [INST] exists separately (no collision)",
-                bracket_id
-            );
+            eprintln!("Token scan: '[' = {bracket_id}, [INST] exists separately (no collision)");
         }
 
         // All tokens must exist in the vocabulary
