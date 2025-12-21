@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use arkavo_sbe::InvariantLayer;
 use arkavo_titan::{Graph, TitanConfig, TitanMonitor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use torg_core::{Builder, Token};
 
 /// Build a representative policy graph (4 inputs, 2 outputs, 5 nodes)
@@ -63,12 +63,7 @@ fn build_benchmark_graph() -> Graph {
 
 fn bench_raw_evaluate(c: &mut Criterion) {
     let graph = build_benchmark_graph();
-    let inputs: HashMap<u16, bool> = HashMap::from([
-        (0, true),
-        (1, false),
-        (2, true),
-        (3, false),
-    ]);
+    let inputs: HashMap<u16, bool> = HashMap::from([(0, true), (1, false), (2, true), (3, false)]);
 
     c.bench_function("raw_evaluate", |b| {
         b.iter(|| torg_core::evaluate(black_box(&graph), black_box(&inputs)))
@@ -77,12 +72,7 @@ fn bench_raw_evaluate(c: &mut Criterion) {
 
 fn bench_monitor_evaluate(c: &mut Criterion) {
     let graph = build_benchmark_graph();
-    let inputs: HashMap<u16, bool> = HashMap::from([
-        (0, true),
-        (1, false),
-        (2, true),
-        (3, false),
-    ]);
+    let inputs: HashMap<u16, bool> = HashMap::from([(0, true), (1, false), (2, true), (3, false)]);
 
     let invariants = Arc::new(InvariantLayer::new());
     let config = TitanConfig {
@@ -99,12 +89,7 @@ fn bench_monitor_evaluate(c: &mut Criterion) {
 
 fn bench_monitor_overhead(c: &mut Criterion) {
     let graph = build_benchmark_graph();
-    let inputs: HashMap<u16, bool> = HashMap::from([
-        (0, true),
-        (1, false),
-        (2, true),
-        (3, false),
-    ]);
+    let inputs: HashMap<u16, bool> = HashMap::from([(0, true), (1, false), (2, true), (3, false)]);
 
     let invariants = Arc::new(InvariantLayer::new());
     let config = TitanConfig {
