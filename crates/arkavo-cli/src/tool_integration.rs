@@ -330,16 +330,15 @@ pub async fn process_with_tools(
 
         // Check for markdown-formatted tool calls (model outputting tool name in code blocks)
         let mut tool_calls = response.tool_calls.clone();
-        if tool_calls.is_empty() {
-            if let Some(parsed_calls) =
+        if tool_calls.is_empty()
+            && let Some(parsed_calls) =
                 parse_markdown_tool_calls(&response.content, registry_arc.as_ref())
-            {
-                tracing::debug!(
-                    "Parsed {} tool call(s) from markdown format",
-                    parsed_calls.len()
-                );
-                tool_calls = parsed_calls;
-            }
+        {
+            tracing::debug!(
+                "Parsed {} tool call(s) from markdown format",
+                parsed_calls.len()
+            );
+            tool_calls = parsed_calls;
         }
 
         if tool_calls.is_empty() {

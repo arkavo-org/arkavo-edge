@@ -102,12 +102,12 @@ default-members = [
     "crates/arkavo-registration",
     ".cargo/xtask",
 ]
-exclude = ["crates/arkavo-protocol/fuzz"]
+exclude = ["crates/arkavo-protocol/fuzz", "examples"]
 resolver = "2"
 
 [workspace.package]
 
-version = "0.50.0"
+version = "0.50.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

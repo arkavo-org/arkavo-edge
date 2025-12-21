@@ -5,30 +5,63 @@ use std::path::Path;
 
 #[allow(clippy::disallowed_methods)]
 pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.is_empty() {
-        print_usage();
-        return Ok(());
+    // Parse all arguments for flags
+    let mut config_path: Option<String> = None;
+    let mut verbose = false;
+    let mut subcommand: Option<&str> = None;
+    let mut init_name: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "-c" | "--config" => {
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    config_path = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "-v" | "--verbose" => verbose = true,
+            "-h" | "--help" | "help" => {
+                print_usage();
+                return Ok(());
+            }
+            "init" => {
+                subcommand = Some("init");
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    init_name = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "run" => subcommand = Some("run"),
+            _ => {
+                // Unknown argument - check if it's a subcommand we don't recognize
+                if subcommand.is_none() && !arg.starts_with('-') {
+                    eprintln!("Error: Unknown agent subcommand '{arg}'");
+                    print_usage();
+                    return Err(format!("Unknown subcommand: {arg}").into());
+                }
+            }
+        }
+        i += 1;
     }
 
-    match args[0].as_str() {
-        "init" => {
-            if args.len() < 2 {
+    // Handle subcommands
+    match subcommand {
+        Some("init") => {
+            if let Some(name) = init_name {
+                init_agent(&name)
+            } else {
                 eprintln!("Error: Agent name required");
-                eprintln!("Usage: arkavo agent init [agent-name]");
-                return Err("Missing agent name".into());
+                eprintln!("Usage: arkavo agent init <agent-name>");
+                Err("Missing agent name".into())
             }
-            init_agent(&args[1])
         }
-        "run" => run_agent(&args[1..]),
-        "help" | "-h" | "--help" => {
-            print_usage();
-            Ok(())
+        Some("run") | None => {
+            // Run agent with optional config and verbose flag
+            run_agent_with_options(config_path.as_deref(), verbose)
         }
-        _ => {
-            eprintln!("Error: Unknown agent subcommand '{}'", args[0]);
-            print_usage();
-            Err(format!("Unknown subcommand: {}", args[0]).into())
-        }
+        _ => unreachable!(),
     }
 }
 
@@ -36,19 +69,24 @@ fn print_usage() {
     println!("Arkavo Agent - Configure and run AI agents");
     println!();
     println!("USAGE:");
-    println!("    arkavo agent <SUBCOMMAND> [OPTIONS]");
+    println!("    arkavo agent [OPTIONS]");
+    println!("    arkavo agent init <name>");
     println!();
     println!("SUBCOMMANDS:");
-    println!(
-        "    init [name]         Create a new .arkavo/AGENTS.md configuration file with agent purpose"
-    );
-    println!(
-        "    run [config] [-v]   Run an agent (quiet by default, looks for .arkavo/AGENTS.md)"
-    );
+    println!("    init <name>         Create a new .arkavo/AGENTS.md configuration file");
+    println!("    run                 Run an agent (alias for default behavior)");
     println!("    help                Print this help message");
     println!();
     println!("OPTIONS:");
+    println!(
+        "    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)"
+    );
     println!("    -v, --verbose       Show startup messages and status");
+    println!();
+    println!("EXAMPLES:");
+    println!("    arkavo agent                           # Run with auto-discovery");
+    println!("    arkavo agent --config AGENTS.md        # Run with specific config");
+    println!("    arkavo agent --config AGENTS.md -v     # Run with verbose output");
 }
 
 // Extract agent role/purpose from AGENTS.md for use in chat mode
@@ -176,7 +214,13 @@ If your agent needs to access external services, add API keys here:
 Once configured, run your agent with:
 
 ```bash
-arkavo agent run
+arkavo agent
+```
+
+Or specify the config file explicitly:
+
+```bash
+arkavo agent --config AGENTS.md
 ```
 
 Your agent will start and be available at the configured address."#
@@ -189,29 +233,20 @@ Your agent will start and be available at the configured address."#
     println!("1. Edit .arkavo/AGENTS.md to customize your agent's purpose and capabilities");
     println!("2. Configure the model and listen address as needed");
     println!("3. Add any required API keys");
-    println!("4. Run your agent with: arkavo agent run");
+    println!("4. Run your agent with: arkavo agent");
 
     Ok(())
 }
 
 #[allow(clippy::disallowed_methods)]
-fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn run_agent_with_options(
+    config_file: Option<&str>,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crate::commands::agent;
 
-    // Parse arguments for --verbose flag and config path
-    let mut config_file_arg: Option<&str> = None;
-    let mut verbose = false;
-
-    for arg in args {
-        if arg == "--verbose" || arg == "-v" {
-            verbose = true;
-        } else if !arg.starts_with('-') {
-            config_file_arg = Some(arg);
-        }
-    }
-
     // Determine config path: explicit arg > .arkavo/AGENTS.md > AGENTS.md
-    let config_path = if let Some(explicit_path) = config_file_arg {
+    let config_path = if let Some(explicit_path) = config_file {
         Path::new(explicit_path).to_path_buf()
     } else if Path::new(".arkavo/AGENTS.md").exists() {
         Path::new(".arkavo/AGENTS.md").to_path_buf()
@@ -220,7 +255,7 @@ fn run_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // If AGENTS.md doesn't exist, use default configuration
-    let agents = if !config_path.exists() && config_file_arg.is_none() {
+    let agents = if !config_path.exists() && config_file.is_none() {
         use std::process::Command;
 
         // Get machine hostname (strip .local suffix if present)

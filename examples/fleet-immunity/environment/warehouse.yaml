@@ -1,0 +1,28 @@
+# Warehouse Environment Configuration
+
+warehouse:
+  name: "Demo Warehouse"
+
+  sectors:
+    - id: 1
+      name: "Loading Bay"
+      hazards: []
+
+    - id: 2
+      name: "Storage Aisle A"
+      hazards: []
+
+    - id: 3
+      name: "Storage Aisle B"
+      hazards: []
+
+    - id: 4
+      name: "Cold Storage"
+      hazards:
+        - type: black_ice
+          active: false
+          traction_coefficient: 0.1
+
+  hazard_api:
+    port: 8360
+    endpoint: /inject
