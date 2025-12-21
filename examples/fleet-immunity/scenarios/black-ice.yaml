@@ -1,0 +1,28 @@
+# Black Ice Hazard Scenario
+
+scenario:
+  name: "Black Ice in Cold Storage"
+  description: |
+    Simulates black ice forming in Sector 4 (Cold Storage).
+    When a rover enters at high speed, it loses traction and crashes.
+    The rover learns from the crash and shares the lesson with the fleet.
+
+hazard:
+  sector: 4
+  type: black_ice
+  traction_coefficient: 0.1
+
+trigger:
+  method: manual
+  endpoint: "http://localhost:8360/inject"
+  payload:
+    sector: 4
+    hazard: black_ice
+    traction: 0.1
+
+expected_outcome:
+  - "Alpha crashes on black ice"
+  - "Alpha synthesizes: IF Sector_4 THEN Drive_Slow"
+  - "Beta and Gamma receive and verify patch"
+  - "Beta slows down before entering Sector 4"
+  - "No additional crashes"
