@@ -64,6 +64,12 @@ pub async fn process_with_tools(
     let mesh_state = std::sync::Arc::new(arkavo_mesh_tools::MeshToolsState::new());
     arkavo_mesh_tools::register_tools(&mut tool_registry, mesh_state);
 
+    // Register HRM orchestration tools (Conductor API)
+    let hrm_state = std::sync::Arc::new(tokio::sync::RwLock::new(
+        arkavo_hrm::tools::HrmToolsState::new(),
+    ));
+    arkavo_hrm::tools::register_tools(&mut tool_registry, hrm_state);
+
     // Wrap registry in Arc for shared access
     let registry_arc = Arc::new(tool_registry);
 

@@ -11,6 +11,8 @@ description = "HRM-Style Orchestration for bounded AI agent execution"
 arkavo-protocol = { path = "../arkavo-protocol" }
 arkavo-events = { path = "../arkavo-events" }
 arkavo-budget = { path = "../arkavo-budget" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
 
 # Async runtime
 async-trait = { workspace = true }

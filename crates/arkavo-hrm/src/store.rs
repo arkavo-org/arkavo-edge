@@ -74,6 +74,11 @@ impl InMemoryTaskStore {
     pub async fn clear(&self) {
         self.tasks.write().await.clear();
     }
+
+    /// List all tasks (returns full task states, not just IDs)
+    pub async fn list_all(&self) -> Vec<GlobalTaskState> {
+        self.tasks.read().await.values().cloned().collect()
+    }
 }
 
 #[async_trait]

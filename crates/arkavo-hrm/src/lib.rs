@@ -34,6 +34,7 @@ pub mod conductor;
 pub mod error;
 pub mod schemas;
 pub mod store;
+pub mod tools;
 
 // Re-export main types
 pub use burst::{BurstContract, BurstResult, BurstState, ContextStrategy, ContinuationHint};

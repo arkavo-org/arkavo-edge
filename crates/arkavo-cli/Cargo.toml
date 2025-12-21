@@ -48,6 +48,7 @@ arkavo-observability = { path = "../arkavo-observability" }
 arkavo-orchestrator = { path = "../arkavo-orchestrator" }
 arkavo-budget = { path = "../arkavo-budget" }
 arkavo-events = { path = "../arkavo-events" }
+arkavo-hrm = { path = "../arkavo-hrm" }
 arkavo-github = { path = "../arkavo-github" }
 arkavo-cef = { path = "../arkavo-cef", optional = true }
 arkavo-device-identity = { path = "../arkavo-device-identity" }

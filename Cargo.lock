@@ -428,6 +428,7 @@ dependencies = [
  "arkavo-events",
  "arkavo-git",
  "arkavo-github",
+ "arkavo-hrm",
  "arkavo-kimi",
  "arkavo-llm",
  "arkavo-mcp",
@@ -761,6 +762,8 @@ version = "0.50.1"
 dependencies = [
  "arkavo-budget",
  "arkavo-events",
+ "arkavo-mcp",
+ "arkavo-mcp-tools",
  "arkavo-protocol",
  "async-trait",
  "chrono",
