@@ -30,11 +30,9 @@ use std::time::Duration;
 use anyhow::Result;
 use arkavo_crypto::AgentKeypair;
 use arkavo_gossip::{GossipConfig, GossipMessage, GossipProtocol, KeyRegistry};
-use arkavo_sbe::{
-    GraphLayer, HierarchicalGraph, InvariantContract, InvariantLayer, PolicyLayer,
-};
+use arkavo_sbe::{GraphLayer, HierarchicalGraph, InvariantContract, InvariantLayer, PolicyLayer};
 use arkavo_titan::{TitanConfig, TitanMonitor};
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::time::sleep;
 use torg_core::{Builder, Graph, Token};
 
@@ -172,7 +170,10 @@ impl DemoAgent {
 
 async fn initialize_agents(
     invariant_layer: Arc<InvariantLayer>,
-) -> Result<(Vec<Arc<RwLock<DemoAgent>>>, broadcast::Sender<(String, GossipMessage)>)> {
+) -> Result<(
+    Vec<Arc<RwLock<DemoAgent>>>,
+    broadcast::Sender<(String, GossipMessage)>,
+)> {
     let mut agents = Vec::new();
     let (message_bus, _) = broadcast::channel::<(String, GossipMessage)>(100);
 
@@ -266,7 +267,11 @@ async fn discover_peers(agents: &[Arc<RwLock<DemoAgent>>]) -> Result<()> {
         }
     }
 
-    println!("[MESH]   All agents connected ({}/{})", agents.len(), agents.len());
+    println!(
+        "[MESH]   All agents connected ({}/{})",
+        agents.len(),
+        agents.len()
+    );
     Ok(())
 }
 
@@ -322,7 +327,10 @@ async fn inject_poison(agent_lock: &Arc<RwLock<DemoAgent>>) -> Result<bool> {
         "DENY"
     };
 
-    println!("[{:<6}] Policy decision: {} (violation not blocked!)", name, decision);
+    println!(
+        "[{:<6}] Policy decision: {} (violation not blocked!)",
+        name, decision
+    );
     drop(monitor);
     drop(graph);
 
@@ -381,7 +389,10 @@ async fn synthesize_and_broadcast(
     );
 
     // Verify locally
-    println!("[{:<6}] [OK] Local verification passed (500 inputs tested)", name);
+    println!(
+        "[{:<6}] [OK] Local verification passed (500 inputs tested)",
+        name
+    );
 
     let patch_id = uuid::Uuid::new_v4();
     println!(
@@ -393,10 +404,7 @@ async fn synthesize_and_broadcast(
     Ok(patch_id)
 }
 
-async fn propagate_to_peers(
-    agents: &[Arc<RwLock<DemoAgent>>],
-    patch_id: uuid::Uuid,
-) -> Result<()> {
+async fn propagate_to_peers(agents: &[Arc<RwLock<DemoAgent>>], patch_id: uuid::Uuid) -> Result<()> {
     // Get the healed graph from Alpha
     let healed_graph = {
         let alpha = agents[0].read().await;
@@ -413,7 +421,10 @@ async fn propagate_to_peers(
             name,
             &patch_id.to_string()[..8]
         );
-        println!("[{:<6}] Deep verification in progress (2x timeout)...", name);
+        println!(
+            "[{:<6}] Deep verification in progress (2x timeout)...",
+            name
+        );
 
         sleep(Duration::from_millis(300)).await;
 
@@ -427,10 +438,7 @@ async fn propagate_to_peers(
     Ok(())
 }
 
-async fn apply_patch_to_all(
-    agents: &[Arc<RwLock<DemoAgent>>],
-    patch_id: uuid::Uuid,
-) -> Result<()> {
+async fn apply_patch_to_all(agents: &[Arc<RwLock<DemoAgent>>], patch_id: uuid::Uuid) -> Result<()> {
     println!(
         "\n[MESH]   Quorum reached: {}/{} approved (threshold: 2/3)",
         agents.len(),

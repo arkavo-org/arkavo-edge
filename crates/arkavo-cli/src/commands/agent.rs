@@ -78,7 +78,9 @@ fn print_usage() {
     println!("    help                Print this help message");
     println!();
     println!("OPTIONS:");
-    println!("    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)");
+    println!(
+        "    -c, --config <FILE> Specify config file (default: .arkavo/AGENTS.md or AGENTS.md)"
+    );
     println!("    -v, --verbose       Show startup messages and status");
     println!();
     println!("EXAMPLES:");
