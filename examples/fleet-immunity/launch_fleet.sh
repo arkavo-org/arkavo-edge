@@ -13,7 +13,17 @@ echo "  ║                                                               ║"
 echo "  ╚═══════════════════════════════════════════════════════════════╝"
 echo ""
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ARKAVO="$REPO_ROOT/target/debug/arkavo"
+
+cd "$SCRIPT_DIR"
+
+# Build arkavo if needed
+if [ ! -f "$ARKAVO" ]; then
+    echo "[BUILD ] Building arkavo CLI..."
+    (cd "$REPO_ROOT" && cargo build -p arkavo -q)
+fi
 
 # Build environment simulator if needed
 if [ ! -f env-simulator/target/debug/fleet-env-simulator ]; then
@@ -31,26 +41,23 @@ sleep 2
 # Start rovers
 echo ""
 echo "[ALPHA ] Starting Rover Alpha on port 8351..."
-cd rover-alpha && arkavo agent --config AGENTS.md &
+(cd "$SCRIPT_DIR/rover-alpha" && "$ARKAVO" agent --config AGENTS.md) &
 ALPHA_PID=$!
-echo $ALPHA_PID > ../.alpha.pid
-cd ..
+echo $ALPHA_PID > .alpha.pid
 
 sleep 1
 
 echo "[BETA  ] Starting Rover Beta on port 8352..."
-cd rover-beta && arkavo agent --config AGENTS.md &
+(cd "$SCRIPT_DIR/rover-beta" && "$ARKAVO" agent --config AGENTS.md) &
 BETA_PID=$!
-echo $BETA_PID > ../.beta.pid
-cd ..
+echo $BETA_PID > .beta.pid
 
 sleep 1
 
 echo "[GAMMA ] Starting Rover Gamma on port 8353..."
-cd rover-gamma && arkavo agent --config AGENTS.md &
+(cd "$SCRIPT_DIR/rover-gamma" && "$ARKAVO" agent --config AGENTS.md) &
 GAMMA_PID=$!
-echo $GAMMA_PID > ../.gamma.pid
-cd ..
+echo $GAMMA_PID > .gamma.pid
 
 echo ""
 echo "[FLEET ] All rovers launched. Waiting for mesh discovery..."
