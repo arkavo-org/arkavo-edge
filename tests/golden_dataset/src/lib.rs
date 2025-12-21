@@ -5,7 +5,10 @@
 //! - Router agent selection (Thompson Sampling)
 //! - Critic verification pipeline
 //! - End-to-end task completion
+//! - Fault tolerance and self-healing (adversarial testing)
 
+pub mod adversarial_runner;
+pub mod adversary;
 pub mod metrics;
 pub mod runner;
 

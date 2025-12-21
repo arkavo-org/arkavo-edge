@@ -1,0 +1,44 @@
+{
+  "id": "ADV-01",
+  "name": "The Drunk Agent",
+  "description": "Tests recovery when primary agent returns corrupted responses. Conductor should detect parse errors, retry, and Router should penalize Agent A before selecting Agent B.",
+  "adversaries": [
+    {
+      "profile": {
+        "id": "drunk-agent",
+        "capabilities": ["code_edit", "refactoring"],
+        "success_rate": 1.0,
+        "latency_ms": 20,
+        "responses": {}
+      },
+      "fault_rate": 1.0,
+      "fault_type": "schema_corruption"
+    }
+  ],
+  "fallback_agents": [
+    {
+      "id": "reliable-agent",
+      "capabilities": ["code_edit", "refactoring"],
+      "success_rate": 1.0,
+      "latency_ms": 30,
+      "responses": {
+        "Subtask 1: Refactor the payment module": {
+          "status": "completed",
+          "changes": [
+            {
+              "file": "src/payment.rs",
+              "action": "refactored"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "expected": {
+    "task_succeeds": true,
+    "expected_error": null,
+    "min_retries": 0,
+    "agent_penalized": true,
+    "critic_vetoed": false
+  }
+}

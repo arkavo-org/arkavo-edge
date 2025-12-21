@@ -1,0 +1,37 @@
+{
+  "id": "ADV-03",
+  "name": "The Infinite Loop",
+  "description": "Tests loop detection guardrails. All agents fail repeatedly. Conductor should hit max_subtasks limit and abort with StrategicThrashing error instead of looping forever.",
+  "adversaries": [
+    {
+      "profile": {
+        "id": "always-fails-1",
+        "capabilities": ["code_edit"],
+        "success_rate": 1.0,
+        "latency_ms": 10,
+        "responses": {}
+      },
+      "fault_rate": 1.0,
+      "fault_type": "timeout"
+    },
+    {
+      "profile": {
+        "id": "always-fails-2",
+        "capabilities": ["code_edit"],
+        "success_rate": 1.0,
+        "latency_ms": 10,
+        "responses": {}
+      },
+      "fault_rate": 1.0,
+      "fault_type": "empty_response"
+    }
+  ],
+  "fallback_agents": [],
+  "expected": {
+    "task_succeeds": false,
+    "expected_error": null,
+    "min_retries": 2,
+    "agent_penalized": true,
+    "critic_vetoed": false
+  }
+}
