@@ -1,0 +1,36 @@
+# Family Safety Policy Configuration
+name: family_safety_v1
+version: "1.0"
+
+prohibited:
+  venue_types:
+    - gambling
+    - casino
+    - adult_entertainment
+    - bar
+    - nightclub
+    - strip_club
+  age_restrictions:
+    - "21+"
+    - "18+"
+    - adults_only
+
+warnings:
+  - late_night_activities
+  - high_crowd_density
+  - loud_environments
+
+required:
+  - age_appropriate: true
+  - has_restroom_facilities: true
+  - stroller_accessible: true
+
+age_rules:
+  - min_age: 0
+    max_age: 3
+    require:
+      - changing_facilities
+      - quiet_zones_available
+    prohibit:
+      - intense_rides
+      - 3d_shows

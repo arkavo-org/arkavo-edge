@@ -1,0 +1,47 @@
+{
+  "version": "v0",
+  "task_id": "task_001",
+  "objective": "Plan a Friday afternoon in Las Vegas for a family with twin toddlers",
+  "user_request": {
+    "destination": "Las Vegas, NV",
+    "travelers": {
+      "adults": 2,
+      "children": [
+        {"age": 3, "name": "Toddler A"},
+        {"age": 3, "name": "Toddler B"}
+      ]
+    },
+    "date": "2025-09-05",
+    "time_window": "12:00-18:00",
+    "budget_usd": 200
+  },
+  "burst_contract": {
+    "goal": "Find 2-3 family-friendly afternoon activities in Las Vegas suitable for 3-year-olds",
+    "context": [
+      {
+        "id": "doc:user_preferences",
+        "snippet": "Family prefers outdoor activities when weather permits. Children enjoy animals and interactive exhibits."
+      },
+      {
+        "id": "doc:constraints",
+        "snippet": "Must have changing facilities. Prefer locations with on-site dining. No activities requiring advance booking over $50."
+      }
+    ],
+    "budget": {
+      "max_steps": 3,
+      "max_tool_calls": 5,
+      "max_wall_time_sec": 45
+    },
+    "return_required": [
+      "delta",
+      "evidence",
+      "confidence",
+      "next_suggestion"
+    ]
+  },
+  "metadata": {
+    "created_at": "2025-09-01T10:00:00Z",
+    "priority": "normal",
+    "tags": ["family", "toddlers", "las_vegas", "afternoon"]
+  }
+}

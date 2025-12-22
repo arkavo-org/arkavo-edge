@@ -1,0 +1,31 @@
+# HRM Orchestration Defaults
+version: "0.9"
+
+burst_defaults:
+  max_steps: 3
+  max_tool_calls: 5
+  max_wall_time_sec: 45
+
+router:
+  scoring:
+    embedding_similarity_weight: 0.4
+    skill_overlap_weight: 0.35
+    utility_prior_weight: 0.25
+  bandit:
+    algorithm: thompson_sampling
+    cold_start_prior: [2, 1]
+    discount_factor: 0.95
+    probation_threshold: 50
+
+guardrails:
+  cost_ceiling_usd_per_subtask: 0.50
+  max_reroutes_per_subtask: 3
+  thrash_detection:
+    enabled: true
+    similarity_threshold: 0.85
+    window_size: 5
+
+memory:
+  stm_max_items: 50
+  task_max_context_tokens: 4000
+  ltm_retrieval_budget: 10
