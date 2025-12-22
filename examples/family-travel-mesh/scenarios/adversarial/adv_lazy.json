@@ -1,0 +1,17 @@
+{
+  "scenario_id": "ADV-02",
+  "name": "Lazy Agent",
+  "description": "Tests Critic semantic verification with lazy responses",
+  "fault_injection": {
+    "target_agent": "vegas-guide",
+    "fault_type": "LazyCompliance",
+    "lazy_pattern": "I completed the task. [placeholder]",
+    "trigger_probability": 1.0
+  },
+  "expected_behavior": {
+    "critic_vetos": true,
+    "veto_reason": "lint_check_failed",
+    "fallback_succeeds": true,
+    "min_retries": 0
+  }
+}

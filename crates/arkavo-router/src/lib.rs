@@ -9,6 +9,7 @@ pub mod deliberation;
 pub mod error;
 pub mod health;
 pub mod judge;
+pub mod learning;
 pub mod metrics;
 pub mod model_discovery;
 pub mod orchestrator;
@@ -38,6 +39,11 @@ pub use prediction::{BudgetRunway, WorkflowCostPrediction, WorkflowCostPredictor
 pub use selector::{ModelSelector, ProviderAvailability};
 pub use stream::{RouteMetadata, RouteResponse, RouteStream, StreamChunk};
 pub use validator::{ResponseValidator, ValidationError};
+
+pub use learning::{
+    AgentContribution, AgentUtility, AgentUtilityStats, BetaPrior, BurstFeedback, FinalTaskReport,
+    LearningConfig, LearningModule, QualityMetrics,
+};
 
 use arkavo_llm::{Message, Provider, ProviderResponse, StreamResponse};
 use arkavo_mcp_tools::ToolRegistry;

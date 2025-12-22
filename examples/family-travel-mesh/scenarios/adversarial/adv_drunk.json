@@ -1,0 +1,17 @@
+{
+  "scenario_id": "ADV-01",
+  "name": "Drunk Agent",
+  "description": "Tests recovery from schema corruption via fallback agent",
+  "fault_injection": {
+    "target_agent": "vegas-guide",
+    "fault_type": "SchemaCorruption",
+    "corruption_pattern": "replace_with_placeholder",
+    "trigger_probability": 1.0
+  },
+  "expected_behavior": {
+    "critic_catches": "placeholder_patterns",
+    "fallback_agent": "family-activities",
+    "task_succeeds": true,
+    "min_retries": 0
+  }
+}

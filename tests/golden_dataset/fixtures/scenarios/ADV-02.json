@@ -1,0 +1,40 @@
+{
+  "id": "ADV-02",
+  "name": "The Lazy Agent",
+  "description": "Tests Critic semantic verification. Agent returns syntactically valid but semantically empty response. Critic should veto, forcing retry with different agent.",
+  "adversaries": [
+    {
+      "profile": {
+        "id": "lazy-agent",
+        "capabilities": ["code_edit", "code_generation"],
+        "success_rate": 1.0,
+        "latency_ms": 15,
+        "responses": {}
+      },
+      "fault_rate": 1.0,
+      "fault_type": "lazy_compliance"
+    }
+  ],
+  "fallback_agents": [
+    {
+      "id": "diligent-agent",
+      "capabilities": ["code_edit", "code_generation"],
+      "success_rate": 1.0,
+      "latency_ms": 40,
+      "responses": {
+        "Subtask 1: Generate a new API endpoint": {
+          "status": "completed",
+          "code": "pub async fn get_users() -> Vec<User> { db.query_all().await }",
+          "file": "src/api/users.rs"
+        }
+      }
+    }
+  ],
+  "expected": {
+    "task_succeeds": true,
+    "expected_error": null,
+    "min_retries": 0,
+    "agent_penalized": true,
+    "critic_vetoed": true
+  }
+}

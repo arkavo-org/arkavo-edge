@@ -21,6 +21,8 @@ reqwest = { workspace = true }
 hf-hub = { workspace = true }
 glob = { workspace = true }
 dirs = { workspace = true }
+rand = { workspace = true }
+rand_distr = "0.4"
 
 # Internal dependencies
 arkavo-llm = { path = "../arkavo-llm", default-features = false }

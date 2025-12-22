@@ -1,0 +1,48 @@
+[package]
+name = "arkavo-hrm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "HRM-Style Orchestration for bounded AI agent execution"
+
+[dependencies]
+# Core arkavo crates
+arkavo-protocol = { path = "../arkavo-protocol" }
+arkavo-events = { path = "../arkavo-events" }
+arkavo-budget = { path = "../arkavo-budget" }
+arkavo-mcp = { path = "../arkavo-mcp" }
+arkavo-mcp-tools = { path = "../arkavo-mcp-tools" }
+
+# Async runtime
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Unique identifiers
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Random sampling for Thompson Sampling (future)
+rand = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Hashing for loop detection
+sha2 = { workspace = true }
+
+[features]
+default = []
+file-store = []
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

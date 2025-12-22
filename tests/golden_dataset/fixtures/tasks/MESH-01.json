@@ -1,0 +1,87 @@
+{
+  "id": "MESH-01",
+  "name": "Multi-Agent Data Query",
+  "category": "mesh",
+  "complexity": "medium",
+  "input": {
+    "objective": "Query weather data from multiple agents and aggregate results",
+    "context_files": [],
+    "required_capabilities": ["mesh_query", "data_aggregation"],
+    "budget": {
+      "max_cost_usd": 1.00,
+      "max_tokens": 25000,
+      "max_steps": 10,
+      "max_wall_time_ms": 60000
+    }
+  },
+  "expected": {
+    "subtask_count": [2, 4],
+    "expected_agents": ["mesh-coordinator", "data-agent-1", "data-agent-2"],
+    "validation_rules": [
+      {
+        "type": "contains_text",
+        "text": "aggregated",
+        "case_sensitive": false
+      },
+      {
+        "type": "field_equals",
+        "path": "status",
+        "value": "completed"
+      },
+      {
+        "type": "critic_pass",
+        "checks": ["schema", "lint"]
+      }
+    ],
+    "expected_status": "completed"
+  },
+  "agents": [
+    {
+      "id": "mesh-coordinator",
+      "capabilities": ["mesh_query", "data_aggregation", "orchestration", "routing"],
+      "success_rate": 1.0,
+      "latency_ms": 30,
+      "responses": {
+        "Subtask 1: Query weather data from multiple agents and aggregate results": {
+          "status": "completed",
+          "aggregated": true,
+          "source": "mesh-coordinator",
+          "data": {
+            "temperature": 22.5,
+            "humidity": 65,
+            "location": "New York"
+          }
+        },
+        "Subtask 2: Query weather data from multiple agents and aggregate results": {
+          "status": "completed",
+          "aggregated": true,
+          "source": "mesh-coordinator",
+          "data": {
+            "temperature": 18.3,
+            "humidity": 72,
+            "location": "Boston"
+          }
+        }
+      }
+    },
+    {
+      "id": "data-agent-1",
+      "capabilities": ["data_aggregation", "weather_api"],
+      "success_rate": 0.95,
+      "latency_ms": 100,
+      "responses": {}
+    },
+    {
+      "id": "data-agent-2",
+      "capabilities": ["data_aggregation", "weather_api"],
+      "success_rate": 0.95,
+      "latency_ms": 120,
+      "responses": {}
+    }
+  ],
+  "metadata": {
+    "author": "golden-dataset",
+    "version": "1.0",
+    "tags": ["mesh", "multi-agent", "aggregation", "medium"]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "CODE-01",
+  "name": "Simple Function Refactor",
+  "category": "code",
+  "complexity": "simple",
+  "input": {
+    "objective": "Rename function 'calculate_total' to 'compute_sum' and update all call sites",
+    "context_files": [],
+    "required_capabilities": ["code_edit", "code_search"],
+    "budget": {
+      "max_cost_usd": 0.50,
+      "max_tokens": 10000,
+      "max_steps": 5,
+      "max_wall_time_ms": 30000
+    }
+  },
+  "expected": {
+    "subtask_count": [1, 2],
+    "expected_agents": ["code-specialist"],
+    "validation_rules": [
+      {
+        "type": "contains_text",
+        "text": "completed",
+        "case_sensitive": false
+      },
+      {
+        "type": "critic_pass",
+        "checks": ["schema", "lint", "policy"]
+      }
+    ],
+    "expected_status": "completed"
+  },
+  "agents": [
+    {
+      "id": "code-specialist",
+      "capabilities": ["code_edit", "code_search", "refactoring"],
+      "success_rate": 1.0,
+      "latency_ms": 50,
+      "responses": {
+        "Subtask 1: Rename function 'calculate_total' to 'compute_sum' and update all call sites": {
+          "status": "completed",
+          "changes": [
+            {
+              "file": "src/utils.rs",
+              "old": "fn calculate_total",
+              "new": "fn compute_sum"
+            }
+          ],
+          "call_sites_updated": 3
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "author": "golden-dataset",
+    "version": "1.0",
+    "tags": ["refactoring", "rename", "simple"]
+  }
+}

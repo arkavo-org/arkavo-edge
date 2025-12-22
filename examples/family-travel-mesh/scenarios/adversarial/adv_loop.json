@@ -1,0 +1,18 @@
+{
+  "scenario_id": "ADV-03",
+  "name": "Infinite Loop",
+  "description": "Tests loop detection guardrails when all agents fail",
+  "fault_injection": {
+    "target_agent": "*",
+    "fault_type": "PolicyViolation",
+    "violation_pattern": "suggest_casino",
+    "trigger_probability": 1.0
+  },
+  "expected_behavior": {
+    "loop_detected": true,
+    "error_type": "StrategicThrashing",
+    "task_aborts": true,
+    "max_retries_respected": true,
+    "expected_error": null
+  }
+}

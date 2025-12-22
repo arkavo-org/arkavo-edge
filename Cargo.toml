@@ -56,6 +56,9 @@ members = [
     "crates/arkavo-ensemble",
     "crates/arkavo-autolearn",
     "crates/arkavo-titan",
+    "crates/arkavo-hrm",
+    "crates/arkavo-critic",
+    "tests/golden_dataset",
     ".cargo/xtask",
 ]
 default-members = [
@@ -100,6 +103,8 @@ default-members = [
     "crates/arkavo-attestation",
     "crates/arkavo-crypto",
     "crates/arkavo-registration",
+    "crates/arkavo-hrm",
+    "crates/arkavo-critic",
     ".cargo/xtask",
 ]
 exclude = ["crates/arkavo-protocol/fuzz", "examples"]
@@ -107,7 +112,7 @@ resolver = "2"
 
 [workspace.package]
 
-version = "0.50.1"
+version = "0.50.2"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Arkavo Contributors"]

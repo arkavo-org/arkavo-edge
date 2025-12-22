@@ -7,6 +7,7 @@ pub mod mcp_integration;
 pub mod mcp_spawner;
 #[cfg(all(unix, feature = "mcp-tools"))]
 pub mod memory_integration;
+pub mod peer_manager;
 pub mod prompt_loader;
 pub mod tool_integration;
 

@@ -1,3 +1,4 @@
+use crate::commands::agent::extract_agent_role;
 use crate::conversation_manager::ConversationManager;
 use crate::mcp_integration::McpConnection;
 use arkavo_llm::{LlmClient, LlmConfig, Message, encode_image_file};
@@ -625,9 +626,20 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize prompt override directory if needed
     let _ = crate::prompt_loader::init_prompt_override_dir();
 
+    // Check for agent persona first - enables progressive tool loading
+    let agent_purpose = extract_agent_role();
+    let has_agent_persona = agent_purpose.as_ref().is_some_and(|p| !p.is_empty());
+
     // Build base system prompt (without repo context initially)
-    let base_system_prompt = if mcp_client.is_some() && model_size_hint != Some("270M") {
-        // Load chat system prompt with MCP tools info (skip for tiny models)
+    // When agent has persona, use progressive tools (don't inject tool examples)
+    let mut base_system_prompt = if has_agent_persona {
+        // Agent mode: persona-focused, tools loaded progressively on demand
+        let persona = agent_purpose.as_ref().unwrap();
+        format!(
+            "You are an AI agent with the following purpose:\n{persona}\n\nStay in character and focus on this purpose. Answer questions directly without using tools unless explicitly needed."
+        )
+    } else if mcp_client.is_some() && model_size_hint != Some("270M") {
+        // General chat mode: include MCP tools info
         let tools_info = format!(
             "EXAMPLES:
 Q: \"What git branch am I on?\" → A: @git_status
@@ -766,35 +778,35 @@ Q: \"Recent commits?\" → A: @git_status
             messages.push(Message::user(&prompt_text));
         }
 
+        // Disable MCP tools for persona-focused agents (progressive tool loading)
+        let effective_mcp = if has_agent_persona {
+            None
+        } else {
+            mcp_client.as_ref()
+        };
+
         if print_mode {
             #[cfg(all(unix, feature = "mcp-tools"))]
             {
-                runtime.block_on(process_message_print_with_router(
-                    &messages,
-                    mcp_client.as_ref(),
-                ))?;
+                runtime.block_on(process_message_print_with_router(&messages, effective_mcp))?;
             }
             #[cfg(not(all(unix, feature = "mcp-tools")))]
             {
                 eprintln!("⚠️  WARNING: MCP tools not available on this platform");
-                runtime.block_on(process_message_print(
-                    &client,
-                    &messages,
-                    mcp_client.as_ref(),
-                ))?;
+                runtime.block_on(process_message_print(&client, &messages, effective_mcp))?;
             }
         } else {
             // Use router-based tool calling on supported platforms
             #[cfg(all(unix, feature = "mcp-tools"))]
             {
-                runtime.block_on(process_message_with_tools(&messages, mcp_client.as_ref()))?;
+                runtime.block_on(process_message_with_tools(&messages, effective_mcp))?;
             }
             #[cfg(not(all(unix, feature = "mcp-tools")))]
             {
                 runtime.block_on(process_message(
                     &client,
                     &messages,
-                    mcp_client.as_ref(),
+                    effective_mcp,
                     &conversation_manager,
                 ))?;
             }
