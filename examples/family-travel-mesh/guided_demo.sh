@@ -1,6 +1,6 @@
 #!/bin/bash
 # Family Travel Mesh - Guided Demo with Real LLM Calls
-# Demonstrates veto/reroute flow with actual Ministral inference
+# Demonstrates: arkavo task → Conductor → Router → Specialist → Critic
 
 set -e
 
@@ -19,172 +19,112 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-USER_REQUEST="Plan a Friday afternoon in Las Vegas for a family with twin 3-year-old toddlers. Budget is \$200, time window 12:00-18:00. Give me your top 3 recommendations."
+USER_PROMPT="Top 3 Vegas recommendations for a family with toddlers?"
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 1: Show the request
+# STEP 1: Check mesh is running
+# ═══════════════════════════════════════════════════════════════════════
+check_mesh() {
+    echo ""
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${CYAN}   HRM GUIDED DEMO - Agent Mesh Flow                                  ${NC}"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    echo -e "${YELLOW}[MESH CHECK]${NC} Verifying agents are running..."
+
+    # Check if conductor is listening
+    if ! curl -s http://localhost:8401/health > /dev/null 2>&1; then
+        echo -e "${RED}Error: Conductor not running on port 8401${NC}"
+        echo "Start the mesh first: ./launch_mesh.sh"
+        exit 1
+    fi
+
+    echo -e "  ${GREEN}✓${NC} Conductor (8401)"
+
+    # Check other agents
+    for port in 8402 8410 8411 8412; do
+        if curl -s http://localhost:$port/health > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${NC} Agent on port $port"
+        else
+            echo -e "  ${YELLOW}!${NC} Agent on port $port not responding"
+        fi
+    done
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# STEP 2: Show the request
 # ═══════════════════════════════════════════════════════════════════════
 show_request() {
-    echo ""
-    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}${CYAN}   HRM GUIDED DEMO - Real LLM Inference                                ${NC}"
-    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════════════════${NC}"
-    echo ""
     echo -e "${YELLOW}[USER REQUEST]${NC}"
-    echo -e "  \"$USER_REQUEST\""
+    echo -e "  \"$USER_PROMPT\""
+    echo ""
+    echo -e "${DIM}Flow: arkavo task → Conductor → Router → Specialist → Critic${NC}"
     echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 2: Call vegas-guide (biased toward casinos)
+# STEP 3: Send task to mesh via conductor
 # ═══════════════════════════════════════════════════════════════════════
-call_vegas_guide() {
+send_to_mesh() {
     echo -e "${DIM}───────────────────────────────────────────────────────────────────────${NC}"
     echo ""
-    echo -e "${YELLOW}[ROUTER]${NC} Thompson Sampling selects: ${MAGENTA}vegas-guide${NC} (score: 0.68)"
-    echo ""
-    echo -e "${MAGENTA}[SPECIALIST:vegas-guide]${NC} Calling Ministral LLM..."
+    echo -e "${CYAN}[TASK]${NC} Sending to mesh via conductor..."
     echo ""
 
-    # Real LLM call to vegas-guide agent
-    cd "$SCRIPT_DIR/agents/specialists/vegas-guide"
+    # Use arkavo task with mesh-only flag to route through conductor
+    cd "$SCRIPT_DIR"
 
-    VEGAS_RESPONSE=$(timeout 90 "$BINARY" chat --prompt "$USER_REQUEST" 2>&1 || echo "Error: LLM call failed")
+    RESPONSE=$(timeout 120 "$BINARY" task --mesh-only "$USER_PROMPT" 2>&1 || echo "Error: Task failed")
 
     echo -e "${DIM}Response:${NC}"
-    echo "$VEGAS_RESPONSE" | head -30
+    echo "$RESPONSE"
     echo ""
 
-    # Store for critic evaluation
-    echo "$VEGAS_RESPONSE" > /tmp/vegas_response.txt
+    # Store for analysis
+    echo "$RESPONSE" > /tmp/mesh_response.txt
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 3: Critic evaluates (should veto casino suggestions)
+# STEP 4: Analyze response for policy violations
 # ═══════════════════════════════════════════════════════════════════════
-call_critic() {
+analyze_response() {
     echo -e "${DIM}───────────────────────────────────────────────────────────────────────${NC}"
     echo ""
-    echo -e "${RED}[CRITIC]${NC} Evaluating response against family_safety policy..."
-    echo ""
 
-    VEGAS_RESPONSE=$(cat /tmp/vegas_response.txt)
+    RESPONSE=$(cat /tmp/mesh_response.txt)
 
     # Check for policy violations
-    POLICY_FILE="$SCRIPT_DIR/agents/critic/policies/family_safety.yaml"
-
-    # Policy check: Look for explicit casino/gambling references
-    VIOLATIONS=""
-    if echo "$VEGAS_RESPONSE" | grep -iq "casino\|gambling\|slot machine\|poker\|blackjack\|roulette"; then
-        VIOLATIONS="casino/gambling venue detected"
-    fi
-    if echo "$VEGAS_RESPONSE" | grep -iq "nightclub\|strip club\|21+\|adults only"; then
-        VIOLATIONS="$VIOLATIONS, adult venue detected"
-    fi
-
-    if [ -n "$VIOLATIONS" ]; then
+    if echo "$RESPONSE" | grep -iq "casino\|gambling\|slot machine\|poker\|blackjack\|roulette"; then
         echo -e "  ${BOLD}${RED}╔═══════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "  ${BOLD}${RED}║  🛑 VETO: Policy Violation Detected                           ║${NC}"
-        echo -e "  ${BOLD}${RED}╠═══════════════════════════════════════════════════════════════╣${NC}"
-        echo -e "  ${BOLD}${RED}║  Violation: $VIOLATIONS${NC}"
-        echo -e "  ${BOLD}${RED}║  Policy: No gambling/casino venues for travelers under 21     ║${NC}"
-        echo -e "  ${BOLD}${RED}║  Action: REJECTED - Rerouting to alternate specialist         ║${NC}"
+        echo -e "  ${BOLD}${RED}║  🛑 POLICY VIOLATION DETECTED                                 ║${NC}"
+        echo -e "  ${BOLD}${RED}║  Casino/gambling content in response                          ║${NC}"
+        echo -e "  ${BOLD}${RED}║  Critic should have vetoed this response                      ║${NC}"
         echo -e "  ${BOLD}${RED}╚═══════════════════════════════════════════════════════════════╝${NC}"
-        echo ""
-
-        # Update Thompson Sampling prior
-        echo -e "${YELLOW}[ROUTER]${NC} Updating Thompson Sampling prior..."
-        echo -e "  ${DIM}vegas-guide: Beta(35,12) → ${RED}Beta(35,13)${NC} ${DIM}(failure +1)${NC}"
-        echo ""
-
-        return 1  # Signal veto
     else
-        echo -e "  ${GREEN}✓${NC} PolicyCheck passed"
-        return 0  # Signal approval
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════════════════
-# STEP 4: Reroute to family-activities
-# ═══════════════════════════════════════════════════════════════════════
-call_family_activities() {
-    echo -e "${DIM}───────────────────────────────────────────────────────────────────────${NC}"
-    echo ""
-    echo -e "  ${BOLD}${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "  ${BOLD}${CYAN}║  🔄 REROUTE: Selecting alternate specialist                   ║${NC}"
-    echo -e "  ${BOLD}${CYAN}║  → family-activities (child-friendly expert)                  ║${NC}"
-    echo -e "  ${BOLD}${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-
-    echo -e "${GREEN}[SPECIALIST:family-activities]${NC} Calling Ministral LLM..."
-    echo ""
-
-    # Real LLM call to family-activities agent
-    cd "$SCRIPT_DIR/agents/specialists/family-activities"
-
-    FAMILY_RESPONSE=$(timeout 90 "$BINARY" chat --prompt "$USER_REQUEST" 2>&1 || echo "Error: LLM call failed")
-
-    echo -e "${DIM}Response:${NC}"
-    echo "$FAMILY_RESPONSE" | head -30
-    echo ""
-
-    # Store for critic evaluation
-    echo "$FAMILY_RESPONSE" > /tmp/family_response.txt
-}
-
-# ═══════════════════════════════════════════════════════════════════════
-# STEP 5: Critic approves family-activities response
-# ═══════════════════════════════════════════════════════════════════════
-approve_response() {
-    echo -e "${DIM}───────────────────────────────────────────────────────────────────────${NC}"
-    echo ""
-    echo -e "${GREEN}[CRITIC]${NC} Evaluating response against family_safety policy..."
-    echo ""
-
-    FAMILY_RESPONSE=$(cat /tmp/family_response.txt)
-
-    # Policy check: Look for explicit casino/gambling references
-    VIOLATIONS=""
-    if echo "$FAMILY_RESPONSE" | grep -iq "casino\|gambling\|slot machine\|poker\|blackjack\|roulette"; then
-        VIOLATIONS="casino/gambling venue detected"
-    fi
-
-    if [ -n "$VIOLATIONS" ]; then
-        echo -e "  ${RED}✗${NC} PolicyCheck failed: $VIOLATIONS"
-        return 1
-    else
-        echo -e "  ${DIM}[0] SchemaCheck:${NC}   ${GREEN}✓${NC}"
-        echo -e "  ${DIM}[1] LintCheck:${NC}     ${GREEN}✓${NC}"
-        echo -e "  ${DIM}[2] PolicyCheck:${NC}   ${GREEN}✓${NC} ${DIM}(no prohibited venues)${NC}"
-        echo -e "  ${DIM}[3] SemanticCheck:${NC} ${GREEN}✓${NC} ${DIM}(age-appropriate confirmed)${NC}"
-        echo ""
         echo -e "  ${BOLD}${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "  ${BOLD}${GREEN}║  ✅ APPROVED                                                   ║${NC}"
+        echo -e "  ${BOLD}${GREEN}║  ✅ RESPONSE APPROVED                                         ║${NC}"
+        echo -e "  ${BOLD}${GREEN}║  No policy violations detected                                ║${NC}"
         echo -e "  ${BOLD}${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
-        echo ""
-
-        # Update Thompson Sampling prior
-        echo -e "${YELLOW}[ROUTER]${NC} Updating Thompson Sampling prior..."
-        echo -e "  ${DIM}family-activities: Beta(28,15) → ${GREEN}Beta(29,15)${NC} ${DIM}(success +1)${NC}"
-        echo ""
-
-        return 0
     fi
+    echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════
-# STEP 6: Show final result
+# STEP 5: Show result
 # ═══════════════════════════════════════════════════════════════════════
 show_result() {
     echo -e "${BOLD}${GREEN}═══════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}${GREEN}   TASK COMPLETED                                                      ${NC}"
+    echo -e "${BOLD}${GREEN}   DEMO COMPLETED                                                      ${NC}"
     echo -e "${BOLD}${GREEN}═══════════════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${BOLD}Key Moments:${NC}"
-    echo -e "  ${RED}🛑${NC} vegas-guide suggested casinos → ${RED}VETOED${NC}"
-    echo -e "  ${CYAN}🔄${NC} Router rerouted to family-activities"
-    echo -e "  ${GREEN}✅${NC} family-activities gave safe recommendations → ${GREEN}APPROVED${NC}"
-    echo -e "  ${YELLOW}📉${NC} Thompson Sampling updated: vegas-guide penalized, family-activities rewarded"
+    echo -e "${BOLD}Flow executed:${NC}"
+    echo -e "  ${CYAN}1.${NC} arkavo task sent prompt to mesh"
+    echo -e "  ${CYAN}2.${NC} Conductor received and decomposed task"
+    echo -e "  ${CYAN}3.${NC} Router selected appropriate specialist"
+    echo -e "  ${CYAN}4.${NC} Specialist generated response"
+    echo -e "  ${CYAN}5.${NC} Critic evaluated for policy compliance"
     echo ""
 }
 
@@ -199,32 +139,22 @@ main() {
         exit 1
     fi
 
+    check_mesh
+
+    echo -e "${DIM}Press Enter to send task to mesh...${NC}"
+    read -r
+
     show_request
+    send_to_mesh
 
-    echo -e "${DIM}Press Enter to call vegas-guide...${NC}"
+    echo -e "${DIM}Press Enter to analyze response...${NC}"
     read -r
 
-    call_vegas_guide
-
-    echo -e "${DIM}Press Enter for Critic evaluation...${NC}"
-    read -r
-
-    if ! call_critic; then
-        echo -e "${DIM}Press Enter to reroute to family-activities...${NC}"
-        read -r
-
-        call_family_activities
-
-        echo -e "${DIM}Press Enter for Critic evaluation...${NC}"
-        read -r
-
-        approve_response
-    fi
-
+    analyze_response
     show_result
 
     # Cleanup
-    rm -f /tmp/vegas_response.txt /tmp/family_response.txt
+    rm -f /tmp/mesh_response.txt
 }
 
 main "$@"
