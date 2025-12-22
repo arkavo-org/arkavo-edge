@@ -628,9 +628,7 @@ pub fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     // Check for agent persona first - enables progressive tool loading
     let agent_purpose = extract_agent_role();
-    let has_agent_persona = agent_purpose
-        .as_ref()
-        .is_some_and(|p| !p.is_empty());
+    let has_agent_persona = agent_purpose.as_ref().is_some_and(|p| !p.is_empty());
 
     // Build base system prompt (without repo context initially)
     // When agent has persona, use progressive tools (don't inject tool examples)
@@ -790,19 +788,12 @@ Q: \"Recent commits?\" → A: @git_status
         if print_mode {
             #[cfg(all(unix, feature = "mcp-tools"))]
             {
-                runtime.block_on(process_message_print_with_router(
-                    &messages,
-                    effective_mcp,
-                ))?;
+                runtime.block_on(process_message_print_with_router(&messages, effective_mcp))?;
             }
             #[cfg(not(all(unix, feature = "mcp-tools")))]
             {
                 eprintln!("⚠️  WARNING: MCP tools not available on this platform");
-                runtime.block_on(process_message_print(
-                    &client,
-                    &messages,
-                    effective_mcp,
-                ))?;
+                runtime.block_on(process_message_print(&client, &messages, effective_mcp))?;
             }
         } else {
             // Use router-based tool calling on supported platforms

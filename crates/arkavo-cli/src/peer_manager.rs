@@ -3,7 +3,9 @@
 //! Manages connections to peer agents for agent-to-agent communication.
 
 use arkavo_protocol::http::HttpTransport;
-use arkavo_protocol::transport::{A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig};
+use arkavo_protocol::transport::{
+    A2aEndpoint, A2aRequest, A2aResponse, A2aTransport, TransportConfig,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -30,7 +32,10 @@ impl PeerManager {
     }
 
     /// Connect to a list of peer URLs
-    pub async fn connect_to_peers(&self, peer_urls: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect_to_peers(
+        &self,
+        peer_urls: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         for url in peer_urls {
             if let Err(e) = self.connect_to_peer(url).await {
                 warn!("Failed to connect to peer {}: {}", url, e);
@@ -96,9 +101,15 @@ impl PeerManager {
 
     /// Send a request to a specific peer
     #[allow(dead_code)]
-    pub async fn send_to(&self, peer_url: &str, method: &str, params: Value) -> Result<A2aResponse, Box<dyn std::error::Error>> {
+    pub async fn send_to(
+        &self,
+        peer_url: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<A2aResponse, Box<dyn std::error::Error>> {
         let peers = self.peers.read().unwrap();
-        let peer = peers.get(peer_url)
+        let peer = peers
+            .get(peer_url)
             .ok_or_else(|| format!("Peer not found: {}", peer_url))?;
 
         let request = A2aRequest::new(method, params);

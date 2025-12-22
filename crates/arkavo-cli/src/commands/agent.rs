@@ -602,7 +602,14 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
                 }
 
                 // Also handle direct YAML-style properties in markdown (for flexibility)
-                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server, &mut in_peers_section, &mut in_a2a_section);
+                parse_yaml_properties(
+                    trimmed,
+                    agent,
+                    &mut in_mcp_section,
+                    &mut current_mcp_server,
+                    &mut in_peers_section,
+                    &mut in_a2a_section,
+                );
             }
         } else {
             // Handle old YAML-style format
@@ -647,7 +654,14 @@ pub fn parse_agents_config(content: &str) -> Result<Vec<AgentConfig>, Box<dyn st
             }
 
             if let Some(agent) = current_agent.as_mut() {
-                parse_yaml_properties(trimmed, agent, &mut in_mcp_section, &mut current_mcp_server, &mut in_peers_section, &mut in_a2a_section);
+                parse_yaml_properties(
+                    trimmed,
+                    agent,
+                    &mut in_mcp_section,
+                    &mut current_mcp_server,
+                    &mut in_peers_section,
+                    &mut in_a2a_section,
+                );
             }
         }
     }
@@ -727,7 +741,11 @@ fn parse_yaml_properties(
     }
 
     // End peers section when we hit a non-list item
-    if *in_peers_section && !trimmed.is_empty() && !trimmed.starts_with('-') && !trimmed.starts_with(' ') {
+    if *in_peers_section
+        && !trimmed.is_empty()
+        && !trimmed.starts_with('-')
+        && !trimmed.starts_with(' ')
+    {
         *in_peers_section = false;
     }
 
@@ -748,9 +766,13 @@ fn parse_yaml_properties(
             return;
         }
         // End a2a section when we hit a non-indented, non-a2a property
-        if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('-')
-            && !trimmed.starts_with("enabled:") && !trimmed.starts_with("service_type:")
-            && trimmed != "peers:" && !trimmed.starts_with("discovery:")
+        if !trimmed.is_empty()
+            && !trimmed.starts_with(' ')
+            && !trimmed.starts_with('-')
+            && !trimmed.starts_with("enabled:")
+            && !trimmed.starts_with("service_type:")
+            && trimmed != "peers:"
+            && !trimmed.starts_with("discovery:")
         {
             *in_a2a_section = false;
         }
